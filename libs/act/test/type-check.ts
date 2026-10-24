@@ -10,6 +10,7 @@ import {
   type Actor,
   act,
   type IAct,
+  type Precondition,
   projection,
   slice,
   state,
@@ -462,4 +463,111 @@ const target = { stream: "s1", actor: { id: "1", name: "test" } };
   void legacy.do("increment", target, { by: 1 }).then((snapshots) => {
     const _patches: number = snapshots[0].patches;
   });
+}
+
+// ── TEST 30: preconditions read the action's payload ───────────────
+{
+  const Move = z.object({ from: z.string(), count: z.number() });
+  const fromOnly: Precondition<{ count: number }, { from: string }> = {
+    description: "reads only from",
+    holds: (p) => p.from.length > 0,
+  };
+  state({ Pieces: z.object({ count: z.number() }) })
+    .init(() => ({ count: 0 }))
+    .emits({ Moved: Move })
+    .on({ move: Move })
+    // A rule typed over part of the payload fits; holds sees the full type.
+    .requires([
+      fromOnly,
+      {
+        description: "count within the state",
+        holds: (p, s) => p.count <= s.count,
+      },
+    ])
+    .emit("Moved")
+    .on({ moveChecked: Move })
+    .given([{ description: "has pieces", valid: (s) => s.count > 0 }])
+    .requires([fromOnly])
+    .emit("Moved")
+    .on({ moveTyped: Move })
+    .requires([
+      {
+        description: "reads a missing field",
+        // @ts-expect-error - "to" is not on the move payload
+        holds: (p) => p.to === "x",
+      },
+    ])
+    .emit("Moved");
+
+  state({ Pieces: z.object({ count: z.number() }) })
+    .init(() => ({ count: 0 }))
+    .emits({ Moved: Move })
+    .on({ move: Move })
+    .requires([fromOnly])
+    // @ts-expect-error - requires comes once, before emit
+    .requires([fromOnly]);
+}
+
+// ── TEST 31: precondition mistakes are compile errors ──────────────
+{
+  const Move = z.object({ from: z.string(), count: z.number() });
+  const Pieces = z.object({ count: z.number() });
+  const base = () =>
+    state({ Pieces })
+      .init(() => ({ count: 0 }))
+      .emits({ Moved: Move })
+      .on({ move: Move });
+
+  // A rule written for another state's shape doesn't fit.
+  const otherState: Precondition<{ owner: string }, { from: string }> = {
+    description: "reads a state field Pieces doesn't have",
+    holds: (_, s) => s.owner.length > 0,
+  };
+  // @ts-expect-error - Pieces has no "owner"
+  base().requires([otherState]);
+
+  // A rule that expects a different type for a payload field doesn't fit.
+  const numericFrom: Precondition<{ count: number }, { from: number }> = {
+    description: "from is a string on move",
+    holds: (p) => p.from > 0,
+  };
+  // @ts-expect-error - move's "from" is a string
+  base().requires([numericFrom]);
+
+  base().requires([
+    {
+      description: "must answer yes or no",
+      // @ts-expect-error - holds returns a boolean
+      holds: () => "yes",
+    },
+  ]);
+
+  // @ts-expect-error - a precondition needs a description
+  base().requires([{ holds: () => true }]);
+
+  // @ts-expect-error - preconditions use holds, not an invariant's valid
+  base().requires([{ description: "wrong predicate name", valid: () => true }]);
+
+  base()
+    .requires([
+      {
+        description: "inline, fully inferred",
+        holds: (p, s) => p.count <= s.count,
+      },
+    ])
+    // @ts-expect-error - .given comes before .requires
+    .given([]);
+
+  base().requires([
+    {
+      description: "inline rules see the real payload type",
+      // @ts-expect-error - count is a number, not a string
+      holds: (p) => p.count.startsWith("1"),
+    },
+  ]);
+
+  // An invariant isn't a precondition: the shapes differ.
+  const invariant = { description: "an invariant", valid: () => true };
+  // @ts-expect-error - requires takes preconditions
+  base().requires([invariant]);
 }

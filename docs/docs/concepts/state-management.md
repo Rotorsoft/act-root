@@ -28,7 +28,7 @@ const Counter = state({ Counter: z.object({ count: z.number() }) })
 
 ### Builder Chain
 
-`state({})` → `.init()` → `.emits({})` → optional `.patch({})` → `.on({}, options?)` → optional `.given([])` → `.emit()` → `.build()`
+`state({})` → `.init()` → `.emits({})` → optional `.patch({})` → `.on({}, options?)` → optional `.given([])` → optional `.requires([])` → `.emit()` → `.build()`
 
 - **`.emits()`** declares events with passthrough reducers by default (`({ data }) => data`)
 - **`.patch()`** overrides only events that need custom reducers
@@ -129,6 +129,30 @@ const mustBeOpen: Invariant<{ status: string }> = {
 ```
 
 When an invariant fails, the framework throws an `InvariantError` with the description.
+
+## Preconditions
+
+An invariant sees only the state and the actor, so one invariant serves every action that needs it. A rule that also needs the action's payload ("you must own *this* territory") is a precondition. Declare it with `.requires([...])`, after `.given([...])`:
+
+```typescript no-check
+import { type Precondition } from "@rotorsoft/act";
+
+// Typed over the part of the payload it reads, so any action with a
+// `from` field can use it.
+const ownsFrom: Precondition<Board, { from: string }> = {
+  description: "You must own the attacking territory",
+  holds: ({ from }, state, actor) => state.owner[from] === actor?.id,
+};
+
+.on({ Attack })
+  .given([mustBeInAttack, mustBeCurrentPlayer])
+  .requires([ownsFrom, adjacent, enoughArmies])
+  .emit((data, { state }) => { /* the dice and the outcome only */ })
+```
+
+The action checks its schema, then its invariants, then its preconditions, each in the order they're declared, and stops at the first that fails. A failed precondition throws the same `InvariantError`, with the message `"<action> failed precondition: <description>"`. Nothing commits. The `act` CLI, the domain diagram and the flow animations list the preconditions after the invariants.
+
+Rules that don't fit a predicate stay as a `throw` in `.emit`: a rule that branches on the state, one that needs a value the handler computes anyway, or one that needs an app-specific error type.
 
 ## Snapshots
 

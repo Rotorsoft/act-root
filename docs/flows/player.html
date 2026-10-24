@@ -528,12 +528,12 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
         glyph("automation", n.cx - tw / 2 + 5, ty - 3.4, g, 0.62);
         const t = el("text", { x: n.cx - tw / 2 + 12, y: ty, class: "as" }, g); t.textContent = n.as;
       }
-      const inv = (n.invariants || []).length;
-      // ◆ n checks: how many invariants the state tests before this action commits
+      const checks = checksOf(n), inv = checks.length;
+      // ◆ n checks: the invariants, then the preconditions, the state tests before this action commits
       const badge = [n.badge, inv ? `◆ ${inv} ${inv > 1 ? "checks" : "check"}` : ""].filter(Boolean).join(" ");
       if (badge) {
         const b = el("text", { x: n.right - 8, y: n.top + 12, "text-anchor": "end", class: "badge" }, g); b.textContent = badge;
-        if (inv) el("title", {}, b).textContent = "Checked by the state before it commits:\n" + n.invariants.join("\n");
+        if (inv) el("title", {}, b).textContent = "Checked by the state before it commits:\n" + checks.join("\n");
       }
     }
     if (selected) { selected = byId(selected.id); selected?.g.classList.add("sel"); }
@@ -550,12 +550,12 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
   $("legend").innerHTML = Object.entries(KINDS).filter(([k]) => used.has(k))
     .map(([k, v]) => `<div><i style="background:var(${v.color})"></i>${v.name}</div>`).join("") +
     `<div>${svgIcon("person")}Person</div><div>${svgIcon("automation")}Automation</div>` +
-    `<div><span class="mono">◆</span>Checks (invariants)</div><div><span class="mono">⏱</span>Timer (deferred)</div>` +
+    `<div><span class="mono">◆</span>Checks (invariants, preconditions)</div><div><span class="mono">⏱</span>Timer (deferred)</div>` +
     (bands.some(b => b.kind === "state") ? `<div><i class="bx" style="--k:var(--state)"></i>State boundary</div>` : "") +
     (bands.some(b => b.kind === "slice") ? `<div><i class="bx" style="--k:var(--ink)"></i>Slice boundary</div>` : "");
   $("read").innerHTML = `
     <p>Time runs left to right. An <b style="color:var(--actor)">actor</b>, a person or an automation, invokes an <b style="color:var(--action)">action</b>.</p>
-    <p>The <b style="color:var(--state)">state</b> loads from the stream, checks the invariants (the ◆ count on an action) one by one, in the order the action declares them, and either refuses the action at the first rule that fails or commits <b style="color:var(--event)">events</b>. Events patch the state, and <b style="color:var(--projection)">projections</b> fold them into read models such as tables and caches.</p>
+    <p>The <b style="color:var(--state)">state</b> loads from the stream, checks the action's rules (the ◆ count) one by one: its invariants, then its preconditions, which also read the payload, each in the order the action declares them. It either refuses the action at the first rule that fails or commits <b style="color:var(--event)">events</b>. Events patch the state, and <b style="color:var(--projection)">projections</b> fold them into read models such as tables and caches.</p>
     <p><b style="color:var(--reaction)">Reactions</b> pick events up after the commit and act as automations: they invoke new actions or call the <b style="color:var(--external)">outside world</b>. A clock marks a reaction that waits for a timestamp.</p>
     ${bands.length ? `<p>Dashed boxes are the boundaries the builders declare. ${bands[0].kind === "slice"
       ? "A <b>slice</b> box holds the actions and events of the partial states the slice declares, and the reactions it declares. Partial states of the same name still merge into one state bar."
@@ -621,6 +621,7 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
       ${n.note ? `<p class="rel">${esc(n.note)}</p>` : ""}
       ${n.description ? `<p>${esc(n.description)}</p>` : ""}
       ${(n.invariants || []).length ? `<p class="rel">Invariants</p><ul>${n.invariants.map(i => `<li>${esc(i)}</li>`).join("")}</ul>` : ""}
+      ${(n.preconditions || []).length ? `<p class="rel">Preconditions</p><ul>${n.preconditions.map(i => `<li>${esc(i)}</li>`).join("")}</ul>` : ""}
       ${n.schema ? `<pre>${esc(n.schema)}</pre>` : ""}
       ${ins.length ? `<p class="rel">From: ${ins.map(e => link(e.a)).join(", ")}</p>` : ""}
       ${outs.length ? `<p class="rel">To: ${outs.map(e => link(e.b)).join(", ")}</p>` : ""}`;
@@ -843,6 +844,8 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
     const t = el("text", { x: x + 19, y: y + 4 }, g); t.textContent = text;
     return g;
   }
+  // an action's rules in the order the state runs them: invariants, then preconditions
+  function checksOf(n) { return [...(n.invariants || []), ...(n.preconditions || [])]; }
   // the action's checks, listed in the order the state runs them: each row gets a ✓ as it passes,
   // and a refusal stops on the failing row with ✕. A reason that is not an invariant comes from
   // .emit(), which runs after every invariant passed, so it is the last row.
@@ -902,7 +905,7 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
       const f = fractionAtY(e, bar.cy);
       if (!(await travel(e, token, 0, f))) return false;
       ping(bar);
-      const rules = from.invariants || [];
+      const rules = checksOf(from);
       if (rules.length || st.reject) {
         if (!(await checklist(from.cx, bar.cy, rules, st.reject, token))) return false;
       } else {

@@ -227,6 +227,7 @@ function merge_into_existing(
     patch: merged_patch,
     on: { ...existing.on, ...state.on },
     given: { ...existing.given, ...state.given },
+    requires: { ...existing.requires, ...state.requires },
     snap: pick_declared(existing.snap, state.snap, "snap strategy", state.name),
     // Per-action retry policy is keyed by action name, so the two partials'
     // maps combine. Left `undefined` when neither declared one, so the

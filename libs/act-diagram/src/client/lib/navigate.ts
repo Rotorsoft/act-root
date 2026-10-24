@@ -45,11 +45,13 @@ function build_patterns(esc: string, type?: string): RegExp[] {
   ];
   const guard_patterns = [
     // Guard definition — prefer jumping to the declaration
-    new RegExp(`(?:const|let|var)\\s+(${esc})\\s*(?::\\s*Invariant)?\\s*=`),
+    new RegExp(
+      `(?:const|let|var)\\s+(${esc})\\s*(?::\\s*(?:Invariant|Precondition)\\b[^=]*)?\\s*=`
+    ),
     new RegExp(`rule\\(\\s*["'\`](${esc})["'\`]`),
     new RegExp(`description:\\s*["'\`](${esc})["'\`]`),
-    // .given() usage in the state builder — last resort
-    new RegExp(`\\.given\\([\\s\\S]*?(${esc})`),
+    // .given() or .requires() usage in the state builder — last resort
+    new RegExp(`\\.(?:given|requires)\\([\\s\\S]*?(${esc})`),
   ];
   const slice_patterns = [
     new RegExp(`(?:const|let|var)\\s+(${esc})\\s*=\\s*slice\\s*\\(`),

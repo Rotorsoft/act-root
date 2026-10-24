@@ -213,7 +213,13 @@ export function format_action(idx: ContractIndex, entry: IndexEntry): string {
   const model = idx.model;
   const owner_name = entry.qualifier;
   let action:
-    | { name: string; emits: string[]; invariants: string[]; line?: number }
+    | {
+        name: string;
+        emits: string[];
+        invariants: string[];
+        preconditions?: string[];
+        line?: number;
+      }
     | undefined;
   let state_file: string | undefined;
   for (const st of model.states) {
@@ -236,6 +242,10 @@ export function format_action(idx: ContractIndex, entry: IndexEntry): string {
     if (action.invariants.length > 0) {
       lines.push("  invariants:");
       for (const inv of action.invariants) lines.push(`    - ${inv}`);
+    }
+    if (action.preconditions?.length) {
+      lines.push("  requires:");
+      for (const pre of action.preconditions) lines.push(`    - ${pre}`);
     }
     if (action.emits.length > 0) {
       lines.push("  emits:");

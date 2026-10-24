@@ -58,6 +58,29 @@ describe("mock_state", () => {
     expect(built[0].given.doIt).toEqual([inv]);
   });
 
+  it("captures requires preconditions, after given or on their own", () => {
+    const built: any[] = [];
+    const inv = { description: "must be open", valid: () => true };
+    const pre = { description: "must own it", holds: () => true };
+    mock_state({ S: {} }, (info) => built.push(info))
+      .init()
+      .emits({ Done: {} })
+      .on({ doIt: {} })
+      .given([inv])
+      .requires([pre])
+      .emit("Done")
+      .on({ doThat: {} })
+      .requires([pre])
+      .emit("Done")
+      .on({ doNothing: {} })
+      .requires()
+      .emit("Done")
+      .build();
+
+    expect(built[0].given.doIt).toEqual([inv]);
+    expect(built[0].requires).toEqual({ doIt: [pre], doThat: [pre] });
+  });
+
   it("handles snap() in chain", () => {
     const built: any[] = [];
     mock_state({ S: {} }, (info) => built.push(info))

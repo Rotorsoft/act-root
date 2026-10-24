@@ -192,7 +192,13 @@ export function format_markdown(idx: ContractIndex): string {
   if (actions.length === 0) lines.push("_(none)_\n");
   for (const a of actions) {
     let action:
-      | { name: string; emits: string[]; invariants: string[]; line?: number }
+      | {
+          name: string;
+          emits: string[];
+          invariants: string[];
+          preconditions?: string[];
+          line?: number;
+        }
       | undefined;
     let state_file: string | undefined;
     for (const st of m.states) {
@@ -214,6 +220,10 @@ export function format_markdown(idx: ContractIndex): string {
       if (action.invariants.length > 0) {
         lines.push("- **invariants:**");
         for (const inv of action.invariants) lines.push(`  - ${inv}`);
+      }
+      if (action.preconditions?.length) {
+        lines.push("- **requires:**");
+        for (const pre of action.preconditions) lines.push(`  - ${pre}`);
       }
       if (action.emits.length > 0) {
         lines.push("- **emits:**");

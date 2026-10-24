@@ -29,6 +29,8 @@ import type {
   Invariant,
   PassthroughPatchHandler,
   PatchHandlers,
+  Precondition,
+  RequiresHandlers,
   Schema,
   Schemas,
   Snapshot,
@@ -49,7 +51,7 @@ import type {
  * 2. Event types via `.emits()` — all events default to passthrough (`({ data }) => data`)
  * 3. Custom event reducers via `.patch()` (optional — only for events that need custom logic)
  * 4. Actions (commands) via `.on()` → `.emit()` — pass an event name string for passthrough
- * 5. Business rules (invariants) via `.given()`
+ * 5. Business rules: invariants via `.given()`, preconditions on the payload via `.requires()`
  * 6. Snapshotting strategy via `.snap()`
  *
  * @template TState - Zod schema type defining the shape of the state
@@ -180,6 +182,17 @@ function action_builder<
       function given(rules: Invariant<TState>[]) {
         internal.given ??= {} as GivenHandlers<TState, Schemas>;
         (internal.given as Record<string, Invariant<TState>[]>)[action] = rules;
+        return { requires, emit };
+      }
+
+      function requires(rules: Precondition<TState, TNewActions>[]) {
+        internal.requires ??= {} as RequiresHandlers<TState, Schemas>;
+        (
+          internal.requires as Record<
+            string,
+            Precondition<TState, TNewActions>[]
+          >
+        )[action] = rules;
         return { emit };
       }
 
@@ -214,7 +227,7 @@ function action_builder<
         >;
       }
 
-      return { given, emit };
+      return { given, requires, emit };
     },
 
     snap(snap: (snapshot: Snapshot<TState, TEvents>) => boolean) {

@@ -73,10 +73,12 @@ export class ValidationError extends Error {
 }
 
 /**
- * Thrown when a business rule (invariant) is violated during action execution.
+ * Thrown when a business rule refuses an action: an invariant from
+ * `.given([...])` or a precondition from `.requires([...])`.
  *
- * Invariants are conditions that must hold true for an action to succeed.
- * They're checked after loading the current state but before emitting events.
+ * Both are conditions the caller must meet for the action to run, so both
+ * refuse it the same way; the message says which layer refused. They're
+ * checked after loading the current state but before emitting events.
  * This error provides complete context about what action was attempted and
  * why it was rejected.
  *
@@ -120,19 +122,25 @@ export class InvariantError<
   readonly payload: Readonly<TActions[TKey]>;
   /** The target stream and actor context */
   readonly target: Target<TActor>;
-  /** The current state snapshot when invariant was checked */
+  /** The current state snapshot when the rule was checked */
   readonly snapshot: Snapshot<TState, TEvents>;
-  /** Human-readable description of why the invariant failed */
+  /** Human-readable description of the rule that refused the action */
   readonly description: string;
 
+  /**
+   * @param rule - Which layer refused the action: an invariant from
+   *   `.given([...])` (the default) or a precondition from
+   *   `.requires([...])`. It names the layer in the message.
+   */
   constructor(
     action: TKey,
     payload: Readonly<TActions[TKey]>,
     target: Target<TActor>,
     snapshot: Snapshot<TState, TEvents>,
-    description: string
+    description: string,
+    rule: "invariant" | "precondition" = "invariant"
   ) {
-    super(`${action as string} failed invariant: ${description}`);
+    super(`${action as string} failed ${rule}: ${description}`);
     this.name = Errors.InvariantError;
     this.action = action;
     this.payload = payload;

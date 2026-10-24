@@ -359,6 +359,8 @@ export const mustBeOpen: Invariant<{ status: string }> = {
 
 The `valid` function returns `true` if the rule passes, `false` if violated. When violated, the framework throws an `InvariantError` with the `description`.
 
+**Preconditions** read the payload too: `type Precondition<S, P> = { description: string; holds: (payload: Readonly<P>, state: Readonly<S>, actor?: Actor) => boolean }`, declared with `.requires([...])` after `.given([...])`. Type `P` with only the fields the rule reads, so actions with those fields can share it. A failed precondition throws the same `InvariantError` (message "failed precondition").
+
 **Validation that depends on action data — throw inside `.emit()`.** Invariants only see `(state, actor)`, so they cannot validate rules that combine state with the incoming action payload (e.g., "contribution amount + current ≤ §415(c) cap", "invoice must have at least one entry", "rate must be > 0"). For these, throw inside the emit handler — the action aborts and no event is committed:
 
 ```typescript

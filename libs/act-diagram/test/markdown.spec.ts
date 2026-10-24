@@ -31,6 +31,7 @@ function richModel(): DomainModel {
             name: "placeOrder",
             emits: ["OrderPlaced", "OrderPlaced_v2"],
             invariants: ["fresh-cart", "non-empty"],
+            preconditions: ["owns-cart"],
             line: 30,
           },
           { name: "noop", emits: [], invariants: [] },
@@ -116,6 +117,8 @@ describe("format_markdown", () => {
     expect(md).toContain("**invariants:**");
     expect(md).toContain("- fresh-cart");
     expect(md).toContain("- non-empty");
+    expect(md).toContain("**requires:**");
+    expect(md).toContain("- owns-cart");
     expect(md).toContain("- `OrderPlaced`");
     expect(md).toContain("- `OrderPlaced_v2`");
     // noop has no emits; the placeholder shows up.

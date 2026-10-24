@@ -52,14 +52,19 @@ Apply `.claude/rules/naming.md`: anything reachable from a package's `index.ts` 
 - A change that taught something → check for one entry in `.claude/skills/simplify-core/learnings.md`.
 - Verify cross-references from CLAUDE.md "Where to find what" cover any new doc pages.
 
-## 6. Wolfdesk + calculator + tRPC example
+## 6. Business rules
+
+- A rule thrown from an `.emit(...)` handler that is a plain predicate (it reads the payload and the state and returns yes or no) belongs in `.requires([...])` as a named `Precondition`, so the CLI, the diagram and the flow animations can see it. One that reads only the state and the actor belongs in `.given([...])`. Flag both as concerns, not blockers.
+- A precondition's predicate is `holds`, never `valid`: `valid`/`validate` belong to the schema layer and to `Invariant`.
+
+## 7. Wolfdesk + calculator + tRPC example
 
 The two examples are doc surface — they're how new readers learn the API.
 
 - Wolfdesk's `TicketOpsSlice` / `TicketWebhooksSlice` / `TicketProjection` must still parse correctly with the `act` CLI (the diagram parser is fragile — verify with `pnpm act packages/wolfdesk` mentally).
 - Calculator's `Calculator` / `DigitBoard` shouldn't gain complexity. It's the minimal example.
 
-## 7. Conventional commits
+## 8. Conventional commits
 
 - Subject must be lowercase. `feat(act): add foo` not `feat(act): Add foo`.
 - `BREAKING CHANGE:` footer required for breaking changes (drives major bump).

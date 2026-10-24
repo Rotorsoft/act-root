@@ -72,6 +72,8 @@ function formatModelTree(model: DomainModel): string {
           let line = `    ${a.name} → [${a.emits.join(", ")}]`;
           if (a.invariants.length)
             line += ` guards: [${a.invariants.join(", ")}]`;
+          if (a.preconditions?.length)
+            line += ` requires: [${a.preconditions.join(", ")}]`;
           lines.push(line);
         }
       }
