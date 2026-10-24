@@ -745,9 +745,10 @@ describe("defer durability", () => {
       ]);
       await store().defer(["slow-agg"], Date.now() + 40);
       const claim = await cold_start(["slow"]);
-      await vi.waitFor(() =>
-        expect(claim.mock.calls.map(lane_of)).toEqual(["slow"])
-      );
+      // A wake that fires a hair before the due-time claims nothing and
+      // re-aims, so the slow lane may claim more than once; no other lane may.
+      await vi.waitFor(() => expect(claim).toHaveBeenCalled());
+      expect(new Set(claim.mock.calls.map(lane_of))).toEqual(new Set(["slow"]));
     });
 
     it("routes a lane-less persisted defer to the default controller", async () => {
