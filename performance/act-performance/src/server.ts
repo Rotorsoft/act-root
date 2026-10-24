@@ -91,7 +91,7 @@ async function main() {
         ? req.headers.authorization.replace("Bearer ", "")
         : "system";
       const stream = "todo-" + randomUUID();
-      const [snap] = await actApp.do(
+      await actApp.do(
         "create",
         {
           stream,
@@ -102,7 +102,7 @@ async function main() {
       streamCount++;
       eventCount++;
       // correlate right after creation
-      await actApp.correlate({ stream, after: snap.event!.id - 1 });
+      await actApp.correlate({ limit: 100 });
       res.status(201).json({ stream });
     } catch (err: any) {
       res.status(400).json({ error: err.message });

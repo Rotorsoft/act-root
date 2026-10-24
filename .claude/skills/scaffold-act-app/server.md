@@ -33,7 +33,7 @@ async function seed() {
 
   // Drain reactions + projections
   for (let i = 0; i < 3; i++) {
-    await app.correlate({ after: -1, limit: 500 });
+    await app.correlate({ limit: 500 });
     const { acked } = await app.drain({ streamLimit: 100, eventLimit: 500 });
     if (acked.length === 0) break;
   }

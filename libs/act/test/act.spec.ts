@@ -222,11 +222,18 @@ describe("act", () => {
   });
 
   it("should correlate when event has reactions", async () => {
+    // Earlier tests left events on the shared store: catch up on them first.
+    let { last_id } = await app.correlate({ limit: 1000 });
+    for (;;) {
+      const next = await app.correlate({ limit: 1000 });
+      if (next.last_id === last_id) break;
+      last_id = next.last_id;
+    }
     await app.do("ignore2", { stream: "dummy", actor }, {});
-    let correlated = await app.correlate({ stream: "dummy" });
+    let correlated = await app.correlate();
     expect(correlated.subscribed).toBe(0); // won't correlate events without reactions
     await app.do("add", { stream: "dummy", actor }, {});
-    correlated = await app.correlate({ stream: "dummy" });
+    correlated = await app.correlate();
     expect(correlated.subscribed).toBe(1); // added event should correlate stream
 
     const drained = await app.drain({ streamLimit: 2 });
