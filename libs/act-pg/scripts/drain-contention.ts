@@ -1,9 +1,11 @@
 /**
  * Multi-worker contention benchmark.
  *
- * Creates separate Act instances sharing the same PostgresStore pool.
- * Each instance has its own _drain_locked mutex, so concurrent drains
- * truly compete through PG's FOR UPDATE SKIP LOCKED.
+ * Creates separate Act instances sharing the same PostgresStore pool and
+ * races their drains over a correlated backlog. One Act runs one drain at a
+ * time, so only separate instances truly compete through PG's
+ * FOR UPDATE SKIP LOCKED. Reports throughput and the share of wasted drains
+ * (a drain that acked nothing).
  *
  * Run: npx tsx libs/act-pg/scripts/drain-contention.ts
  */
