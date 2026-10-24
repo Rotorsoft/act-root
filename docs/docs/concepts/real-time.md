@@ -3,6 +3,9 @@ id: real-time
 title: Real-Time with SSE
 ---
 
+import Scene from "@site/src/components/Scene";
+import ssePatches from "@site/src/scenes/sse-patches";
+
 # Real-Time with act-http/sse
 
 `@rotorsoft/act-http/sse` broadcasts incremental state updates over Server-Sent Events. Each event-sourced commit emits a *domain patch* (a partial state update); the broadcast layer forwards those patches keyed by event version, so subscribers can apply them to their cached state without ever refetching.
@@ -42,26 +45,7 @@ Run `pnpm dev:http` from the repo root and press keys at [http://localhost:3000]
 
 ## Architecture
 
-```
-   app.do() → snapshots (each carries its domain patch)
-       │
-       ▼
-   deriveState(snap)              ← app-specific (overlay presence, etc.)
-   state._v = snap.event.version  ← event store version = single source of truth
-       │
-       ▼
-   broadcast.publish(streamId, state, patches)
-       │
-       ├── version-key each patch: { [baseV+1]: patch1, [baseV+2]: patch2, ... }
-       └── push to all SSE subscribers
-       │
-       ▼
-   Client: applyPatchMessage(msg, cached)
-       │
-       ├── contiguous → deep-merge patches in version order
-       ├── stale      → skip (client already ahead)
-       └── behind     → resync (client missed versions)
-```
+<Scene scene={ssePatches} />
 
 ## The version contract
 

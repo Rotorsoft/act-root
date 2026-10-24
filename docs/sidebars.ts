@@ -13,6 +13,7 @@ const sidebars: SidebarsConfig = {
         "guides/external-integration",
         "guides/auto-generated-api",
         "guides/flow-animations",
+        "guides/diagrams",
         "guides/close-policies",
         "guides/sensitive-data",
         "guides/pii-encryption-at-rest",

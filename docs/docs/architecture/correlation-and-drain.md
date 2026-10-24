@@ -3,6 +3,9 @@ id: correlation-and-drain
 title: Correlation and drain
 ---
 
+import Scene from "@site/src/components/Scene";
+import settleLoop from "@site/src/scenes/settle-loop";
+
 # Correlation and drain
 
 How reactions actually fire. Two cooperating subsystems with a shared goal: deliver every reactive event to its handler, exactly once, eventually. Different concerns:
@@ -52,29 +55,17 @@ That is why the scan runs for **every** app since [#1487](https://github.com/Rot
 
 A mark is an assertion about the log, so the scan only raises one for an event the target's own `fetch` would return — an event outside the subscription's `source` filter is not that target's work and leaves its mark alone.
 
-```
-                    correlate({ after, limit })
-                              │
-                              ▼
-                    query events past checkpoint
-                              │
-                              ▼
-                    for each event:
-                      for each registered reaction (static AND dynamic):
-                        resolved = resolver(event) | resolver
-                        raise priority/lane only if it beats the
-                          target's last-subscribed floor
-                        mark = event.id, if the event is inside the
-                          target's source filter
-                              │
-                              ▼
-                    subscribe(targets with a mark or a raise)
-                              │
-                              ▼
-                    advance checkpoint to last scanned event id
-                              │
-                              ▼
-                    record what each raised target was subscribed at
+```mermaid
+flowchart TD
+  C["correlate({ after, limit })"]:::reaction --> A{"armed?"}
+  A -- no --> I1["idle: no store read"]
+  A -- yes --> L{"holds the<br/>lease?"}
+  L -- "refused (automatic paths only)" --> I2["idle: another worker scans"]
+  L -- "held, or explicit app.correlate()" --> Q["read the events past the checkpoint"]:::store
+  Q --> E["for each event, every reaction (static and dynamic) resolves its target: raise its priority or lane only above what it already carries, and set its work mark when the event is inside its source filter"]:::state
+  E --> S["subscribe the targets with a mark or a raise"]:::store
+  S --> K["advance the checkpoint to the last event read"]:::state
+  K --> R["remember what each raised target was subscribed at"]
 ```
 
 The checkpoint advances only after `subscribe` succeeds. If `subscribe` throws, the checkpoint stays where it was and the next correlate retries from the same point.
@@ -99,54 +90,19 @@ Separate leases do not make two applications over one store supported. They stil
 
 `drain()` runs one cycle of the pipeline:
 
-```
-                              drain({ streamLimit, eventLimit, leaseMillis })
-                                        │
-                              armed? (do() / reset() flagged work)
-                                  no ──┬── yes
-                                       │
-                                  return empty result
-                                       │
-                                       ▼
-                              concurrent drain in flight?
-                                  yes ─┬── no
-                                       │
-                                  return empty result
-                                       │
-                                       ▼
-                              compute lagging/leading split via ratio
-                                       │
-                                       ▼
-                              ops.claim(lagging, leading, by, leaseMillis)
-                                       │
-                                  ┌────┴───────┐
-                                  ▼            ▼
-                              empty?       leases
-                                │            │
-                          disarm; return     │
-                                             ▼
-                              ops.fetch(leases, eventLimit)
-                                             │
-                                             ▼
-                              for each leased stream:
-                                build payloads (filter events to ones
-                                whose registered reaction targets us)
-                                             │
-                                             ▼
-                              dispatch via handle / handleBatch
-                                             │
-                                             ▼
-                              ops.block(retries-exhausted) then ops.ack(successes)
-                                (block first — ack releases the lease block needs)
-                                             │
-                                             ▼
-                              update lag/lead ratio per pressure
-                                             │
-                                             ▼
-                              emit "acked" / "blocked" lifecycle events
-                                             │
-                                             ▼
-                              disarm only if claim returned nothing
+```mermaid
+flowchart TD
+  D["drain({ streamLimit, eventLimit, leaseMillis })"]:::reaction --> G{"free to<br/>run?"}
+  G -- "no: not armed, stopped, a pass in flight, or the breaker open" --> E1["empty result"]
+  G -- yes --> CL["claim(lagging, leading, by, leaseMillis), split by the lag/lead ratio"]:::store
+  CL --> N{"any leases?"}
+  N -- no --> DIS["disarm; empty result"]
+  N -- yes --> F["fetch the leased streams' events"]:::store
+  F --> H["for each stream, keep the events a reaction resolves to it, then run handle or handleBatch, streams in parallel"]:::reaction
+  H --> B["block the streams out of retries, emit blocked"]:::bad
+  B --> AK["ack the rest: advance watermarks, persist defers and backoffs, emit acked"]:::good
+  AK --> RT["update the lag/lead ratio"]
+  RT --> CS["run the closes reactions asked for"]
 ```
 
 ### The dual-frontier split
@@ -179,24 +135,7 @@ Each controller is armed on its own. `do()` and a notification from another proc
 
 `settle()` is the production-friendly entry point. It debounces multiple rapid calls into one cycle, then runs `correlate → drain` in a loop until a pass produces no progress:
 
-```
-                    settle(options) ── debounce timer ── timer fires
-                                                              │
-                                                              ▼
-                                                  reentrancy guard
-                                                              │
-                                                              ▼
-                                                  loop until no progress:
-                                                    correlate(query)   (starts up and scans
-                                                                        from its own checkpoint)
-                                                    drain(options)
-                                                    progress = subscribed > 0 ||
-                                                               leased.length > 0 ||
-                                                               it read events
-                                                              │
-                                                              ▼
-                                                  emit "settled" with every pass's drain
-```
+<Scene scene={settleLoop} />
 
 "Until no progress" handles paginated catch-up. After `app.reset(...)`, a settled stream might have thousands of events. One drain cycle's `streamLimit × eventLimit` won't catch up; subsequent cycles will. A pass that leased streams counts as progress even if every one of them deferred or failed, since more marked streams may wait behind the claim's budget. `settle()` returns at once (it only schedules); the caller hears the `"settled"` event, carrying what every pass acked and blocked, when a pass finds nothing left.
 

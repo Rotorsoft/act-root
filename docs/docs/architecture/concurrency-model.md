@@ -3,6 +3,10 @@ id: concurrency-model
 title: Concurrency model
 ---
 
+import Scene from "@site/src/components/Scene";
+import commitRace from "@site/src/scenes/commit-race";
+import competingWorkers from "@site/src/scenes/competing-workers";
+
 # Concurrency model
 
 Two distinct concurrency primitives, used at different layers for different problems. Conflating them is the most common source of confusion when reading the framework's source.
@@ -23,24 +27,7 @@ Same store, same DB, but they don't interact. A stream can have a held reaction 
 
 Action commits are append-only and version-checked. Each event in a stream has a `version` (0-indexed, monotonic per stream). A commit asserts "the current head version is X; append after that."
 
-```
-caller                  framework                   store
-  │  app.do(...)            │                          │
-  │ ──────────────────────► │                          │
-  │                         │  load() → snapshot.event │
-  │                         │  expectedVersion = ev?   │
-  │                         │  reduce → emit events    │
-  │                         │  store.commit(           │
-  │                         │    stream, msgs, meta,   │
-  │                         │    expectedVersion ──────────►   tx BEGIN
-  │                         │  )                       │      SELECT max(version)
-  │                         │                          │      if version != expectedVersion:
-  │                         │                          │          throw ConcurrencyError
-  │                         │                          │      INSERT events
-  │                         │                          │      tx COMMIT
-  │                         │  ◄──────────────────────────── return Committed[]
-  │  ◄───────────────────── │
-```
+<Scene scene={commitRace} />
 
 If two callers race on the same stream, only one wins. The loser sees `ConcurrencyError` with `expectedVersion` and `lastVersion` (the actual head). The standard remedy is per-action retry policy — `state.on(entry, { maxRetries, backoff? })` — which lets the orchestrator absorb the conflict and re-run from `load()`. See [`ActionOptions` in Error Handling](../concepts/error-handling.md#retry-pattern--per-action-policy).
 
@@ -79,59 +66,27 @@ A row with **no mark is not claimable**, definitionally — `NULL` means correla
 
 One consequence is worth internalizing, because it changes what a watermark *means*. A subscription's `at` now advances only over events that resolve to that target, so a reader of two of a state's ten event types sits below the stream's head for good, with nothing pending. "Behind the head" and "has work" are different questions, and only the mark answers the second one.
 
-```
-worker A                  store                     worker B
-  │  claim(by="A")             │                          │
-  │ ─────────────────────────► │                          │
-  │                            │  tx BEGIN                │
-  │                            │  SELECT * FROM streams   │
-  │                            │   WHERE leased_until<NOW │
-  │                            │   FOR UPDATE             │
-  │                            │   SKIP LOCKED            │
-  │                            │  UPDATE leased_by='A'    │
-  │                            │  tx COMMIT               │
-  │  ◄──────────────────────── │                          │
-  │  [streams 1, 3, 5]         │                          │
-  │                            │   ◄──────────────────────  claim(by="B")
-  │                            │  tx BEGIN                │
-  │                            │  SELECT ... SKIP LOCKED  │
-  │                            │  → returns 2, 4 (1,3,5   │
-  │                            │   locked by A; skipped)  │
-  │                            │  ────────────────────────►
-  │                            │                          │  [streams 2, 4]
-  │  process events for 1,3,5  │                          │  process events for 2,4
-  │  ack(by="A")               │                          │  ack(by="B")
-  │ ─────────────────────────► │  ◄────────────────────── │
-```
+<Scene scene={competingWorkers} />
 
 `SKIP LOCKED` is the key: workers never block each other waiting for a lock. If a stream is held by another worker, the polling worker just gets the next available stream. Zero contention, no thundering herd. The trade-off is no fairness guarantees — a worker can repeatedly pick up the "easier" streams and leave the leased ones to time out — but in practice this is desirable (active workers stay active).
 
 ### Lease lifecycle
 
-```
-                   ┌───────────────────────┐
-                   │ leased_by=NULL        │
-                   │ at=last_acked_pos     │  ← steady state
-                   └──────────┬────────────┘
-                              │  claim()
-                              ▼
-                   ┌───────────────────────┐
-                   │ leased_by='worker-X'  │
-                   │ leased_until=NOW+lease│
-                   └──────────┬────────────┘
-                              │
-              ┌──────── ack() ┼ block() ─────┐
-              │               │              │
-              ▼               ▼              ▼
-        leased_by=NULL  leased_by=NULL  blocked=true
-        at=new position at=last position retry_count++
-        retry_count=0   retry_count++
-                              │
-                              │ (if retry_count > maxRetries
-                              │  AND blockOnError)
-                              ▼
-                       set blocked=true
-                       (no further claims)
+```mermaid
+stateDiagram-v2
+  direction LR
+  [*] --> idle
+  idle --> leased: claim()<br/>work mark above the watermark,<br/>retry + 1
+  leased --> idle: ack()<br/>the watermark advances, retry back to -1
+  leased --> scheduled: ack() with a due time<br/>a defer (retry -1) or a backoff (retry kept)
+  scheduled --> leased: claim() once<br/>the due time has passed
+  leased --> idle: the lease expires<br/>a failure with no backoff, or the worker died
+  leased --> blocked: block()<br/>retries used up, with blockOnError
+  blocked --> idle: app.unblock() or app.reset()
+  class idle store
+  class leased reaction
+  class scheduled state
+  class blocked bad
 ```
 
 Three "exits" from a leased state:

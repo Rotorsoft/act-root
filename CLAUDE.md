@@ -134,6 +134,7 @@ If schemas aren't being captured for an event, the parser is best-effort: it wal
 | External integration (inline `webhook` vs forwarded bus, idempotency contract, recovery) | [docs/docs/guides/external-integration.md](docs/docs/guides/external-integration.md) |
 | Auto-generated API surfaces (`trpc`, `hono`, `openapi` subpaths + deployment recipes) | [docs/docs/guides/auto-generated-api.md](docs/docs/guides/auto-generated-api.md) |
 | Flow animations: animated maps of an app's flows, published with the docs or exported as MP4 (`docs/flows/*.flow.json`, `animate-act-flows` skill) | [docs/docs/guides/flow-animations.md](docs/docs/guides/flow-animations.md) |
+| Diagrams in the docs: Mermaid for flows and state machines, animated `<Scene>` sequences for things that happen at once (`docs/src/scenes/`), one color set (`--dg-*`) | [docs/docs/guides/diagrams.md](docs/docs/guides/diagrams.md) |
 | Adding a new `@rotorsoft/act-*` package | [docs/docs/guides/contributing-new-package.md](docs/docs/guides/contributing-new-package.md) |
 | Third-party adapter onboarding (TCK from a fresh repo + conformance badge) | [docs/docs/guides/tck-conformance.md](docs/docs/guides/tck-conformance.md) |
 | Inspecting contracts with the `act` CLI | [docs/docs/guides/contracts-cli.md](docs/docs/guides/contracts-cli.md) |
