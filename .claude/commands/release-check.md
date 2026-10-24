@@ -15,7 +15,7 @@ Verify the current branch is mergeable. CI (`ci-cd.yml` → `ci` job) runs typec
    # For each renamed/removed symbol, grep for it in docs
    grep -rln "<old-name-or-shape>" docs/docs CLAUDE.md libs/*/README.md
    ```
-   When the PR migrates a callsite to a new primitive (e.g., `query` → `query_stats`), also grep for the old behavioral description in `docs/docs/architecture/` ASCII diagrams. Report hits — they must be updated in this PR, not a follow-up. Skip cleanly when this is a no-public-surface PR (deps bump, internal refactor).
+   When the PR migrates a callsite to a new primitive (e.g., `query` → `query_stats`), also grep for the old behavioral description in the `docs/docs/architecture/` Mermaid diagrams and the scenes in `docs/src/scenes/`. Report hits — they must be updated in this PR, not a follow-up. Skip cleanly when this is a no-public-surface PR (deps bump, internal refactor).
 3. **Lint** (`pnpm lint`) — it takes a second, and fixing a lint error before the push saves a CI round trip. CI runs it too.
 
 ## Then push and read CI

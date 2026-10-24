@@ -19,7 +19,6 @@ Open a pull request for the current branch following the Act project conventions
    - **Stability charter impact** — call out additive vs. breaking with files touched. Skip the section only if no charter-covered files changed.
 
      If the PR adds public surface (new export, builder method, port method, lifecycle event, new field on an exported type), link its `rfcs/NNNN-*.md` here.
-   - **Follow-ups** — parked work referenced as separate tickets.
 5. Open with `gh pr create --title ... --body "$(cat <<'EOF' ... EOF)"` and HEREDOC the body so Markdown formatting survives.
 6. Print the resulting URL.
 
@@ -65,7 +64,6 @@ they'd need to open the diff to get that, rewrite the body.
 
 ## Conventions
 
-- **Coverage line is required** when libs/ changed. Format: `Coverage: 100% statements / 100% branches / 100% functions / 100% lines.`
 - **Co-Author trailer** stays — the project credits Claude as a contributor.
 - **Do NOT use auto-merge.** The user merges manually after CI.
 - **`Closes #N`** uses the actual GitHub issue number, not the project key (`ACT-604`). The auto-close hook only recognizes `#`.

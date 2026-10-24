@@ -131,7 +131,7 @@ Then ask Claude Code: **"Build me an app from this spec: `<link-or-file>`"**.
 
 ## Quality signals
 
-100% statement, branch, function, and line coverage on every PR. Property-based tests cover commit version monotonicity, claim/lease lifecycle, cache/store coherence, correlate→drain delivery exactness, and close idempotency. A CI bench fails the build when any scenario's p50 regresses past 1.5× the checked-in baseline; numbers are in [PERFORMANCE.md](./libs/act/PERFORMANCE.md). The three in-tree stores (Postgres, SQLite, InMemory) pass the same [TCK](./libs/act-tck) and every PR runs that TCK against PostgreSQL 18 and the pinned libSQL; the [conformance workflow](https://github.com/rotorsoft/act-root/actions/workflows/conformance.yml) adds PostgreSQL 14–17, the latest libSQL and a multi-process stress run every week. Public API stability is governed by [STABILITY.md](./STABILITY.md): breaking changes require an explicit `BREAKING CHANGE:` footer and a written migration note.
+100% statement, branch, function, and line coverage on every PR. Property-based tests cover commit version monotonicity, claim/lease lifecycle, cache/store coherence, correlate→drain delivery exactness, and close idempotency. A weekly bench run fails when an adapter's numbers regress past its budget against the checked-in baseline; numbers are in [PERFORMANCE.md](./libs/act/PERFORMANCE.md). The three in-tree stores (Postgres, SQLite, InMemory) pass the same [TCK](./libs/act-tck) and every PR runs that TCK against PostgreSQL 18 and the pinned libSQL; the [conformance workflow](https://github.com/rotorsoft/act-root/actions/workflows/conformance.yml) adds PostgreSQL 14–17, the latest libSQL and a multi-process stress run every week. Public API stability is governed by [STABILITY.md](./STABILITY.md): breaking changes require an explicit `BREAKING CHANGE:` footer and a written migration note.
 
 ## Documentation
 
@@ -152,7 +152,7 @@ Then ask Claude Code: **"Build me an app from this spec: `<link-or-file>`"**.
 
 ## Contributing
 
-Fork, branch, install (`pnpm install`), test (`pnpm test`), lint (`pnpm lint`), commit, push, PR. Conventional commits. 100% coverage gate. The full pre-handoff workflow lives in [CLAUDE.md](./CLAUDE.md); the per-package contributing guide is in [docs/docs/guides/contributing-new-package.md](./docs/docs/guides/contributing-new-package.md). Open an issue or join [GitHub Discussions](https://github.com/rotorsoft/act-root/discussions) for questions.
+Fork, branch, install (`pnpm install`), test (`pnpm test`), lint (`pnpm lint`), commit, push, PR. Conventional commits. 100% coverage gate. The full pre-handoff workflow lives in [CONTRIBUTING.md](./CONTRIBUTING.md#pre-handoff-workflow); the per-package contributing guide is in [docs/docs/guides/contributing-new-package.md](./docs/docs/guides/contributing-new-package.md). Open an issue or join [GitHub Discussions](https://github.com/rotorsoft/act-root/discussions) for questions.
 
 ## Versioning
 

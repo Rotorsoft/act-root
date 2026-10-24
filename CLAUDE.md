@@ -89,7 +89,7 @@ Conventional commits, validated by hook:
 
 # Types: feat, fix, docs, style, refactor, test, chore
 # Scope: package name (act, act-pg, calculator, wolfdesk, etc.)
-# Subject: imperative mood, lowercase, no period
+# Subject: imperative mood, starts lowercase (identifiers keep their case), no period
 ```
 
 ## Where to find what
