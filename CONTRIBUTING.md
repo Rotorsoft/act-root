@@ -33,6 +33,17 @@ A branch stacked on another PR's branch conflicts once that PR squash-merges. Me
 
 Each step closes a failure mode that has actually shipped: per-slice test runs missed what the full gate catches, and PRs that changed described behavior left the docs describing the old shape.
 
+## Changing a port interface
+
+When you add, remove, or change a method on a port in `libs/act/src/types/ports.ts` (`Store`, `Cache`, `Logger`), update the matching `runStoreTck` / `runCacheTck` / `runLoggerTck` in `libs/act-tck/src/` in the same slice. The TCK is the executable contract; adapters validate themselves against it.
+
+1. Add or update cases in `libs/act-tck/src/{store,cache,logger}-tck.ts`.
+2. If the method is optional, add a flag to the matching `Capabilities` type and gate the new tests on it, so existing adapters keep passing until they opt in.
+3. Update the `docs/docs/guides/writing-a-*.md` walkthrough for that port.
+4. Run the TCK against every in-tree adapter: InMemory, act-pg, act-sqlite, act-notify (over Postgres) and act-pino.
+
+Example: `Store.query_stats(input, options)` landed as a required method (every adapter implements it), and `store-tck.ts` gained its `describe("query_stats", …)` block in the same change.
+
 ## Naming conventions
 
 Lives in [`.claude/rules/naming.md`](.claude/rules/naming.md), so Claude Code loads it whenever it reads or writes TypeScript under `libs/`, `packages/`, `recipes/` or `test/`. It is the one copy: edit it there.

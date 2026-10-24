@@ -27,12 +27,12 @@ pnpm monorepo with two main sections:
   - `@rotorsoft/act-pg` — PostgreSQL adapter (production)
   - `@rotorsoft/act-sqlite` — SQLite/libSQL adapter (embedded/single-node)
   - `@rotorsoft/act-patch` — immutable deep-merge patch utility
-  - `@rotorsoft/act-http` — HTTP integrations (umbrella). `webhook` for reaction-driven POST delivery, `receiver` for inbound webhook ingestion, the `sse` subpath for incremental state broadcast (formerly `@rotorsoft/act-sse`; status in [STABILITY.md § Deprecation policy](STABILITY.md#deprecation-policy)), plus the auto-generated API subpaths (`trpc`, `hono`, `openapi`) that walk a built `IAct` registry and emit one route per action — guide at [docs/docs/guides/auto-generated-api.md](docs/docs/guides/auto-generated-api.md)
+  - `@rotorsoft/act-http` — HTTP integrations: `webhook`, `receiver`, `sse`, and APIs generated from the registry (`trpc`, `hono`, `openapi`)
   - `@rotorsoft/act-pino` — pino-backed `Logger` adapter
-  - `@rotorsoft/act-notify` — hybrid notify-broker decorator: `withBroker(store, broker)` delegates every durable Store method and rides an external broker (Redis implemented, Kafka scaffolded, Loopback for tests) for cross-process wakeups only — lifts the LISTEN/NOTIFY fanout ceiling without touching durability. TCK-proven over PostgresStore
+  - `@rotorsoft/act-notify` — `withBroker(store, broker)`: cross-process wakeups over Redis, durability untouched
   - `@rotorsoft/act-otel` — Prometheus metrics bridge: `instrument(app)` maintains the metric set listed in its README (and the observability guide) off the lifecycle events. Leaf package — core stays metrics-free by design
   - `@rotorsoft/act-crypto` — authenticated envelope encryption (AES-256-GCM + versioned wire format) for adapters that want column-level encryption with operator-controlled keys. Leaf package — adapters depend on it, core does not.
-  - `@rotorsoft/act-ops` — operational primitives (idempotency, retry budgets, poison-message classification). **Zero dep on `@rotorsoft/act`** by design — so non-Act receivers (forwarded-bus consumers, Express endpoints, queue workers) can speak the same contract without pulling in the orchestrator
+  - `@rotorsoft/act-ops` — idempotency, retry budgets, poison-message classification; no dependency on `@rotorsoft/act`
   - `@rotorsoft/act-tck` — Test Compatibility Kit for Store/Cache/Logger ports
   - `@rotorsoft/act-diagram` — domain-model diagram (React UI) plus the `act` contracts CLI
 
@@ -79,18 +79,6 @@ pnpm act -q TicketOpened                  # non-interactive: print one entity, e
 - All actions need actor context (`{ id, name }`)
 - ESM only (`"type": "module"`, `.js` import extensions)
 - Public API stability is governed by [STABILITY.md](STABILITY.md) — read before changing any builder API, `IAct` method, `Store`/`Cache` contract, lifecycle event, or public type export
-
-## Commit Message Format
-
-Conventional commits, validated by hook:
-
-```
-<type>(<scope>): <subject>
-
-# Types: feat, fix, docs, style, refactor, test, chore
-# Scope: package name (act, act-pg, calculator, wolfdesk, etc.)
-# Subject: imperative mood, starts lowercase (identifiers keep their case), no period
-```
 
 ## Where to find what
 
@@ -160,8 +148,6 @@ When an Act application hits the edges (events table growing without bound, cool
 | Temporal / timing recipes landing (one-shot vs recurring) | [recipes/temporal/README.md](recipes/temporal/README.md) |
 | Recurring timers (tick-emits-next-tick over one-shot `.defer`) | [recipes/temporal/recurring-timers/README.md](recipes/temporal/recurring-timers/README.md) |
 
-Recipe conventions: each folder has a README + optional runnable artifacts (`.sql` files using `{{schema}}` / `{{table}}` placeholders, `run.sh` wrappers, `.ts` samples that compile against the live `@rotorsoft/act` API). The framework code stays unchanged — recipes are operator playbooks, not framework features. New recipes land here when an operator hits a real wall the existing pages don't cover.
-
 ### Performance evidence
 
 Per-package `PERFORMANCE.md` files track benchmark history with before/after numbers per optimization. READMEs link to them; READMEs themselves stay narrative.
@@ -207,29 +193,15 @@ Source-of-truth for what lives where:
 ## Development Workflow
 
 - Strict TypeScript everywhere — type-check before pushing
-- Pre-commit hooks run lint/format, and CI runs the full suite on every push (never bypass hooks with `--no-verify`)
+- Pre-commit hooks run lint/format, and CI runs the full suite on every push
 - Use Zod schemas for all runtime validation
 - Never modify event data structures in place — evolve via versioned event names
 - Keep state machines focused; split concerns into separate slices
 - Adding a feature to core: update `libs/act/src/types/`, implement, test, demo in an example, ensure all three stores (InMemory/Postgres/Sqlite) support it
 - Adding a new `/libs` package: see [contributing-new-package.md](docs/docs/guides/contributing-new-package.md) — **seed a baseline tag before the first merge** or semantic-release defaults to `1.0.0`
-- **Respecting the stability charter.** The public API is covered by [STABILITY.md](STABILITY.md). Before changing any of the surfaces below, decide whether the change is **additive** (new optional method, new optional field, new event name) or **breaking** (rename, removal, narrowed type, changed semantics). Additive changes are fine in any release; breaking changes require a `BREAKING CHANGE:` commit footer that drives a major version bump and a written migration note in `RELEASE_NOTES_*.md` or the changelog. If you're not sure which category your change falls into, stop and ask. Files holding charter-covered surface:
-  - `libs/act/src/builders/{act,state,slice,projection}-builder.ts` and their contracts in `libs/act/src/types/builders.ts` — fluent builder DSL
-  - `libs/act/src/act.ts` and `libs/act/src/types/act.ts` — the `Act` orchestrator, `ActOptions`, and lifecycle event names/shapes (`IAct` lives in `types/action.ts`)
-  - `libs/act/src/types/ports.ts` — `Store`, `Cache`, `Logger` interfaces
-  - `libs/act/src/types/index.ts` (and what it re-exports) — public type surface
-  - `libs/act/src/ports.ts` — the public port singletons (`store()`, `cache()`, `log()`, `dispose()`, etc.); the `SNAP_EVENT`/`TOMBSTONE_EVENT` constants live in `types/ports.ts`
-
-  Out of scope for the charter — change freely: anything in `libs/act/src/internal/`, performance characteristics, log formats, adapter implementation details outside the contract.
-
-- **Gating new public surface — write an RFC.** The charter catches *changes* to the public surface; the `rfcs/` process gates *additions* before they calcify. Any PR that adds a new public export, builder method, port method, or lifecycle event needs a one-page RFC (copy [`rfcs/0000-template.md`](rfcs/0000-template.md) → `rfcs/NNNN-<slug>.md`) capturing motivation, the surface added, alternatives considered, and stability impact. The PR template carries the checklist line; see [`rfcs/README.md`](rfcs/README.md) for what does and doesn't require one. The reviewer checks it against the stability snapshot diff; there is no CI gate.
-
-- **Changing a port interface (Store, Cache, Logger).** When you add, remove, or change a method on a port in `libs/act/src/types/ports.ts`, you must also update the matching `runStoreTck` / `runCacheTck` / `runLoggerTck` in `libs/act-tck/src/`. The TCK is the executable contract — adapters validate themselves against it. Rules:
-  1. Add or update cases in `libs/act-tck/src/{store,cache,logger}-tck.ts`.
-  2. If the method is optional, add a flag to the matching `Capabilities` type and gate the new tests on it so existing adapters keep passing until they opt in.
-  3. Update the `docs/docs/guides/writing-a-*.md` walkthrough for that port (if it exists yet).
-  4. Run the TCK against every in-tree adapter (InMemory, act-pg, act-sqlite, act-pino).
-  Example: `Store.query_stats(input, options)` from [#639](https://github.com/Rotorsoft/act-root/issues/639) landed as a required method (not capability-gated — every adapter implements it). The TCK gained a `describe("query_stats", …)` block in `store-tck.ts` in lockstep with the port change.
+- **Respecting the stability charter.** Before changing public surface, decide whether the change is additive or breaking; [STABILITY.md](STABILITY.md) defines both, and a breaking change needs a `BREAKING CHANGE:` footer and a migration note. If unsure, stop and ask. Charter-covered files: `builders/*-builder.ts`, `types/builders.ts`, `act.ts`, `types/act.ts`, `types/ports.ts`, `types/index.ts` and `ports.ts` under `libs/act/src/`.
+- **New public surface needs an RFC**: see [STABILITY.md § Adding new covered surface](STABILITY.md#adding-new-covered-surface).
+- **Changing a port interface (Store, Cache, Logger)** updates the matching TCK in `libs/act-tck/src/` in the same slice: [CONTRIBUTING.md § Changing a port interface](CONTRIBUTING.md#changing-a-port-interface).
 
 ### Pre-handoff workflow (mandatory before "ready for review" / PR)
 
@@ -238,8 +210,6 @@ Run `/release-check` before calling a branch ready: it runs the snapshot, doc-au
 ### Documentation discipline
 
 - **READMEs** show current patterns and strategies — not historical benchmarks
-- **`PERFORMANCE.md`** tracks evolution with per-optimization before/after numbers
-- New optimization → benchmark goes in `PERFORMANCE.md`, README links to it
 - Deep reference goes in `docs/docs/` (Docusaurus), procedural app-building guidance in `.claude/skills/scaffold-act-app/`, contributor workflow in `docs/docs/guides/`
 - **Doc snippets are type-checked.** Every fenced ` ```ts ` block in `docs/docs/**` is tangled and compiled against the live `@rotorsoft/act` source in CI (`pnpm -F docs check:snippets`). A new snippet must be a self-contained program or carry a `no-check` marker on its info string if it's a deliberate fragment. See [docs/scripts/README.md](docs/scripts/README.md).
 
@@ -251,7 +221,7 @@ Durable workflow rules the AI assistant follows when working on the framework it
 - **Integration helpers live in separate packages, never in core.** HTTP delivery, message-bus forwarders, webhook signers, etc. go in their own `@rotorsoft/act-*` package (precedent: `act-http`, `act-pino`, `act-pg`, `act-sqlite`, `act-tck`, `act-patch`). Core stays governed by `STABILITY.md`.
 - **No manual version bumps.** Semantic-release owns the `version` field in `package.json`. The only manual version event is seeding the baseline `0.0.0` tag when adding a new package. Manual bumps create diffs that conflict with the auto-bump commit.
 - **Don't modify working code without explicit approval.** Propose changes first when the user hasn't asked for code. Refactors-while-you're-here are the most common way to expand the blast radius of a small request.
-- **Conventional-commit subject starts lowercase; identifiers after the first word keep their case.** `feat(act): add foo` not `feat(act): Add foo`, and `fix(act): make InMemoryStore drop ...` keeps the type name as written. The commitlint hook rejects only a capitalized first word, so never start the subject with a type name.
+- **Conventional commits** (`<type>(<scope>): <subject>`; types feat, fix, docs, style, refactor, test, chore; scope is the package). **The subject starts lowercase; identifiers after the first word keep their case.** `feat(act): add foo` not `feat(act): Add foo`, and `fix(act): make InMemoryStore drop ...` keeps the type name as written. The commitlint hook rejects only a capitalized first word, so never start the subject with a type name.
 - **Never `--no-verify` or `--no-gpg-sign`.** The pre-commit hook runs lint-staged and the commit-msg hook runs commitlint; bypassing them ships unverified work. If a hook fails, fix the underlying issue.
 - **PR auto-close uses GitHub numbers, not project keys.** `Closes #735` (auto-closes on merge), not `Closes ACT-604` (doesn't). Project keys go in the PR title and body for searchability.
 
