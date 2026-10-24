@@ -507,6 +507,60 @@ describe("correlate: the checkpoint", () => {
     });
   });
 
+  describe("one checkpoint serves every reaction, so a scan reads only `limit`", () => {
+    const run = async (
+      first: (app: ReturnType<typeof counting>["app"]) => Promise<unknown>
+    ) => {
+      const { app, ran } = counting();
+      for (const stream of ["a", "b", "c", "d", "e"])
+        await app.do("tick", { stream, actor }, {});
+      await first(app);
+      for (let i = 0; i < 5; i++) {
+        await app.correlate();
+        await app.drain();
+      }
+      return ran.sort();
+    };
+    const counting = () => {
+      const ran: string[] = [];
+      const app = act()
+        .withState(Ticker)
+        .on("Ticked")
+        .do(async function count(e) {
+          ran.push(e.stream);
+        })
+        .to((e) => ({ target: `dyn-${e.stream}` }))
+        .build({ autoSettle: false });
+      return { app, ran };
+    };
+    const all = ["a", "b", "c", "d", "e"];
+
+    it("runs every reaction after an unfiltered scan", async () => {
+      expect(await run((app) => app.correlate())).toEqual(all);
+    });
+
+    it.each([
+      ["a stream filter", { stream: "e" }],
+      ["a names filter", { names: ["Nope"] }],
+      ["an `after`", { after: 2 }],
+    ])(
+      "ignores %s in app.correlate(), losing no reaction",
+      async (_, query) => {
+        expect(await run((app) => app.correlate(query as never))).toEqual(all);
+      }
+    );
+
+    it("ignores a filter in settle({ correlate }), losing no reaction", async () => {
+      expect(
+        await run(async (app) => {
+          const settled = new Promise((resolve) => app.on("settled", resolve));
+          app.settle({ debounceMs: 0, correlate: { names: ["Nope"] } });
+          await settled;
+        })
+      ).toEqual(all);
+    });
+  });
+
   describe("a static-only app advances the checkpoint too", () => {
     it("persists how far the scan read, because it scans now", async () => {
       const raw = new InMemoryStore();

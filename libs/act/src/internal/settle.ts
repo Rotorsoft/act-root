@@ -90,8 +90,7 @@ export class SettleLoop<TEvents extends Schemas> {
       this._timer = undefined;
       const {
         debounceMs: _,
-        // Every pass scans from correlation's own checkpoint.
-        correlate: { after: _after, ...correlate_query } = {},
+        correlate: correlate_query = {},
         maxPasses = Infinity,
         ...drain_options
       } = this._next ?? {};

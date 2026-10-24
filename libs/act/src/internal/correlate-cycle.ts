@@ -356,7 +356,9 @@ export class CorrelateCycle<
       if (correlating === false) return idle();
     }
 
-    const after = Math.max(this._checkpoint, query.after || -1);
+    // One checkpoint serves every reaction, so the scan reads only `limit`:
+    // a filter would move it past events the filter skipped.
+    const after = this._checkpoint;
     const correlated = new Map<string, Correlated>();
     let last_id = after;
     // A resolver threw: the scan stops before that event, so the next one
@@ -446,7 +448,7 @@ export class CorrelateCycle<
       },
       // Resolvers see `pii: null`: correlate runs actor-less, and one
       // undecryptable row would otherwise stop every stream's reactions.
-      { ...query, after, with_pii: false }
+      { after, limit: query.limit, with_pii: false }
     );
 
     if (this._declared_lanes.size > 1) await this._recall(correlated);
