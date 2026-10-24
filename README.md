@@ -21,12 +21,14 @@
 
 Act is an event-sourcing framework for TypeScript built on three primitives: actions, state, and reactions. An action commits events, state folds them, and reactions run on what was committed. Pick a store at bootstrap (Postgres for production, SQLite for embedded, in-memory for tests); the application code stays the same.
 
-```mermaid
-flowchart LR
-  client([client]):::actor -- "action: app.do()" --> act["<b>Act</b><br/>events, state, drain, recover"]:::action
-  act -- "load()" --> client
-  act -- reaction --> downstream([downstream]):::external
-```
+<a href="https://rotorsoft.github.io/act-root/flows/calculator.html">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="./assets/flow-dark.gif">
+    <img src="./assets/flow-light.gif" alt="The calculator example's flow animation: a person presses keys, each action passes through the calculator state and commits an event, and two reactions pick the events up and call actions of their own on the digit board and result streams" width="100%">
+  </picture>
+</a>
+
+<sub>The calculator example, animated from its builders: actions pass through the state and commit events, and reactions pick the events up and call more actions. [Play it live](https://rotorsoft.github.io/act-root/flows/calculator.html), or [see how it's made](https://rotorsoft.github.io/act-root/docs/guides/flow-animations).</sub>
 
 The primitives:
 
