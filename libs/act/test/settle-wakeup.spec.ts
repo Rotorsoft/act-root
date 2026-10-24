@@ -234,6 +234,42 @@ describe("a scheduled settle pass is never reset or replaced", () => {
  * event — was ever scanned. Counting a pass that read events as progress
  * fixes it; it terminates because ids are monotonic and finite.
  */
+// A scan stops before an event whose resolver throws, for every reaction
+// on it, even one whose resolver already resolved: nothing for that event
+// runs until the resolver stops throwing (the scan retries it). Settle
+// must still come to rest instead of looping on the stuck event.
+describe("a resolver that throws after another resolved on the same event", () => {
+  const Tap = state({ Tap: z.object({ n: z.number() }) })
+    .init(() => ({ n: 0 }))
+    .emits({ Tapped: ZodEmpty })
+    .patch({ Tapped: (_, s) => ({ n: s.n + 1 }) })
+    .on({ tap: ZodEmpty })
+    .emit(() => ["Tapped", {}])
+    .build();
+
+  it("runs neither reaction, and settle comes to rest", async () => {
+    let ran = 0;
+    const app = act()
+      .withState(Tap)
+      .on("Tapped")
+      .do(async function resolved() {
+        ran++;
+      })
+      .to((e) => ({ target: `ok-${e.stream}` }))
+      .on("Tapped")
+      .do(async function never() {})
+      .to(() => {
+        throw new Error("resolver bug");
+      })
+      .build();
+    const settled = new Promise((r) => app.on("settled", r));
+    await app.do("tap", { stream: "first", actor: { id: "a", name: "a" } }, {});
+    await settled;
+    expect(ran).toBe(0);
+    await dispose()();
+  });
+});
+
 describe("settle loop paginates past inert windows", () => {
   it("keeps correlating while last_id advances, though nothing subscribes or drains", async () => {
     const breaker = new CircuitBreaker({

@@ -1010,9 +1010,9 @@ export class Act<
     if (!this._drain) return { kind: "idle", last_id: -1 };
     return this._scoped(async () => {
       const pass = await this._correlate.correlate(query, lease);
-      // Also re-arms correlate, so a backlog scan keeps going.
-      if (pass.kind === "scanned" && (pass.subscribed > 0 || pass.marked > 0))
-        this._arm_all();
+      // Only a mark makes a stream claimable. Also re-arms correlate, so a
+      // backlog scan keeps going.
+      if (pass.kind === "scanned" && pass.marked > 0) this._arm_all();
       return pass;
     });
   }

@@ -119,8 +119,7 @@ export class SettleLoop<TEvents extends Schemas> {
           // leaves the claimable set (acked, blocked, scheduled); a zero
           // backoff keeps it claimable until it blocks or succeeds.
           const made_progress =
-            drain.leased.length > 0 ||
-            (scanned && (pass.subscribed > 0 || pass.read));
+            drain.leased.length > 0 || (scanned && pass.read);
           if (!made_progress) break;
         }
         // `Act.emit` contains listener throws, so the store-failure catch
