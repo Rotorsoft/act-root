@@ -76,7 +76,7 @@ pnpm -F docs flows:video wolfdesk --scenario 2 --out escalation.mp4
 The repo README's animation is a GIF made this way, in each theme:
 
 ```bash
-pnpm -F docs flows:video calculator --scenario 1 --size 1440x810 --speed 1.8 --gif-width 960 --theme dark --out ../assets/flow-dark.gif
+pnpm -F docs flows:video wolfdesk --scenario 1 --size 1440x810 --speed 2 --gif-width 960 --theme dark --out ../assets/flow-dark.gif
 ```
 
 It drives Chrome through `playwright-core`, captures every frame the page paints and encodes H.264 with `ffmpeg`. You need Chrome and `ffmpeg` installed.
