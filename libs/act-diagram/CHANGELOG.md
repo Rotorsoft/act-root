@@ -1,3 +1,10 @@
+# [@rotorsoft/act-diagram-v1.2.0](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-diagram-v1.1.8...@rotorsoft/act-diagram-v1.2.0) (2026-10-24)
+
+
+### Features
+
+* **act:** name the rules an action requires with .requires(...) ([#2115](https://github.com/Rotorsoft/act-root/issues/2115)) ([dc49211](https://github.com/Rotorsoft/act-root/commit/dc4921175dd5bd65c47d9a7c82c9dd4cd29b0ab8)), closes [#2086](https://github.com/Rotorsoft/act-root/issues/2086)
+
 # [@rotorsoft/act-diagram-v1.1.8](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-diagram-v1.1.7...@rotorsoft/act-diagram-v1.1.8) (2026-10-19)
 
 
