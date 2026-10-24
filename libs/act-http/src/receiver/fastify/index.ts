@@ -58,7 +58,7 @@
  */
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { type CheckWebhookOptions, checkWebhook } from "../check.js";
-import { type Finalizers, make_finalizers } from "../finalize.js";
+import { type Finalizers, make_idempotency } from "../finalize.js";
 
 /** Shape attached to `request.idempotency` by the Fastify adapter. */
 export type FastifyIdempotency = {
@@ -95,16 +95,6 @@ export function webhookMiddleware(
       await reply.status(result.status).send({ error: result.reason });
       return;
     }
-    const { commit, release } = make_finalizers(
-      options.store,
-      result.key,
-      result.deduped
-    );
-    req.idempotency = {
-      key: result.key,
-      deduped: result.deduped,
-      commit,
-      release,
-    };
+    req.idempotency = make_idempotency(options.store, result);
   };
 }

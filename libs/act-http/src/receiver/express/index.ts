@@ -57,7 +57,7 @@
  */
 import type { NextFunction, Request, RequestHandler, Response } from "express";
 import { type CheckWebhookOptions, checkWebhook } from "../check.js";
-import { type Finalizers, make_finalizers } from "../finalize.js";
+import { type Finalizers, make_idempotency } from "../finalize.js";
 
 /** Shape attached to `req.idempotency` by the Express adapter. */
 export type ExpressIdempotency = {
@@ -88,17 +88,8 @@ export function webhookMiddleware(
       res.status(result.status).json({ error: result.reason });
       return;
     }
-    const { commit, release } = make_finalizers(
-      options.store,
-      result.key,
-      result.deduped
-    );
-    (req as Request & { idempotency: ExpressIdempotency }).idempotency = {
-      key: result.key,
-      deduped: result.deduped,
-      commit,
-      release,
-    };
+    (req as Request & { idempotency: ExpressIdempotency }).idempotency =
+      make_idempotency(options.store, result);
     next();
   };
 }

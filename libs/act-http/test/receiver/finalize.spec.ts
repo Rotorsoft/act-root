@@ -1,12 +1,12 @@
 import { InMemoryIdempotencyStore } from "@rotorsoft/act-ops/idempotency";
 import { describe, expect, it, vi } from "vitest";
-import { make_finalizers } from "../../src/receiver/finalize.js";
+import { make_idempotency } from "../../src/receiver/finalize.js";
 
-describe("make_finalizers", () => {
+describe("make_idempotency", () => {
   it("commit promotes a tentative claim to durable", () => {
     const store = new InMemoryIdempotencyStore();
     expect(store.claim("k")).toBe(true);
-    const { commit } = make_finalizers(store, "k", false);
+    const { commit } = make_idempotency(store, { key: "k", deduped: false });
     commit();
     expect(store.claim("k")).toBe(false);
   });
@@ -14,7 +14,7 @@ describe("make_finalizers", () => {
   it("release drops a tentative claim so a retry re-processes", () => {
     const store = new InMemoryIdempotencyStore();
     expect(store.claim("k")).toBe(true);
-    const { release } = make_finalizers(store, "k", false);
+    const { release } = make_idempotency(store, { key: "k", deduped: false });
     release();
     expect(store.claim("k")).toBe(true);
   });
@@ -25,7 +25,10 @@ describe("make_finalizers", () => {
       commit: vi.fn(),
       release: vi.fn(),
     };
-    const { commit, release } = make_finalizers(store, "k", false);
+    const { commit, release } = make_idempotency(store, {
+      key: "k",
+      deduped: false,
+    });
     await commit();
     await commit();
     await release();
@@ -39,7 +42,10 @@ describe("make_finalizers", () => {
       commit: vi.fn(),
       release: vi.fn(),
     };
-    const { commit, release } = make_finalizers(store, "k", true);
+    const { commit, release } = make_idempotency(store, {
+      key: "k",
+      deduped: true,
+    });
     await commit();
     await release();
     // A duplicate must never commit or release someone else's claim.

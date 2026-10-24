@@ -20,7 +20,15 @@ export type Finalizers = {
 };
 
 /**
- * Build the {@link Finalizers} for one delivery.
+ * The `idempotency` bag a receiver adapter hands its route for one
+ * delivery: the claimed key, whether it was a duplicate, and the
+ * {@link Finalizers}.
+ */
+export type Idempotency = { key: string; deduped: boolean } & Finalizers;
+
+/**
+ * Build the {@link Idempotency} bag for one delivery that passed
+ * `checkWebhook`.
  *
  * Guarantees:
  *
@@ -32,13 +40,14 @@ export type Finalizers = {
  *   further calls are no-ops — an adapter that both auto-finalizes and
  *   lets the operator call `commit()`/`release()` can't double-fire.
  */
-export function make_finalizers(
+export function make_idempotency(
   store: IdempotencyStore,
-  key: string,
-  deduped: boolean
-): Finalizers {
+  { key, deduped }: { key: string; deduped: boolean }
+): Idempotency {
   let settled = deduped;
   return {
+    key,
+    deduped,
     async commit() {
       if (settled) return;
       settled = true;
