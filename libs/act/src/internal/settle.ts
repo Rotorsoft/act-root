@@ -68,8 +68,8 @@ export class SettleLoop<TEvents extends Schemas> {
    * queues one more pass after it. Callers pass options, which the next
    * pass uses; internal wake-ups pass none, so they never discard a
    * caller's. The cycle runs correlate→drain in a
-   * loop until no progress is made (no new subscriptions, no events read,
-   * no streams leased) or `maxPasses` is reached, then emits the
+   * loop until a pass makes no progress (it read no events and leased no
+   * streams) or `maxPasses` is reached, then emits the
    * `"settled"` lifecycle event via {@link SettleDeps.on_settled}.
    */
   schedule(options?: SettleOptions): void {

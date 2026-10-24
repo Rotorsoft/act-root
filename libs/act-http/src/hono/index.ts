@@ -13,7 +13,8 @@
  * import { hono } from "@rotorsoft/act-http/hono";
  *
  * const api = hono(app, {
- *   actor: (c) => ({ id: c.req.header("x-user-id")!, name: "..." }),
+ *   // the extractor receives `unknown`; it is the Hono Context
+ *   actor: (c) => ({ id: (c as Context).req.header("x-user-id")!, name: "..." }),
  *   stream: (action, input, c) => `tenant-${c.req.header("x-tenant")}`,
  * });
  *

@@ -261,7 +261,7 @@ The `pii` column stays the same type (`jsonb` on PG, `TEXT` on SQLite). Encrypte
 
 The read path discriminates by type after `JSON.parse`: strings get decrypted, objects pass through. This makes mixed-data rollouts transparent — events written before enabling encryption continue to read as plaintext, events written after read as ciphertext.
 
-Transparency covers payload **types**, not just values. `encrypt` serializes through `JSON.stringify`, so a `Date` inside a sensitive field would come back as an ISO string unless something revives it. The adapters pass their own date reviver into `decrypt`, the same one they apply to `data` and `meta` — so a `Date` in `pii` is a `Date` whether or not encryption is enabled, on every adapter ([#1365](https://github.com/Rotorsoft/act-root/issues/1365), [#1370](https://github.com/Rotorsoft/act-root/issues/1370)). The store TCK pins all four cells.
+Transparency covers payload **types**, not just values. `encrypt` serializes through `JSON.stringify`, so a `Date` inside a sensitive field comes back from `decrypt` as an ISO string, exactly as it would from unencrypted JSON. The adapters don't revive it: the framework turns the fields the event's schema declares as `z.date()` back into `Date`s on read (see the [Store contract](../architecture/extension-points.md#store-contract)), so a `Date` in `pii` is a `Date` whether or not encryption is enabled, on every adapter.
 
 ### What stays unchanged
 

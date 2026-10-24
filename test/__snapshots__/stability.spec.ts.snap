@@ -469,8 +469,8 @@ export declare class Act<TSchemaReg extends SchemaRegister<TActions>, TEvents ex
      *   \`__snapshot__\` events (counted in the result); \`on_progress\`
      *   fires once per event.
      * @param sink - Where the events land. Defaults to this Act's store.
-     * @returns {@link ScanResult} with \`kept\`, \`duration_ms\`, and
-     *   \`dropped\` per-category counters.
+     * @returns The {@link ScanResult}: what was kept, migrated and dropped,
+     *   and how long it took.
      *
      * @example Restore a CSV backup into the connected store
      * \`\`\`typescript
@@ -574,7 +574,7 @@ export declare class Act<TSchemaReg extends SchemaRegister<TActions>, TEvents ex
      * sets \`autoSettle: false\`. Call it at startup, to run what was pending
      * before a restart, or with options for the next pass; the scheduling
      * rule is in the event-sourcing docs (§ settle). Runs correlate→drain in a loop until a pass makes no
-     * progress — no new subscriptions, no events read, no streams leased —
+     * progress — it read no events and leased no streams —
      * then emits the \`"settled"\` lifecycle event, so one call fully catches
      * up paginated streams without forcing callers to loop.
      *
@@ -2788,8 +2788,8 @@ export type ProjectionBuilder<TEvents extends Schemas, TTarget extends string | 
 import { z } from "zod";
 import { type ActOptions, type AutocloseConfig, type Config } from "./types/index.js";
 /**
- * Zod schema for validating package.json metadata.
- * @internal
+ * Zod schema for the package.json fields {@link config} validates. Published
+ * for tooling that reads the same file, not for apps.
  */
 export declare const PackageSchema: z.ZodObject<{
     name: z.ZodString;
@@ -3546,7 +3546,7 @@ export declare const cache: (adapter?: Cache) => Cache;
  * resolvers rather than the public \`store()\`/\`cache()\`, which consult the
  * frame this bag *is* and would recurse.
  *
- * @internal
+ * Published for adapter and decorator authors, not for apps.
  */
 export declare const default_scope: () => Scoped;
 /**
@@ -5267,8 +5267,8 @@ export type Drain<TEvents extends Schemas> = {
  * @property correlate - Query for each correlation scan (default \`limit\`: 100).
  *   Every pass scans from correlation's own checkpoint, so \`after\` is ignored.
  * @property maxPasses - Cap on correlate→drain loops (default: \`Infinity\`).
- *   Settle exits early as soon as a pass makes no progress (no new
- *   subscriptions, no events read, no streams leased), so the cap only matters in
+ *   Settle exits early as soon as a pass makes no progress (it read no
+ *   events and leased no streams), so the cap only matters in
  *   pathological cases. It caps one settle: a reaction chain that keeps
  *   committing schedules new passes of its own, which \`maxPasses\` doesn't
  *   cover. \`shutdown()\` stops any of them after the pass in flight.
@@ -5303,8 +5303,8 @@ export type ShutdownOptions = {
 };
 /**
  * Name of the implicit lane every reaction lands in unless its \`.to({lane})\`
- * declaration says otherwise. Acts that don't call
- * \`.withLane(...)\` see only this lane,.
+ * declaration says otherwise. An Act that never calls \`.withLane(...)\` has
+ * only this lane.
  *
  * Persisted on \`streams.lane\` and threaded as the strict-typed default in
  * builder generics — \`lane?: TLanes\` always includes \`"default"\`.
@@ -5815,15 +5815,11 @@ export declare function is_literal_source(source: string): boolean;
 /**
  * Revive ISO-8601-shaped strings into \`Date\`s during \`JSON.parse\`.
  *
- * **The framework no longer uses this.** Dates are resolved from the declared
- * \`z.date()\` paths at build time and converted on read, so a field declared
- * \`z.string()\` keeps its string even when the value looks like a timestamp
- *. Adapters
- * return what they stored; typing is the orchestrator's job.
- *
- * Kept exported for host applications that parse Act JSON themselves and want
- * the old shape-based behaviour. New code should let the schema decide.
- *
+ * For host applications that parse Act JSON themselves (an export file, a
+ * message forwarded by a webhook) and have no event schema at hand. It turns
+ * every timestamp-shaped string into a \`Date\`, including fields declared as
+ * \`z.string()\`. The framework doesn't use it: it converts only the fields an
+ * event's schema declares as \`z.date()\`.
  */
 export declare const dateReviver: (_key: string, value: unknown) => unknown;
 //# sourceMappingURL=utils.d.ts.map"
@@ -10142,8 +10138,8 @@ export type Drain<TEvents extends Schemas> = {
  * @property correlate - Query for each correlation scan (default \`limit\`: 100).
  *   Every pass scans from correlation's own checkpoint, so \`after\` is ignored.
  * @property maxPasses - Cap on correlate→drain loops (default: \`Infinity\`).
- *   Settle exits early as soon as a pass makes no progress (no new
- *   subscriptions, no events read, no streams leased), so the cap only matters in
+ *   Settle exits early as soon as a pass makes no progress (it read no
+ *   events and leased no streams), so the cap only matters in
  *   pathological cases. It caps one settle: a reaction chain that keeps
  *   committing schedules new passes of its own, which \`maxPasses\` doesn't
  *   cover. \`shutdown()\` stops any of them after the pass in flight.
@@ -10178,8 +10174,8 @@ export type ShutdownOptions = {
 };
 /**
  * Name of the implicit lane every reaction lands in unless its \`.to({lane})\`
- * declaration says otherwise. Acts that don't call
- * \`.withLane(...)\` see only this lane,.
+ * declaration says otherwise. An Act that never calls \`.withLane(...)\` has
+ * only this lane.
  *
  * Persisted on \`streams.lane\` and threaded as the strict-typed default in
  * builder generics — \`lane?: TLanes\` always includes \`"default"\`.

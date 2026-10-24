@@ -129,15 +129,11 @@ const ISO_8601 =
 /**
  * Revive ISO-8601-shaped strings into `Date`s during `JSON.parse`.
  *
- * **The framework no longer uses this.** Dates are resolved from the declared
- * `z.date()` paths at build time and converted on read, so a field declared
- * `z.string()` keeps its string even when the value looks like a timestamp
- *. Adapters
- * return what they stored; typing is the orchestrator's job.
- *
- * Kept exported for host applications that parse Act JSON themselves and want
- * the old shape-based behaviour. New code should let the schema decide.
- *
+ * For host applications that parse Act JSON themselves (an export file, a
+ * message forwarded by a webhook) and have no event schema at hand. It turns
+ * every timestamp-shaped string into a `Date`, including fields declared as
+ * `z.string()`. The framework doesn't use it: it converts only the fields an
+ * event's schema declares as `z.date()`.
  */
 export const dateReviver = (_key: string, value: unknown): unknown =>
   typeof value === "string" && ISO_8601.test(value) ? new Date(value) : value;
