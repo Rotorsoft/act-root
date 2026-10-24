@@ -57,12 +57,22 @@ describe("tickets", () => {
 
   const DAY = 24 * 60 * 60 * 1000;
   const future = () => new Date(Date.now() + DAY);
-  // A few correlate+drain passes let a defer chain settle (each pass wakes the
-  // streams whose due-time has passed and runs the next hop).
+  // Correlate+drain until a pass finds nothing left (each pass wakes the
+  // streams whose due-time has passed and runs the next hop of a defer
+  // chain). It stops on the outcome, not after a fixed number of passes:
+  // how many a chain needs depends on the machine. The lease outlives any
+  // pass, so a slow pass never loses its ack.
   const settle = async () => {
-    for (let i = 0; i < 3; i++) {
-      await app.correlate({ limit: 200 });
-      await app.drain({ streamLimit: 100, eventLimit: 100, leaseMillis: 50 });
+    let last_id = -1;
+    for (let i = 0; i < 20; i++) {
+      const scan = await app.correlate({ limit: 200 });
+      const pass = await app.drain({
+        streamLimit: 100,
+        eventLimit: 100,
+        leaseMillis: 10_000,
+      });
+      if (!pass.leased.length && scan.last_id === last_id) return;
+      last_id = scan.last_id;
     }
   };
 
