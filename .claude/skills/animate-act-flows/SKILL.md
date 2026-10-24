@@ -69,7 +69,7 @@ Each step walks one existing edge (`from`, `to`) or stands at one node (`at`):
 - `say`: one or two plain sentences for the caption. `**bold**` and `` `code` `` render.
 - Steps that reach an event: `data` (the fields that matter) and `patch` (the change to the state, mirroring the real `.patch(...)`; defaults to `data`). Set `patch` (`{}` when nothing shows) whenever the data fields aren't state fields, or they land in the state panel. The panel folds only events on the scenario's `stream`; a step on another stream sets `"stream"` and shows up in the event stream only. `null` in a patch shows a cleared field.
 - `wait` on a step leaving a deferred reaction ("deferred until escalateAfter").
-- `action → event` with `"reject": "<reason>"`: the state refuses, nothing commits. Use the real invariant description or error message.
+- `action → event` with `"reject": "<reason>"`: the state refuses, nothing commits. Use the real invariant description or error message. While the token stands on the state bar, the player lists the action's `invariants` in array order and checks them one by one. A reason that matches an invariant stops the list on that row with ✕. Any other reason is a `throw` in `.emit(...)`, which runs only after every invariant passed, so it shows as one more row after them. Keep `invariants` in the order of the `.given([...])` array (the extractor does).
 - `reaction → external` with `"retries": n` and `"backoff": ["~200 ms", ...]`: fails n times, then succeeds. Add `"blocked": true` and `"target"` when it runs out instead.
 - `{ "at": "<node>", "say": "...", "wait": "...", "noop": true }`: a timer that wakes and does nothing.
 

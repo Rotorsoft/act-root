@@ -163,6 +163,11 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
 .verdict rect { fill: var(--surface); stroke: var(--k); stroke-width: 1.4; }
 .verdict text { font: 600 11px var(--f-mono); fill: var(--k); }
 .verdict { animation: pop .25s ease-out; }
+.checks rect.card { fill: var(--surface); stroke: var(--state); stroke-width: 1.4; }
+.checks text { font: 500 12.5px var(--f-mono); fill: var(--muted); }
+.checks .row { animation: pop .25s ease-out; }
+.checks .row.pass text { fill: var(--good); }
+.checks .row.fail text { fill: var(--bad); font-weight: 600; }
 @keyframes pop { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 .tick { fill: var(--k); }
 .tick.on { animation: tickon .8s ease-out; }
@@ -202,7 +207,7 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
   .panel .pb { max-height: 50vh; }
   .win { position: fixed; }
 }
-@media (prefers-reduced-motion: reduce) { .node.ping .pulse, .band.ping .pulse, .ring, .timer .hand, .log li.new, .tick.on, .verdict, .state .chg, .recording .rec-dot { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .node.ping .pulse, .band.ping .pulse, .ring, .timer .hand, .log li.new, .tick.on, .verdict, .checks .row, .state .chg, .recording .rec-dot { animation: none; } }
 </style>
 
 <div class="app" id="app">
@@ -550,7 +555,7 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
     (bands.some(b => b.kind === "slice") ? `<div><i class="bx" style="--k:var(--ink)"></i>Slice boundary</div>` : "");
   $("read").innerHTML = `
     <p>Time runs left to right. An <b style="color:var(--actor)">actor</b>, a person or an automation, invokes an <b style="color:var(--action)">action</b>.</p>
-    <p>The <b style="color:var(--state)">state</b> loads from the stream, checks the invariants (the ◆ count on an action) and either refuses the action or commits <b style="color:var(--event)">events</b>. Events patch the state, and <b style="color:var(--projection)">projections</b> fold them into read models such as tables and caches.</p>
+    <p>The <b style="color:var(--state)">state</b> loads from the stream, checks the invariants (the ◆ count on an action) one by one, in the order the action declares them, and either refuses the action at the first rule that fails or commits <b style="color:var(--event)">events</b>. Events patch the state, and <b style="color:var(--projection)">projections</b> fold them into read models such as tables and caches.</p>
     <p><b style="color:var(--reaction)">Reactions</b> pick events up after the commit and act as automations: they invoke new actions or call the <b style="color:var(--external)">outside world</b>. A clock marks a reaction that waits for a timestamp.</p>
     ${bands.length ? `<p>Dashed boxes are the boundaries the builders declare. ${bands[0].kind === "slice"
       ? "A <b>slice</b> box holds the actions and events of the partial states the slice declares, and the reactions it declares. Partial states of the same name still merge into one state bar."
@@ -838,6 +843,31 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
     const t = el("text", { x: x + 19, y: y + 4 }, g); t.textContent = text;
     return g;
   }
+  // the action's checks, listed in the order the state runs them: each row gets a ✓ as it passes,
+  // and a refusal stops on the failing row with ✕. A reason that is not an invariant comes from
+  // .emit(), which runs after every invariant passed, so it is the last row.
+  async function checklist(x, y, rules, reject, token) {
+    const rows = reject && !rules.includes(reject) ? [...rules, reject] : rules;
+    const fail = reject ? rows.indexOf(reject) : -1;
+    const RH = 22, w = Math.max(...rows.map(r => r.length)) * 7.5 + 42, h = rows.length * RH + 10;
+    const left = x + 14 + w > svg.viewBox.baseVal.width ? x - 14 - w : x + 14;
+    const g = el("g", { class: "checks" }, gFx);
+    el("rect", { x: left, y: y - h / 2, width: w, height: h, rx: 9, class: "card" }, g);
+    let ok = true;
+    for (let i = 0; i < rows.length && ok; i++) {
+      const r = el("g", { class: "row" }, g);
+      const t = el("text", { x: left + 11, y: y - h / 2 + 5 + RH * i + 15 }, r);
+      t.textContent = "○ " + rows[i];
+      if (!(ok = await wait(380, token))) break;
+      r.classList.add(i === fail ? "fail" : "pass");
+      t.textContent = (i === fail ? "✕ " : "✓ ") + rows[i];
+      if (i === fail) break;
+      ok = await wait(220, token);
+    }
+    if (ok) ok = await wait(reject ? 1500 : 500, token);
+    g.remove();
+    return ok;
+  }
   function timer(n) {
     const g = el("g", { class: "timer", style: `--k:var(--reaction)` }, gFx);
     const x = n.right + 2, y = n.top - 2;
@@ -868,17 +898,19 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
 
     const bar = barAt(from.cx);
     if (kindOf(from) === "action" && kindOf(to) === "event" && bar) {
-      // the action passes through the state: invariants pass or refuse
+      // the action passes through the state: its checks pass one by one, or one refuses
       const f = fractionAtY(e, bar.cy);
       if (!(await travel(e, token, 0, f))) return false;
       ping(bar);
-      const inv = (from.invariants || []).length;
-      const v = st.reject
-        ? verdict(from.cx, bar.cy, "✕ " + st.reject, "var(--bad)")
-        : verdict(from.cx, bar.cy, inv ? `◆ ${inv} ${inv > 1 ? "checks" : "check"} ✓` : "✓", "var(--good)");
-      const ok = await wait(st.reject ? 1700 : 650, token);
-      v.remove();
-      if (!ok) return false;
+      const rules = from.invariants || [];
+      if (rules.length || st.reject) {
+        if (!(await checklist(from.cx, bar.cy, rules, st.reject, token))) return false;
+      } else {
+        const v = verdict(from.cx, bar.cy, "✓", "var(--good)");
+        const ok = await wait(650, token);
+        v.remove();
+        if (!ok) return false;
+      }
       if (st.reject) {
         from.g.classList.add("bad");
         e.g.classList.remove("live"); e.g.classList.add("trail");
