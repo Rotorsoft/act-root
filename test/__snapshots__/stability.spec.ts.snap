@@ -11049,10 +11049,11 @@ export declare function runSseSubscription<S extends {
 
 exports[`@rotorsoft/act-http — public API stability > stable public surface for ./hono 1`] = `
 "// === index.d.ts ===
-import type { Actor, Target } from "@rotorsoft/act";
+import type { Actor } from "@rotorsoft/act";
 import type { IdempotencyStore } from "@rotorsoft/act-ops/idempotency";
 import type { Context, MiddlewareHandler } from "hono";
 import { Hono } from "hono";
+import { type ActSurface } from "../api/dispatch.js";
 import { type ActorExtractor, type SseOptions } from "../api/index.js";
 /**
  * Hono context variables this subpath contributes. The generic on
@@ -11144,24 +11145,6 @@ export declare function authenticated(extractor: ActorExtractor): MiddlewareHand
     Variables: ActMiddlewareVariables;
 }>;
 /**
- * Structural shape of the Act surface this generator walks at
- * runtime — the registry's action-name → owning-state map plus the
- * \`do(...)\` dispatch. Letting TApp infer to the caller's concrete
- * \`Act<...>\` against this structural bound keeps nested variance
- * out of the signature and avoids \`any\` in either direction.
- *
- * @internal
- */
-type ActSurface = {
-    readonly registry: {
-        actions: Record<string, {
-            readonly name: string;
-            readonly actions: Record<string, unknown>;
-        }>;
-    };
-    do(action: string, target: Target, payload: unknown): Promise<unknown>;
-};
-/**
  * Build a typed Hono REST surface from a built \`Act\` instance.
  *
  * Walks \`app.registry.actions\` once and emits one
@@ -11196,12 +11179,12 @@ type ActSurface = {
 export declare function hono<TApp extends ActSurface = ActSurface>(app: TApp, options: HonoOptions): Hono<{
     Variables: ActMiddlewareVariables;
 }>;
-export {};
 //# sourceMappingURL=index.d.ts.map"
 `;
 
 exports[`@rotorsoft/act-http — public API stability > stable public surface for ./openapi 1`] = `
 "// === index.d.ts ===
+import type { ActSurface } from "../api/dispatch.js";
 /**
  * Minimal OpenAPI 3.1 document type. The emitter targets the 3.1
  * spec; the type is intentionally a structural subset rather than
@@ -11308,23 +11291,6 @@ export type OpenAPIComponents = {
     readonly responses: Record<string, OpenAPIResponse>;
 };
 /**
- * Structural shape of the Act surface this emitter walks. Letting
- * TApp infer to the caller's concrete \`Act<TSchemaReg, ...>\` instead
- * of forcing it to fit a narrow framework-typed upper bound keeps
- * the caller's variance from leaking — and avoids \`any\` in the
- * signature.
- *
- * @internal
- */
-type ActRegistryView = {
-    readonly registry: {
-        actions: Record<string, {
-            readonly name: string;
-            readonly actions: Record<string, unknown>;
-        }>;
-    };
-};
-/**
  * Build an OpenAPI 3.1 document describing a built \`Act\` instance's
  * action surface.
  *
@@ -11349,8 +11315,7 @@ type ActRegistryView = {
  *   empty, or if any \`servers[].url\` fails URL parsing after
  *   \`{variable}\` substitution.
  */
-export declare function openapi<TApp extends ActRegistryView>(app: TApp, options: OpenAPIOptions): OpenAPIDocument;
-export {};
+export declare function openapi<TApp extends Pick<ActSurface, "registry">>(app: TApp, options: OpenAPIOptions): OpenAPIDocument;
 //# sourceMappingURL=index.d.ts.map"
 `;
 
@@ -12204,61 +12169,9 @@ export declare const is_version_neutral: <S extends BroadcastState>(msg: PatchMe
 
 exports[`@rotorsoft/act-http — public API stability > stable public surface for ./trpc 1`] = `
 "// === index.d.ts ===
-/**
- * @packageDocumentation
- * @module act-http/trpc
- *
- * tRPC subpath for the auto-generated API epic (#835). Walks the
- * registry of a built \`Act\` once at function call and emits a typed
- * router that exposes every registered action as a flat \`mutation\`,
- * matching the shape hand-written tRPC routers in the Act ecosystem
- * already use.
- *
- * Usage:
- *
- * \`\`\`ts
- * import { trpc } from "@rotorsoft/act-http/trpc";
- *
- * const router = trpc(app, {
- *   actor: (ctx) => ({ id: ctx.user.id, name: ctx.user.name }),
- *   stream: (action, input, ctx) => input.stream ?? ctx.tenant,
- * });
- *
- * // Client sees:
- * //   appRouter.PressKey.mutate({ key: "5" })
- * //   appRouter.OpenTicket.mutate({ title: "..." })
- * \`\`\`
- *
- * The route shape is flat: one procedure per registered action at
- * the top level. Action names are the unique identifiers across
- * the registry (the framework already enforces no duplicates), so
- * an extra namespace tier would be overhead in the common case.
- * Pure mutations for this slice; query/projection wiring lives in
- * a follow-up. See \`libs/act-http/README.md\` for the full surface
- * walkthrough.
- *
- * **Actor lives on the context.** The generator wires an internal
- * tRPC middleware that runs the host's
- * {@link TrpcOptions.actor | actor extractor} once per call and
- * injects the resolved {@link Actor} onto the downstream context as
- * \`ctx.actor\`. Every generated mutation reads from there — auth
- * resolves at the procedure boundary, not inside each action body,
- * and any composed middleware (logging, tracing) sees the same
- * \`ctx.actor\`. The middleware factory is also exported as
- * {@link authenticated} for hosts that need to compose it into
- * their own procedure chain.
- *
- * Composes the shared utilities at \`@rotorsoft/act-http/api\`:
- * {@link ActorExtractor} for the auth seam, {@link toApiError} for
- * the uniform error→status/code mapping, {@link withIdempotency}
- * for \`Idempotency-Key\` dedup. Three transports (this one, Hono,
- * OpenAPI) ride the same utilities so a client talking to two
- * transports never sees two error shapes for the same framework
- * error.
- */
-import { type Target } from "@rotorsoft/act";
 import type { IdempotencyStore } from "@rotorsoft/act-ops/idempotency";
 import { type AnyTRPCMiddlewareFunction, type AnyTRPCMutationProcedure, type AnyTRPCRootTypes, type TRPCBuiltRouter } from "@trpc/server";
+import { type ActSurface } from "../api/dispatch.js";
 import { type ActorExtractor, type SseOptions } from "../api/index.js";
 /**
  * Per-call options for {@link trpc}. The host supplies the three
@@ -12353,26 +12266,6 @@ export type TrpcOptions<Ctx> = {
  * in the extractor body).
  */
 export declare function authenticated(extractor: ActorExtractor): AnyTRPCMiddlewareFunction;
-/**
- * Structural shape of the Act surface this generator walks at
- * runtime — the registry's action-name → owning-state map plus the
- * \`do(...)\` dispatch. Letting TApp infer to the caller's concrete
- * \`Act<...>\` against this structural bound (instead of forcing it
- * to fit a narrow framework-typed upper bound) keeps the variance
- * of nested types like \`PatchHandler\` from leaking — and avoids
- * \`any\` in the signature.
- *
- * @internal
- */
-type ActSurface = {
-    readonly registry: {
-        actions: Record<string, {
-            readonly name: string;
-            readonly actions: Record<string, unknown>;
-        }>;
-    };
-    do(action: string, target: Target, payload: unknown): Promise<unknown>;
-};
 /**
  * Generated router type — one mutation procedure per action name in
  * \`TApp\`'s registry. Mapped over the concrete action keys so

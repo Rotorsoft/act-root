@@ -46,12 +46,12 @@
  * them never sees two shapes for the same framework error.
  */
 import { zValidator } from "@hono/zod-validator";
-import type { Actor, Target } from "@rotorsoft/act";
+import type { Actor } from "@rotorsoft/act";
 import type { IdempotencyStore } from "@rotorsoft/act-ops/idempotency";
 import type { Context, MiddlewareHandler } from "hono";
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
-import { track_in_flight } from "../api/in-flight.js";
+import { type ActSurface, make_dispatch } from "../api/dispatch.js";
 import {
   type ActorExtractor,
   type ApiError,
@@ -61,7 +61,6 @@ import {
   SseConnectionCounter,
   type SseOptions,
   toApiError,
-  withIdempotency,
 } from "../api/index.js";
 
 /**
@@ -183,28 +182,6 @@ const default_key_from = (c: Context): string | undefined =>
   c.req.header("idempotency-key");
 
 /**
- * Structural shape of the Act surface this generator walks at
- * runtime — the registry's action-name → owning-state map plus the
- * `do(...)` dispatch. Letting TApp infer to the caller's concrete
- * `Act<...>` against this structural bound keeps nested variance
- * out of the signature and avoids `any` in either direction.
- *
- * @internal
- */
-type ActSurface = {
-  readonly registry: {
-    actions: Record<
-      string,
-      {
-        readonly name: string;
-        readonly actions: Record<string, unknown>;
-      }
-    >;
-  };
-  do(action: string, target: Target, payload: unknown): Promise<unknown>;
-};
-
-/**
  * Build a typed Hono REST surface from a built `Act` instance.
  *
  * Walks `app.registry.actions` once and emits one
@@ -247,11 +224,11 @@ export function hono<TApp extends ActSurface = ActSurface>(
   api.use("*", authenticated(options.actor));
 
   const key_from = options.idempotency?.keyFrom ?? default_key_from;
-  // Counts claims per key so a duplicate of a still-running action can be
-  // told apart from a duplicate of a committed one (see `track_in_flight`).
-  const tracker = options.idempotency
-    ? track_in_flight(options.idempotency.store)
-    : undefined;
+  const dispatch = make_dispatch<Context>(
+    app,
+    options,
+    options.idempotency?.store
+  );
 
   // Wire SSE subscriptions before the mutation routes so the
   // `/sse/*` paths sit alongside `/actions/*`. The cap counter is
@@ -261,10 +238,9 @@ export function hono<TApp extends ActSurface = ActSurface>(
   if (options.sse) {
     const sse_config = resolveSseConfig(options.sse);
     const sse_counter = new SseConnectionCounter(sse_config.maxConnections);
-    const state_names = new Set<string>();
-    for (const action of Object.values(app.registry.actions)) {
-      state_names.add(action.name);
-    }
+    const state_names = new Set(
+      Object.values(app.registry.actions).map((a) => a.name)
+    );
     for (const state_name of state_names) {
       api.get(`/sse/${state_name}`, async (c) => {
         const stream_id = c.req.query("stream");
@@ -366,57 +342,39 @@ export function hono<TApp extends ActSurface = ActSurface>(
           const raw: unknown = is_json(c.req.header("content-type"))
             ? await c.req.json()
             : {};
-          const actor = c.get("actor");
-          const stream = await options.stream(action_name, input, c);
-          const expected_version = options.expectedVersion
-            ? await options.expectedVersion(action_name, input, c)
-            : undefined;
-          const target =
-            expected_version === undefined
-              ? { stream, actor }
-              : { stream, actor, expectedVersion: expected_version };
-
-          if (options.idempotency) {
-            const key = key_from(c);
-            if (!key) {
-              const body: ApiError = {
-                error: "BadRequest",
-                detail: "Idempotency-Key required",
-                code: "BAD_REQUEST",
-              };
-              return c.json(body, 400);
-            }
-            const outcome = await withIdempotency(tracker!.store, key, () =>
-              app.do(action_name as never, target as never, raw as never)
-            );
-            if (outcome.deduped && tracker!.in_flight(key)) {
-              const body: ApiError = {
-                error: "ServiceUnavailable",
-                detail:
-                  "Idempotency-Key in flight; the original request has not finished, retry later",
-                code: "IN_FLIGHT",
-              };
-              c.header("Retry-After", "1");
-              return c.json(body, 503);
-            }
-            if (outcome.deduped) {
-              const body: ApiError = {
-                error: "Conflict",
-                detail:
-                  "Idempotency-Key already used; original result not cached",
-                code: "CONFLICT",
-              };
-              return c.json(body, 409);
-            }
-            return c.json(outcome.result);
-          }
-
-          const snapshots = await app.do(
-            action_name as never,
-            target as never,
-            raw as never
+          const outcome = await dispatch(
+            action_name,
+            input,
+            raw,
+            c,
+            c.get("actor"),
+            () => key_from(c)
           );
-          return c.json(snapshots);
+          if (outcome.kind === "done") return c.json(outcome.result);
+          if (outcome.kind === "missing-key") {
+            const body: ApiError = {
+              error: "BadRequest",
+              detail: "Idempotency-Key required",
+              code: "BAD_REQUEST",
+            };
+            return c.json(body, 400);
+          }
+          if (outcome.kind === "in-flight") {
+            const body: ApiError = {
+              error: "ServiceUnavailable",
+              detail:
+                "Idempotency-Key in flight; the original request has not finished, retry later",
+              code: "IN_FLIGHT",
+            };
+            c.header("Retry-After", "1");
+            return c.json(body, 503);
+          }
+          const body: ApiError = {
+            error: "Conflict",
+            detail: "Idempotency-Key already used; original result not cached",
+            code: "CONFLICT",
+          };
+          return c.json(body, 409);
         } catch (err) {
           const { status, body } = toApiError(err);
           // Hono types narrow `status` to its known status-number union;

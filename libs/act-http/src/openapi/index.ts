@@ -59,6 +59,7 @@
  */
 import { pii_fields } from "@rotorsoft/act";
 import { z } from "zod";
+import type { ActSurface } from "../api/dispatch.js";
 
 /**
  * Minimal OpenAPI 3.1 document type. The emitter targets the 3.1
@@ -413,27 +414,6 @@ function build_operation(
 }
 
 /**
- * Structural shape of the Act surface this emitter walks. Letting
- * TApp infer to the caller's concrete `Act<TSchemaReg, ...>` instead
- * of forcing it to fit a narrow framework-typed upper bound keeps
- * the caller's variance from leaking — and avoids `any` in the
- * signature.
- *
- * @internal
- */
-type ActRegistryView = {
-  readonly registry: {
-    actions: Record<
-      string,
-      {
-        readonly name: string;
-        readonly actions: Record<string, unknown>;
-      }
-    >;
-  };
-};
-
-/**
  * Build an OpenAPI 3.1 document describing a built `Act` instance's
  * action surface.
  *
@@ -458,7 +438,7 @@ type ActRegistryView = {
  *   empty, or if any `servers[].url` fails URL parsing after
  *   `{variable}` substitution.
  */
-export function openapi<TApp extends ActRegistryView>(
+export function openapi<TApp extends Pick<ActSurface, "registry">>(
   app: TApp,
   options: OpenAPIOptions
 ): OpenAPIDocument {
