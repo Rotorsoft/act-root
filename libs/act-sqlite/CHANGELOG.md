@@ -1,3 +1,10 @@
+# [@rotorsoft/act-sqlite-v1.22.0](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-sqlite-v1.21.3...@rotorsoft/act-sqlite-v1.22.0) (2026-10-24)
+
+
+### Features
+
+* **act-tck:** schema-driven dates on read become one TCK case ([#2081](https://github.com/Rotorsoft/act-root/issues/2081)) ([902fac6](https://github.com/Rotorsoft/act-root/commit/902fac696bc353bec74e33fbb7357ebf380644bc)), closes [#2066](https://github.com/Rotorsoft/act-root/issues/2066)
+
 # [@rotorsoft/act-sqlite-v1.21.3](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-sqlite-v1.21.2...@rotorsoft/act-sqlite-v1.21.3) (2026-10-21)
 
 
