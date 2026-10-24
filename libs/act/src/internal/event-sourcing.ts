@@ -454,6 +454,22 @@ export async function action<
         });
       }
 
+      // After the invariants, in declaration order, stopping at the first
+      // that doesn't hold.
+      if (me.requires) {
+        const preconditions = me.requires[action] || [];
+        for (const { holds, description } of preconditions)
+          if (!holds(validated, snapshot.state, actor))
+            throw new InvariantError(
+              action,
+              validated,
+              target,
+              snapshot,
+              description,
+              "precondition"
+            );
+      }
+
       const result = me.on[action](validated, snapshot, target);
       if (!result) return [snapshot];
 

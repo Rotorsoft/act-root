@@ -10,6 +10,7 @@ import {
   type Actor,
   act,
   type IAct,
+  type Precondition,
   projection,
   slice,
   state,
@@ -462,4 +463,47 @@ const target = { stream: "s1", actor: { id: "1", name: "test" } };
   void legacy.do("increment", target, { by: 1 }).then((snapshots) => {
     const _patches: number = snapshots[0].patches;
   });
+}
+
+// ── TEST 30: preconditions read the action's payload ───────────────
+{
+  const Move = z.object({ from: z.string(), count: z.number() });
+  const fromOnly: Precondition<{ count: number }, { from: string }> = {
+    description: "reads only from",
+    holds: (p) => p.from.length > 0,
+  };
+  state({ Pieces: z.object({ count: z.number() }) })
+    .init(() => ({ count: 0 }))
+    .emits({ Moved: Move })
+    .on({ move: Move })
+    // A rule typed over part of the payload fits; holds sees the full type.
+    .requires([
+      fromOnly,
+      {
+        description: "count within the state",
+        holds: (p, s) => p.count <= s.count,
+      },
+    ])
+    .emit("Moved")
+    .on({ moveChecked: Move })
+    .given([{ description: "has pieces", valid: (s) => s.count > 0 }])
+    .requires([fromOnly])
+    .emit("Moved")
+    .on({ moveTyped: Move })
+    .requires([
+      {
+        description: "reads a missing field",
+        // @ts-expect-error - "to" is not on the move payload
+        holds: (p) => p.to === "x",
+      },
+    ])
+    .emit("Moved");
+
+  state({ Pieces: z.object({ count: z.number() }) })
+    .init(() => ({ count: 0 }))
+    .emits({ Moved: Move })
+    .on({ move: Move })
+    .requires([fromOnly])
+    // @ts-expect-error - requires comes once, before emit
+    .requires([fromOnly]);
 }

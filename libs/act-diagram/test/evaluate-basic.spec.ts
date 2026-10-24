@@ -375,6 +375,33 @@ export const S = state({ S: z.object({ v: z.string() }) })
     expect(model.states[0].events[0].hasCustomPatch).toBe(false);
   });
 
+  it("lists an action's preconditions after its invariants", () => {
+    const files: FileTab[] = [
+      {
+        path: "src/app.ts",
+        content: `
+import { state } from "@rotorsoft/act";
+import { z } from "zod";
+export const S = state({ S: z.object({}) })
+  .init(() => ({}))
+  .emits({ E: z.object({}) })
+  .on({ a: z.object({ from: z.string() }) })
+    .given([{ description: "is open", valid: () => true }])
+    .requires([{ description: "owns from", holds: () => true }])
+    .emit("E")
+  .on({ b: z.object({}) })
+    .emit("E")
+  .build();
+`,
+      },
+    ];
+    const { model } = extract_model(files);
+    const [a, b] = model.states[0].actions;
+    expect(a.invariants).toEqual(["is open"]);
+    expect(a.preconditions).toEqual(["owns from"]);
+    expect(b.preconditions).toBeUndefined();
+  });
+
   it("handles action with invariants that have no description", () => {
     const files: FileTab[] = [
       {

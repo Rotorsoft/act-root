@@ -57,6 +57,8 @@ export type ActionNode = {
   name: string;
   emits: string[]; // event names this action emits
   invariants: string[];
+  /** Descriptions of the `.requires([...])` preconditions, in order. */
+  preconditions?: string[];
   line?: number;
 };
 

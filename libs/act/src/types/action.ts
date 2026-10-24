@@ -378,6 +378,34 @@ export type Invariant<TState extends Schema, TActor extends Actor = Actor> = {
 };
 
 /**
+ * A precondition is a named rule an action requires before it runs, one
+ * that reads the action's payload as well as the state. Declared with
+ * `.requires([...])` and checked after the invariants in `.given([...])`:
+ * a precondition whose `holds` returns `false` refuses the action with an
+ * {@link InvariantError} carrying its description.
+ *
+ * Keep rules that read only the state and the actor as invariants, which
+ * every action can reuse. A precondition typed over a narrower payload
+ * (`{ from: string }`) fits every action whose payload has those fields.
+ *
+ * @template TState - State schema.
+ * @template TPayload - The action payload, or the part of it the rule reads.
+ * @template TActor - Actor type extending base Actor.
+ */
+export type Precondition<
+  TState extends Schema,
+  TPayload,
+  TActor extends Actor = Actor,
+> = {
+  description: string;
+  holds: (
+    payload: Readonly<TPayload>,
+    state: Readonly<TState>,
+    actor?: TActor
+  ) => boolean;
+};
+
+/**
  * Represents an emitted event tuple from an action handler.
  * @template TEvents - Event schemas.
  */
@@ -476,6 +504,18 @@ export type ActionHandlers<
  */
 export type GivenHandlers<TState extends Schema, TActions extends Schemas> = {
   [TKey in keyof TActions]?: Invariant<TState>[];
+};
+
+/**
+ * Maps action names to the preconditions they require.
+ * @template TState - State schema.
+ * @template TActions - Action schemas.
+ */
+export type RequiresHandlers<
+  TState extends Schema,
+  TActions extends Schemas,
+> = {
+  [TKey in keyof TActions]?: Precondition<TState, TActions[TKey]>[];
 };
 
 // ---------------------------------------------------------------------------
@@ -682,6 +722,7 @@ export type State<
   patch: PatchHandlers<TState, TEvents>;
   on: ActionHandlers<TState, TEvents, TActions>;
   given?: GivenHandlers<TState, TActions>;
+  requires?: RequiresHandlers<TState, TActions>;
   snap?: (snapshot: Snapshot<TState, TEvents>) => boolean;
   /**
    * Per-action retry policy keyed by action name. Set by

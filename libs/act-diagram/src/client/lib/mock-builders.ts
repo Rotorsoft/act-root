@@ -76,6 +76,7 @@ export function mock_state(
     events: {} as Record<string, any>,
     actions: {} as Record<string, any>,
     given: {} as Record<string, any[]>,
+    requires: {} as Record<string, any[]>,
     patches: new Set<string>(),
     _tag: "State" as const,
   };
@@ -84,20 +85,21 @@ export function mock_state(
     on(action_entry: Record<string, any>) {
       const action_name = Object.keys(action_entry)[0];
       info.actions[action_name] = action_entry[action_name];
+      const emit = (handler: any) => {
+        attach_emit(info, action_name, handler);
+        return action_builder(action_name);
+      };
+      const requires = (rules?: any[]) => {
+        if (rules) info.requires[action_name] = rules;
+        return { emit };
+      };
       return {
         given(rules?: any[]) {
           if (rules) info.given[action_name] = rules;
-          return {
-            emit(handler: any) {
-              attach_emit(info, action_name, handler);
-              return action_builder(action_name);
-            },
-          };
+          return { requires, emit };
         },
-        emit(handler: any) {
-          attach_emit(info, action_name, handler);
-          return action_builder(action_name);
-        },
+        requires,
+        emit,
       };
     },
     snap: () => action_builder(_currentAction),

@@ -4,7 +4,13 @@
  * Extracted from Diagram.tsx so rendering rules can be unit-tested
  * without React or DOM dependencies.
  */
-import type { DomainModel, StateNode } from "../types/index.js";
+import type { ActionNode, DomainModel, StateNode } from "../types/index.js";
+
+/** The rules guarding an action, invariants first, or undefined when none. */
+function rules_of(action: ActionNode): string[] | undefined {
+  const rules = [...action.invariants, ...(action.preconditions ?? [])];
+  return rules.length ? rules : undefined;
+}
 
 // ── Constants ────────────────────────────────────────────────────────
 export const W = 100,
@@ -196,13 +202,10 @@ function place_chain(
       type: "action",
       label: row.an,
       sub:
-        dispatched_action && dispatched_action.invariants.length > 0
+        dispatched_action && rules_of(dispatched_action)
           ? "guarded"
           : undefined,
-      guards:
-        dispatched_action && dispatched_action.invariants.length > 0
-          ? dispatched_action.invariants
-          : undefined,
+      guards: dispatched_action ? rules_of(dispatched_action) : undefined,
       file: row.target_state?.file,
       emits: dispatched_action?.emits,
     });
@@ -604,8 +607,8 @@ export function compute_layout(view_model: DomainModel): Layout {
           pos: { x: cx, y: actY },
           type: "action",
           label: action.name,
-          sub: action.invariants.length > 0 ? "guarded" : undefined,
-          guards: action.invariants.length > 0 ? action.invariants : undefined,
+          sub: rules_of(action) ? "guarded" : undefined,
+          guards: rules_of(action),
           file: action_file_map.get(action.name) ?? st.file,
           emits: action.emits,
         });
@@ -782,8 +785,8 @@ export function compute_layout(view_model: DomainModel): Layout {
         pos: { x: cx, y: actY },
         type: "action",
         label: action.name,
-        sub: action.invariants.length > 0 ? "guarded" : undefined,
-        guards: action.invariants.length > 0 ? action.invariants : undefined,
+        sub: rules_of(action) ? "guarded" : undefined,
+        guards: rules_of(action),
         emits: action.emits,
       });
       for (const en of action.emits) {

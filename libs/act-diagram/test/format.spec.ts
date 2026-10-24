@@ -44,6 +44,7 @@ function build_model(): DomainModel {
             name: "placeOrder",
             emits: ["OrderPlaced", "OrderPlaced_v2"],
             invariants: ["fresh-cart"],
+            preconditions: ["owns-cart"],
             line: 30,
           },
         ],
@@ -349,6 +350,11 @@ describe("format_action", () => {
     expect(out).toContain("placeOrder");
     expect(out).toContain("on:      Order");
     expect(out).toContain("- fresh-cart");
+    expect(out).toContain("requires:");
+    expect(out).toContain("- owns-cart");
+    expect(out.indexOf("- fresh-cart")).toBeLessThan(
+      out.indexOf("- owns-cart")
+    );
     expect(out).toContain("OrderPlaced");
     expect(out).toContain("OrderPlaced_v2");
   });
