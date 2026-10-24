@@ -84,12 +84,11 @@ export type StaticTarget = {
 
 /**
  * What a target's subscription row holds. A resolution sends its own
- * priority/lane only when it beats `floor` (`+Infinity` for static targets);
+ * priority/lane only when it beats `priority` (never, for a static target);
  * otherwise it re-sends these values with the mark. The store owns the lane;
  * this only caches it, so a missing record is re-read from the row.
  */
 type Subscription = {
-  readonly floor: number;
   readonly priority: number;
   readonly lane: string | undefined;
 };
@@ -99,7 +98,7 @@ type Correlated = {
   source: string | undefined;
   priority: number;
   lane: string | undefined;
-  /** True when priority/lane came from a resolution that beat the floor. */
+  /** True when priority/lane came from a resolution that beat the record. */
   upgraded: boolean;
   /** True when the target had no record, so its row must be read. */
   missed: boolean;
@@ -199,7 +198,7 @@ export class CorrelateCycle<
   private _restoring = false;
   private _init_promise: Promise<void> | undefined;
   // Bounded by `maxSubscribedStreams`; static records live apart so eviction
-  // never drops their +Infinity floor.
+  // never lets a resolution re-lane them.
   private readonly _dynamic_subscriptions: LruMap<string, Subscription>;
   private readonly _static_subscriptions = new Map<string, Subscription>();
   private readonly _patterns = new LruMap<string, RegExp>(PATTERN_CACHE_SIZE);
@@ -259,7 +258,6 @@ export class CorrelateCycle<
         : Math.max(-1, watermark - COLD_START_BACK_SCAN);
     for (const { stream, priority = 0, lane } of this._static_targets) {
       this._static_subscriptions.set(stream, {
-        floor: Number.POSITIVE_INFINITY,
         priority,
         lane,
       });
@@ -396,11 +394,12 @@ export class CorrelateCycle<
               );
               lane = undefined;
             }
+            const fixed = this._static_subscriptions.get(resolved.target);
             const recorded =
-              this._static_subscriptions.get(resolved.target) ??
-              this._dynamic_subscriptions.get(resolved.target);
+              fixed ?? this._dynamic_subscriptions.get(resolved.target);
             const priority = resolved.priority ?? 0;
-            const upgraded = !recorded || priority > recorded.floor;
+            const upgraded =
+              !recorded || (!fixed && priority > recorded.priority);
             const carried = upgraded
               ? { priority, lane }
               : { priority: recorded.priority, lane: recorded.lane };
@@ -486,11 +485,10 @@ export class CorrelateCycle<
         (entry) => entry.correlated_at !== undefined
       ).length;
       this._checkpoint = last_id;
-      // Only dynamic targets can be upgraded (statics sit at +Infinity).
+      // Only dynamic targets can be upgraded: a static target is never re-laned.
       for (const { stream, priority, lane } of streams) {
         if (correlated.get(stream)?.upgraded)
           this._dynamic_subscriptions.set(stream, {
-            floor: priority as number,
             priority: priority as number,
             lane,
           });
@@ -523,7 +521,6 @@ export class CorrelateCycle<
         );
         if (!row) return;
         this._dynamic_subscriptions.set(stream, {
-          floor: row.priority,
           priority: row.priority,
           lane: row.lane,
         });
