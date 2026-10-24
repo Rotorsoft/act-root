@@ -112,7 +112,8 @@ jobs:
   # workers. Reports to the run's Job Summary.
   stress:
     runs-on: ubuntu-latest
-    services:
+    # Postgres 18 for every job below that needs one (YAML anchor).
+    services: &pg18
       postgres:
         image: postgres:18-alpine
         env:
@@ -170,18 +171,7 @@ jobs:
       fail-fast: false
       matrix:
         node: ["22.23.3", "24.21.0"]
-    services:
-      postgres:
-        image: postgres:18-alpine
-        env:
-          POSTGRES_PASSWORD: postgres
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 5431:5432
+    services: *pg18
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
@@ -216,18 +206,7 @@ jobs:
   # (host/db/user/password = postgres) match the docker service.
   perf:
     runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:18-alpine
-        env:
-          POSTGRES_PASSWORD: postgres
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 5431:5432
+    services: *pg18
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
@@ -278,18 +257,7 @@ jobs:
   # Postgres adapter, so this job needs the same service.
   scenarios:
     runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:18-alpine
-        env:
-          POSTGRES_PASSWORD: postgres
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 5431:5432
+    services: *pg18
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
@@ -339,39 +307,4 @@ jobs:
               tail -n 80 bench-scenarios.log
             fi
             echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
-
-
-  summary:
-    # Always runs so the workflow summary is populated even when a cell
-    # fails. `if: always()` is required because the matrix jobs' failure
-    # would otherwise mark this dependency as skipped.
-    if: always()
-    needs: [pg, sqlite, node-compat, perf, scenarios]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Compose conformance table
-        run: |
-          status() {
-            case "$1" in
-              success) echo "✅" ;;
-              failure) echo "❌" ;;
-              cancelled) echo "⚪" ;;
-              *) echo "❓" ;;
-            esac
-          }
-          {
-            echo "## Store conformance matrix"
-            echo ""
-            echo "| Adapter | Version | Result |"
-            echo "|---|---|---|"
-            # The `needs.<job>.result` for a matrix job rolls up to the
-            # worst single cell; per-cell detail is in the run UI.
-            echo "| PostgreSQL | 14, 15, 16, 17 | $(status ${{ needs.pg.result }}) |"
-            echo "| libSQL | latest | $(status ${{ needs.sqlite.result }}) |"
-            echo "| Node | 22, 24 | $(status ${{ needs.node-compat.result }}) |"
-            echo "| Adapter perf gate | PG 18, SQLite | $(status ${{ needs.perf.result }}) |"
-            echo "| Scenario benches | PG 18 | $(status ${{ needs.scenarios.result }}) |"
-            echo ""
-            echo "Per-version detail in the [run page](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})."
           } >> "$GITHUB_STEP_SUMMARY"
