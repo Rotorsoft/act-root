@@ -54,11 +54,27 @@ So the goal is not to merge the two concepts. It's to give preconditions the sam
   ```ts
   type Precondition<TState extends Schema, TPayload, TActor extends Actor = Actor> = {
     description: string;
-    valid: (payload: Readonly<TPayload>, state: Readonly<TState>, actor?: TActor) => boolean;
+    holds: (payload: Readonly<TPayload>, state: Readonly<TState>, actor?: TActor) => boolean;
   };
   ```
-  Payload comes first, as it does in the `.emit` handler. `requires` types each rule against the action's own payload, so a precondition declared over a narrower shape (`{ from: string }`) fits every action whose payload has that field: `Attack`, `BlitzAttack` and `Fortify` can share `ownsFrom`.
-- **No new error class.** A failed precondition throws the existing `InvariantError` with the rule's `description`. That's what wolfdesk already does by hand, and act-http already maps `InvariantError` to 409. The message reads `"<action> failed precondition: <description>"`, so logs tell the layers apart.
+  Payload comes first, as it does in the `.emit` handler. The predicate is `holds`, not `valid`: "valid" and "validate" belong to the schema layer (`ValidationError`, the `validated` payload), and a failed precondition must not read like a schema failure. `Invariant.valid` is published and stays, so the two layers name their predicate differently. That's the price of keeping the words apart. `requires` types each rule against the action's own payload, so a precondition declared over a narrower shape (`{ from: string }`) fits every action whose payload has that field: `Attack`, `BlitzAttack` and `Fortify` can share `ownsFrom`.
+- **Error:** `PreconditionError`, a sibling of `InvariantError` (not a subclass), with the same fields (`action`, `payload`, `target`, `snapshot`, `description`) and the message `"<action> failed precondition: <description>"`. act-http's error map adds `PreconditionError: { status: 409, code: "PRECONDITION" }`. Reusing `InvariantError` would have saved one export, but every catch block, log line and HTTP response would then call a failed precondition an invariant.
+
+### Vocabulary
+
+One term per thing, the same in the builder, the types, the internals, the tools and the docs:
+
+| Where | Name |
+|---|---|
+| builder clause | `.requires([...])` |
+| each item | `Precondition` |
+| its predicate | `holds(payload, state, actor)` |
+| registry field | `requires[action]`, beside `given[action]` |
+| failure | `PreconditionError`, message "failed precondition" |
+| parser, CLI, diagram, flow spec | `preconditions` |
+| never used for this layer | `valid`, `validate`, `validation` (the schema layer), `check`, `guard` |
+
+This follows the pattern `.given` already set: the clause is `given`, its items are `Invariant`s. In Eiffel, the `require` clause holds the preconditions.
 - **No port, lifecycle event or option changes.**
 
 ### Order and short-circuit
@@ -82,23 +98,23 @@ Two of the seven throws read only the state and the actor, so they're invariants
 type FromTo = { from: string; to: string };
 export const territoriesExist: Precondition<GameState, FromTo> = {
   description: "Both territories must exist",
-  valid: ({ from, to }, state) => !!state.territories[from] && !!state.territories[to],
+  holds: ({ from, to }, state) => !!state.territories[from] && !!state.territories[to],
 };
 export const ownsFrom: Precondition<GameState, { from: string }> = {
   description: "You must own the attacking territory",
-  valid: ({ from }, state, actor) => state.territories[from]?.owner === actor?.id,
+  holds: ({ from }, state, actor) => state.territories[from]?.owner === actor?.id,
 };
 export const targetsAnEnemy: Precondition<GameState, { to: string }> = {
   description: "You can't attack your own territory",
-  valid: ({ to }, state, actor) => state.territories[to]?.owner !== actor?.id,
+  holds: ({ to }, state, actor) => state.territories[to]?.owner !== actor?.id,
 };
 export const adjacent: Precondition<GameState, FromTo> = {
   description: "The territories must be adjacent",
-  valid: ({ from, to }) => isAdjacent(from, to),
+  holds: ({ from, to }) => isAdjacent(from, to),
 };
 export const enoughArmies: Precondition<GameState, { from: string; attackDice: number }> = {
   description: "Leave at least one army behind",
-  valid: ({ from, attackDice }, state) => (state.territories[from]?.armies ?? 0) > attackDice,
+  holds: ({ from, attackDice }, state) => (state.territories[from]?.armies ?? 0) > attackDice,
 };
 
 // game.ts
@@ -142,7 +158,7 @@ After:
 .emit("MessageRead")
 ```
 
-With the rules declared, the handler collapses to the static `.emit("MessageRead")` form, which the diagram can read without running anything. One behavior change: `MessageNotFoundError` becomes an `InvariantError` (409 over act-http). An app that needs its own error type, for a 404 say, keeps that throw in `.emit`.
+With the rules declared, the handler collapses to the static `.emit("MessageRead")` form, which the diagram can read without running anything. Two behavior changes: `MessageNotFoundError` becomes a `PreconditionError` (409 over act-http), and so does the hand-built `InvariantError` for "Must be receiver to ack", which was never an invariant. An app that needs its own error type, for a 404 say, keeps that throw in `.emit`.
 
 ## What stays in `.emit`
 
@@ -160,8 +176,9 @@ One cost: a precondition and the handler may both look up the same value (`state
 1. **Widen `Invariant` to `valid(state, actor, payload)`.** It's additive, but it erodes the separation the book argues for: invariants start depending on one action's payload and lose their reuse. It also blurs the "invariants see state only" lesson in ch. 3 and appendix A. Rejected.
 2. **Name the throw inside `.emit`:** a `PreconditionError("...")` class or a `reject("...")` helper that the parser finds statically. This is the smallest change, but the parser only sees literal messages, there's no declaration order to animate unless the parser walks the handler, and a rule can't be tested alone or shared between actions. Rejected as the main mechanism. Throws in `.emit` stay supported for what doesn't fit a predicate.
 3. **Both, a declaration and a named throw.** Two new mechanisms for one concept. The declaration alone covers the common case, and plain throws already cover the rest. Rejected.
-4. **A new `PreconditionError` class**, possibly extending `InvariantError`. It distinguishes the layers by type, but it adds an export and an error-map entry, and every caller that catches `InvariantError` keeps working anyway. The description and the message already say which layer failed. Left as an open question.
-5. **Do nothing.** Most rules stay invisible to every tool Act ships, and apps keep hand-building `InvariantError`.
+4. **Reuse `InvariantError`** for failed preconditions. It saves an export, but it names the failure after the wrong layer everywhere it surfaces. Subclassing (`PreconditionError extends InvariantError`) keeps old catch blocks working, but it still says a precondition *is* an invariant. Rejected in favor of a sibling class.
+5. **Keep `valid` as the predicate name**, so both layers share one shape. It's consistent with `Invariant`, but it reuses the schema layer's word for a business rule. Rejected.
+6. **Do nothing.** Most rules stay invisible to every tool Act ships, and apps keep hand-building `InvariantError`.
 
 ## Field check
 
@@ -173,10 +190,9 @@ Act already declares invariants, where other frameworks don't, so `.requires` ex
 
 ## Stability / charter impact
 
-All additive: one builder method on the state action chain, one public type (`Precondition`), and a new message prefix on an existing error. Nothing is renamed or removed, and plain throws in `.emit` keep working. No port changes, so no TCK change. The parser, CLI, diagram and flow player gain a field. The docs and the book chapters that teach the two-layer split (ch. 3, ch. 12, appendix A, the scaffold skill's `domain.md` and `act-api.md`, `state-management.md`, `error-handling.md`) are updated together, keeping the invariant/precondition distinction.
+All additive: one builder method on the state action chain, one public type (`Precondition`), one error class (`PreconditionError`) and its act-http error-map entry. Nothing is renamed or removed, and plain throws in `.emit` keep working. No port changes, so no TCK change. The parser, CLI, diagram and flow player gain a field. The docs and the book chapters that teach the two-layer split (ch. 3, ch. 12, appendix A, the scaffold skill's `domain.md` and `act-api.md`, `state-management.md`, `error-handling.md`) are updated together, keeping the invariant/precondition distinction.
 
 ## Open questions
 
 - **The name.** `requires` follows Eiffel's `require` keyword, the precondition clause in Meyer's Design by Contract that the book cites, and it reads as a sentence: "Attack, given it's the attack phase, requires that you own the territory". Other candidates are in the PR description.
-- **Error type:** reuse `InvariantError` (recommended above) or add `PreconditionError extends InvariantError`.
 - **Invariants in disguise.** Should `.given` docs and the scaffold skill tell authors to move state-and-actor-only throws (Risk's conquest and card-trade rules, wolfdesk's `TicketCannotOpenTwice`) into invariants? That holds independently of this RFC.
