@@ -1390,8 +1390,8 @@ export class Act<
    * `unblock()`, `restore()`) schedules this on its own unless the app
    * sets `autoSettle: false`. Call it at startup, to run what was pending
    * before a restart, or with options for the next pass; the scheduling
-   * rule is in the event-sourcing docs (§ settle). Runs correlate→drain in a loop until a pass makes no
-   * progress — it read no events and leased no streams —
+   * rule is in the event-sourcing docs (§ settle). Runs correlate→drain
+   * passes until one makes no progress (see {@link SettleOptions.maxPasses}),
    * then emits the `"settled"` lifecycle event, so one call fully catches
    * up paginated streams without forcing callers to loop.
    *

@@ -135,15 +135,13 @@ Each controller is armed on its own. `do()` and a notification from another proc
 
 ## Settle — the catch-up loop
 
-`settle()` is the production-friendly entry point. It debounces multiple rapid calls into one cycle, then runs `correlate → drain` in a loop until a pass produces no progress:
+`settle()` runs `correlate → drain` in a loop until a pass makes no progress. Its scheduling, debounce and progress rule live in [Event sourcing § settle()](../concepts/event-sourcing.md#settle); this section covers the internals.
 
 <Scene scene={settleLoop} />
 
-"Until no progress" handles paginated catch-up. After `app.reset(...)`, a settled stream might have thousands of events. One drain cycle's `streamLimit × eventLimit` won't catch up; subsequent cycles will. A pass that leased streams counts as progress even if every one of them deferred or failed, since more marked streams may wait behind the claim's budget. `settle()` returns at once (it only schedules); the caller hears the `"settled"` event, carrying what every pass acked and blocked, when a pass finds nothing left.
+"Until no progress" handles paginated catch-up. After `app.reset(...)`, a settled stream might have thousands of events. One drain cycle's `streamLimit × eventLimit` won't catch up; subsequent cycles will. `settle()` returns at once (it only schedules); the caller hears the `"settled"` event, carrying what every pass acked and blocked, when a pass finds nothing left.
 
-The debounce is `ActOptions.settleDebounceMs ?? 10` by default. Coalesces commits in the same tick (typical pattern: tRPC mutation chain calling `app.do` many times) into one settle pass.
-
-**Scheduling.** The rule (a scheduled pass is never put off, a call during a cycle queues one more) lives in [Event sourcing § settle()](../concepts/event-sourcing.md#settle). Inside, the queued pass holds even when the wake lands while the pass is still waiting on its scan or claim: an empty result never lowers a flag that a wake raised in the meantime, so the queued pass still finds the work.
+**Scheduling, inside.** The queued pass holds even when the wake lands while the pass is still waiting on its scan or claim: an empty result never lowers a flag that a wake raised in the meantime, so the queued pass still finds the work.
 
 The cost of that rule: a reaction that commits while the cycle runs queues one more pass, so one chain of reactions can emit `"settled"` twice, the second time for a short pass that finds little or nothing. Listeners on `"settled"` should treat it as "work was done", not "exactly once per burst".
 
