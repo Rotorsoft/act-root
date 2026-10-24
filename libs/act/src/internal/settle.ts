@@ -67,9 +67,8 @@ export class SettleLoop<TEvents extends Schemas> {
    * `debounceMs` brings it forward), and a call during a running cycle
    * queues one more pass after it. Callers pass options, which the next
    * pass uses; internal wake-ups pass none, so they never discard a
-   * caller's. The cycle runs correlate→drain in a
-   * loop until a pass makes no progress (it read no events and leased no
-   * streams) or `maxPasses` is reached, then emits the
+   * caller's. The cycle runs correlate→drain passes until one makes no
+   * progress (see {@link SettleOptions.maxPasses}), then emits the
    * `"settled"` lifecycle event via {@link SettleDeps.on_settled}.
    */
   schedule(options?: SettleOptions): void {
