@@ -1,3 +1,10 @@
+# [@rotorsoft/act-tck-v1.41.0](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.40.0...@rotorsoft/act-tck-v1.41.0) (2026-10-24)
+
+
+### Features
+
+* **act-tck:** schema-driven dates on read become one TCK case ([#2081](https://github.com/Rotorsoft/act-root/issues/2081)) ([902fac6](https://github.com/Rotorsoft/act-root/commit/902fac696bc353bec74e33fbb7357ebf380644bc)), closes [#2066](https://github.com/Rotorsoft/act-root/issues/2066)
+
 # [@rotorsoft/act-tck-v1.40.0](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.39.2...@rotorsoft/act-tck-v1.40.0) (2026-10-22)
 
 
