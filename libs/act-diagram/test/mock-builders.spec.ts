@@ -9,6 +9,9 @@ import {
   unknown_module_proxy,
 } from "../src/client/lib/mock-builders.js";
 
+/** A patch that changes nothing. */
+const unchanged = () => ({});
+
 describe("mock_state", () => {
   it("captures state name and events", () => {
     const built: any[] = [];
@@ -33,7 +36,7 @@ describe("mock_state", () => {
     mock_state({ S: {} }, (info) => built.push(info))
       .init()
       .emits({ E1: {} })
-      .patch({ E1: () => ({}) })
+      .patch({ E1: unchanged })
       .on({ doIt: {} })
       .emit("E1")
       .build();
@@ -729,7 +732,7 @@ describe("builder-surface coverage", () => {
     });
     st.init()
       .emits({ Happened: {} })
-      .patch({ Happened: () => ({}) })
+      .patch({ Happened: unchanged })
       .on({ act: {} })
       .emit(() => ["Happened", {}])
       .discloses(() => true)
