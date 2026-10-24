@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v1.33.18](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.33.17...@rotorsoft/act-v1.33.18) (2026-10-24)
+
+
+### Bug Fixes
+
+* **act:** a correlate scan reads only limit, so a filter loses no reaction ([#2106](https://github.com/Rotorsoft/act-root/issues/2106)) ([b367bd5](https://github.com/Rotorsoft/act-root/commit/b367bd5d31a5a951e9edac3c705f6d3be63192c0))
+
 # [@rotorsoft/act-v1.33.17](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.33.16...@rotorsoft/act-v1.33.17) (2026-10-24)
 
 # [@rotorsoft/act-v1.33.16](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.33.15...@rotorsoft/act-v1.33.16) (2026-10-23)
