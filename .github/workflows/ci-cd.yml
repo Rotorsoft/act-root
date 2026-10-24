@@ -43,7 +43,9 @@ jobs:
               # change to one never skips the checks that cover it. This only
               # type-checks and lints bench files: every benchmark, the adapter
               # perf gate included, runs on the weekly schedule
-              # (conformance.yml).
+              # (conformance.yml). The globs also match every root and package
+              # config (package.json, tsconfig*.json, biome.json,
+              # vite.config.ts, tsup.config.ts).
               - '**/*.ts'
               - '**/*.tsx'
               - '**/*.json'
@@ -52,20 +54,12 @@ jobs:
               - 'libs/*/src/**'
               - 'libs/*/test/**'
               - 'test/**'
-              - 'libs/*/package.json'
-              - 'libs/*/tsconfig*.json'
-              - 'libs/*/tsup.config.ts'
-              - 'libs/tsconfig*.json'
               - 'packages/**'
               - 'recipes/**'
               - 'docs/docs/architecture/behavior-contracts.md'
               - 'scripts/**'
-              - 'package.json'
               - 'pnpm-lock.yaml'
               - 'pnpm-workspace.yaml'
-              - 'tsconfig*.json'
-              - 'vite.config.ts'
-              - 'biome.json'
               - '.github/workflows/ci-cd.yml'
       - uses: dorny/paths-filter@v4
         id: libs
@@ -183,31 +177,6 @@ jobs:
           set -o pipefail
           ./libs/act-diagram/dist/cli/act.js packages/calculator -q Incremented | tee act-cli-dist.log
           grep -q "^Incremented$" act-cli-dist.log
-
-      # Render the v8 coverage summary as a markdown table in the PR/run
-      # summary. `json-summary` reporter is enabled in vite.config.ts.
-      - name: Coverage summary
-        if: always()
-        run: |
-          node -e '
-            const fs = require("fs");
-            const f = "coverage/coverage-summary.json";
-            if (!fs.existsSync(f)) { console.log("No coverage summary found"); process.exit(0); }
-            const t = JSON.parse(fs.readFileSync(f, "utf8")).total;
-            const row = (label, m) => `| ${label} | ${m.pct.toFixed(2)}% | ${m.covered}/${m.total} |`;
-            const md = [
-              "## Coverage",
-              "",
-              "| Metric | % | Covered / Total |",
-              "|---|---:|---:|",
-              row("Statements", t.statements),
-              row("Branches",   t.branches),
-              row("Functions",  t.functions),
-              row("Lines",      t.lines),
-              "",
-            ].join("\n");
-            fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, md + "\n");
-          '
 
       # Coveralls upload is best-effort: a coveralls outage must not block a
       # release.
