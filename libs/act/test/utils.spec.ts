@@ -80,7 +80,6 @@ describe("utils", () => {
       const prev = { a: 1, b: 2 };
       // Deliberately cast curr to any to test deletion logic; this is safe for test coverage
       const curr: any = { a: undefined, b: null };
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
       const patched = patch(prev, curr);
       expect(patched).toEqual({});
     });
@@ -160,7 +159,6 @@ describe("utils", () => {
     it("falls back to empty object when patched_value is undefined but original is mergeable", () => {
       const original = { config: { feature: true } } as const;
       const patches = { config: undefined };
-      // eslint-ignore-next-line @typescript-eslint/no-unsafe-argument
       const result = patch(original, patches);
       expect(result).toEqual({});
     });
@@ -198,7 +196,6 @@ describe("utils", () => {
         },
       };
       // Intentionally using any to simulate a non-Zod schema for coverage; this is safe for test coverage
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
       expect(() => validate("test", { foo: 1 }, fakeSchema as any)).toThrow(
         ValidationError
       );
@@ -225,7 +222,6 @@ describe("utils", () => {
 
       let caught: ValidationError | undefined;
       try {
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
         validate("test", { foo: 1 }, fakeSchema as any);
       } catch (e) {
         caught = e as ValidationError;

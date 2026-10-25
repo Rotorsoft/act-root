@@ -212,7 +212,6 @@ describe("projection", () => {
 
   it("should throw when .on() receives multiple keys", () => {
     expect(() =>
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-argument -- intentionally testing invalid input
       projection("target").on({
         A: z.object({}),
         B: z.object({}),
@@ -542,7 +541,6 @@ describe("projection", () => {
     await dispose();
   });
 
-  /* eslint-disable @typescript-eslint/no-unused-expressions, @typescript-eslint/require-await -- type-only narrowing checks */
   describe("type narrowing", () => {
     it("preserves event payload type through .on().do()", () => {
       projection("typed-target")

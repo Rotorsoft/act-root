@@ -277,7 +277,6 @@ export const P = projection("uncaptured")
   it("outer catch non-Error branch (line 209 String(e))", () => {
     const poisoned: any = [{ path: "src/app.ts", content: "const x = 1;" }];
     poisoned.filter = () => {
-      // eslint-disable-next-line @typescript-eslint/only-throw-error
       throw { toString: () => "non-error setup failure" };
     };
     const { error } = extract_model(poisoned as FileTab[]);

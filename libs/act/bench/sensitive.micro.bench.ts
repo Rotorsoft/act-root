@@ -22,7 +22,6 @@
  * adapter-level numbers belong in `libs/act-pg/bench/`.
  */
 
-/* eslint-disable @typescript-eslint/no-unsafe-argument -- bench helpers use any to avoid State name branding */
 import { afterAll, describe, it } from "vitest";
 import { z } from "zod";
 import { act } from "../src/builders/act-builder.js";

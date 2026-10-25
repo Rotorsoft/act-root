@@ -291,7 +291,6 @@ describe("Builder", () => {
   // narrowing for action names, payloads, and event names through every
   // .withState() / .withSlice() / .on() call. These tests don't assert
   // runtime behavior — they fail at compile time if narrowing breaks.
-  /* eslint-disable @typescript-eslint/no-unused-vars, @typescript-eslint/require-await -- type-only narrowing checks */
   describe("type narrowing", () => {
     const Counter = state({ Counter: z.object({ count: z.number() }) })
       .init(() => ({ count: 0 }))

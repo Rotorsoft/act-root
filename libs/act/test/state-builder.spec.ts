@@ -32,7 +32,6 @@ describe("state-builder", () => {
       .patch(patch);
 
     expect(() =>
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-argument -- intentionally testing invalid input
       builder.on({ a: z.object({}), b: z.object({}) } as any)
     ).toThrow(".on() requires exactly one key");
   });
@@ -84,17 +83,15 @@ describe("state-builder", () => {
     });
 
     it("should throw when record has more than one key", () => {
-      expect(() =>
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-argument -- intentionally testing invalid input
-        state({ A: counter, B: counter } as any)
-      ).toThrow("state() requires exactly one key");
+      expect(() => state({ A: counter, B: counter } as any)).toThrow(
+        "state() requires exactly one key"
+      );
     });
 
     it("should throw when record has zero keys", () => {
-      expect(() =>
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-argument -- intentionally testing invalid input
-        state({} as any)
-      ).toThrow("state() requires exactly one key");
+      expect(() => state({} as any)).toThrow(
+        "state() requires exactly one key"
+      );
     });
 
     it("should support full builder chain with given and snap", () => {

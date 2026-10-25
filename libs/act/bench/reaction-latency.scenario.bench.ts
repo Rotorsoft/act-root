@@ -210,14 +210,12 @@ describe("commit→reaction latency (InMemoryStore)", () => {
       };
     }
 
-    // eslint-disable-next-line no-console
     console.log(
       "\n=== commit→reaction latency (InMemoryStore) ===" +
         "\nProves:  the do→settle→drain hot path stays under a millisecond-grade" +
         "\n         ceiling at idle; queuing under saturation is observable, not silent." +
         "\nAsserts: idle p99 < 50 ms (lower ms = faster on every column)"
     );
-    // eslint-disable-next-line no-console
     console.table(results);
 
     // Regression bound: the idle p99 must stay under a generous

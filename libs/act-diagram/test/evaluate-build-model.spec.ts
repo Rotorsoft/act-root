@@ -527,7 +527,6 @@ describe("build_model direct tests", () => {
     const corruptState = {
       _tag: "State",
       get name(): string {
-        // eslint-disable-next-line @typescript-eslint/only-throw-error
         throw { toString: () => "string error" };
       },
       events: {},
@@ -570,7 +569,6 @@ describe("build_model direct tests", () => {
     const corruptState = {
       _tag: "State",
       get name(): string {
-        // eslint-disable-next-line @typescript-eslint/only-throw-error
         throw { toString: () => "corrupt string" };
       },
       events: {},
@@ -643,7 +641,6 @@ describe("build_model direct tests", () => {
     const corruptState = {
       _tag: "State", // must have _tag so it passes typeof check
       get name(): string {
-        // eslint-disable-next-line @typescript-eslint/only-throw-error
         throw { toString: () => "string thrown in build_state" };
       },
       events: {},
@@ -698,7 +695,6 @@ describe("build_model direct tests", () => {
       _tag: "Slice",
       _varName: "ThrowSlice2",
       get states(): any {
-        // eslint-disable-next-line @typescript-eslint/only-throw-error
         throw { toString: () => "string thrown" };
       },
       projections: [],

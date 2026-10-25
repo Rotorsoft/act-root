@@ -165,7 +165,6 @@ describe("config", () => {
       vi.resetModules();
       vi.doMock("node:fs", () => ({
         readFileSync: vi.fn(() => {
-          // eslint-disable-next-line @typescript-eslint/only-throw-error -- intentional non-Error throw
           throw "raw string failure";
         }),
       }));
@@ -179,7 +178,6 @@ describe("config", () => {
       vi.resetModules();
       vi.doMock("node:fs", () => ({
         readFileSync: vi.fn(() => {
-          // eslint-disable-next-line @typescript-eslint/only-throw-error -- intentional non-Error throw
           throw 42;
         }),
       }));

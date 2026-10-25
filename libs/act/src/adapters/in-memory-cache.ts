@@ -15,7 +15,6 @@ import type { Cache, CacheEntry, Schema } from "../types/index.js";
  * cache(new InMemoryCache({ maxSize: 500 }));
  * ```
  */
-/* eslint-disable @typescript-eslint/require-await -- async interface for Redis-compatibility */
 export class InMemoryCache implements Cache {
   // CacheEntry<any> lets `get<TState>` and `set<TState>` flow without casts:
   // any is bidirectionally compatible with the per-call TState binding, while

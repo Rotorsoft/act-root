@@ -204,7 +204,6 @@ describe("commit→reaction latency (PostgresStore single-process)", () => {
       };
     }
 
-    // eslint-disable-next-line no-console
     console.log(
       "\n=== commit→reaction latency (PostgresStore single-process) ===" +
         "\nProves:  PG adapter overhead keeps the same order of magnitude as InMemory" +
@@ -212,7 +211,6 @@ describe("commit→reaction latency (PostgresStore single-process)", () => {
         "\nAsserts: idle p50 < 50 ms — p50 over p99 because small idle sample is" +
         "\n         PG-jitter sensitive (lower ms = faster on every column)"
     );
-    // eslint-disable-next-line no-console
     console.table(results);
 
     // Regression bound: idle p50 (median) must stay under a generous

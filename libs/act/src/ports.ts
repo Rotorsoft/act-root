@@ -8,11 +8,11 @@ import type {
   Cache,
   Disposable,
   Disposer,
+  ExitCode,
   Logger,
   Scoped,
   Store,
 } from "./types/index.js";
-import { type ExitCode, ExitCodes } from "./types/index.js";
 
 /**
  * Port/adapter infrastructure for the Act framework.

@@ -121,7 +121,6 @@ export function mock_state(
   });
 
   return {
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     init: (_initFn?: any) => ({
       emits(events: Record<string, any>) {
         info.events = events ?? {};

@@ -145,7 +145,6 @@ export interface ActBuilder<
   TSchemaReg extends SchemaRegister<TActions>,
   TEvents extends Schemas,
   TActions extends Schemas,
-  // eslint-disable-next-line @typescript-eslint/no-empty-object-type
   TStateMap extends Record<string, Schema> = {},
   TActor extends Actor = Actor,
   TLanes extends string = typeof DEFAULT_LANE,
@@ -338,7 +337,7 @@ export type StateBuilder<
      */
     emits: <TEvents extends Schemas>(
       events: ZodTypes<TEvents>
-      // eslint-disable-next-line @typescript-eslint/no-empty-object-type -- {} avoids string index signature that Record<string, never> would add, keeping keyof A precise
+      // `{}` avoids the string index signature `Record<string, never>` would add
     ) => ActionBuilder<TState, TEvents, {}, TName> & {
       /**
        * Overrides specific event reducers. Events without a custom patch
@@ -362,7 +361,7 @@ export type StateBuilder<
        */
       patch: (
         patch: Partial<PatchHandlers<TState, TEvents>>
-        // eslint-disable-next-line @typescript-eslint/no-empty-object-type -- {} avoids string index signature that Record<string, never> would add, keeping keyof A precise
+        // `{}` avoids the string index signature `Record<string, never>` would add
       ) => ActionBuilder<TState, TEvents, {}, TName>;
     };
   };
@@ -771,7 +770,6 @@ export type Slice<
   TSchemaReg extends SchemaRegister<TActions>,
   TEvents extends Schemas,
   TActions extends Schemas,
-  // eslint-disable-next-line @typescript-eslint/no-empty-object-type
   TStateMap extends Record<string, Schema> = {},
   TActor extends Actor = Actor,
   TLanes extends string = typeof DEFAULT_LANE,
@@ -813,7 +811,6 @@ export interface SliceBuilder<
   TSchemaReg extends SchemaRegister<TActions>,
   TEvents extends Schemas,
   TActions extends Schemas,
-  // eslint-disable-next-line @typescript-eslint/no-empty-object-type
   TStateMap extends Record<string, Schema> = {},
   TActor extends Actor = Actor,
   TLanes extends string = typeof DEFAULT_LANE,
@@ -1074,7 +1071,5 @@ export type ProjectionBuilder<
            */
           of: OfSignatures;
         }
-      : // eslint-disable-next-line @typescript-eslint/no-empty-object-type
-        {})
-  : // eslint-disable-next-line @typescript-eslint/no-empty-object-type
-    {});
+      : {})
+  : {});

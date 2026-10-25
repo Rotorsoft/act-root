@@ -60,8 +60,6 @@ function register_batch_handler(
   batch_handlers.set(proj.target, proj.batchHandler);
 }
 
-/* eslint-disable @typescript-eslint/no-empty-object-type -- {} used as generic defaults */
-
 /**
  * Creates a new Act orchestrator builder for composing event-sourced applications.
  *

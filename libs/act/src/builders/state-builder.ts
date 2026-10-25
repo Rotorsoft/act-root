@@ -121,7 +121,7 @@ export function state<TName extends string, TState extends Schema>(
             message: (validated) => validated,
           };
 
-          // eslint-disable-next-line @typescript-eslint/no-empty-object-type -- {} avoids string index signature
+          // `{}` avoids the string index signature `Record<string, never>` would add
           const builder = action_builder<TState, TEvents, {}, TName>(internal);
 
           return Object.assign(builder, {
