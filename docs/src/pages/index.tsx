@@ -102,26 +102,29 @@ const TicketMessaging = state({ Ticket: TicketMessagingState })
     note: 'All three share the name "Ticket" — the orchestrator merges their schemas via ZodObject.extend().',
   },
   invariants: {
-    tab: "Invariants",
-    title: "Define reusable business rules across slices",
+    tab: "Business rules",
+    title: "Name every rule an action must pass",
     blurb:
-      "Invariants are typed constraints checked before actions execute. Define them once, reuse across any state via .given([invariant]).",
-    code: `import { type Invariant } from "@rotorsoft/act";
+      "Invariants (.given) read only the state and the actor, so one rule serves any action. Preconditions (.requires) also read the action's payload. Both run before the handler, in order, and the first that fails refuses the action with a named InvariantError.",
+    code: `import { type Invariant, type Precondition } from "@rotorsoft/act";
 
 export const mustBeOpen: Invariant<{ productId: string; closedById?: string }> = {
   description: "Ticket must be open",
   valid: (state) => !!state.productId && !state.closedById,
 };
 
-export const mustBeUser: Invariant<{ productId: string; userId: string }> = {
-  description: "Must be the owner",
-  valid: (state, actor) => state.userId === actor?.id,
+export const mustBeReceiver: Precondition<
+  { messages: Record<string, { to?: string }> },
+  { messageId: string }
+> = {
+  description: "Must be receiver to ack",
+  holds: ({ messageId }, state, actor) => state.messages[messageId]?.to === actor?.id,
 };
 
 // Use in any state builder:
 .on({ CloseTicket }).given([mustBeOpen]).emit("TicketClosed")
-.on({ RequestEscalation }).given([mustBeOpen, mustBeUser]).emit("TicketEscalationRequested")`,
-    note: "Typed against minimal interfaces — TypeScript contravariance ensures Invariant<SuperType> is assignable to Invariant<SubType>.",
+.on({ AcknowledgeMessage }).given([mustBeOpen]).requires([mustBeReceiver]).emit("MessageRead")`,
+    note: "Typed against minimal interfaces: a rule written for the fields it reads fits every state and payload that has them.",
   },
   orchestrator: {
     tab: "Orchestrator",

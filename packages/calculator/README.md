@@ -64,8 +64,8 @@ A single state with five events and two actions:
 
 | Action     | Schema                       | Notes                                                   |
 |------------|------------------------------|---------------------------------------------------------|
-| `PressKey` | `{ key: digit \| op \| symbol }` | Routes to one of `DigitPressed` / `OperatorPressed` / `DotPressed` / `EqualsPressed` — can emit multiple events |
-| `Clear`    | empty                         | Guarded by `Must be dirty` invariant                    |
+| `PressKey` | `{ key: digit \| op \| symbol }` | Routes to one of `DigitPressed` / `OperatorPressed` / `DotPressed` / `EqualsPressed` — can emit multiple events. Requires `Equals needs an operator` (a precondition: it reads the key) |
+| `Clear`    | empty                         | Guarded by `Must be dirty` invariant (it reads only the state) |
 
 Snapshot after every 12 patches:
 
@@ -172,7 +172,7 @@ const result = await app.close([
 
 - Invariant violation (`Clear` on a clean calculator) → `InvariantError`
 - Schema violation (numeric key) → `ValidationError`
-- Custom emit-time error (`=` with no operator) → throws `"no operator"`
+- Precondition violation (`=` with no operator) → `InvariantError` ("PressKey failed precondition: Equals needs an operator")
 - Missing target stream → throws `"Missing target stream"`
 
 Run with `pnpm test` from the root, or `pnpm -F calculator test` for this package only.

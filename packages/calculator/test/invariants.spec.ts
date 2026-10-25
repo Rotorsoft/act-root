@@ -40,10 +40,13 @@ describe("calculator invariants", () => {
     ).rejects.toThrow(ValidationError);
   });
 
-  it("should throw no operator error", async () => {
+  it("refuses = with no operator, as a precondition", async () => {
     await expect(
       app.do("PressKey", { stream: "C", actor }, { key: "=" })
-    ).rejects.toThrow("no operator");
+    ).rejects.toMatchObject({
+      name: "ERR_INVARIANT",
+      message: "PressKey failed precondition: Equals needs an operator",
+    });
   });
 
   it("should throw missing target stream error", async () => {

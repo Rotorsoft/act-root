@@ -82,26 +82,37 @@ What happened:
 - **`app.do(action, target, payload)`** dispatches an action. Act validates the payload, runs any invariants, applies the reducer, commits the resulting events to the store, updates the cache, and returns one snapshot per emitted event.
 - **`app.load(State, stream)`** reconstructs current state by replaying events from the cache or store. The `version` is the 0-indexed sequence number of the last event.
 
-## 4. Add a business rule (invariant)
+## 4. Add business rules
 
-Real domains have rules: "you can't decrement below zero", "you can't close a ticket twice", etc. Act expresses them as **invariants** — small pure functions checked before an action runs:
+Real domains have rules: "you can't decrement below zero", "you can't close a ticket twice". Act declares them as named rules, checked before an action runs, in two layers:
+
+- **Invariants** (`.given([...])`) read only the state and the actor, so one invariant serves every action that needs it.
+- **Preconditions** (`.requires([...])`) also read the action's payload, for rules about *this* request.
+
+"You can't decrement below zero" depends on how much you subtract, so it's a precondition:
 
 ```typescript no-check
-import { type Invariant } from "@rotorsoft/act";
+import { type Invariant, type Precondition } from "@rotorsoft/act";
 
-const mustStayPositive: Invariant<{ count: number }> = {
+const notLocked: Invariant<{ locked?: boolean }> = {
+  description: "Counter must not be locked",
+  valid: (state) => !state.locked,
+};
+
+const staysPositive: Precondition<{ count: number }, { by: number }> = {
   description: "Count cannot go negative",
-  valid: (state) => state.count >= 0,
+  holds: (action, state) => state.count - action.by >= 0,
 };
 
 // Add a `decrement` action that reuses the same Incremented event
-// (with negative amount) and is gated by the invariant:
+// (with a negative amount), gated by both layers:
 .on({ decrement: z.object({ by: z.number() }) })
-  .given([mustStayPositive])
+  .given([notLocked])
+  .requires([staysPositive])
   .emit((action) => ["Incremented", { amount: -action.by }])
 ```
 
-When the invariant fails, Act throws `InvariantError` *before* any event is committed. State doesn't change; the caller sees a typed error with the rule's `description`.
+The invariants run first, then the preconditions, each in the order you declare them. The first rule that fails throws `InvariantError` *before* any event is committed. State doesn't change, and the caller sees a typed error whose message names the layer (`"decrement failed precondition: Count cannot go negative"`) and whose `description` names the rule. The `act` CLI, the domain diagram and the flow animations list both layers by name.
 
 ## 5. Inspect what happened
 
@@ -133,7 +144,7 @@ You've covered the four primitives that show up in every Act app:
 
 - **State** (`state()`) — what your domain looks like and how events transform it
 - **Actions** (`.on().emit()`) — typed intents that produce events
-- **Invariants** (`.given()`) — preconditions checked before commit
+- **Business rules** (`.given()` invariants, `.requires()` preconditions) — checked before commit
 - **Events** (`.emits()`/`.patch()`) — the immutable record
 
 The next things you'll want, in roughly the order you'll need them:
