@@ -369,11 +369,12 @@ describe("scoped ports", () => {
     // Correlate (scoped) arms the fast controller; the auto-started
     // worker tick must drain against the scoped store.
     await app.correlate();
-    await new Promise<void>((r) => setTimeout(r, 60));
 
     // The reaction target must have been written on the scoped store.
-    const out = await app.load("Out", "lane-out");
-    expect(out.state.n).toBe(4);
+    await vi.waitFor(async () => {
+      const out = await app.load("Out", "lane-out");
+      expect(out.state.n).toBe(4);
+    });
 
     // And the singleton must stay empty for that stream.
     const singleton_events: unknown[] = [];
