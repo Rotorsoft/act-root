@@ -25,12 +25,10 @@ import type {
   AutoclosePolicy,
   AutoclosePredicate,
   Committed,
-  GivenHandlers,
   Invariant,
   PassthroughPatchHandler,
   PatchHandlers,
   Precondition,
-  RequiresHandlers,
   Schema,
   Schemas,
   Snapshot,
@@ -180,19 +178,12 @@ function action_builder<
       }
 
       function given(rules: Invariant<TState>[]) {
-        internal.given ??= {} as GivenHandlers<TState, Schemas>;
-        (internal.given as Record<string, Invariant<TState>[]>)[action] = rules;
+        ((internal.given ??= {}) as Record<string, unknown>)[action] = rules;
         return { requires, emit };
       }
 
       function requires(rules: Precondition<TState, TNewActions>[]) {
-        internal.requires ??= {} as RequiresHandlers<TState, Schemas>;
-        (
-          internal.requires as Record<
-            string,
-            Precondition<TState, TNewActions>[]
-          >
-        )[action] = rules;
+        ((internal.requires ??= {}) as Record<string, unknown>)[action] = rules;
         return { emit };
       }
 

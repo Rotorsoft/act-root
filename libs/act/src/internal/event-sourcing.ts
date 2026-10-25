@@ -440,35 +440,27 @@ export async function action<
         expectedVersion ??
         (snapshot.version >= 0 ? snapshot.version : undefined);
 
-      if (me.given) {
-        const invariants = me.given[action] || [];
-        invariants.forEach(({ valid, description }) => {
-          if (!valid(snapshot.state, actor))
-            throw new InvariantError(
-              action,
-              validated,
-              target,
-              snapshot,
-              description
-            );
-        });
-      }
-
-      // After the invariants, in declaration order, stopping at the first
-      // that doesn't hold.
-      if (me.requires) {
-        const preconditions = me.requires[action] || [];
-        for (const { holds, description } of preconditions)
-          if (!holds(validated, snapshot.state, actor))
-            throw new InvariantError(
-              action,
-              validated,
-              target,
-              snapshot,
-              description,
-              "precondition"
-            );
-      }
+      // Invariants, then preconditions, each in declaration order: the
+      // first rule that fails refuses the action.
+      for (const { valid, description } of me.given?.[action] ?? [])
+        if (!valid(snapshot.state, actor))
+          throw new InvariantError(
+            action,
+            validated,
+            target,
+            snapshot,
+            description
+          );
+      for (const { holds, description } of me.requires?.[action] ?? [])
+        if (!holds(validated, snapshot.state, actor))
+          throw new InvariantError(
+            action,
+            validated,
+            target,
+            snapshot,
+            description,
+            "precondition"
+          );
 
       const result = me.on[action](validated, snapshot, target);
       if (!result) return [snapshot];
