@@ -668,7 +668,6 @@ describe("slice", () => {
     await dispose();
   });
 
-  /* eslint-disable @typescript-eslint/no-unused-vars, @typescript-eslint/require-await -- type-only narrowing checks */
   describe("type narrowing", () => {
     it("narrows event name + handler args in .on().do()", () => {
       const _check = () => {

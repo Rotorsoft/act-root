@@ -3588,8 +3588,7 @@ export type Config = Package & {
 //# sourceMappingURL=index.d.ts.map
 // === ports.d.ts ===
 import { ConsoleLogger } from "./adapters/console-logger.js";
-import type { Cache, Disposable, Disposer, Logger, Scoped, Store } from "./types/index.js";
-import { type ExitCode } from "./types/index.js";
+import type { Cache, Disposable, Disposer, ExitCode, Logger, Scoped, Store } from "./types/index.js";
 /**
  * Port/adapter infrastructure for the Act framework.
  *

@@ -325,7 +325,6 @@ export function compute_layout(view_model: DomainModel): Layout {
     }
   }
 
-  // eslint-disable-next-line no-useless-assignment
   let cx = PAD;
   let globalY = 0;
 

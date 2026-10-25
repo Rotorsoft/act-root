@@ -3,7 +3,7 @@
  * Bare implementations; tracing wraps them in `tracing.ts`.
  */
 
-import { type Patch, patch } from "@rotorsoft/act-patch";
+import { patch } from "@rotorsoft/act-patch";
 import { cache, log, store } from "../ports.js";
 import {
   ConcurrencyError,
