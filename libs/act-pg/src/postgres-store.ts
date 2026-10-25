@@ -408,6 +408,25 @@ export class PostgresStore implements Store {
     }
   }
 
+  /** One transaction: any failure rolls back and throws a {@link StoreError} naming the operation. */
+  private async _tx<T>(
+    operation: string,
+    work: (client: pg.PoolClient) => Promise<T>
+  ): Promise<T> {
+    const client = await this._client(operation);
+    try {
+      await client.query("BEGIN");
+      const result = await work(client);
+      await client.query("COMMIT");
+      return result;
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => {});
+      throw new StoreError(operation, { cause: error });
+    } finally {
+      client.release();
+    }
+  }
+
   async dispose() {
     await this._teardown_listen();
     await this._pool.end();
@@ -1062,9 +1081,7 @@ export class PostgresStore implements Store {
     millis: number,
     lane?: string
   ): Promise<Lease[]> {
-    const client = await this._client("claim");
-    try {
-      await client.query("BEGIN");
+    return this._tx("claim", async (client) => {
       const lane_clause = lane !== undefined ? `AND s.lane = $7` : "";
       // Fairness reserve: carve `fair` slots off the lagging
       // budget for pure watermark-order claims so a default-priority
@@ -1196,7 +1213,6 @@ export class PostgresStore implements Store {
         `,
         params
       );
-      await client.query("COMMIT");
 
       return rows.map(({ stream, source, at, retry, lagging, lane }) => ({
         stream,
@@ -1207,12 +1223,7 @@ export class PostgresStore implements Store {
         lagging,
         lane,
       }));
-    } catch (error) {
-      await client.query("ROLLBACK").catch(() => {});
-      throw new StoreError("claim", { cause: error });
-    } finally {
-      client.release();
-    }
+    });
   }
 
   async subscribe(
@@ -1220,9 +1231,7 @@ export class PostgresStore implements Store {
     correlated_at?: number,
     correlator?: { key: string; by: string; millis: number }
   ): Promise<SubscribeResult> {
-    const client = await this._client("subscribe");
-    try {
-      await client.query("BEGIN");
+    return this._tx("subscribe", async (client) => {
       let subscribed = 0;
       if (streams.length) {
         // Two statements, because `subscribed` means "newly registered
@@ -1346,25 +1355,17 @@ export class PostgresStore implements Store {
                 (SELECT at FROM ${this._fqc} WHERE key = $1) AS correlated_at`,
         [correlator?.key ?? ""]
       );
-      await client.query("COMMIT");
       return {
         subscribed,
         watermark: rows[0]?.max ?? -1,
         correlated_at: Number(rows[0]?.correlated_at ?? -1),
         ...(correlating === undefined ? {} : { correlating }),
       };
-    } catch (error) {
-      await client.query("ROLLBACK").catch(() => {});
-      throw new StoreError("subscribe", { cause: error });
-    } finally {
-      client.release();
-    }
+    });
   }
 
   async ack(leases: Lease[]): Promise<Lease[]> {
-    const client = await this._client("ack");
-    try {
-      await client.query("BEGIN");
+    return this._tx("ack", async (client) => {
       // One statement finalizes the whole batch, so acks and defer
       // schedules land all-or-nothing per the Store.ack contract. Every
       // entry advances the watermark to its `at` (the last event handled
@@ -1404,7 +1405,6 @@ export class PostgresStore implements Store {
       `,
         [JSON.stringify(leases)]
       );
-      await client.query("COMMIT");
 
       return rows
         .filter((row) => row.due === null)
@@ -1417,18 +1417,11 @@ export class PostgresStore implements Store {
           lagging: row.lagging,
           lane: row.lane,
         }));
-    } catch (error) {
-      await client.query("ROLLBACK").catch(() => {});
-      throw new StoreError("ack", { cause: error });
-    } finally {
-      client.release();
-    }
+    });
   }
 
   async block(leases: BlockedLease[]): Promise<BlockedLease[]> {
-    const client = await this._client("block");
-    try {
-      await client.query("BEGIN");
+    return this._tx("block", async (client) => {
       const { rows } = await client.query<{
         stream: string;
         source: string | null;
@@ -1452,7 +1445,6 @@ export class PostgresStore implements Store {
       `,
         [JSON.stringify(leases)]
       );
-      await client.query("COMMIT");
 
       return rows.map((row) => ({
         stream: row.stream,
@@ -1464,12 +1456,7 @@ export class PostgresStore implements Store {
         error: row.error,
         lane: row.lane,
       }));
-    } catch (error) {
-      await client.query("ROLLBACK").catch(() => {});
-      throw new StoreError("block", { cause: error });
-    } finally {
-      client.release();
-    }
+    });
   }
 
   /** `claim` compares `deferred_at` with the worker's clock, the one its defer timer uses. */
@@ -2081,9 +2068,7 @@ export class PostgresStore implements Store {
     if (!targets.length) return new Map();
     const full = targets.filter((t) => t.before === undefined);
     const windowed = targets.filter((t) => t.before !== undefined);
-    const client = await this._client("truncate");
-    try {
-      await client.query("BEGIN");
+    return this._tx("truncate", async (client) => {
       // Seeds (snapshots/tombstones) produce watermark-relevant ids, so
       // truncate takes the same visibility lock as commit — see the
       // commit path for the id-order-vs-visibility-order rationale.
@@ -2159,14 +2144,8 @@ export class PostgresStore implements Store {
           committed: rows[0] as Committed<Schemas, keyof Schemas>,
         });
       }
-      await client.query("COMMIT");
       return result;
-    } catch (error) {
-      await client.query("ROLLBACK").catch(() => {});
-      throw new StoreError("truncate", { cause: error });
-    } finally {
-      client.release();
-    }
+    });
   }
 
   /** One transaction; `RESTART IDENTITY` makes the serial assign dense ids from 1. */
