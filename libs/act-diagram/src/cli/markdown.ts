@@ -12,6 +12,7 @@ import {
   type ContractIndex,
   event_names_for,
   event_status,
+  find_action,
   list_by_kind,
 } from "./contract-index.js";
 
@@ -191,25 +192,7 @@ export function format_markdown(idx: ContractIndex): string {
   const actions = list_by_kind(idx, "action");
   if (actions.length === 0) lines.push("_(none)_\n");
   for (const a of actions) {
-    let action:
-      | {
-          name: string;
-          emits: string[];
-          invariants: string[];
-          preconditions?: string[];
-          line?: number;
-        }
-      | undefined;
-    let state_file: string | undefined;
-    for (const st of m.states) {
-      if (a.qualifier && st.name !== a.qualifier) continue;
-      const found = st.actions.find((x) => x.name === a.name);
-      if (found) {
-        action = found;
-        state_file = st.file;
-        break;
-      }
-    }
+    const { action, state_file } = find_action(m, a.name, a.qualifier);
     lines.push(`### \`${a.name}\``);
     if (a.qualifier) lines.push(`- **on state:** \`${a.qualifier}\``);
     if (state_file)

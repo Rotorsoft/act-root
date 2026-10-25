@@ -24,6 +24,7 @@ import {
   type ContractIndex,
   event_names_for,
   event_status,
+  find_action,
   type IndexEntry,
 } from "./contract-index.js";
 
@@ -212,25 +213,7 @@ export function format_event(idx: ContractIndex, entry: IndexEntry): string {
 export function format_action(idx: ContractIndex, entry: IndexEntry): string {
   const model = idx.model;
   const owner_name = entry.qualifier;
-  let action:
-    | {
-        name: string;
-        emits: string[];
-        invariants: string[];
-        preconditions?: string[];
-        line?: number;
-      }
-    | undefined;
-  let state_file: string | undefined;
-  for (const st of model.states) {
-    if (owner_name && st.name !== owner_name) continue;
-    const a = st.actions.find((x) => x.name === entry.name);
-    if (a) {
-      action = a;
-      state_file = st.file;
-      break;
-    }
-  }
+  const { action, state_file } = find_action(model, entry.name, owner_name);
   const lines: string[] = [];
   lines.push(bold(pink(entry.name)));
   if (owner_name) lines.push(`  on:      ${amber(owner_name)}`);
