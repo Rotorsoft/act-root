@@ -993,7 +993,14 @@ describe("lanes", () => {
       const two = make_worker(store, ["b"]);
       const unsharded = make_worker(store, ["default", "b"]);
       await one.settled();
+
+      // `two` shares `one`'s lease, so it settles without scanning.
+      await one.app.do("increment", { stream: "s", actor }, {});
+      const scans = vi.spyOn(store, "query");
       await two.settled();
+      expect(scans).not.toHaveBeenCalled();
+      scans.mockRestore();
+
       await unsharded.settled();
 
       const keys = spy.mock.calls
