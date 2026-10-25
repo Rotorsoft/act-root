@@ -1,6 +1,6 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "description": "Run by the hosted Mend Renovate App (github.com/apps/renovate). No self-hosted workflow \u2014 see issue #877 for the migration rationale.",
+  "description": "Run by the hosted Mend Renovate App (github.com/apps/renovate). No self-hosted workflow.",
   "extends": [
     "config:recommended",
     ":automergePatch",
@@ -35,20 +35,20 @@
       "minimumReleaseAge": "30 days"
     },
     {
-      "description": "pnpm overrides are security pins, not feature upgrades. They force a transitive dep to the latest fix *within the major its consumers are written against*. A major bump jumps the override target past that major, leaving peers unsatisfied and breaking builds. Closed #1102/#1103/#1104 (and #1162/#1163/#1164 after the pins moved to pnpm-workspace.yaml) for exactly this. Patch/minor on overrides is still fine. Matched by file because the pins live in pnpm-workspace.yaml since the pnpm settings migration; the depType rule alone stopped matching there.",
+      "description": "pnpm overrides are security pins, not feature upgrades. They force a transitive dep to the latest fix *within the major its consumers are written against*. A major bump jumps the override target past that major, leaving peers unsatisfied and breaking builds. Patch/minor on overrides is still fine. Matched by file because the pins live in pnpm-workspace.yaml since the pnpm settings migration; the depType rule alone stopped matching there.",
       "matchUpdateTypes": ["major"],
       "enabled": false,
       "matchFileNames": ["pnpm-workspace.yaml"]
     },
     {
-      "description": "The docs package is a deliberate TypeScript 6 island (CLAUDE.md \u00a7 Important Constraints). typedoc caps its `typescript` peer at 6.x, and on TS7 it dies inside typedoc reading 'PropertyDeclaration', taking `pnpm -F docs build:all` with it; `check:snippets` fails separately with 'ts.createProgram is not a function', since the TS7 native compiler does not expose the JS API that script uses. The rest of the workspace is on TS7 and pnpm's per-package isolation keeps the two apart. Closed #1342 for exactly this. Revisit when typedoc supports TS7 \u2014 and delete this rule then rather than widening it.",
+      "description": "The docs package is a deliberate TypeScript 6 island (CLAUDE.md \u00a7 Important Constraints). typedoc caps its `typescript` peer at 6.x, and on TS7 it dies inside typedoc reading 'PropertyDeclaration', taking `pnpm -F docs build:all` with it; `check:snippets` fails separately with 'ts.createProgram is not a function', since the TS7 native compiler does not expose the JS API that script uses. The rest of the workspace is on TS7 and pnpm's per-package isolation keeps the two apart. Revisit when typedoc supports TS7 \u2014 and delete this rule then rather than widening it.",
       "matchFileNames": ["docs/package.json"],
       "matchPackageNames": ["typescript"],
       "matchUpdateTypes": ["major"],
       "enabled": false
     },
     {
-      "description": "A package declared as BOTH a peerDependency and a devDependency must move in one PR. The devDep exists only to satisfy the peer locally, so bumping one and not the other leaves the package contradicting itself, and pnpm resolves a second copy. For a type-bearing package that is fatal: two zod copies make TypeScript reject its own types (`Type '5' is not assignable to type '4'`), breaking every release job on master. That happened because the `Dev dependencies` rule above captured zod's devDependency while its peerDependency stayed in `Non-major dependencies` \u2014 two PRs, merged hours apart, skewed in between. Closed #1633/#1634 for exactly this, then #1688/#1689 repeated it after the rule that would have stopped it (#1640) was closed unmerged. #632 is the same failure mode for act itself. `{{{depName}}}` groups per package, so these keep their own PRs rather than piling into one.",
+      "description": "A package declared as BOTH a peerDependency and a devDependency must move in one PR. The devDep exists only to satisfy the peer locally, so bumping one and not the other leaves the package contradicting itself, and pnpm resolves a second copy. For a type-bearing package that is fatal: two zod copies make TypeScript reject its own types (`Type '5' is not assignable to type '4'`), breaking every release job on master. `{{{depName}}}` groups per package, so these keep their own PRs rather than piling into one.",
       "matchPackageNames": [
         "zod",
         "vitest",
@@ -63,12 +63,12 @@
       "groupName": "{{{depName}}}"
     },
     {
-      "description": "@types/node tracks the oldest Node the libraries support (the engines floor, currently 22), not the newest runtime CI uses. Types newer than the floor let code call APIs a Node 22 user doesn't have, and typecheck would never notice; the weekly node-compat job (conformance.yml) runs the tests on the floor, but only for paths that are exercised. Browser globals are kept out separately, by `lib: [\"ES2022\"]` in libs/tsconfig.base.json (#1786). Raise this together with the engines floor.",
+      "description": "@types/node tracks the oldest Node the libraries support (the engines floor, currently 22), not the newest runtime CI uses. Types newer than the floor let code call APIs a Node 22 user doesn't have, and typecheck would never notice; the weekly node-compat job (conformance.yml) runs the tests on the floor, but only for paths that are exercised. Browser globals are kept out separately, by `lib: [\"ES2022\"]` in libs/tsconfig.base.json. Raise this together with the engines floor.",
       "matchPackageNames": ["@types/node"],
       "allowedVersions": "<23"
     },
     {
-      "description": "react and react-dom must always be the exact same version: React checks this at runtime, and the docs build (Docusaurus server render) throws 'Incompatible React versions' when they differ. They used to sit in the per-package rule above, which split them into two PRs that each bumped one and failed CI on their own (#1735/#1736). One PR moves both, with every peer and dev entry of each.",
+      "description": "react and react-dom must always be the exact same version: React checks this at runtime, and the docs build (Docusaurus server render) throws 'Incompatible React versions' when they differ. They used to sit in the per-package rule above, which split them into two PRs that each bumped one and failed CI on their own. One PR moves both, with every peer and dev entry of each.",
       "matchPackageNames": ["react", "react-dom"],
       "groupName": "react"
     }
