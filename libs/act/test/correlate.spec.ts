@@ -224,10 +224,10 @@ describe("correlate: the armed flag", () => {
       for (let i = 0; i < 4; i++)
         await app.do("hush", { stream: `q${i}`, actor }, {});
 
-      // `{}` overrides the default query, so `limit` is undefined.
-      await app.correlate({});
+      // `limit: 0` reads everything past the checkpoint.
+      await app.correlate({ limit: 0 });
       const queries = count_queries(raw);
-      await app.correlate({});
+      await app.correlate({ limit: 0 });
       expect(queries.n).toBe(0);
     });
 
@@ -504,6 +504,36 @@ describe("correlate: the checkpoint", () => {
       await raw.subscribe([], 50);
       await raw.subscribe([], 10);
       expect(await peek(raw)).toBe(50);
+    });
+  });
+
+  describe("app.correlate reads 10 events unless the query sets a limit", () => {
+    const scanned = async (
+      query?: Parameters<ReturnType<typeof worker>["correlate"]>[0]
+    ) => {
+      // A fresh store each time, so every scan starts at event id 0.
+      await dispose()("EXIT").catch(() => {});
+      store(new InMemoryStore());
+      await store().seed();
+      const app = worker();
+      for (let i = 0; i < 15; i++)
+        await app.do("tick", { stream: `l${i}`, actor }, {});
+      return (await app.correlate(query)).last_id;
+    };
+
+    it("reads 10 with no query, an empty one, or a leftover filter", async () => {
+      const all = [
+        await scanned(),
+        await scanned({}),
+        await scanned({ stream: "l0" }),
+      ];
+      // Event ids start at 0, so a 10-event scan ends at id 9.
+      expect(all).toEqual([9, 9, 9]);
+    });
+
+    it("reads the given limit, and everything with limit 0", async () => {
+      expect(await scanned({ limit: 3 })).toBe(2);
+      expect(await scanned({ limit: 0 })).toBe(14);
     });
   });
 
