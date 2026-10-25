@@ -365,8 +365,9 @@ describe("act", () => {
       app.settle({ debounceMs: 20 });
       app.settle({ debounceMs: 20 });
 
-      // Wait for debounce + processing
-      await sleep(300);
+      // Wait for the one cycle, then give a stray timer a chance to fire
+      await vi.waitFor(() => expect(settledListener).toHaveBeenCalled());
+      await sleep(40);
       expect(settledListener).toHaveBeenCalledTimes(1);
       const drain = settledListener.mock.calls[0][0];
       expect(drain).toHaveProperty("fetched");
