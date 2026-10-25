@@ -95,6 +95,27 @@ describe("partial-state", () => {
     );
   });
 
+  it("should throw on a duplicate action even when the partials share its schema", () => {
+    // Both partials declare `increment` with the same ZodEmpty instance. The
+    // same schema is not the same partial: merging them would pair one
+    // partial's rules with the other's handler, depending on order.
+    const SharedSchema = state({ Thing: schema })
+      .init(() => ({ count: 0, label: "" }))
+      .emits({ Other: ZodEmpty })
+      .patch({ Other: () => ({}) })
+      .on({ increment: PartA.actions.increment })
+      .requires([{ description: "never checked", holds: () => true }])
+      .emit(() => ["Other", {}])
+      .build();
+
+    expect(() => act().withState(PartA).withState(SharedSchema)).toThrow(
+      'Duplicate action "increment"'
+    );
+    expect(() => act().withState(SharedSchema).withState(PartA)).toThrow(
+      'Duplicate action "increment"'
+    );
+  });
+
   it("should throw on conflicting custom patches for same event across partials", () => {
     const DupEvent = state({ Thing: schema })
       .init(() => ({ count: 0, label: "" }))
