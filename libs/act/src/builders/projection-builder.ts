@@ -21,8 +21,6 @@ import type {
 import { add_reaction } from "./builder-utils.js";
 import { _this_ } from "./merge.js";
 
-/* eslint-disable @typescript-eslint/no-empty-object-type -- {} used as generic defaults */
-
 /**
  * Creates a new projection builder for composing read-model update handlers.
  *

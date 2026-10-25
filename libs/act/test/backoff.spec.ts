@@ -185,26 +185,28 @@ describe("per-reaction backoff (integration)", () => {
       })
       .build({ autoSettle: false });
 
-    await app.do("tick", { stream: "s1", actor }, {});
-    await app.correlate();
+    // Only `Date` is faked: "inside the window" holds however slow the
+    // runner is, and the wake's real timer still fires.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      await app.do("tick", { stream: "s1", actor }, {});
+      await app.correlate();
 
-    // First attempt fails — controller now defers
-    await app.drain();
-    expect(attempts).toBe(1);
+      // First attempt fails — controller now defers
+      await app.drain();
+      expect(attempts).toBe(1);
 
-    // Immediate next drain: stream is in backoff, handler must not run
-    await app.drain();
-    expect(attempts).toBe(1);
+      // Next drain, still inside the window: the stream is in backoff
+      vi.setSystemTime(Date.now() + 50);
+      await app.drain();
+      expect(attempts).toBe(1);
 
-    // Still inside window
-    await sleep(50);
-    await app.drain();
-    expect(attempts).toBe(1);
-
-    // After window — handler can run again
-    await sleep(200);
-    await app.drain();
-    expect(attempts).toBe(2);
+      // Past the window — the wake runs the retry
+      vi.setSystemTime(Date.now() + 200);
+      await vi.waitFor(() => expect(attempts).toBe(2));
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   // A reaction with no backoff is paced by the default one, not by the lease
@@ -429,12 +431,10 @@ describe("per-reaction backoff (integration)", () => {
     });
   });
 
-  it("garbage-collects only entries whose window has elapsed", async () => {
-    // Two streams enter backoff on the same drain cycle. The fixed 50ms
-    // window means both expire ~50ms after their failure. We schedule
-    // them ~30ms apart so when the timer fires for the first, the second
-    // is still ~30ms from ready — exercising the "keep" branch of the
-    // callback's per-entry check.
+  it("a wake for the earlier backoff leaves the later one parked", async () => {
+    // Two streams back off 30ms apart on a frozen clock, then the clock
+    // moves to where only the first is due. Whenever the wake fires, it
+    // retries the first and leaves the second parked.
     const attempts: Record<string, number> = { early: 0, late: 0 };
     const handler = vi
       .fn()
@@ -453,29 +453,31 @@ describe("per-reaction backoff (integration)", () => {
       })
       .build({ autoSettle: false });
 
-    // Commit + correlate + drain "early" — backoff entry set at T+50.
-    await app.do("tick", { stream: "early", actor }, {});
-    await app.correlate();
-    await app.drain();
-    expect(attempts.early).toBe(1);
-
-    // Commit + correlate + drain "late" 30ms later — entry set at T'+50.
-    // Both entries are now in the map; the earliest timer reschedules. On a
-    // slow run `early`'s timer can be draining already, and a drain that
-    // finds a pass in flight claims nothing, so drain until `late` ran.
-    await sleep(30);
-    await app.do("tick", { stream: "late", actor }, {});
-    await app.correlate();
-    await vi.waitFor(async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      // "early" fails at T: due at T+50.
+      await app.do("tick", { stream: "early", actor }, {});
+      await app.correlate();
       await app.drain();
-      expect(attempts.late).toBe(1);
-    });
+      expect(attempts.early).toBe(1);
 
-    // `early`'s timer fires ~50ms after its failure, while `late` is still
-    // ~20ms short of its window. The callback iterates the map and must
-    // delete `early` but keep `late`.
-    await vi.waitFor(() => expect(attempts.early).toBe(2), { interval: 5 });
-    expect(attempts.late).toBe(1);
+      // "late" fails at T+30: due at T+80. A drain finding a pass in flight
+      // claims nothing, so drain until `late` ran.
+      vi.setSystemTime(Date.now() + 30);
+      await app.do("tick", { stream: "late", actor }, {});
+      await app.correlate();
+      await vi.waitFor(async () => {
+        await app.drain();
+        expect(attempts.late).toBe(1);
+      });
+
+      // At T+60 only "early" is due.
+      vi.setSystemTime(Date.now() + 30);
+      await vi.waitFor(() => expect(attempts.early).toBe(2), { interval: 5 });
+      expect(attempts.late).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("backoff window is honored precisely via persisted deferred_at, not the lease duration", async () => {
@@ -509,26 +511,32 @@ describe("per-reaction backoff (integration)", () => {
       }
     )._drain_controllers.get("default")!;
 
-    await app.do("tick", { stream: "floor", actor }, {});
-    await app.correlate();
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      await app.do("tick", { stream: "floor", actor }, {});
+      await app.correlate();
 
-    // First attempt fails — the stream is deferred for 50ms and the 500ms
-    // lease is released (the due-ack persists the schedule and frees it).
-    await app.drain({ leaseMillis: 500 });
-    expect(attempts).toBe(1);
+      // First attempt fails — the stream is deferred for 50ms and the 500ms
+      // lease is released (the due-ack persists the schedule and frees it).
+      await app.drain({ leaseMillis: 500 });
+      expect(attempts).toBe(1);
 
-    // 20ms later: still inside the 50ms backoff window → deferred_at excludes
-    // it from claim, so no re-attempt and no phantom retry bump.
-    await sleep(20);
-    ctrl.arm();
-    await app.drain({ leaseMillis: 500 });
-    expect(attempts).toBe(1);
+      // 20ms later: still inside the 50ms backoff window → deferred_at
+      // excludes it from claim, so no re-attempt and no phantom retry bump.
+      vi.setSystemTime(Date.now() + 20);
+      ctrl.arm();
+      await app.drain({ leaseMillis: 500 });
+      expect(attempts).toBe(1);
 
-    // 80ms total: past the 50ms backoff, well under the 500ms lease. The
-    // short backoff is honored — the released lease does not floor it up.
-    await sleep(60);
-    ctrl.arm();
-    await app.drain({ leaseMillis: 500 });
-    expect(attempts).toBe(2);
+      // 80ms total: past the 50ms backoff, well under the 500ms lease. The
+      // short backoff is honored — the released lease does not floor it up.
+      // The wake may run it first; either way it runs exactly once more.
+      vi.setSystemTime(Date.now() + 60);
+      ctrl.arm();
+      await app.drain({ leaseMillis: 500 });
+      await vi.waitFor(() => expect(attempts).toBe(2));
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

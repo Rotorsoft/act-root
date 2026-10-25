@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/require-await, @typescript-eslint/no-unused-expressions */
 /**
  * Type-level diagnostics - NOT a runtime test file.
  * Verified by: npx tsc --noEmit

@@ -34,7 +34,7 @@ The primitives:
 
 | | |
 |---|---|
-| Action | The change you want to make. Validated against a Zod schema, emitted as one or more immutable events, committed under optimistic concurrency. |
+| Action | The change you want to make. Validated against a Zod schema, checked against named business rules (the state's invariants, then the action's preconditions), emitted as one or more immutable events, committed under optimistic concurrency. |
 | State | The data you care about. Defined as a Zod schema, evolved by emit-and-patch, served back through `load()` with snapshot and cache layers in front of replay. |
 | Reaction | What happens as a result. Fires in commit order, retried under back-pressure with configurable backoff, blocked-stream surfaced to operators when a downstream wedges. |
 

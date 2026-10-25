@@ -144,7 +144,9 @@ it("should accumulate events", async () => {
 });
 ```
 
-## Testing Invariants
+## Testing Business Rules
+
+Test each rule by the refusal it causes. A refused action throws `InvariantError`: its `description` names the rule, and its message says which layer refused (`failed invariant` for `.given`, `failed precondition` for `.requires`).
 
 ```typescript no-check
 it("should reject closing a non-open ticket", async () => {
@@ -164,6 +166,16 @@ it("should enforce business rules", async () => {
   await expect(
     app.do("CloseTicket", t, { reason: "Again" })
   ).rejects.toThrow();
+});
+
+it("should refuse an ack from anyone but the receiver", async () => {
+  // A precondition: the rule reads the payload's messageId, not just the state.
+  await expect(
+    app.do("AcknowledgeMessage", someoneElse, { messageId })
+  ).rejects.toMatchObject({
+    name: "ERR_INVARIANT",
+    message: "AcknowledgeMessage failed precondition: Must be receiver to ack",
+  });
 });
 ```
 

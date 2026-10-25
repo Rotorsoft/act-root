@@ -43,7 +43,8 @@
       "schema": "{ key: 0-9 | + - * / | . | = }",
       "file": "packages/calculator/src/calculator.ts",
       "line": 117,
-      "description": "One action for every key. The emit decides which event the key becomes, and refuses = when no operator is pending (it throws \"no operator\")."
+      "description": "One action for every key. The emit decides which event the key becomes. A precondition refuses = when no operator is pending.",
+      "preconditions": ["Equals needs an operator"]
     },
     {
       "id": "action:Clear",
@@ -509,8 +510,8 @@
         {
           "from": "action:PressKey",
           "to": "evt:EqualsPressed",
-          "say": "The emit throws, so nothing commits.",
-          "reject": "no operator"
+          "say": "The precondition reads the key and refuses: nothing commits.",
+          "reject": "Equals needs an operator"
         },
         {
           "from": "actor:user",

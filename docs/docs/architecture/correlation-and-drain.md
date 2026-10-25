@@ -70,7 +70,7 @@ flowchart TD
 
 The checkpoint advances only after `subscribe` succeeds. If `subscribe` throws, the checkpoint stays where it was and the next correlate retries from the same point.
 
-There is one checkpoint, and every reaction shares it, so a scan always starts there and takes only `limit` from its query. `app.correlate(query)` and `settle({ correlate })` ignore any filter or `after`: a scan that skipped events would move the checkpoint past them, and their reactions would never run.
+There is one checkpoint, and every reaction shares it, so a scan always starts there and takes only `limit` from its query. `app.correlate()` reads 10 events when the query sets no `limit`, and `limit: 0` reads everything. `app.correlate(query)` and `settle({ correlate })` ignore any filter or `after`: a scan that skipped events would move the checkpoint past them, and their reactions would never run.
 
 **Parking the scan ([#1510](https://github.com/Rotorsoft/act-root/issues/1510), [#1517](https://github.com/Rotorsoft/act-root/issues/1517), [#1669](https://github.com/Rotorsoft/act-root/issues/1669)).** Correlate keeps its own armed flag, so a system where nothing has happened stops paying for a scan. A `do()`, `reset`/`unblock`, cross-process `notify`, or poll tick arms it; the scan parks it again only when its page comes back **short**. Resolving no target is not the same proof: every caller passes a `limit`, and most domain events have no reactions, so a full window that resolved nothing is indistinguishable from an empty log — parking there strands every reaction past that window, since the armed check then returns without a store read.
 

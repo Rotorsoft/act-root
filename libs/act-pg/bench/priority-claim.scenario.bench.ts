@@ -394,7 +394,6 @@ describe("priority-aware claim vs dual-frontier baseline", () => {
           baseline.totalDrainMs) *
         100;
 
-      // eslint-disable-next-line no-console
       console.log(
         "\n=== priority-aware claim vs dual-frontier baseline ===" +
           "\nProves:   priority-tagged streams reach time-to-first-event much sooner" +
@@ -410,7 +409,6 @@ describe("priority-aware claim vs dual-frontier baseline", () => {
           "\n          (priority skipped ahead), and matching others-median-@end" +
           "\n          (no starvation)."
       );
-      // eslint-disable-next-line no-console
       console.table({
         baseline: {
           "priority TTF (ms)": baseline.ttfMs.toFixed(0),
@@ -429,9 +427,7 @@ describe("priority-aware claim vs dual-frontier baseline", () => {
           "others median @end": priorityOthersAtEnd.median,
         },
       });
-      // eslint-disable-next-line no-console
       console.log(`Priority-target speedup: ${ttfSpeedup.toFixed(2)}x`);
-      // eslint-disable-next-line no-console
       console.log(
         `Total drain delta: ${totalDrainDelta >= 0 ? "+" : ""}${totalDrainDelta.toFixed(1)}% ` +
           "(positive = priority arm took longer overall)"

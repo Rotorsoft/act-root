@@ -1,3 +1,13 @@
+# [@rotorsoft/act-v1.34.2](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.34.1...@rotorsoft/act-v1.34.2) (2026-10-25)
+
+# [@rotorsoft/act-v1.34.1](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.34.0...@rotorsoft/act-v1.34.1) (2026-10-25)
+
+
+### Bug Fixes
+
+* **act:** app.correlate reads 10 events whenever its query sets no limit ([#2136](https://github.com/Rotorsoft/act-root/issues/2136)) ([61cf98d](https://github.com/Rotorsoft/act-root/commit/61cf98de66eeb000cde901eff64498de467c2184))
+* **act:** two partials declaring one action throw at build, even with a shared schema ([#2135](https://github.com/Rotorsoft/act-root/issues/2135)) ([db20267](https://github.com/Rotorsoft/act-root/commit/db202675ecae219a2f0bba049f48fe6b91add7f4))
+
 # [@rotorsoft/act-v1.34.0](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.33.20...@rotorsoft/act-v1.34.0) (2026-10-24)
 
 

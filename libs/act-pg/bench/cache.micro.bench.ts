@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unsafe-argument -- bench helpers use any to avoid State name branding */
 import { describe, it } from "vitest";
 import { z } from "zod";
 import { state } from "../../act/src/builders/state-builder.js";

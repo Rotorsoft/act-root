@@ -412,6 +412,8 @@ describe("defer outcome (integration)", () => {
   });
 
   it("holds pending until the due-time, then redelivers and acks", async () => {
+    // Only `Date` is faked, so "before the due-time" holds on a slow runner.
+    vi.useFakeTimers({ toFake: ["Date"] });
     let attempts = 0;
     const until = Date.now() + 120;
     const deferring = async () => {
@@ -438,16 +440,21 @@ describe("defer outcome (integration)", () => {
     expect(first.acked.length).toBe(0);
     expect(first.blocked.length).toBe(0);
 
-    // Before the due-time: the stream is skipped, handler is not re-run.
-    await sleep(20);
-    await app.drain();
-    expect(attempts).toBe(1);
+    try {
+      // Before the due-time: the stream is skipped, handler is not re-run.
+      vi.setSystemTime(Date.now() + 20);
+      await app.drain();
+      expect(attempts).toBe(1);
 
-    // After the due-time: the wake redelivers, the handler succeeds, acked.
-    await vi.waitFor(() => {
-      expect(attempts).toBe(2);
-      expect(acked).toContain("d1");
-    });
+      // After the due-time: the wake redelivers, the handler succeeds, acked.
+      vi.setSystemTime(until + 1);
+      await vi.waitFor(() => {
+        expect(attempts).toBe(2);
+        expect(acked).toContain("d1");
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("keeps the wake for other parked streams when a woken drain claims nothing", async () => {
@@ -494,7 +501,7 @@ describe("defer outcome (integration)", () => {
       .withState(counter)
       .on("ticked")
       .defer((e) => ({
-        at: new Date(e.created.getTime() + (e.stream === "w1" ? 60 : 250)),
+        at: new Date(e.created.getTime() + (e.stream === "w1" ? 250 : 1000)),
       }))
       .do(async function remind(e) {
         ran.push(e.stream);
@@ -502,10 +509,10 @@ describe("defer outcome (integration)", () => {
       .to((e) => ({ target: `remind-${e.stream}` }))
       .build({
         autoSettle: false,
-        circuitBreaker: { failureThreshold: 1, cooldownMs: 120 },
+        circuitBreaker: { failureThreshold: 1, cooldownMs: 500 },
       });
     app.on("error", () => {});
-    await app.do("tick", { stream: "w1", actor }, {});
+    const [committed] = await app.do("tick", { stream: "w1", actor }, {});
     await app.do("tick", { stream: "w2", actor }, {});
     await app.correlate();
     await app.drain(); // both parked
@@ -513,10 +520,11 @@ describe("defer outcome (integration)", () => {
     // One failed claim opens the breaker (threshold 1).
     vi.spyOn(store(), "claim").mockRejectedValueOnce(new StoreError("claim"));
     await app.drain();
-    await sleep(100); // w1's wake fired while open
+    // w1's wake fires at +250ms while the breaker is open (until ~+500ms)
+    await sleep(committed.event!.created.getTime() + 300 - Date.now());
     expect(ran).toEqual([]);
     await vi.waitFor(() => expect(ran).toEqual(["w1", "w2"]), {
-      timeout: 1000,
+      timeout: 3000,
     });
   });
 

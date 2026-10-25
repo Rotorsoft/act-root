@@ -25,12 +25,10 @@ import type {
   AutoclosePolicy,
   AutoclosePredicate,
   Committed,
-  GivenHandlers,
   Invariant,
   PassthroughPatchHandler,
   PatchHandlers,
   Precondition,
-  RequiresHandlers,
   Schema,
   Schemas,
   Snapshot,
@@ -121,7 +119,7 @@ export function state<TName extends string, TState extends Schema>(
             message: (validated) => validated,
           };
 
-          // eslint-disable-next-line @typescript-eslint/no-empty-object-type -- {} avoids string index signature
+          // `{}` avoids the string index signature `Record<string, never>` would add
           const builder = action_builder<TState, TEvents, {}, TName>(internal);
 
           return Object.assign(builder, {
@@ -180,19 +178,12 @@ function action_builder<
       }
 
       function given(rules: Invariant<TState>[]) {
-        internal.given ??= {} as GivenHandlers<TState, Schemas>;
-        (internal.given as Record<string, Invariant<TState>[]>)[action] = rules;
+        ((internal.given ??= {}) as Record<string, unknown>)[action] = rules;
         return { requires, emit };
       }
 
       function requires(rules: Precondition<TState, TNewActions>[]) {
-        internal.requires ??= {} as RequiresHandlers<TState, Schemas>;
-        (
-          internal.requires as Record<
-            string,
-            Precondition<TState, TNewActions>[]
-          >
-        )[action] = rules;
+        ((internal.requires ??= {}) as Record<string, unknown>)[action] = rules;
         return { emit };
       }
 

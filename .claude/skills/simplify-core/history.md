@@ -8,24 +8,24 @@ Least recently run goes next. A lens with no accepted proposal in its last three
 
 | lens | last run | runs | accepted | status |
 |---|---|---|---|---|
-| Public surface | 2026-10-23 | 6 | 1 | active (no new surface; two `@internal` tags left on published exports, which the API reference hides) |
-| Dead code (tool) | 2026-10-22 | 6 | 4 | active (`LruSet`, used only by its own spec; two act-pg bench scripts nothing cites) |
+| Public surface | 2026-10-23 | 6 | 2 | active (no new surface; two `@internal` tags left on published exports, which the API reference hides) |
+| Dead code (tool) | 2026-10-25 | 7 | 4 | active (48 dead `eslint-disable` comments from the pre-Biome era; 3 unused imports Biome only warns about) |
 | Hotspots (tool) | 2026-10-20 | 5 | 1 | retired 2026-10-20: two runs with no proposal; every branch in the hot functions (correlate, action, drain) is a separate rule |
 | File budget | 2026-10-23 | 7 | 1 | active (InMemoryStream's getters, −67 in the largest adapter file) |
-| Comment noise | 2026-10-22 | 6 | 4 | active (internal/ reached 30%: eight comments that contradict the code, essays; the cut takes it to 28.7%) |
-| Concepts and options | 2026-10-23 | 7 | 1 | active (found the filtered-correlate bug: a per-call filter moves the shared checkpoint) |
+| Comment noise | 2026-10-25 | 7 | 4 | active (#2115 copied a 21-line `emit` doc 3 times and a `requires` doc twice; two `@returns` went stale) |
+| Concepts and options | 2026-10-23 | 7 | 3 | active (found the filtered-correlate bug: a per-call filter moves the shared checkpoint) |
 | Core or decorator? | 2026-10-15 | 3 | 0 | retired 2026-10-15: three runs, findings only (PII, audit, breaker, lanes stay; priority is a major-version question) |
-| DRY across adapters and builders | 2026-10-22 | 6 | 5 | active (PostgresStore's pii codec and row copies, four receiver idempotency objects; found the generators' lost doc comments) |
+| DRY across adapters and builders | 2026-10-25 | 7 | 5 | active (ten SQL transaction scaffolds; the two rule layers written twice in every layer #2115 touched) |
 | Reading path | 2026-10-23 | 6 | 3 | active (13 runtime files, ~31 names; settle restates correlate's init and checkpoint) |
 | Newcomer test (quarterly) | 2026-10-17 | 2 | 0 | active (21 concepts, 3 imports; a package.json without name/version crashes) |
-| Tests by concept | 2026-10-22 | 6 | 8 | active (private reach-ins in audit, defer and lanes specs; schema dates repeated in two adapters) |
+| Tests by concept | 2026-10-25 | 7 | 8 | active (six time-budget tests red after one short stall; two tests that don't pin their names) |
 | Mutation evidence (monthly, CI) | never | 0 | 0 | retired: setup removed (#1805), see baselines below |
 | Packages earn their place | 2026-10-15 | 4 | 0 | retired 2026-10-15: four runs, no proposal (removal is ruled out; act-tck churn is the snapshot, now P2026-10-15p-1) |
-| Infra | 2026-10-23 | 7 | 1 | active (two report-only workflow steps, a services block written four times; a flake that failed master twice) |
-| One source of truth | 2026-10-23 | 7 | 5 | active (act-sse's status worded seven ways) |
-| Examples | 2026-10-23 | 6 | 2 | active (242 unchecked API snippets compiled by hand: the tRPC `actor`/ctx examples fail in 4 places; the settle scene's debounce is backwards) |
-| Process | 2026-10-23 | 6 | 7 | active (the stability snapshot changed in 25 of 49 commits, 1 with new surface) |
-| Feature interactions | 2026-10-22 | 6 | 9 | active (found the restore overlaps #2043 left) |
+| Infra | 2026-10-23 | 7 | 2 | active (two report-only workflow steps, a services block written four times; a flake that failed master twice) |
+| One source of truth | 2026-10-23 | 7 | 8 | active (act-sse's status worded seven ways) |
+| Examples | 2026-10-23 | 6 | 3 | active (242 unchecked API snippets compiled by hand: the tRPC `actor`/ctx examples fail in 4 places; the settle scene's debounce is backwards) |
+| Process | 2026-10-23 | 6 | 9 | active (the stability snapshot changed in 25 of 49 commits, 1 with new surface) |
+| Feature interactions | 2026-10-25 | 7 | 9 | active (partials sharing an action schema merge silently; #2106's correlate default) |
 
 ## Interaction register
 
@@ -61,7 +61,13 @@ Where two features meet, and why. The Feature interactions lens reads this first
 | restore, other workers on the store | another process keeps the correlation lease and scans from its old checkpoint: 10 of 20 restored events run (control, one worker: 20 of 20) | justified, documented | the `Store.restore` port doc says to restart other processes; the user docs don't yet (P2026-10-22-2) |
 | restore, drain in flight | the in-flight `ack` writes nothing into the restored store | harmless | InMemory probe 3 of 3; Postgres not probed |
 | correlate outcome, lane arming / settle progress | Act arms on `marked > 0` and settle counts `read` | resolved | #2084 (P2026-10-22f-2); `subscribed` stays only in `app.correlate()`'s public return |
-| explicit correlate filter, shared checkpoint | `app.correlate(query)` and `settle({ correlate })` pass every `Query` field to the scan, which then moves the one checkpoint every reaction shares past what the filter skipped | accidental, and a bug | P2026-10-23-1; goes when the scan reads only `limit`, as `start_correlations` already does |
+| explicit correlate filter, shared checkpoint | the scan reads only `limit` | resolved | #2106 (P2026-10-23-1) |
+| `app.correlate` default, a query without `limit` | the default `{ limit: 10 }` sits on the parameter, so `{}` or a leftover `{ stream }` reads the whole log while the JSDoc says 10 | accidental | P2026-10-25-2 |
+| `.given`/`.requires`/`on`, partial-state merge | `merge.ts` skips the duplicate-action check on schema identity, so two partials sharing one action schema merge silently: one partial's rules with the other's handler, by order | accidental, and a bug | P2026-10-25-1 (probed in the main loop); goes when the check keys on the handler |
+| `.requires`, per-action retry | the `ConcurrencyError` retry re-runs `load` and every rule | shared primitive | probed; no test pins it yet (P2026-10-25-5) |
+| `.requires`, sensitive fields | one actor-gated snapshot feeds `given`, `requires` and `.emit` | shared primitive | probed: both see `[REDACTED]` for another actor |
+| `.requires`, act-http errors | the class map gives 409 `INVARIANT`; only the message names the layer | shared primitive | `rule` is a constructor argument, not a field |
+| empty block/ack skipped (#2117), breaker / lifecycle | a pass that only blocks makes no ack call and emits no `acked`; `breaker.passed()` still runs | harmless | probed |
 
 ## Mutation baselines
 
@@ -103,6 +109,8 @@ Sound proposals that missed a run's cut. The next run ranks these before looking
 - `/pr` requires a "Coverage: 100%" line that restates CI. (2026-10-23 process)
 
 ## Self-changes
+
+- 2026-10-25: the Tests by concept lens names time-budget tests (a fixed sleep or pass count before an assertion; a "not yet" check inside a real-clock window) and how to prove one (an injected stall and a control). Three such tests flaked in two days and the sweep found six more. Two smells added: a test that waits a time budget instead of an outcome, and a feature added beside an existing one by copying its shape in every layer (#2115). learnings.md merges the debounce-racing entry into a general time-budget rule and gains the copied-layer and shared-value-dedup lessons.
 
 - 2026-10-23: the Examples lens names the diagram sources #2092 added (`docs/src/scenes/*.ts`, the Mermaid blocks) and the flow specs (`docs/flows/*.flow.json`): they describe timing and outcomes, nothing compiles them against the code, and the settle scene shipped with the debounce backwards and went stale again a day later (#2084). Two smells added: a timing word explained from its usual meaning instead of the scheduling code (the scene), and a per-call option that narrows a read on a path that advances shared state (P2026-10-23-1). learnings.md gains those two and the debounce-racing test (P2026-10-23-2).
 
@@ -643,3 +651,41 @@ Design findings, not proposed: act.ts holds seven concepts and can't reach 300 l
 Lens metrics: files over 300 code lines 9 (act.ts 802, in-memory-store 730, audit 566, event-sourcing 467, drain-cycle 458, close-cycle 450, types/builders 448, correlate-cycle 422, types/action 306); reading path 13 runtime files, ~33 names (+`_passes`, `_restoring`, the `correlate`→`_scan` split; −the `subscribed` reads); `@internal` on published exports 4 → 2; check:snippets 45 checked / 197 `no-check`, and 242 unchecked API snippets compiled by hand found one misuse (tRPC ctx, 3 sites + 1); master red from flakes in 7 days: 3.
 
 Tickets (user: "file them all"): #2097 (P2026-10-23-1), #2098 (-2), #2099 (-3), #2100 (-4), #2101 (s-1), #2102 (s-2), #2103 (s-3), #2104 (s-4), #2105 (s-5).
+
+### 2026-10-25 — full run (four specialists: dead code + comment noise, DRY across adapters and builders, tests by concept, feature interactions)
+
+| metric | 2026-10-23 | now | why |
+|---|---|---|---|
+| core lines (libs/act/src) | 17613 | 17798 | #2115 (`.requires`, +224 net), #2106, #2110, #2117 |
+| spec files / test lines | 215 / 59351 | 216 / 59838 | `preconditions.spec.ts`, type-check additions (#2115), refusal tests (#2121) |
+| CI workflows / lines | 5 / 825 | 5 / 740 | #2111 (report-only steps, one Postgres anchor, path filters); +13 for the bench `synchronous_commit` step (#2117) |
+| docs lines / CLAUDE.md | 9264 / 31 KB | 9317 / 27 KB | #2113 (−4 KB), #2115's preconditions docs |
+| everything else | | unchanged | 51 exports, 8 / 20 / 18 / 11, 9 files touching 5+ features, 9 files over 300 code lines, 29% / 14% comments, 0 ticket refs |
+
+Audit: 14 PRs since the last run: its nine tickets (#2106–#2114), the notify-bench fix with the empty block/ack skip (#2117), `.requires` (#2115, RFC 2086, new public surface, the assistant's), wolfdesk declaring every rule (#2121), and two flaky tests (#2107, #2119). Three flakes in two days (#2098, #2118, wolfdesk's `settle()` in #2121) shared one shape: a test that waits a fixed time or pass count instead of an outcome. #2115 added the second rule layer by copying the first in every layer it touched: the builder types (a 21-line `emit` doc three times, the `requires` doc twice, two `@returns` left stale), the check in `action()` (a second loop style), the builder writers and the CLI lookups. It also extended an older merge gap to `.requires` (P2026-10-25-1).
+
+Decisions on P2026-10-23*: all accepted and shipped. -1 → #2097 / #2106; -2 → #2098 / #2107; -3 → #2099 / #2108; -4 → #2100 / #2109; s-1 → #2101 / #2110; s-2 → #2102 / #2112; s-3 → #2103 / #2113; s-4 → #2104 / #2114; s-5 → #2105 / #2111.
+
+Promises kept: -1 +4/−5 source → +13/−9 (+63 tests); s-1 −3 → −3; s-2 net 0 → net 0 (one copy fewer); s-3 −4.1 KB → −4.0 KB; s-4 −1.4 KB → −7 lines; s-5 825 → ~680 → 727 at merge (later 740 with a bench step).
+
+Verified in the main loop before ranking: two partials declaring `bump` with one shared `ZodEmpty` schema build without error and run A's precondition with B's handler (control, distinct schemas: `Duplicate action`); `Act.correlate` defaults `{ limit: 10 }` on the parameter (act.ts), so `{}` reads with no limit while its JSDoc says 10; `types/builders.ts:472` and `:494` `@returns` omit `.requires`; feeding `holds` the raw payload instead of the validated one leaves `preconditions.spec` and wolfdesk green (29 tests); `backoff.spec.ts:481` sleeps 20 ms inside a 50 ms backoff window and then asserts no retry (a >30 ms stall fails it; the specialist probed six such tests with a stall and a control).
+
+Proposals (pending), ranked. Defects first (outside the cap):
+- P2026-10-25-1 (f-D1). Partial states that share one action schema merge silently. `merge.ts` skips the duplicate-action check when the schemas are identical ("the same partial re-registered via another slice"), but distinct partials sharing an exported schema or `ZodEmpty` match too; the spreads then pair one partial's `given`/`requires` with the other's handler, depending on order. Key the skip on the handler (`existing.on[name] === state.on[name]`): a re-registered partial carries the same handler, two partials never do. Simulated: the probe throws `Duplicate action "bump"`, libs/act and packages 3,913 green. Behavior: an app declaring one action in two partials with a shared schema now fails at build, as intended.
+- P2026-10-25-2 (f-D2). `app.correlate`'s default limit applies only when the argument is omitted; the assistant's #2106 JSDoc says "default 10" for every call. Code: default `{}` and `query.limit ?? 10`, so `{}` or a leftover filter reads 10, not the whole log (`correlate.spec.ts:228` pins `{}` as unbounded today and changes); or docs only. Recommended: the code fix.
+- P2026-10-25-3 (x-D1 + notes). Docs that contradict the code after #2115: `ActionBuilder.on`'s `@returns` ("`.given()` and `.emit()`"), `.given`'s ("`.emit()`"), the bare `.emit` doc ("Same two overloads as the post-`.given()` form"); wolfdesk.flow.json's state description says only "invariants". Fixed by s-1 where they overlap.
+- P2026-10-25-4 (t-D1). Six time-budget tests that go red after one short stall: `backoff.spec.ts:481/494` (20 ms sleep in a 50 ms window), `:432` (two windows 30 ms apart; its name describes a backoff map #1872 removed), `:170`, `defer.spec.ts:414` and `:488`, `scope.spec.ts:332` (a fixed 60 ms wait for a lane worker); `act.spec.ts:369` by reading. "Not yet" checks move a faked `Date` by hand, as backoff.spec's own no-backoff block does; result checks use `vi.waitFor`; the breaker test widens its cooldown.
+- P2026-10-25-5 (t-D2 + f findings). Tests that don't pin their names: `preconditions.spec` "passes the validated payload…" (the assistant's, #2115; row 87) checks only a description, so `holds(payload)` instead of `holds(validated)` passes; `correlate.spec.ts:1418` "stops a second worker … from scanning" asserts only `scans > 0`, so a worker refused the lease can scan (row 105's lanes test has the same gap). Add a schema-default payload assertion, scan-count assertions, and the retry × `.requires` probe as a test; drop TEST 31's redundant inline case in type-check.ts.
+Simplifications:
+- P2026-10-25s-1 (f-1 + d-1 + x-1). One module-local `ActionRules` type for what follows `.on()` and `.given()`, so `.requires` and `.emit` and their docs are declared once; fixes P2026-10-25-3's `@returns`. `types/builders.ts` 1,154 → 1,096 (−58 after Biome, simulated); the published d.ts changes shape only, no surface change. Keep the type above the `ActionBuilder` doc (the detachment learning) and check hover docs.
+- P2026-10-25s-2 (f-2 + x-3 + d-2). `action()` checks both layers with one loop style (`for … of me.given?.[action] ?? []`, the same for `requires`), and the builder writes both maps the same way (−18: event-sourcing.ts −9, state-builder.ts −9; simulated, 100%).
+- P2026-10-25s-3 (x-2). Delete 48 dead `eslint-disable` comments (ESLint left in May; 13 in `libs/*/src`) and the 3 unused imports Biome only warns about (`event-sourcing.ts` `Patch`, `ports.ts` `ExitCodes`, `test/sandbox.ts` `Cache`/`Store`) (−49).
+- P2026-10-25s-4 (d-3). One private `_tx(op, work)` per SQL adapter for the five claim/subscribe/ack/block/truncate scaffolds (−30; pg −21, sqlite −9); `commit`, `restore` and sqlite's `_update` keep their own error mapping. One owner for the rollback-and-wrap policy.
+- P2026-10-25s-5 (d-4). act-diagram's CLI `format.ts` and `markdown.ts` find an action with the same loop and inline type; one `find_action` (−16).
+- P2026-10-25s-6 (x-4, backlog P2026-10-23p-2). Workflow and Renovate comments cut to their why (~130 of 180 workflow comment lines; renovate.json's 17 ticket-history descriptions).
+
+Findings, not proposed: `InvariantError` keeps `rule` only in the message (a field would be new surface); knip lists unpublished `export` keywords on types `types/index.ts` doesn't re-export (`ReactionDo`, `BuilderBase`, `FoldFlush`, …) and act-diagram helpers outside its entry points (0 lines either way); 78 ticket references in non-core `libs/*/src` comments (act-http 49) for a future comment lens; the act-diagram printers label the two layers differently (CLI "requires", layout "guards", player "Preconditions"); the PG `ack`/`block` BEGIN/COMMIT around one UPDATE is a perf question for a real-adapter bench.
+
+Lens metrics: SQL transaction scaffolds 10 (→ 2 with s-4); #2115 twin copies across layers 5 sites (→ 0 if s-1, s-2, s-5 ship); time-budget tests red after a ≤100 ms stall: 6 probed, 1 by reading; contract-cited tests whose body doesn't pin their name: 1 (row 87), plus 1 uncited; interactions classified 12 (2 accidental, both defects; 8 shared primitive; 1 harmless; 1 none).
+
+Tickets (user: "do it"): #2123 (P2026-10-25-1), #2124 (-2), #2125 (-3), #2126 (-4), #2127 (-5), #2128 (s-1), #2129 (s-2), #2130 (s-3), #2131 (s-4), #2132 (s-5), #2133 (s-6).

@@ -980,8 +980,9 @@ export class Act<
    * the event), and marks their work so the next drain can claim it.
    *
    * @param query - Only `limit` is used: the most events the pass reads
-   *   (default 10). The scan always starts at the correlation checkpoint,
-   *   which every reaction shares, so filters and `after` are ignored.
+   *   (10 when the query has none; `0` reads everything). The scan always
+   *   starts at the correlation checkpoint, which every reaction shares, so
+   *   filters and `after` are ignored.
    * @returns The number of newly subscribed streams and the last scanned event id
    *
    * @example Manual correlation
@@ -992,9 +993,9 @@ export class Act<
    * @see {@link start_correlations} for automatic periodic correlation
    */
   async correlate(
-    query: Query = { limit: 10 }
+    query: Query = {}
   ): Promise<{ subscribed: number; last_id: number }> {
-    const pass = await this._correlate_pass(query);
+    const pass = await this._correlate_pass({ limit: query.limit ?? 10 });
     return {
       subscribed: pass.kind === "scanned" ? pass.subscribed : 0,
       last_id: pass.last_id,

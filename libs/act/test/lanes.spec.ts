@@ -258,7 +258,6 @@ describe("lanes", () => {
     // lane name fails compile — runtime never sees it. The @ts-expect-error
     // markers below are the live assertion: they fail to compile if the
     // narrowing breaks.
-    /* eslint-disable @typescript-eslint/no-unused-expressions */
     () =>
       slice<typeof Counter>()
         .withState(Counter)
@@ -429,7 +428,6 @@ describe("lanes", () => {
     // Dynamic resolvers thread the same TLanes generic — the function's
     // return shape is `Resolved<TLanes> | undefined`, so an undeclared
     // lane fails compile. The @ts-expect-error below is the live assertion.
-    /* eslint-disable @typescript-eslint/no-unused-expressions */
     () =>
       slice<typeof Counter>()
         .withState(Counter)

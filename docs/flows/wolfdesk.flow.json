@@ -295,7 +295,7 @@
       "label": "Ticket",
       "note": "TicketCreation + TicketOperations + TicketMessaging, merged at build",
       "file": "packages/wolfdesk/src/ticket.ts",
-      "description": "One Ticket state assembled from three partial states. Each action loads it from the stream (cache or snapshot plus events), checks its invariants against it, and commits events that patch it. Optimistic concurrency on the stream version."
+      "description": "One Ticket state assembled from three partial states. Each action loads it from the stream (cache or snapshot plus events), checks its invariants and preconditions against it, and commits events that patch it. Optimistic concurrency on the stream version."
     },
     {
       "id": "proj:tickets",

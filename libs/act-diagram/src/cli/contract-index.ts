@@ -9,7 +9,7 @@
  * in CLAUDE.md and ACT-403: an event `Foo` is deprecated when any
  * `Foo_v<n>` with a higher version exists.
  */
-import type { DomainModel } from "../client/types/index.js";
+import type { ActionNode, DomainModel } from "../client/types/index.js";
 
 export type Kind =
   | "event"
@@ -208,6 +208,20 @@ export const CATEGORY_KEYWORDS: Record<string, Kind> = {
 };
 
 /** Return every entry of a given kind, sorted by name. */
+/** The action named `name`, on the state named `qualifier` when given. */
+export function find_action(
+  model: DomainModel,
+  name: string,
+  qualifier?: string
+): { action?: ActionNode; state_file?: string } {
+  for (const st of model.states) {
+    if (qualifier && st.name !== qualifier) continue;
+    const action = st.actions.find((x) => x.name === name);
+    if (action) return { action, state_file: st.file };
+  }
+  return {};
+}
+
 export function list_by_kind(idx: ContractIndex, kind: Kind): IndexEntry[] {
   return idx.entries
     .filter((e) => e.kind === kind)

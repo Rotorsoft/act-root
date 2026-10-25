@@ -19,8 +19,6 @@ import type {
 import { reaction_on, register_lane } from "./builder-utils.js";
 import { register_state } from "./merge.js";
 
-/* eslint-disable @typescript-eslint/no-empty-object-type -- {} used as generic defaults */
-
 /**
  * Creates a new slice builder for composing partial states with scoped reactions.
  *
