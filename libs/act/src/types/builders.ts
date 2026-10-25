@@ -423,6 +423,80 @@ type ActionEmit<
 };
 
 /**
+ * What follows `.on(...)` or `.given(...)`: the preconditions, then the
+ * `.emit(...)` that finishes the action.
+ */
+type ActionRules<
+  TState extends Schema,
+  TEvents extends Schemas,
+  TActions extends Schemas,
+  TName extends string,
+  TSnap extends boolean,
+  TKey extends string,
+  TNewActions extends Schema,
+> = {
+  /**
+   * Adds named preconditions the action requires: rules that read the
+   * action's payload as well as the state.
+   *
+   * They're checked after the invariants in `.given()`, in declaration
+   * order, before the handler runs. Each pairs a `description` with a
+   * `holds(payload, state, actor?)` predicate; the first that returns
+   * `false` refuses the action with `InvariantError` carrying its
+   * description. Rules that read only the state and the actor belong in
+   * `.given()`, where every action can reuse them.
+   *
+   * @param rules - Array of {@link Precondition} objects (`{ description, holds }`)
+   * @returns An object with `.emit()` to finalize the action
+   *
+   * @example
+   * ```typescript
+   * .requires([
+   *   { description: "Must own the territory", holds: (p, s, actor) => s.owners[p.from] === actor?.id },
+   * ])
+   * ```
+   */
+  requires: (rules: Precondition<TState, TNewActions>[]) => {
+    /**
+     * Defines the action handler that emits events, as `.emit()` after
+     * `.on()` does: a handler returning one or more events, or an event
+     * name to pass the payload through as the event data.
+     */
+    emit: ActionEmit<
+      TState,
+      TEvents,
+      TActions,
+      TName,
+      TSnap,
+      TKey,
+      TNewActions
+    >;
+  };
+  /**
+   * Defines the action handler that emits events.
+   *
+   * The handler receives the action payload and current state snapshot,
+   * and must return one or more events to emit. Events are applied to state
+   * via the patch handlers defined earlier.
+   *
+   * Pass a string event name for passthrough: the action payload becomes
+   * the event data directly.
+   *
+   * @param handler - Function that returns events to emit, or event name string for passthrough
+   * @returns The ActionBuilder for chaining more actions
+   *
+   * @example Custom handler
+   * ```typescript
+   * .emit((action, snapshot) => {
+   *   const newBalance = snapshot.state.balance + action.amount;
+   *   return ["Deposited", { amount: action.amount, newBalance }];
+   * })
+   * ```
+   */
+  emit: ActionEmit<TState, TEvents, TActions, TName, TSnap, TKey, TNewActions>;
+};
+
+/**
  * Builder interface for defining actions (commands) on a state.
  *
  * Actions represent user/system intents to modify state. Each action is validated
@@ -469,7 +543,7 @@ export type ActionBuilder<
    * @param entry - Single-key record `{ ActionName: schema }`
    * @param options - Optional per-action retry policy
    *   ({@link ActionOptions}).
-   * @returns An object with `.given()` and `.emit()` for further configuration
+   * @returns An object with `.given()`, `.requires()` and `.emit()` for further configuration
    *
    * @example Simple action without invariants
    * ```typescript
@@ -480,7 +554,15 @@ export type ActionBuilder<
   on: <TKey extends string, TNewActions extends Schema>(
     entry: ActionEntry<TKey, TNewActions>,
     options?: ActionOptions
-  ) => {
+  ) => ActionRules<
+    TState,
+    TEvents,
+    TActions,
+    TName,
+    TSnap,
+    TKey,
+    TNewActions
+  > & {
     /**
      * Adds business rule invariants that must hold before the action can execute.
      *
@@ -491,7 +573,7 @@ export type ActionBuilder<
      * the action to succeed.
      *
      * @param rules - Array of {@link Invariant} objects (`{ description, valid }`)
-     * @returns An object with `.emit()` to finalize the action
+     * @returns An object with `.requires()` and `.emit()` to finish the action
      *
      * @example
      * ```typescript
@@ -501,165 +583,9 @@ export type ActionBuilder<
      * ])
      * ```
      */
-    given: (rules: Invariant<TState>[]) => {
-      /**
-       * Adds named preconditions the action requires: rules that read the
-       * action's payload as well as the state.
-       *
-       * They're checked after the invariants in `.given()`, in declaration
-       * order, before the handler runs. Each pairs a `description` with a
-       * `holds(payload, state, actor?)` predicate; the first that returns
-       * `false` refuses the action with `InvariantError` carrying its
-       * description. Rules that read only the state and the actor belong in
-       * `.given()`, where every action can reuse them.
-       *
-       * @param rules - Array of {@link Precondition} objects (`{ description, holds }`)
-       * @returns An object with `.emit()` to finalize the action
-       *
-       * @example
-       * ```typescript
-       * .requires([
-       *   { description: "Must own the territory", holds: (p, s, actor) => s.owners[p.from] === actor?.id },
-       * ])
-       * ```
-       */
-      requires: (rules: Precondition<TState, TNewActions>[]) => {
-        /**
-         * Defines the action handler that emits events.
-         *
-         * The handler receives the action payload and current state snapshot,
-         * and must return one or more events to emit. Events are applied to state
-         * via the patch handlers defined earlier.
-         *
-         * Pass a string event name for passthrough: the action payload becomes
-         * the event data directly.
-         *
-         * @param handler - Function that returns events to emit, or event name string for passthrough
-         * @returns The ActionBuilder for chaining more actions
-         *
-         * @example Custom handler
-         * ```typescript
-         * .emit((action, snapshot) => {
-         *   const newBalance = snapshot.state.balance + action.amount;
-         *   return ["Deposited", { amount: action.amount, newBalance }];
-         * })
-         * ```
-         */
-        emit: ActionEmit<
-          TState,
-          TEvents,
-          TActions,
-          TName,
-          TSnap,
-          TKey,
-          TNewActions
-        >;
-      };
-      /**
-       * Defines the action handler that emits events.
-       *
-       * The handler receives the action payload and current state snapshot,
-       * and must return one or more events to emit. Events are applied to state
-       * via the patch handlers defined earlier.
-       *
-       * Pass a string event name for passthrough: the action payload becomes
-       * the event data directly.
-       *
-       * @param handler - Function that returns events to emit, or event name string for passthrough
-       * @returns The ActionBuilder for chaining more actions
-       *
-       * @example Custom handler
-       * ```typescript
-       * .emit((action, snapshot) => {
-       *   const newBalance = snapshot.state.balance + action.amount;
-       *   return ["Deposited", { amount: action.amount, newBalance }];
-       * })
-       * ```
-       */
-      emit: ActionEmit<
-        TState,
-        TEvents,
-        TActions,
-        TName,
-        TSnap,
-        TKey,
-        TNewActions
-      >;
-    };
-    /**
-     * Adds named preconditions the action requires: rules that read the
-     * action's payload as well as the state.
-     *
-     * They're checked after the invariants in `.given()`, in declaration
-     * order, before the handler runs. Each pairs a `description` with a
-     * `holds(payload, state, actor?)` predicate; the first that returns
-     * `false` refuses the action with `InvariantError` carrying its
-     * description. Rules that read only the state and the actor belong in
-     * `.given()`, where every action can reuse them.
-     *
-     * @param rules - Array of {@link Precondition} objects (`{ description, holds }`)
-     * @returns An object with `.emit()` to finalize the action
-     *
-     * @example
-     * ```typescript
-     * .requires([
-     *   { description: "Must own the territory", holds: (p, s, actor) => s.owners[p.from] === actor?.id },
-     * ])
-     * ```
-     */
-    requires: (rules: Precondition<TState, TNewActions>[]) => {
-      /**
-       * Defines the action handler that emits events.
-       *
-       * The handler receives the action payload and current state snapshot,
-       * and must return one or more events to emit. Events are applied to state
-       * via the patch handlers defined earlier.
-       *
-       * Pass a string event name for passthrough: the action payload becomes
-       * the event data directly.
-       *
-       * @param handler - Function that returns events to emit, or event name string for passthrough
-       * @returns The ActionBuilder for chaining more actions
-       *
-       * @example Custom handler
-       * ```typescript
-       * .emit((action, snapshot) => {
-       *   const newBalance = snapshot.state.balance + action.amount;
-       *   return ["Deposited", { amount: action.amount, newBalance }];
-       * })
-       * ```
-       */
-      emit: ActionEmit<
-        TState,
-        TEvents,
-        TActions,
-        TName,
-        TSnap,
-        TKey,
-        TNewActions
-      >;
-    };
-    /**
-     * Defines the action handler that emits events. Same two overloads as
-     * the post-`.given()` form above:
-     *
-     * - **Function** — receives `(action, snapshot)` and returns one or
-     *   more `[EventName, data]` tuples (or `undefined`).
-     * - **String** — passthrough: the action payload becomes the event
-     *   data directly. Must reference an event declared in `.emits()`.
-     *
-     * The two overloads are kept separate (rather than merged into a
-     * `handler | string` union) so that TS contextual typing of the
-     * function alternative isn't degraded by considering the string
-     * branch — under the union form `TState` could collapse to its
-     * `Schema` constraint inside the callback.
-     *
-     * @example Passthrough (action payload = event data)
-     * ```typescript
-     * .emit("Incremented")
-     * ```
-     */
-    emit: ActionEmit<
+    given: (
+      rules: Invariant<TState>[]
+    ) => ActionRules<
       TState,
       TEvents,
       TActions,
