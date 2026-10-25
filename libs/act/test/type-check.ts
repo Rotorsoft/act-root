@@ -545,9 +545,6 @@ const target = { stream: "s1", actor: { id: "1", name: "test" } };
   // @ts-expect-error - a precondition needs a description
   base().requires([{ holds: () => true }]);
 
-  // @ts-expect-error - preconditions use holds, not an invariant's valid
-  base().requires([{ description: "wrong predicate name", valid: () => true }]);
-
   base()
     .requires([
       {

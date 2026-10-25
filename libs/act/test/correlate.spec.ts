@@ -1422,15 +1422,23 @@ describe("correlate: the lease", () => {
       const b = build(store);
       await a.do("bump", { stream: "s1", actor }, {});
 
-      // Both settle, but only one may scan. The other returns without reading
-      // the store, which is the entire point.
-      const scans: number[] = [];
+      const settled = (app: ReturnType<typeof build>) =>
+        new Promise<void>((resolve) => {
+          app.on("settled", () => resolve());
+          app.settle({ debounceMs: 0 });
+        });
+
+      // `a` alone: its scans are the baseline.
       const spy = vi.spyOn(store, "query");
-      a.settle({ debounceMs: 0 });
-      b.settle({ debounceMs: 0 });
-      await new Promise((r) => setTimeout(r, 150));
-      scans.push(spy.mock.calls.length);
-      expect(scans[0]).toBeGreaterThan(0);
+      await settled(a);
+      const alone = spy.mock.calls.length;
+      expect(alone).toBeGreaterThan(0);
+
+      // `b` settles while `a` holds the lease: refused, it reads nothing.
+      await a.do("bump", { stream: "s1", actor }, {});
+      spy.mockClear();
+      await settled(b);
+      expect(spy).not.toHaveBeenCalled();
 
       await a.shutdown();
       await b.shutdown();
