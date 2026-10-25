@@ -32,16 +32,17 @@ const Calculator = state({ Calculator: State })
 
 ### Multiple Event Types from One Action
 
-A single `PressKey` action emits different events based on the key pressed. Note the `=` branch reads `snapshot.state.operator` and throws if there's nothing to compute — invariants run before the emit handler, but action-side preconditions on dynamic state can also be enforced inside `.emit()`:
+A single `PressKey` action emits different events based on the key pressed. Pressing `=` with nothing to compute is refused by a precondition: a rule that reads the action's payload (the key) as well as the state, declared with `.requires(...)` and checked before the handler runs:
 
 ```typescript no-check
 .on({ PressKey: z.object({ key: z.enum(KEYS) }) })
-  .emit(({ key }, { state }) => {
+  .requires([{
+    description: "Equals needs an operator",
+    holds: ({ key }, state) => key !== "=" || !!state.operator,
+  }])
+  .emit(({ key }) => {
     if (key === ".") return ["DotPressed", {}];
-    if (key === "=") {
-      if (!state.operator) throw Error("no operator");
-      return [["EqualsPressed", {}]]; // an array of tuples = multi-event commit
-    }
+    if (key === "=") return [["EqualsPressed", {}]]; // an array of tuples = multi-event commit
     return DIGITS.includes(key)
       ? ["DigitPressed", { digit: key }]
       : ["OperatorPressed", { operator: key }];
@@ -68,7 +69,7 @@ Each event type has its own reducer logic:
 
 ### Invariants
 
-The `Clear` action enforces that the calculator has state to clear:
+The `Clear` action enforces that the calculator has state to clear. That rule reads only the state, so it's an invariant, declared with `.given(...)`:
 
 ```typescript no-check
 .on({ Clear: ZodEmpty })

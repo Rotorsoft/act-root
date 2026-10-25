@@ -115,12 +115,16 @@ const Calculator = state({ Calculator: State })
     }),
   })
   .on({ PressKey: Actions.PressKey })
-  .emit(({ key }, { state }) => {
+  // A precondition: the rule reads the key the action carries, not just the state.
+  .requires([
+    {
+      description: "Equals needs an operator",
+      holds: ({ key }, state) => key !== "=" || !!state.operator,
+    },
+  ])
+  .emit(({ key }) => {
     if (key === ".") return ["DotPressed", {}];
-    if (key === "=") {
-      if (!state.operator) throw Error("no operator");
-      return [["EqualsPressed", {}]]; // can return multiple events!
-    }
+    if (key === "=") return [["EqualsPressed", {}]]; // can return multiple events!
     return DIGITS.includes(key as Digits)
       ? ["DigitPressed", { digit: key as Digits }]
       : ["OperatorPressed", { operator: key as Operators }];
