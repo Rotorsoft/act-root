@@ -190,8 +190,11 @@ function merge_into_existing(
 ): void {
   // 1. Validate no cross-state collisions for actions/events
   for (const name of Object.keys(state.actions)) {
-    // Same schema reference means the same partial re-registered via another slice
-    if (existing.actions[name] === state.actions[name]) continue;
+    // The same handler means the same partial re-registered via another
+    // slice. A shared schema doesn't: two partials can declare one action
+    // with one exported schema, and merging them would pair one partial's
+    // rules with the other's handler.
+    if (existing.on[name] === state.on[name]) continue;
     if (actions[name]) throw new Error(`Duplicate action "${name}"`);
   }
   for (const name of Object.keys(state.events)) {
