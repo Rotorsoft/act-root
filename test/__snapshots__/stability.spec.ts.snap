@@ -13704,6 +13704,8 @@ export declare class PostgresStore implements Store {
     private _decode_pii;
     /** A saturated pool fails here as a {@link StoreError} naming the operation. */
     private _client;
+    /** One transaction: any failure rolls back and throws a {@link StoreError} naming the operation. */
+    private _tx;
     dispose(): Promise<void>;
     /**
      * Cancels any reconnect, forgets the handler, UNLISTENs and destroys the
@@ -14010,6 +14012,8 @@ export declare class SqliteStore implements Store {
     private _parse_pii_from_read;
     seed(): Promise<void>;
     drop(): Promise<void>;
+    /** One write transaction: any failure rolls back and throws a {@link StoreError} naming the operation. */
+    private _tx;
     dispose(): Promise<void>;
     commit<E extends Schemas>(stream: string, msgs: Message<E, keyof E>[], meta: EventMeta, expectedVersion?: number): Promise<Committed<E, keyof E>[]>;
     query<E extends Schemas>(callback: (event: Committed<E, keyof E>) => void, query?: Query): Promise<number>;

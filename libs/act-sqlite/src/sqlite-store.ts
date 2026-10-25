@@ -1,4 +1,4 @@
-import { type Client, createClient } from "@libsql/client";
+import { type Client, createClient, type Transaction } from "@libsql/client";
 import type {
   BlockedLease,
   Committed,
@@ -554,6 +554,22 @@ export class SqliteStore implements Store {
     await this.client.execute("DROP TABLE IF EXISTS correlated");
   }
 
+  /** One write transaction: any failure rolls back and throws a {@link StoreError} naming the operation. */
+  private async _tx<T>(
+    operation: string,
+    work: (tx: Transaction) => Promise<T>
+  ): Promise<T> {
+    const tx = await this.client.transaction("write");
+    try {
+      const result = await work(tx);
+      await tx.commit();
+      return result;
+    } catch (e) {
+      await tx.rollback();
+      throw new StoreError(operation, { cause: e });
+    }
+  }
+
   async dispose() {
     await Promise.resolve();
     this.client.close();
@@ -753,8 +769,7 @@ export class SqliteStore implements Store {
       if (source !== undefined && !is_literal_source(source))
         streamPatternToGlob(source);
     }
-    const tx = await this.client.transaction("write");
-    try {
+    return this._tx("subscribe", async (tx) => {
       let subscribed = 0;
       for (const {
         stream,
@@ -869,7 +884,6 @@ export class SqliteStore implements Store {
         sql: "SELECT at FROM correlated WHERE key = ?",
         args: [correlator?.key ?? ""],
       });
-      await tx.commit();
       return {
         subscribed,
         watermark: Number(wm.rows[0].w),
@@ -880,10 +894,7 @@ export class SqliteStore implements Store {
         correlated_at: Number(cp.rows[0].at),
         ...(correlating === undefined ? {} : { correlating }),
       };
-    } catch (e) {
-      await tx.rollback();
-      throw new StoreError("subscribe", { cause: e });
-    }
+    });
   }
 
   // --- claim: write transaction. Single-writer: concurrent claims from
@@ -896,8 +907,7 @@ export class SqliteStore implements Store {
     millis: number,
     lane?: string
   ) {
-    const tx = await this.client.transaction("write");
-    try {
+    return this._tx("claim", async (tx) => {
       const now = new Date().toISOString();
 
       const lane_clause = lane !== undefined ? " AND lane = ?" : "";
@@ -1003,18 +1013,13 @@ export class SqliteStore implements Store {
         });
       }
 
-      await tx.commit();
       return leases;
-    } catch (e) {
-      await tx.rollback();
-      throw new StoreError("claim", { cause: e });
-    }
+    });
   }
 
   // --- ack: transaction + ownership check (= PG WHERE leased_by) ---
   async ack(leases: Lease[]) {
-    const tx = await this.client.transaction("write");
-    try {
+    return this._tx("ack", async (tx) => {
       // The whole batch finalizes in one transaction, so acks and defer
       // schedules land all-or-nothing per the Store.ack contract. Every
       // entry advances the watermark to its `at` (the last event handled
@@ -1059,18 +1064,13 @@ export class SqliteStore implements Store {
           });
         }
       }
-      await tx.commit();
       return result;
-    } catch (e) {
-      await tx.rollback();
-      throw new StoreError("ack", { cause: e });
-    }
+    });
   }
 
   // --- block: transaction + ownership + idempotent (= PG) ---
   async block(leases: BlockedLease[]) {
-    const tx = await this.client.transaction("write");
-    try {
+    return this._tx("block", async (tx) => {
       const result: BlockedLease[] = [];
       for (const l of leases) {
         const r = await tx.execute({
@@ -1101,12 +1101,8 @@ export class SqliteStore implements Store {
           });
         }
       }
-      await tx.commit();
       return result;
-    } catch (e) {
-      await tx.rollback();
-      throw new StoreError("block", { cause: e });
-    }
+    });
   }
 
   // --- defer: hold streams out of claim until deferred_at ---
@@ -1586,8 +1582,7 @@ export class SqliteStore implements Store {
       }
     >();
 
-    const tx = await this.client.transaction("write");
-    try {
+    await this._tx("truncate", async (tx) => {
       for (const { stream, before, max_id } of targets) {
         if (before === undefined) continue;
         // Closest safe boundary: latest snapshot older than the cutoff
@@ -1661,11 +1656,7 @@ export class SqliteStore implements Store {
           },
         });
       }
-      await tx.commit();
-    } catch (e) {
-      await tx.rollback();
-      throw new StoreError("truncate", { cause: e });
-    }
+    });
 
     return result;
   }
