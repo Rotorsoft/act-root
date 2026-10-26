@@ -1,7 +1,7 @@
 {
   "name": "@rotorsoft/act-pino",
   "type": "module",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "description": "Pino logger adapter for @rotorsoft/act",
   "keywords": [
     "typescript",

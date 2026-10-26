@@ -1,3 +1,10 @@
+# [@rotorsoft/act-pino-v1.0.8](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-pino-v1.0.7...@rotorsoft/act-pino-v1.0.8) (2026-10-26)
+
+
+### Bug Fixes
+
+* **deps:** update non-major dependencies ([#2148](https://github.com/Rotorsoft/act-root/issues/2148)) ([29b98cf](https://github.com/Rotorsoft/act-root/commit/29b98cfb7b4363073f94d2511100dc8592790006))
+
 # [@rotorsoft/act-pino-v1.0.7](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-pino-v1.0.6...@rotorsoft/act-pino-v1.0.7) (2026-10-02)
 
 
