@@ -1,3 +1,10 @@
+# [@rotorsoft/act-crypto-v0.1.9](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-crypto-v0.1.8...@rotorsoft/act-crypto-v0.1.9) (2026-10-26)
+
+
+### Bug Fixes
+
+* **deps:** update non-major dependencies ([#2148](https://github.com/Rotorsoft/act-root/issues/2148)) ([29b98cf](https://github.com/Rotorsoft/act-root/commit/29b98cfb7b4363073f94d2511100dc8592790006))
+
 # [@rotorsoft/act-crypto-v0.1.8](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-crypto-v0.1.7...@rotorsoft/act-crypto-v0.1.8) (2026-10-02)
 
 
