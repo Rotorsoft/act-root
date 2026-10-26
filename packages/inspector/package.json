@@ -28,7 +28,7 @@
     "@trpc/server": "11.19.0",
     "cors": "^2.8.6",
     "d3-scale": "^4.0.2",
-    "lucide-react": "^1.55.0",
+    "lucide-react": "^1.61.0",
     "pg": "^8.23.1",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
