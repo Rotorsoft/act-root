@@ -1,6 +1,5 @@
 # RFC 1238: validateFoldedState — opt-in state-schema validation after each reduction
 
-- **Status:** accepted
 - **Issue:** #1238
 - **Author:** Roger Torres
 - **Created:** 2026-07-11

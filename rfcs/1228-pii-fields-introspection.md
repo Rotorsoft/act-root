@@ -1,6 +1,5 @@
 # RFC 1228: export `pii_fields` for adapter-side sensitivity introspection
 
-- **Status:** accepted
 - **Issue:** #1228
 - **Author:** Claude Fable 5
 - **Created:** 2026-07-11

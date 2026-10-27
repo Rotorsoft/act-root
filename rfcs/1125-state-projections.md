@@ -1,7 +1,6 @@
 # RFC 1125 — State projections: fold in memory, flush one upsert per stream
 
 - **Issue:** [#1125](https://github.com/Rotorsoft/act-root/issues/1125)
-- **Status:** accepted
 
 ## Motivation
 

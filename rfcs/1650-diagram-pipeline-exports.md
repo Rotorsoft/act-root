@@ -1,6 +1,5 @@
 # RFC 1650: act-diagram pipeline exports
 
-- **Status:** draft
 - **Issue:** #1650
 - **Author:** rotorsoft
 - **Created:** 2026-09-09

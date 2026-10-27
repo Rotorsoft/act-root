@@ -1,6 +1,5 @@
 # RFC 1487: the work mark on `StreamPosition`
 
-- **Status:** draft
 - **Issue:** #1487
 - **Author:** Rotorsoft
 - **Created:** 2026-08-16

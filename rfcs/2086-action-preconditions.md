@@ -1,6 +1,5 @@
 # RFC 2086: named preconditions with `.requires(...)`
 
-- **Status:** accepted
 - **Issue:** #2086
 - **Author:** Claude, for rotorsoft
 - **Created:** 2026-10-24

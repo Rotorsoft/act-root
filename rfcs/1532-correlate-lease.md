@@ -1,6 +1,5 @@
 # RFC 1532: lease the correlate checkpoint so one worker scans at a time
 
-- **Status:** draft
 - **Issue:** [#1532](https://github.com/Rotorsoft/act-root/issues/1532)
 - **Author:** Rotorsoft
 - **Created:** 2026-08-21

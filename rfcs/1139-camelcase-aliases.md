@@ -1,6 +1,5 @@
 # RFC 1139: camelCase aliases for snake_case sse public members
 
-- **Status:** accepted <!-- draft | accepted | rejected | superseded -->
 - **Issue:** #1139
 - **Author:** Claude (with Rotorsoft)
 - **Created:** 2026-07-05

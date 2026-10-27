@@ -1,6 +1,5 @@
 # RFC 1449: a subscription-side work set, and the store split it enables
 
-- **Status:** draft
 - **Issue:** #1449
 - **Author:** Rotorsoft
 - **Created:** 2026-08-10

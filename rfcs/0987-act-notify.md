@@ -1,7 +1,6 @@
 # RFC 0987 — act-notify: the hybrid notify-broker decorator
 
 - **Issue:** [#987](https://github.com/Rotorsoft/act-root/issues/987)
-- **Status:** accepted
 
 ## Motivation
 

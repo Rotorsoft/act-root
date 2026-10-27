@@ -1,8 +1,8 @@
 # RFCs
 
 [STABILITY.md](../STABILITY.md) is the contract for what semver protects, and the
-`runStabilityTck` snapshot in every package catches *changes* to that surface in a
-PR diff. Neither gates *additions*. A new export, builder method, port method, or
+stability snapshot (`test/stability.spec.ts`, run by `pnpm check:stability`) catches
+*changes* to that surface in a PR diff. Neither gates *additions*. A new export, builder method, port method, or
 lifecycle event ships the moment a PR merges — and from that moment it's covered by
 the charter and expensive to take back. This folder is the lightweight gate in
 front of that one-way door: before new public surface calcifies, write down why it
@@ -42,11 +42,11 @@ than reverse-engineer the intent later.
 1. Copy [`0000-template.md`](0000-template.md) to `rfcs/NNNN-<slug>.md`, where `NNNN`
    is the PR number (or the issue number if you open the RFC first). Fill in every section.
 2. Open the PR with the implementation, or RFC-first if you want design sign-off
-   before writing code. Either way, **the PR that adds the surface links the RFC**.
-3. The PR checklist (see [`.github/pull_request_template.md`](../.github/pull_request_template.md))
-   carries the one-line confirmation that surface-adding PRs include an RFC link.
-4. Mark the RFC `accepted` when the PR merges; `rejected` or `superseded` otherwise.
+   before writing code. Either way, **the PR that adds the surface links the RFC**
+   (`/pr` asks for the link).
+3. An RFC on master is accepted. One that is turned down says so in its title:
+   "(rejected)", or "(declined: …)" when the status quo stays.
 
-This complements, not replaces, the rest of the pre-handoff workflow in
-[CLAUDE.md](../CLAUDE.md) — the 100% coverage gate, the learnings entry, and the doc audit
-still apply.
+This complements, not replaces, the rest of the
+[pre-handoff workflow](../CONTRIBUTING.md#pre-handoff-workflow): the 100% coverage
+gate and the doc audit still apply.

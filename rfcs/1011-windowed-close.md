@@ -1,6 +1,5 @@
 # RFC 1011: close the books on a rolling window — prune history before a snapshot
 
-- **Status:** draft
 - **Issue:** #1011 (part of #1008)
 - **Author:** Roger Torres (with Claude)
 - **Created:** 2026-07-10

@@ -1,6 +1,5 @@
 # RFC 1193: two-phase commit for the receiver IdempotencyStore
 
-- **Status:** accepted
 - **Issue:** #1193
 - **Author:** Rotorsoft
 - **Created:** 2026-07-10

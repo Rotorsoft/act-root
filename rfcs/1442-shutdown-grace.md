@@ -1,6 +1,5 @@
 # RFC 1442: `shutdown({ graceMs })` — a bounded wait for in-flight drain cycles
 
-- **Status:** draft
 - **Issue:** #1442
 - **Author:** Rotorsoft
 - **Created:** 2026-08-12

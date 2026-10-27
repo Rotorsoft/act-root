@@ -1,6 +1,5 @@
 # RFC 1278: `Store.ack` advances the watermark and defers in one entry
 
-- **Status:** accepted
 - **Issue:** #1278
 - **Author:** Claude Opus 4.8
 - **Created:** 2026-07-18

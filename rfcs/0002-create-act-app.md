@@ -1,6 +1,5 @@
-# RFC 0002: create-act-app scaffolder
+# RFC 0002: create-act-app scaffolder (rejected)
 
-- **Status:** rejected <!-- draft | accepted | rejected | superseded -->
 - **Issue:** #1037
 - **Author:** rotorsoft
 - **Created:** 2026-06-27
