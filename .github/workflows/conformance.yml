@@ -132,13 +132,6 @@ jobs:
         if: always()
         run: cat stress-report.md >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Upload report artifact
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: stress-report
-          path: stress-report.md
-
   # Proves the engines floor (Node >=22.23.3) and 24 still pass; CI runs 26.
   node-compat:
     runs-on: ubuntu-latest
@@ -183,34 +176,14 @@ jobs:
       - run: pnpm build
       - name: act-pg perf gate
         run: |
-          set -o pipefail
           pnpm -F @rotorsoft/act-pg bench:run
-          pnpm -F @rotorsoft/act-pg bench:check 2>&1 | tee bench-pg.log
+          pnpm -F @rotorsoft/act-pg bench:check
       - name: act-sqlite perf gate
         # Runs even when the pg gate fails, so one breach doesn't hide the other.
         if: always()
         run: |
-          set -o pipefail
           pnpm -F @rotorsoft/act-sqlite bench:run
-          pnpm -F @rotorsoft/act-sqlite bench:check 2>&1 | tee bench-sqlite.log
-      - name: Append adapter perf results to step summary
-        if: always()
-        run: |
-          {
-            echo "## Adapter perf gate"
-            echo ""
-            echo "Real-adapter p50 regression budgets — act-pg 2.0×, act-sqlite"
-            echo "1.5×, both with a 1.0 ms absolute floor. A breach fails the job."
-            echo ""
-            echo "### act-pg"
-            echo '```'
-            sed -E $'s/\x1b\\[[0-9;]*m//g' bench-pg.log 2>/dev/null || echo "(no act-pg output)"
-            echo '```'
-            echo "### act-sqlite"
-            echo '```'
-            sed -E $'s/\x1b\\[[0-9;]*m//g' bench-sqlite.log 2>/dev/null || echo "(no act-sqlite output)"
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
+          pnpm -F @rotorsoft/act-sqlite bench:check
 
   # Scenario benchmarks, each with a built-in regression bound, on Postgres.
   scenarios:
@@ -237,32 +210,5 @@ jobs:
           psql -h localhost -p 5431 -U postgres -c "ALTER SYSTEM SET synchronous_commit = off"
           psql -h localhost -p 5431 -U postgres -c "SELECT pg_reload_conf()"
           psql -h localhost -p 5431 -U postgres -tc "SHOW synchronous_commit"
-      # The captured tables go to the step summary.
       - name: bench:scenarios
-        env:
-          # Node emits ANSI color even when piped; it garbles the summary.
-          NO_COLOR: "1"
-          FORCE_COLOR: "0"
-        run: |
-          set -o pipefail
-          pnpm bench:scenarios 2>&1 | tee bench-scenarios.log
-      - name: Append scenario bench results to step summary
-        if: always()
-        run: |
-          {
-            echo "## Scenario benchmark results"
-            echo ""
-            echo '```'
-            # Keep the `=== header ===` + console.table blocks; sed strips stray ANSI.
-            if grep -qE '=== .+ ===' bench-scenarios.log 2>/dev/null; then
-              awk '
-                /=== .+ ===/    { printing=1 }
-                printing        { print }
-                /└/ && printing { printing=0; print "" }
-              ' bench-scenarios.log \
-              | sed -E $'s/\x1b\\[[0-9;]*m//g'
-            else
-              tail -n 80 bench-scenarios.log
-            fi
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
+        run: pnpm bench:scenarios
