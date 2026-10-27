@@ -71,7 +71,7 @@ const broadcast = new BroadcastChannel<AppState>({
   cacheSize: 50, // LRU entries; default 50
   // Called when a subscriber callback throws. The frame still reaches every
   // other subscriber and the publish still returns — a bad consumer must not
-  // break the publisher. Defaults to the framework's log() port.
+  // break the publisher. Defaults to console.error.
   onSubscriberError: (error, streamId) => metrics.sseSubscriberError.inc(),
   // Called when overlay-contributed state is lost — overlay() finding no
   // cached baseline, or the LRU evicting an entry that carried overlay keys.
@@ -215,7 +215,7 @@ export const onStateChange = publicProcedure
 ### applyPatchMessage
 
 :::note Safe to import from a browser
-The `sse` subpath's client half — `applyPatchMessage`, `patch`, and the wire types — depends only on `@rotorsoft/act-patch`, which has no dependencies of its own. The server half (`BroadcastChannel`) reaches the framework through an `import()` whose path is a variable. A bundler can't follow that, so Node APIs such as `AsyncLocalStorage` stay out of a client bundle (a bundler does follow a literal `import("…")` into its own chunk, and the browser build fails there). CI enforces this with `pnpm check:browser-safe`, which walks the built subpath's imports, literal `import()` included, and fails on any Node builtin.
+The `sse` subpath's client half — `applyPatchMessage`, `patch`, and the wire types — depends only on `@rotorsoft/act-patch`, which has no dependencies of its own. The server half (`BroadcastChannel`) never imports the framework either; its default `onSubscriberError` logs to the console, so pass your logger there. That keeps Node APIs such as `AsyncLocalStorage` out of a client bundle. CI enforces this with `pnpm check:browser-safe`, which walks the built subpath's imports, dynamic `import()` included, and fails on any Node builtin.
 :::
 
 

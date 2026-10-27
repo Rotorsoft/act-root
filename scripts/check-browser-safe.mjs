@@ -18,8 +18,7 @@
  * packages into their own builds, and fails on any `node:` builtin or bare
  * Node module. It follows `import("literal")` too: a bundler builds that as a
  * separate chunk, and the build fails there even though the browser never
- * runs it. Server-only code is reached through an import whose path is a
- * variable, which a bundler can't follow.
+ * runs it.
  *
  * Runs against `dist/`, so `pnpm build` must come first.
  *
@@ -117,8 +116,8 @@ if (violations.length) {
   console.error("Browser-facing entry points must not import Node APIs:\n");
   for (const v of violations) console.error(`  ✗ ${v}\n`);
   console.error(
-    "Reach server-only code through import(path) with the path in a variable:\n" +
-      "a bundler can't follow it, so it stays out of the browser build.\n"
+    "Keep server-only code out of these entry points: a bundler follows every\n" +
+      "import, dynamic ones included, into the browser build.\n"
   );
   process.exit(1);
 }
