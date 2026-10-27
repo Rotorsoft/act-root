@@ -30,13 +30,7 @@ async function seed() {
     email: "admin", name: "Admin", provider: "local", providerId: "admin", passwordHash: adminHash,
   });
   await app.do("AssignRole", { stream: "admin", actor: system }, { role: "admin" });
-
-  // Drain reactions + projections
-  for (let i = 0; i < 3; i++) {
-    await app.correlate({ limit: 500 });
-    const { acked } = await app.drain({ streamLimit: 100, eventLimit: 500 });
-    if (acked.length === 0) break;
-  }
+  // Each commit settles its own reactions and projections.
 
   console.log("Seeded dev data");
   console.log("  Admin user: admin/admin");

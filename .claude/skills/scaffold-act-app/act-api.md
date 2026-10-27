@@ -332,47 +332,20 @@ Set `source` only when you want to genuinely scope drain to a *stable* stream pa
 
 **Rule:** a commit doesn't make work drainable; `correlate` does. In tests that walk the pipeline, build with `autoSettle: false` and call `await app.correlate(); await app.drain();` (a bare `drain()` finds nothing). In the app, commits settle their own reactions, so API mutations need no `settle()`; use `app.start_correlations()` only when other processes commit to a store without `notify`. See [testing](https://rotorsoft.github.io/act-root/docs/concepts/testing) and [correlation and drain](https://rotorsoft.github.io/act-root/docs/architecture/correlation-and-drain).
 
-## 8. Invariant Type
+## 8. Business Rules
 
 ```typescript
 type Invariant<S extends Schema> = {
   description: string;
   valid: (state: Readonly<S>, actor?: Actor) => boolean;
 };
-```
-
-**Usage:**
-```typescript
-import { type Invariant } from "@rotorsoft/act";
-
-// Type S with MINIMAL fields — contravariance allows assignment to subtypes
-export const mustBeOpen: Invariant<{ status: string }> = {
-  description: "Item must be open",
-  valid: (state) => state.status === "Open",
+type Precondition<S extends Schema, P> = {
+  description: string;
+  holds: (payload: Readonly<P>, state: Readonly<S>, actor?: Actor) => boolean;
 };
-
-// Use in state builder
-.on({ CloseItem })
-  .given([mustBeOpen])
-  .emit(...)
 ```
 
-The `valid` function returns `true` if the rule passes, `false` if violated. When violated, the framework throws an `InvariantError` with the `description`.
-
-**Preconditions** read the payload too: `type Precondition<S, P> = { description: string; holds: (payload: Readonly<P>, state: Readonly<S>, actor?: Actor) => boolean }`, declared with `.requires([...])` after `.given([...])`. Type `P` with only the fields the rule reads, so actions with those fields can share it. A failed precondition throws the same `InvariantError` (message "failed precondition").
-
-**Validation that depends on action data — throw inside `.emit()`.** Invariants only see `(state, actor)`, so they cannot validate rules that combine state with the incoming action payload (e.g., "contribution amount + current ≤ §415(c) cap", "invoice must have at least one entry", "rate must be > 0"). For these, throw inside the emit handler — the action aborts and no event is committed:
-
-```typescript
-.on({ AddContribution })
-.emit((data, { state }) => {
-  const newTotal = state.contributed + data.amount;
-  if (newTotal > state.annualCap) throw new Error(`Exceeds §415(c) cap of ${state.annualCap}`);
-  return ["ContributionAdded", data];
-})
-```
-
-This belongs in the aggregate (not the router/API layer) because the aggregate is the system of record. A router-level check is invisible to other callers (CLI, replays, internal `app.do()` calls) and lets bad events sneak in. Router-level throws are appropriate only for cross-aggregate constraints (need visibility into other streams), external-dependency prereqs (e.g. "no email address — can't send"), or admin-tool guards on destructive operations.
+`.given([...])` declares invariants (state and actor), and `.requires([...])` after it declares preconditions (they also read the payload). Both refuse with an `InvariantError` and commit nothing. Rules on the payload alone belong in the Zod schema. When to use which, typing `S` and `P` with only the fields a rule reads, and why rules live in the aggregate: [domain.md § Invariants](domain.md#invariants).
 
 ## 9. Emit Handler Signature
 

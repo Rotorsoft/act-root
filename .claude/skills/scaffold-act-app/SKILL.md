@@ -88,7 +88,7 @@ The state schema is the **accumulation of all event fields** for that aggregate:
 
 Translate spec scenarios directly into test cases:
 
-- **Given** (preconditions) → seed events via `app.do()` to set up state
+- **Given** (prior events) → seed events via `app.do()` to set up state
 - **When** (action) → dispatch the action under test via `app.do()`
 - **Then** (assertions) → assert emitted events, final state (`app.load()`), or expected errors (`rejects.toThrow()`)
 
