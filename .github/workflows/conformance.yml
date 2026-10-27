@@ -1,17 +1,9 @@
 name: Store Conformance Matrix
 
-# Weekly (and on demand): the Store TCK against every supported backend
-# version, the full suite on the older supported Node lines, the adapter
-# perf gates, the scenario benchmarks, plus the multi-process Postgres
-# stress harness. Catches
-# dialect-specific regressions (PG SKIP LOCKED behavior across majors,
-# libSQL release bumps) and lease/commit/drain races that single-process
-# tests cannot. ci-cd.yml already runs the full TCK against PG 18 and the
-# pinned libSQL on every PR, so this runs on a schedule rather than per PR.
-#
-# Informational, not required for branch protection. A red cell signals
-# "this version slipped" — author owns the call to revert, pin, or
-# document the loss of support.
+# Weekly: the Store TCK on every supported backend version, the older Node
+# lines, the perf gates, the scenario benches and the multi-process stress
+# harness. ci-cd.yml covers PG 18 and the pinned libSQL on every PR.
+# Informational: a red cell means a version slipped.
 
 on:
   schedule:
@@ -33,9 +25,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # PostgreSQL 13 went EOL 2025-11. 14 is the oldest still
-        # security-patched line. 18 is left out: `ci-cd.yml` already runs
-        # the full TCK against it.
+        # 14 is the oldest security-patched line; ci-cd.yml covers 18.
         pg: ["14", "15", "16", "17"]
     services:
       postgres:
@@ -59,22 +49,16 @@ jobs:
           node-version: 26.12.1
           cache: "pnpm"
       - run: pnpm install
-      # Run from the repo root, not `pnpm -F <pkg> exec vitest`: the root
-      # vite config aliases `@rotorsoft/*` to each package's SOURCE, and
-      # these jobs never build. From inside a package that alias is not
-      # applied, so vitest falls back to act-tck's `exports`, which point
-      # at a `dist/` that does not exist here.
+      # From the repo root: the root vite config aliases `@rotorsoft/*` to
+      # source, and these jobs never build.
       - name: Run TCK against PostgreSQL ${{ matrix.pg }}
         run: pnpm vitest run libs/act-pg/test/store-tck.spec.ts
-      # act-notify runs the full Store TCK over withBroker(PostgresStore),
-      # so a with-broker.ts change gets the same multi-version PG coverage
-      # as the base adapter (its correctness rides on PG semantics).
+      # act-notify runs the Store TCK over withBroker(PostgresStore).
       - name: Run act-notify TCK against PostgreSQL ${{ matrix.pg }}
         run: pnpm vitest run libs/act-notify/test/store-tck.spec.ts
 
   sqlite:
-    # Answers "does the next libSQL release break us before we adopt it."
-    # The pinned version is what `ci-cd.yml` already tests.
+    # Does the next libSQL release break us? ci-cd.yml tests the pinned one.
     name: libsql-latest
     runs-on: ubuntu-latest
     steps:
@@ -88,9 +72,7 @@ jobs:
           cache: "pnpm"
 
       - name: Override @libsql/client to latest
-        # `pnpm.overrides` survives `pnpm install` and is the idiomatic
-        # way to swap a transitive version in a workspace. Writing into
-        # the root package.json keeps the change scoped to this job.
+        # `pnpm.overrides` swaps the version for this job only.
         run: |
           node -e '
             const fs = require("fs");
@@ -108,8 +90,7 @@ jobs:
       - name: Run TCK against the latest libSQL
         run: pnpm vitest run libs/act-sqlite/test/store-tck.spec.ts
 
-  # Multi-process Postgres stress harness: real concurrency, real PG, real
-  # workers. Reports to the run's Job Summary.
+  # Multi-process Postgres stress harness; reports to the Job Summary.
   stress:
     runs-on: ubuntu-latest
     # Postgres 18 for every job below that needs one (YAML anchor).
@@ -136,9 +117,7 @@ jobs:
           cache: "pnpm"
 
       - run: pnpm install
-      # Workers import `@rotorsoft/act` and `@rotorsoft/act-pg` via the
-      # workspace symlinks; build them so the published-shape resolution
-      # works (PostgresStore imports `@rotorsoft/act` by package name).
+      # Workers import the packages by name, so build them.
       - run: pnpm -F @rotorsoft/act-patch build
       - run: pnpm -F @rotorsoft/act build
       - run: pnpm -F @rotorsoft/act-pg build
@@ -160,11 +139,7 @@ jobs:
           name: stress-report
           path: stress-report.md
 
-  # The libraries' engines floor is Node >=22.23.3, while CI, docs and the
-  # perf image run on 26. This proves every supported release line still
-  # passes, so the floor is a fact rather than a promise. Weekly rather than
-  # per PR: typecheck already pins the floor's API (`@types/node`), and in
-  # 100 per-PR runs this caught nothing the Node 26 job missed.
+  # Proves the engines floor (Node >=22.23.3) and 24 still pass; CI runs 26.
   node-compat:
     runs-on: ubuntu-latest
     strategy:
@@ -186,24 +161,11 @@ jobs:
       - run: pnpm build
       - run: pnpm test
 
-  # Per-adapter perf gate on REAL adapters: the docker Postgres on 5431 and a
-  # real on-disk SQLite, the only place adapter-level regressions (a lost
-  # index, a reintroduced N+1, a snapshot-floor read that scans the whole
-  # stream) actually surface. Weekly, like every benchmark: PR merges gate
-  # on functionality and compatibility, and benchmarks keep their own pace.
-  #
-  # Budgets: p50 ≤ 2.0× baseline for act-pg (wide noise band on a real
-  # DB), p50 ≤ 1.5× for act-sqlite (embedded, tighter). Both skip the
-  # ratio check when the baseline p50 is below a 1.0 ms absolute floor
-  # (sub-ms ops are noise-dominated). See each package's perf-check.ts.
-  #
-  # A budget breach fails this job. Baselines come from a CI runner
-  # (perf-baseline.yml), so they match the hardware the gate runs on, and
-  # the 2.0×/1.5× tolerances + the 1.0 ms floor absorb run-to-run variance.
-  # If a scenario proves noisy, refresh the baseline (re-run
-  # perf-baseline.yml) or widen its budget — don't silence the gate. The pg
-  # connection needs no extra env: PostgresStore defaults
-  # (host/db/user/password = postgres) match the docker service.
+  # Per-adapter perf gate on real adapters (Postgres on 5431, on-disk SQLite).
+  # Budgets: p50 ≤ 2.0× baseline for act-pg, ≤ 1.5× for act-sqlite, skipped
+  # below a 1.0 ms baseline (see each perf-check.ts). Baselines come from
+  # perf-baseline.yml. A noisy scenario gets a fresh baseline or a wider
+  # budget, never a silenced gate.
   perf:
     runs-on: ubuntu-latest
     services: *pg18
@@ -217,8 +179,7 @@ jobs:
           node-version: 26.12.1
           cache: "pnpm"
       - run: pnpm install
-      # The bench scripts import `@rotorsoft/act` by package name, which
-      # resolves to its built `dist/`.
+      # The bench scripts import `@rotorsoft/act` from its built dist/.
       - run: pnpm build
       - name: act-pg perf gate
         run: |
@@ -251,10 +212,7 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
-  # Scenario benchmarks, each with a built-in regression bound. Weekly
-  # rather than per PR: in about 70 per-PR runs they caught no regression,
-  # and they were the slowest job on a core PR. They run on the real
-  # Postgres adapter, so this job needs the same service.
+  # Scenario benchmarks, each with a built-in regression bound, on Postgres.
   scenarios:
     runs-on: ubuntu-latest
     services: *pg18
@@ -268,12 +226,10 @@ jobs:
           node-version: 26.12.1
           cache: "pnpm"
       - run: pnpm install
-      # The scenario benches measure wake-up and reaction latency, not the
-      # runner's disk. GitHub runners intermittently stall WAL flushes for
-      # ~100 ms, which turned every write (mark, lease, ack) into a stall and
-      # failed the notify bench on the same code that passes the next run.
-      # Async commit takes the flush off the request path for this throwaway
-      # database only; the perf job keeps the default its baselines assume.
+      # Runners intermittently stall WAL flushes for ~100 ms, which failed the
+      # notify bench on good code. These benches measure wake-up latency, not
+      # disk, so this throwaway database commits async; the perf job keeps the
+      # default its baselines assume.
       - name: Postgres without synchronous commit (benches only)
         env:
           PGPASSWORD: postgres
@@ -281,16 +237,10 @@ jobs:
           psql -h localhost -p 5431 -U postgres -c "ALTER SYSTEM SET synchronous_commit = off"
           psql -h localhost -p 5431 -U postgres -c "SELECT pg_reload_conf()"
           psql -h localhost -p 5431 -U postgres -tc "SHOW synchronous_commit"
-      # Scenario benchmarks (Shape C). Each one has a built-in
-      # regression assertion, so a real perf regression breaks the
-      # build. The captured stdout ends up in the workflow's step
-      # summary so reviewers see the numbers without scrolling logs.
+      # The captured tables go to the step summary.
       - name: bench:scenarios
         env:
-          # vitest/node emit ANSI color codes even when stdout is piped,
-          # which renders as `␛[32m'…'␛[39m` garbage inside the markdown
-          # code block we append to the step summary. NO_COLOR disables
-          # color emission at the Node level.
+          # Node emits ANSI color even when piped; it garbles the summary.
           NO_COLOR: "1"
           FORCE_COLOR: "0"
         run: |
@@ -303,12 +253,7 @@ jobs:
             echo "## Scenario benchmark results"
             echo ""
             echo '```'
-            # Extract the console.table blocks from the captured run.
-            # Scenario benches print `=== <header> ===` then the table;
-            # the closing `└` line is the bottom corner of the table.
-            # Single-process vitest keeps output prefix-free, so the
-            # match is purely structural. `sed` strips any stray ANSI
-            # escapes that slipped past NO_COLOR (belt and suspenders).
+            # Keep the `=== header ===` + console.table blocks; sed strips stray ANSI.
             if grep -qE '=== .+ ===' bench-scenarios.log 2>/dev/null; then
               awk '
                 /=== .+ ===/    { printing=1 }
