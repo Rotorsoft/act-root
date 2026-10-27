@@ -68,10 +68,17 @@ describe("recurring reminder timer recipe", () => {
 
     // The failed finalize leaves tick 1 leased until the lease expires; jump
     // the clock past it once (only `Date` is faked, and it keeps moving).
-    // The loop drives a drain after the jump, since the real-time wake for
-    // the expired lease would not fire inside the test.
+    // The failed pass schedules its own retry for the breaker cooldown (30s
+    // of real time), and a drain that claims nothing before the jump disarms
+    // the lane, so after the jump the loop re-arms it before each drain, as
+    // that retry would.
     // It drives passes until four ticks are in, not for a fixed number of
     // passes: how many ticks fit in a time budget depends on the machine.
+    const lane = (
+      app as unknown as {
+        _drain_controllers: Map<string, { arm: () => void }>;
+      }
+    )._drain_controllers.get("default")!;
     vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true });
     let jumped = false;
     const committed = async () =>
@@ -82,6 +89,7 @@ describe("recurring reminder timer recipe", () => {
     let ticks: number[] = [];
     for (let i = 0; i < 100 && ticks.length < 4; i++) {
       await app.correlate();
+      if (jumped) lane.arm();
       await app.drain();
       await sleep(STEP + 20);
       if (!blip && !jumped) {
