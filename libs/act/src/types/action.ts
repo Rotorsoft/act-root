@@ -471,7 +471,7 @@ export type PassthroughPatchHandler = ((event: {
 }) => unknown) & { readonly _passthrough: true };
 
 /**
- * Handles an action, producing one or more emitted events.
+ * Handles an action, producing the events to emit, or `undefined` (or `[]`) to commit nothing.
  * @template TState - State schema.
  * @template TEvents - Event schemas.
  * @template TActions - Action schemas.
@@ -503,7 +503,7 @@ export type ActionHandlers<
 };
 
 /**
- * Maps action names to invariants that must hold after the action.
+ * Maps action names to the invariants checked before the action's handler runs.
  * @template TState - State schema.
  * @template TActions - Action schemas.
  */
