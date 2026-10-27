@@ -56,6 +56,28 @@ describe("validateFoldedState", () => {
     ).rejects.toBeInstanceOf(ValidationError);
   });
 
+  it("refuses before the commit: nothing is stored, no reaction runs, the stream keeps working", async () => {
+    const reacted: string[] = [];
+    const app = act()
+      .withState(calc())
+      .on("dividedByZero")
+      .do(async function onDivided(e) {
+        reacted.push(e.stream);
+      })
+      .to("divided")
+      .build({ validateFoldedState: true });
+    await app.do("add", { stream: "c0", actor }, { by: 1 });
+    await expect(
+      app.do("divide", { stream: "c0", actor }, {})
+    ).rejects.toBeInstanceOf(ValidationError);
+    const stored = await app.query_array({ stream: "c0" });
+    expect(stored.map((e) => e.name)).toEqual(["added"]);
+    const [snap] = await app.do("add", { stream: "c0", actor }, { by: 2 });
+    expect((snap.state as { result: number }).result).toBe(3);
+    await app.settle();
+    expect(reacted).toEqual([]);
+  });
+
   it("names the state and the triggering event in the error", async () => {
     const app = act().withState(calc()).build({ validateFoldedState: true });
     let caught: unknown;

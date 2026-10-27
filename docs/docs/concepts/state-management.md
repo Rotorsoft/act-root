@@ -31,7 +31,7 @@ const Counter = state({ Counter: z.object({ count: z.number() }) })
 `state({})` → `.init()` → `.emits({})` → optional `.patch({})` → `.on({}, options?)` → optional `.given([])` → optional `.requires([])` → `.emit()` → `.build()`
 
 - **`.emits()`** declares events with passthrough reducers by default (`({ data }) => data`)
-- **`.patch()`** overrides only events that need custom reducers
+- **`.patch()`** overrides only events that need custom reducers. A reducer reads the event's `data` (and `version`, if it must): an action folds before the store assigns `id` and `created`, so during an action those are `-1` and the commit time. Keep a business timestamp in the event data, or read `created` in a projection, which sees the stored row.
 - **`.on(entry, options?)`** registers an action; the optional second argument is an [`ActionOptions`](./error-handling.md#retry-pattern--per-action-policy) for per-action retry policy (`maxRetries`, optional `backoff`). Omit for the current single-attempt behavior.
 - **`.emit("EventName")`** passes the action payload through directly as event data
 - **`.emit((action, snapshot, target) => [name, data])`** for computed event data. The handler receives:
@@ -112,6 +112,19 @@ Inlining the schema in each partial — `.emits({ TicketOpened: z.object({...}) 
 > Event "TicketOpened" in state "Ticket" is declared with different Zod schemas across slices. Cross-slice event schemas must reference the same instance — extract a shared schema (e.g. `export const TicketOpened = z.object({ ... })` in a shared module) and import it in every slice that declares it.
 
 Cross-state collisions (two slices declaring the same event name in *different* state names) still throw `Duplicate event` regardless of reference, because the same event name can only be owned by one state.
+
+## What an action checks, in order
+
+`app.do(...)` refuses at the first check that fails, and nothing is stored:
+
+1. **The payload** against the action's schema (`ValidationError`).
+2. **Invariants** (`.given`): rules the current state and actor must meet for the action to run (`InvariantError`).
+3. **Preconditions** (`.requires`): rules that also read the payload (`InvariantError`, "failed precondition").
+4. The handler decides the events; each is checked against its schema (`ValidationError`).
+5. **One fold, before the commit:** the events fold into the new state. With [`validateFoldedState`](./configuration.md#debugging-validating-folded-state), that state is checked against the state's schema (`ValidationError`).
+6. The events commit, with optimistic concurrency on the stream, and the returned snapshots carry the stored rows.
+
+A note on the word: in design by contract, an *invariant* is what must hold after every operation. Act's invariants are checked *before* the handler, on the current state, so they read like preconditions on the state; the names stay because they are the API. What must hold after every action is the state schema, which step 5 checks.
 
 ## Invariants
 

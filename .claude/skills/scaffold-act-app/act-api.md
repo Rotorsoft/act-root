@@ -143,7 +143,7 @@ export const LotAdded = z.object({ ticker: z.string(), lot: Lot });
 // where Lot has transaction_date: z.string() — the actual trade date
 ```
 
-In projections, use `event.created` for the timestamp:
+In projections, use `event.created` for the timestamp. A state's `.patch` reducers fold before the commit, so they see the commit time, not the stored `created`; don't keep it in aggregate state:
 ```typescript
 .on({ ItemCreated })
 .do(async function insertItem(event) {

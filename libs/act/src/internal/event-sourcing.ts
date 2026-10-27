@@ -38,15 +38,14 @@ export const bare_patch: PatchFn = (_me, state, partial) =>
 
 /**
  * `validateFoldedState`: merge, then parse against the state schema, so a
- * bad reducer fails at its own event. A debugging aid, not a production guard.
+ * bad reducer fails at its own event. On `do` this runs before the commit,
+ * so the action is refused and nothing is stored.
  */
 export const validating_patch: PatchFn = (me, state, partial, event) => {
   const next = patch(state, partial) as typeof state;
-  return validate(
-    `${me.name}.${String(event.name)}#${event.id}`,
-    next,
-    me.state
-  );
+  // Before the commit there is no id yet (`-1`).
+  const id = event.id >= 0 ? `#${event.id}` : "";
+  return validate(`${me.name}.${String(event.name)}${id}`, next, me.state);
 };
 
 const DEFAULT_BATCH = 500;
@@ -501,6 +500,27 @@ export async function action<
         },
       };
 
+      // Fold before the commit (the decider rule), so `validateFoldedState`
+      // refuses a bad state before anything is stored. Reducers see the
+      // event data and the next version; the store assigns `id` and
+      // `created`, so they get placeholders here (`-1`, the commit time).
+      let { state, patches } = snapshot;
+      const created = new Date();
+      const folded = events.map((e, i) => {
+        const event = {
+          ...e,
+          id: -1,
+          stream,
+          version: snapshot.version + i + 1,
+          created,
+          meta,
+        } as Committed<TEvents, keyof TEvents>;
+        const patch = me.patch[event.name](event, state);
+        state = patch_fn(me, state, patch, event);
+        patches++;
+        return { state, patch, patches };
+      });
+
       let committed: Committed<TEvents, keyof TEvents>[];
       try {
         committed = await store().commit(
@@ -517,25 +537,20 @@ export async function action<
         throw error;
       }
 
-      let { state, patches } = snapshot;
-      const snapshots = committed.map((row, i) => {
-        // The caller sent the plaintext, so no view/gate round-trip.
-        const event = { ...row, data: events[i].data };
-        const p = me.patch[event.name](event, state);
-        state = patch_fn(me, state, p, event);
-        patches++;
-        return {
-          event,
-          state,
-          version: event.version,
-          id: event.id,
-          patches,
-          snaps: snapshot.snaps,
-          patch: p,
-          cache_hit: snapshot.cache_hit,
-          replayed: snapshot.replayed,
-        };
-      });
+      // The stored rows carry the real `id` and `created`; the state is
+      // already folded. The caller sent the plaintext, so no view/gate
+      // round-trip.
+      const snapshots = committed.map((row, i) => ({
+        event: { ...row, data: events[i].data },
+        state: folded[i].state,
+        version: row.version,
+        id: row.id,
+        patches: folded[i].patches,
+        snaps: snapshot.snaps,
+        patch: folded[i].patch,
+        cache_hit: snapshot.cache_hit,
+        replayed: snapshot.replayed,
+      }));
 
       const last = snapshots.at(-1)!;
       // A guardless (reaction) commit can land past events this fold never

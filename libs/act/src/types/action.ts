@@ -430,7 +430,12 @@ export type StateSchemas<
 };
 
 /**
- * Handles patching state in response to a committed event.
+ * Handles patching state in response to an event.
+ *
+ * An action folds its events before the commit (the decider rule), so read
+ * the event's `data` and `version`: `id` is `-1` and `created` is the
+ * commit time until the store assigns them. Loads and replays pass the
+ * stored row.
  * @template TState - State schema.
  * @template TEvents - Event schemas.
  * @template TKey - Event name.

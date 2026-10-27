@@ -199,7 +199,7 @@ All additive: one builder method on the state action chain (`.requires`), two pu
 
 ## Postconditions
 
-Not proposed. A postcondition checks the state after the action's events are applied, before they commit: a promise the code makes, not a condition the caller must meet. Act already covers the structural part. `ActOptions.validateFoldedState` (RFC 1238) parses the folded state against its declared schema after each reduction, so a reducer that produces `NaN` fails where it happened. Domain postconditions ("armies are never negative") detect bugs, not bad requests, so they belong in tests (given/when/then and property tests), which catch them without a runtime check on every commit. If one is ever needed, it fits the same chain as `.ensures([...])`, Eiffel's word for it. It would be checked after the patch and before the commit, and throw an internal error rather than a refusal.
+Not proposed. A postcondition checks the state after the action's events are applied, before they commit: a promise the code makes, not a condition the caller must meet. Act covers the structural part. An action folds its events before it commits them, and `ActOptions.validateFoldedState` (RFC 1238) parses each folded state against the state's schema there, so a reducer that produces `NaN` refuses the action and nothing is stored. Domain postconditions ("armies are never negative") detect bugs, not bad requests, so they belong in tests (given/when/then and property tests), which catch them without a runtime check on every commit. If one is ever needed, it fits the same chain as `.ensures([...])`, Eiffel's word for it. It would run at the same point, after the fold and before the commit, and throw an internal error rather than a refusal.
 
 ## Open questions
 
