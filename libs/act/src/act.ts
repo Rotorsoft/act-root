@@ -617,8 +617,8 @@ export class Act<
 
   /**
    * Executes an action: validates the payload, loads the state, checks its
-   * invariants, and commits the events its handler emits, with optimistic
-   * concurrency on the stream. The reactions to those events settle on
+   * invariants and preconditions, and commits the events its handler emits,
+   * with optimistic concurrency on the stream. The reactions to those events settle on
    * their own (unless `autoSettle: false`).
    *
    * @template TKey - Action name from registered actions
