@@ -361,8 +361,9 @@ export declare class Act<TSchemaReg extends SchemaRegister<TActions>, TEvents ex
      * (\`drain: false\`) each tick is a no-op, like \`settle()\`.
      *
      * @param query - Only \`limit\` is used: the most events each correlate pass
-     *   reads (default 100). The scan always starts at the correlation
-     *   checkpoint, so \`after\` is ignored.
+     *   reads. With no limit, or \`0\`, the passes use the background default
+     *   (100): a poll never reads the whole log in one tick. The scan always
+     *   starts at the correlation checkpoint, so \`after\` is ignored.
      * @param frequency - Milliseconds between ticks (default: 10000)
      * @returns \`true\` if the poll started, \`false\` if one is already running
      *

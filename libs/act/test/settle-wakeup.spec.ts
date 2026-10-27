@@ -714,6 +714,22 @@ describe("a local change settles its own reactions", () => {
     await vi.waitFor(() => expect(limit()).toBe(100));
   });
 
+  it("a poll with limit 0 scans at the background default, not the whole log", async () => {
+    const app = act()
+      .withState(Ping)
+      .on("Pinged")
+      .do(async function track() {})
+      .to("tracker")
+      .build({ autoSettle: false });
+    const query = vi.spyOn(store(), "query");
+    const limit = () =>
+      query.mock.calls.filter(([, q]) => q?.with_pii === false).at(-1)?.[1]
+        ?.limit;
+    app.start_correlations({ limit: 0 }, 5);
+    await vi.waitFor(() => expect(limit()).toBe(100));
+    app.stop_correlations();
+  });
+
   it("replays a reset target with no settle call", async () => {
     const ran: string[] = [];
     const app = reacting(ran);
