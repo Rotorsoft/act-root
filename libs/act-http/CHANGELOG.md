@@ -1,3 +1,10 @@
+# [@rotorsoft/act-http-v1.10.24](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-http-v1.10.23...@rotorsoft/act-http-v1.10.24) (2026-10-27)
+
+
+### Bug Fixes
+
+* **act-http:** keep the framework out of the sse subpath, so browser builds work ([#2154](https://github.com/Rotorsoft/act-root/issues/2154)) ([a329b67](https://github.com/Rotorsoft/act-root/commit/a329b67f387e3c368e5d51d343201dce3e0b33de)), closes [#2145](https://github.com/Rotorsoft/act-root/issues/2145)
+
 # [@rotorsoft/act-http-v1.10.23](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-http-v1.10.22...@rotorsoft/act-http-v1.10.23) (2026-10-26)
 
 
