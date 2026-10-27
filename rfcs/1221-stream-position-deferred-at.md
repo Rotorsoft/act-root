@@ -1,6 +1,5 @@
 # RFC 1221: expose `deferred_at` on `StreamPosition`
 
-- **Status:** accepted
 - **Issue:** #1221
 - **Author:** Rotorsoft
 - **Created:** 2026-07-11

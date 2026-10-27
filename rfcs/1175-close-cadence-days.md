@@ -1,6 +1,5 @@
 # RFC 1175: close cadence knobs — derive, deprecate, and speak in days
 
-- **Status:** draft
 - **Issue:** #1175 (follow-up to #1011)
 - **Author:** Roger Torres (with Claude)
 - **Created:** 2026-07-10

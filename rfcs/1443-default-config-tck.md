@@ -1,6 +1,5 @@
 # RFC 1443: `default_factory` — the TCK covers an adapter's own defaults
 
-- **Status:** draft
 - **Issue:** #1443
 - **Author:** Rotorsoft
 - **Created:** 2026-08-11

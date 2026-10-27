@@ -1,6 +1,5 @@
 # RFC 0001: Deferred reactions & timers
 
-- **Status:** accepted <!-- draft | accepted | rejected | superseded -->
 - **Issue:** #1049
 - **Author:** rotorsoft
 - **Created:** 2026-06-27

@@ -1,6 +1,5 @@
 # RFC 1277: prebuilt per-event read gate (`registry.query_gate`) and gate consolidation
 
-- **Status:** accepted
 - **Issue:** #1277
 - **Author:** Claude Opus 4.8
 - **Created:** 2026-07-18

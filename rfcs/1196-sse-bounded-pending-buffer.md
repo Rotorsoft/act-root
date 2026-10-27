@@ -1,6 +1,5 @@
 # RFC 1196: bound the per-connection SSE pending buffer
 
-- **Status:** draft
 - **Issue:** #1196
 - **Author:** Roger Torres
 - **Created:** 2026-07-11

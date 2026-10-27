@@ -1,6 +1,5 @@
 # RFC 1484: a durable, single-writer correlate checkpoint
 
-- **Status:** draft
 - **Issue:** #1484
 - **Author:** Rotorsoft
 - **Created:** 2026-08-15

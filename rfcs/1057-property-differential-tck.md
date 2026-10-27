@@ -1,6 +1,5 @@
 # RFC 1057: Property/fuzz workloads in the differential TCK + cache & logger differential harnesses
 
-- **Status:** accepted <!-- draft | accepted | rejected | superseded -->
 - **Issue:** #1057
 - **Author:** rotorsoft
 - **Created:** 2026-06-28

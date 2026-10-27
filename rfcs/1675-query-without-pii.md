@@ -1,6 +1,5 @@
 # RFC 1675: `Query.with_pii` — let a read decline the sensitive payload
 
-- **Status:** draft
 - **Issue:** #1675
 - **Author:** rotorsoft
 - **Created:** 2026-10-01

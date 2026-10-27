@@ -1,6 +1,5 @@
 # RFC 1621: publish the HTTP delivery classifier
 
-- **Status:** draft
 - **Issue:** #1621
 - **Author:** Rotorsoft
 - **Created:** 2026-09-06

@@ -1,6 +1,5 @@
-# RFC 1405: a pii sidecar for snapshots, and where gating happens
+# RFC 1405: a pii sidecar for snapshots, and where gating happens (declined: the status quo stays)
 
-- **Status:** **declined** — status quo kept (option C). This RFC stands as the decision record.
 - **Issue:** #1405 (filed out of #1397)
 - **Author:** Rotorsoft
 - **Created:** 2026-08-08

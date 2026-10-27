@@ -1,6 +1,5 @@
 # RFC 1434: `_resync` — a server-forced refetch frame for SSE
 
-- **Status:** draft
 - **Issue:** #1423
 - **Author:** Rotorsoft
 - **Created:** 2026-08-08

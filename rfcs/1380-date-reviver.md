@@ -1,6 +1,5 @@
 # RFC 1380: `dateReviver` — one shared JSON date reviver
 
-- **Status:** draft
 - **Issue:** #1370 (and #1365)
 - **Author:** Rotorsoft
 - **Created:** 2026-08-05

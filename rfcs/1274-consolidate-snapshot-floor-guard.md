@@ -1,6 +1,5 @@
 # RFC 1274: Consolidate the `with_snaps` snapshot-floor eligibility guard at the orchestrator
 
-- **Status:** accepted <!-- draft | accepted | rejected | superseded -->
 - **Issue:** #1274 (supersedes the piecemeal fixes #1267, #1270; folds in #1261)
 - **Author:** rotorsoft
 - **Created:** 2026-07-16

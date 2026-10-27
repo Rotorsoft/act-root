@@ -1,6 +1,5 @@
 # RFC 1279: `RedisSubscriber.unsubscribe` accepts an optional listener
 
-- **Status:** accepted
 - **Issue:** #1279
 - **Author:** Claude Opus 4.8
 - **Created:** 2026-07-18

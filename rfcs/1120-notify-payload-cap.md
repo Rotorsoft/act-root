@@ -1,6 +1,5 @@
 # RFC 1120: skip oversize NOTIFY payloads in `PostgresStore.commit`
 
-- **Status:** draft <!-- draft | accepted | rejected | superseded -->
 - **Issue:** #1120
 - **Author:** Claude (with Rotorsoft)
 - **Created:** 2026-07-04

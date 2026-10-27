@@ -1,6 +1,5 @@
 # RFC 1312: SSE overlay frames carry a marker so live clients apply them
 
-- **Status:** draft
 - **Issue:** #1312
 - **Author:** debug-wave
 - **Created:** 2026-07-22

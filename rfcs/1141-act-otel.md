@@ -1,6 +1,5 @@
 # RFC 1141: `@rotorsoft/act-otel` — Prometheus metrics bridge
 
-- **Status:** accepted <!-- draft | accepted | rejected | superseded -->
 - **Issue:** #1141
 - **Author:** rotorsoft
 - **Created:** 2026-07-05

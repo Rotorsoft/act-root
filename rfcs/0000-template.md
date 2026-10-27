@@ -1,6 +1,5 @@
 # RFC NNNN: <short title>
 
-- **Status:** draft <!-- draft | accepted | rejected | superseded -->
 - **Issue:** #NNNN
 - **Author:** <name>
 - **Created:** YYYY-MM-DD

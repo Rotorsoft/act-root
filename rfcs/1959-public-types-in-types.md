@@ -1,6 +1,5 @@
 # RFC 1959: Every public type lives in `types/`
 
-- **Status:** accepted
 - **Issue:** #1942
 - **Author:** rotorsoft
 - **Created:** 2026-10-17

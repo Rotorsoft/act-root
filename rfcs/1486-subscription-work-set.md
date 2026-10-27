@@ -1,6 +1,5 @@
 # RFC 1486: `subscribe({ correlated_at })` — a subscription-side work set
 
-- **Status:** draft
 - **Issue:** #1486
 - **Author:** Rotorsoft
 - **Created:** 2026-08-15
