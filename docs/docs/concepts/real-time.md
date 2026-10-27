@@ -16,7 +16,7 @@ import ssePatches from "@site/src/scenes/sse-patches";
 npm install @rotorsoft/act-http
 ```
 
-> **Coming from `@rotorsoft/act-sse`?** Import from `@rotorsoft/act-http/sse` instead, and rename `getState`, `getSubscriberCount`, `publishOverlay` and `getOnline` to `state`, `subscriberCount`, `overlay` and `online`. That package's status is in the [deprecation policy](https://github.com/Rotorsoft/act-root/blob/master/STABILITY.md#deprecation-policy).
+> **Coming from `@rotorsoft/act-sse`?** Import from `@rotorsoft/act-http/sse` instead; the four methods it renamed and that package's status are in the [deprecation policy](https://github.com/Rotorsoft/act-root/blob/master/STABILITY.md#deprecation-policy).
 
 
 ### Clearing a field

@@ -86,15 +86,6 @@ pnpm act -q TicketOpened                  # non-interactive: print one entity, e
 
 When the user wants to scaffold or extend an app using Act, use the **`scaffold-act-app`** skill. It owns the full app-building surface: spec parsing, state/slice/projection design, monorepo layout, tRPC API, React client, SSE wiring, tests. The skill description triggers it automatically when the user asks to build, scaffold, or translate a domain model.
 
-### Inspecting an Act app from the terminal
-
-The **`act`** CLI (shipped from `@rotorsoft/act-diagram` as a `bin`) is the build-time companion to `act-inspector`. Where the inspector shows runtime state, `act` shows the **structural contract** — every event, action, slice, projection, state, and reaction the parser can see, with producer/consumer relationships, captured Zod schemas, and deprecation status (via the `_v<n>` convention). Detail views can jump straight into `$EDITOR` at the source line.
-
-- `pnpm act` — interactive: pick a category → entry → view detail → optionally open in `$EDITOR`.
-- `pnpm act -q <name>` — non-interactive, exits after printing. Used by CI smoke tests in `ci-cd.yml`.
-
-If schemas aren't being captured for an event, the parser is best-effort: it walks `.emits({...})` literally. Shorthand (`{ TicketOpened }`) records the identifier name; explicit Zod expressions are captured verbatim.
-
 ### Framework reference (Docusaurus)
 
 | Topic | File |
@@ -155,7 +146,7 @@ Per-package `PERFORMANCE.md` files track benchmark history with before/after num
 - `libs/act/PERFORMANCE.md` — drain/cache/correlate
 - `libs/act-pg/PERFORMANCE.md` — Postgres-specific (incl. `notify` latency)
 
-**Benchmarks must run on real adapters.** InMemoryStore is the fastest possible read/write path (no I/O, no SQL planner) — measuring perf optimizations against it understates wins and ignores the index/lock/connection-pool dimensions that the production adapters live in. Every perf claim that ships in a `PERFORMANCE.md` table needs numbers from `act-pg` (port 5431 docker) or `act-sqlite`. InMemory may appear as a baseline reference, never as the primary number. New benches go in the relevant adapter package's `bench/` or `scripts/`, not just `libs/act/bench/`.
+**Benchmarks run on real adapters** (act-pg on port 5431, or act-sqlite), in that adapter's `bench/`; InMemory is a baseline at most. Why: [`libs/act/PERFORMANCE.md`](libs/act/PERFORMANCE.md).
 
 ## Safety-critical one-liners
 
