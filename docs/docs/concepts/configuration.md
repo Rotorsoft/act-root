@@ -181,7 +181,9 @@ const app = act()
   .build({ validateFoldedState: true }); // dev / CI only
 ```
 
-This is a **debugging and CI aid, not a production guard**. Turn it on while developing new reducers or in CI to catch total-reducer bugs at the source; leave it off in production.
+It detects the bad state; it doesn't refuse the action. On `do`, the fold runs after the commit, so by the time `do` throws, the event is already stored, reactions run on it, and every later `do` or cold `load` of that stream throws too, until the reducer is fixed or the flag is off.
+
+This is a **debugging and CI aid, not a production guard**. Turn it on while developing new reducers or in CI to catch total-reducer bugs at the source; leave it off in production. When the flag is off, the fold has no extra cost: the validating step is chosen once at `build()`.
 
 - **Zero cost when off.** The reduction pipeline names three things: a **reducer** (a state's `.patch()` handler) turns one event into a partial, a **patch step** merges that partial into state, and the **fold** is the loop applying the patch step across a stream's events. The patch step is selected once at `build()` — the same way the orchestrator picks bare vs trace-decorated store ops from the log level. When off (the default), the fold loop is byte-identical to a bare reduction: the validating patch step is never selected, so there is no per-event cost, not even a branch. Flipping the flag is the entire opt-in; there is no per-state wiring.
 - **On the projection path**, a bad reduction throws inside the fold batch handler, which blocks the stream — the `ValidationError` message rides the [`blocked`](./error-handling.md#blocked-streams) lifecycle event's `error`. Recover the same way you recover any blocked stream once the reducer is fixed.

@@ -56,6 +56,19 @@ describe("validateFoldedState", () => {
     ).rejects.toBeInstanceOf(ValidationError);
   });
 
+  it("stores the event before throwing on do, so the stream fails later loads", async () => {
+    const app = act().withState(calc()).build({ validateFoldedState: true });
+    await app.do("add", { stream: "c0", actor }, { by: 1 });
+    await expect(
+      app.do("divide", { stream: "c0", actor }, {})
+    ).rejects.toBeInstanceOf(ValidationError);
+    const stored = await app.query_array({ stream: "c0" });
+    expect(stored.map((e) => e.name)).toEqual(["added", "dividedByZero"]);
+    await expect(
+      app.do("add", { stream: "c0", actor }, { by: 1 })
+    ).rejects.toBeInstanceOf(ValidationError);
+  });
+
   it("names the state and the triggering event in the error", async () => {
     const app = act().withState(calc()).build({ validateFoldedState: true });
     let caught: unknown;
