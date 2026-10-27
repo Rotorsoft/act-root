@@ -8,7 +8,6 @@ import { createHash, randomUUID } from "node:crypto";
 import { log, store } from "../ports.js";
 import type {
   EventRegister,
-  Query,
   Registry,
   Resolved,
   SchemaRegister,
@@ -306,7 +305,8 @@ export class CorrelateCycle<
 
   /** Scan past the checkpoint, subscribe new targets and raise their work marks. */
   async correlate(
-    query: Query,
+    /** The most events the scan reads (`0` reads everything). */
+    limit: number,
     /**
      * Honour the correlation lease. Only the settle loop and poller do; an
      * explicit `app.correlate()` scans now, since `close` loops on it.
@@ -314,7 +314,7 @@ export class CorrelateCycle<
     lease = false
   ): Promise<CorrelatePass> {
     if (this._restoring) return { kind: "idle", last_id: this._checkpoint };
-    const pass = this._scan(query, lease);
+    const pass = this._scan(limit, lease);
     this._passes.add(pass);
     try {
       return await pass;
@@ -323,7 +323,7 @@ export class CorrelateCycle<
     }
   }
 
-  private async _scan(query: Query, lease: boolean): Promise<CorrelatePass> {
+  private async _scan(limit: number, lease: boolean): Promise<CorrelatePass> {
     await this._init();
     const epoch = this._epoch;
     const idle = (): CorrelatePass => ({
@@ -354,8 +354,6 @@ export class CorrelateCycle<
       if (correlating === false) return idle();
     }
 
-    // One checkpoint serves every reaction, so the scan reads only `limit`:
-    // a filter would move it past events the filter skipped.
     const after = this._checkpoint;
     const correlated = new Map<string, Correlated>();
     let last_id = after;
@@ -447,7 +445,7 @@ export class CorrelateCycle<
       },
       // Resolvers see `pii: null`: correlate runs actor-less, and one
       // undecryptable row would otherwise stop every stream's reactions.
-      { after, limit: query.limit, with_pii: false }
+      { after, limit, with_pii: false }
     );
 
     if (this._declared_lanes.size > 1) await this._recall(correlated);
@@ -501,7 +499,7 @@ export class CorrelateCycle<
     // not. It lowers only the raises it saw, so one that landed mid-scan
     // keeps the cycle armed.
     this._checkpoint = last_id;
-    if (!stopped && found !== query.limit) this._lowered = raised;
+    if (!stopped && found !== limit) this._lowered = raised;
     return { kind: "scanned", last_id, subscribed: 0, marked: 0, read };
   }
 
