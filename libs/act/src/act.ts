@@ -103,12 +103,10 @@ import type {
 
 /** Reject `onlyLanes` entries that reference undeclared lanes. */
 function validate_only_lanes(
-  options: ActOptions,
-  lanes: ReadonlyArray<LaneConfig>
+  only: ReadonlyArray<string> | undefined,
+  declared: ReadonlyArray<string>
 ): void {
-  if (!options.onlyLanes || options.onlyLanes.length === 0) return;
-  const declared = new Set<string>(["default", ...lanes.map((l) => l.name)]);
-  const unknown = options.onlyLanes.filter((l) => !declared.has(l));
+  const unknown = (only ?? []).filter((l) => !declared.includes(l));
   if (unknown.length > 0)
     throw new Error(
       `ActOptions.onlyLanes references undeclared lane(s): ${unknown
@@ -279,7 +277,7 @@ export class Act<
     this._batch_handlers = batch_handlers;
     this._lanes = lanes;
     this._declared_lanes = ["default", ...lanes.map((l) => l.name)];
-    validate_only_lanes(options, lanes);
+    validate_only_lanes(options.onlyLanes, this._declared_lanes);
     // Every Act runs in its own ports frame (the singletons when unscoped),
     // so a shared Act never inherits its caller's frame.
     this._ports = options.scoped ?? default_scope();
@@ -329,7 +327,7 @@ export class Act<
       handle,
       handle_batch
     );
-    this._advise_orphaned_lanes(options);
+    this._advise_orphaned_lanes();
     this._audit_deps = this._build_audit_deps();
     this._correlate = this._build_correlate(options, classification);
     this._settle = this._build_settle(options);
@@ -366,10 +364,9 @@ export class Act<
     handle_batch: HandleBatch<TEvents>
   ): Map<string, DrainController<TEvents, TActions, TSchemaReg>> {
     const all_lanes = this._declared_lanes;
-    const only_set =
-      options.onlyLanes && options.onlyLanes.length > 0
-        ? new Set<string>(options.onlyLanes as readonly string[])
-        : undefined;
+    const only_set = options.onlyLanes?.length
+      ? new Set<string>(options.onlyLanes as readonly string[])
+      : undefined;
     const active_lanes = only_set
       ? all_lanes.filter((n) => only_set.has(n))
       : all_lanes;
@@ -415,7 +412,7 @@ export class Act<
       });
       // A lane with `cycleMs` drives itself on that timer (not on
       // writer-only instances).
-      if (cfg?.cycleMs !== undefined && options.drain !== false)
+      if (cfg?.cycleMs !== undefined && this._drain)
         controller.start(cfg.cycleMs);
       controllers.set(name, controller);
     }
@@ -423,8 +420,7 @@ export class Act<
   }
 
   /** One process can't see the cluster, so it reports its own lane gaps. */
-  private _advise_orphaned_lanes(options: ActOptions): void {
-    if (!options.onlyLanes || options.onlyLanes.length === 0) return;
+  private _advise_orphaned_lanes(): void {
     const active = new Set(this._drain_controllers.keys());
     const orphaned = this._declared_lanes.filter((name) => !active.has(name));
     if (orphaned.length === 0) return;
