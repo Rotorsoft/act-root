@@ -14,12 +14,11 @@
  * subpath. That shipped for ten days before anyone ran the demo client
  * (#1423 added the import; nothing in CI builds a browser bundle).
  *
- * This walks the STATIC import graph of each entry below, following
- * `@rotorsoft/*` packages into their own builds, and fails on any `node:`
- * builtin or bare Node module. Dynamic `import()` is deliberately ignored: it
- * is the supported way to reach server-only code from a module that must stay
- * browser-safe, because a bundler leaves it as a separate chunk that a browser
- * never has to evaluate.
+ * This walks the import graph of each entry below, following `@rotorsoft/*`
+ * packages into their own builds, and fails on any `node:` builtin or bare
+ * Node module. It follows `import("literal")` too: a bundler builds that as a
+ * separate chunk, and the build fails there even though the browser never
+ * runs it.
  *
  * Runs against `dist/`, so `pnpm build` must come first.
  *
@@ -49,13 +48,15 @@ const NODE_BUILTINS = new Set([
   ...builtinModules.map((m) => `node:${m}`),
 ]);
 
-/** Static `import`/`export ... from` specifiers. Dynamic `import()` is skipped. */
+/** `import`/`export ... from` specifiers, plus `import("literal")`. */
 const specifiers = (source) => {
   const out = [];
   const re = /(?:^|[\s;}])(?:import|export)\s[^;]*?from\s*["']([^"']+)["']/g;
   const bare = /(?:^|[\s;}])import\s*["']([^"']+)["']/g;
   for (const m of source.matchAll(re)) out.push(m[1]);
   for (const m of source.matchAll(bare)) out.push(m[1]);
+  for (const m of source.matchAll(/\bimport\(\s*["']([^"']+)["']\s*\)/g))
+    out.push(m[1]);
   return out;
 };
 
@@ -112,15 +113,15 @@ for (const { entry, why } of BROWSER_ENTRIES) {
 }
 
 if (violations.length) {
-  console.error("Browser-facing entry points must not statically import Node APIs:\n");
+  console.error("Browser-facing entry points must not import Node APIs:\n");
   for (const v of violations) console.error(`  ✗ ${v}\n`);
   console.error(
-    "Reach server-only code through a dynamic import() instead — a bundler\n" +
-      "leaves it as a chunk the browser never evaluates.\n"
+    "Keep server-only code out of these entry points: a bundler follows every\n" +
+      "import, dynamic ones included, into the browser build.\n"
   );
   process.exit(1);
 }
 
 console.log(
-  `browser-safe: ${BROWSER_ENTRIES.length} entry point(s) carry no static Node dependency`
+  `browser-safe: ${BROWSER_ENTRIES.length} entry point(s) carry no Node dependency`
 );

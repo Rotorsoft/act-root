@@ -152,22 +152,14 @@ const OVERLAY_KEYS = Symbol("act.sse.overlay_keys");
 type WithOverlayKeys = { [OVERLAY_KEYS]?: ReadonlySet<string> };
 
 /**
- * Default `onSubscriberError` — routes through the framework logger, so a
- * throwing subscriber lands wherever the host already sends framework logs.
- *
- * The logger is reached through a dynamic import on purpose. This module sits
- * in the `sse` subpath alongside `applyPatchMessage` and the wire types, which
- * browser code imports; a static `import { log } from "@rotorsoft/act"` puts
- * the whole framework in that bundle, and the framework builds an
- * `AsyncLocalStorage` the moment it loads — a Node API the browser stubs out
- * and throws on. Only a server ever constructs a `BroadcastChannel`, so this
- * path never runs client-side, and the import stays out of the static graph
- * where the bundler would follow it.
+ * Default `onSubscriberError`. This module shares the `sse` subpath with
+ * `applyPatchMessage`, which browser code imports, so it never imports the
+ * framework: a bundler would follow that into a browser build. Pass
+ * `onSubscriberError` to send these to your logger.
  */
 const default_subscriber_error = (error: unknown, streamId: string): void => {
-  void import("@rotorsoft/act").then(({ log }) =>
-    log().error(error, `sse subscriber threw for "${streamId}"`)
-  );
+  // biome-ignore lint/suspicious/noConsole: the default can't reach the framework logger (see above)
+  console.error(`sse subscriber threw for "${streamId}"`, error);
 };
 
 /** Record which keys an overlay owns, accumulating across overlays. */
@@ -217,9 +209,8 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
     /**
      * Called when a subscriber callback throws. The frame is still delivered
      * to every other subscriber and the publish still returns normally — a
-     * bad consumer must not break the publisher (#1423). Defaults to the
-     * framework's `log()` port, so it lands wherever the host already
-     * routes framework logs.
+     * bad consumer must not break the publisher. Defaults to `console.error`;
+     * pass your logger here to route it with the rest of your logs.
      */
     onSubscriberError?: (error: unknown, streamId: string) => void;
     /**

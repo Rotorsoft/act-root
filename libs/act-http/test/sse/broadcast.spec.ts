@@ -1,4 +1,3 @@
-import { log } from "@rotorsoft/act";
 import { describe, expect, it, vi } from "vitest";
 import { applyPatchMessage } from "../../src/sse/apply-patch.js";
 import { BroadcastChannel } from "../../src/sse/broadcast.js";
@@ -287,15 +286,13 @@ describe("subscriber containment and overlay cache misses", () => {
     });
     bc.subscribe("a", () => delivered.push("second"));
 
-    const spy = vi.spyOn(log(), "error").mockImplementation(() => {});
-    // Default onSubscriberError routes through the framework logger; the
-    // frame still reaches the other subscribers. The logger is reached by
-    // dynamic import — the SSE subpath must not carry a static dependency on
-    // the framework, which browser bundles cannot load — so the log lands a
-    // microtask later while delivery stays synchronous.
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    // Default onSubscriberError logs to the console; the frame still reaches
+    // the other subscribers.
     expect(() => bc.publish("a", st(0), [{ count: 1 }])).not.toThrow();
     expect(delivered).toEqual(["second"]);
-    await vi.waitFor(() => expect(spy).toHaveBeenCalledOnce());
+    expect(spy).toHaveBeenCalledOnce();
+    expect(spy.mock.calls[0][0]).toBe('sse subscriber threw for "a"');
     spy.mockRestore();
 
     // Default onOverlayMiss is a silent no-op — behavior unchanged.
