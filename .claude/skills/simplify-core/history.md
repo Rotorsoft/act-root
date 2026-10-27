@@ -730,3 +730,5 @@ Findings, not proposed: `InvariantError.rule` lives only in the message, so code
 
 Lens metrics: files over 300 code lines 9 (act.ts 802, in-memory-store 730, audit 566, event-sourcing 473, types/builders 464, drain-cycle 457, close-cycle 450, correlate-cycle 419, types/action 325); reading path 13 runtime files, ~33 names (~32 with s-1 and s-3); master red from flakes since 2026-10-20: 3 runs (2 tests, both fixed), plus 2 PR flakes hidden by re-runs; PR template use 0 of 300; RFCs still `draft` after shipping 17 of 17.
 
+
+Tickets (user: "file them all"): #2157 (P2026-10-27-1), #2158 (-2), #2159 (-3), #2160 (-4), #2161 (-5), #2162 (s-1), #2163 (s-2), #2164 (s-3), #2165 (s-4), #2166 (s-5), #2167 (s-6), #2168 (s-7).
