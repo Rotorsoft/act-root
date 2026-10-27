@@ -494,10 +494,7 @@ export class Act<
     return new SettleLoop<TEvents>(
       {
         correlate: (q) =>
-          this._correlate_pass(
-            { ...q, limit: q.limit ?? this._poll_limit ?? 100 },
-            true
-          ),
+          this._correlate_pass(q.limit ?? this._poll_limit ?? 100, true),
         // `settle()` validated the options, and `_schedule` skips writer-only
         // instances, so the loop drains through the internal path.
         drain: (o) => this._scoped(() => this._drain_all(o)),
@@ -995,7 +992,7 @@ export class Act<
   async correlate(
     query: Query = {}
   ): Promise<{ subscribed: number; last_id: number }> {
-    const pass = await this._correlate_pass({ limit: query.limit ?? 10 });
+    const pass = await this._correlate_pass(query.limit ?? 10);
     return {
       subscribed: pass.kind === "scanned" ? pass.subscribed : 0,
       last_id: pass.last_id,
@@ -1004,14 +1001,14 @@ export class Act<
 
   /** One correlate pass; arms every lane when it found work. */
   private async _correlate_pass(
-    query: Query,
+    limit: number,
     /** Honour the correlation lease — settle and the poller only. */
     lease = false
   ): Promise<CorrelatePass> {
     // Writer-only instances don't correlate.
     if (!this._drain) return { kind: "idle", last_id: -1 };
     return this._scoped(async () => {
-      const pass = await this._correlate.correlate(query, lease);
+      const pass = await this._correlate.correlate(limit, lease);
       // Only a mark makes a stream claimable. Also re-arms correlate, so a
       // backlog scan keeps going.
       if (pass.kind === "scanned" && pass.marked > 0) this._arm_all();
