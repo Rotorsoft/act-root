@@ -8,24 +8,24 @@ Least recently run goes next. A lens with no accepted proposal in its last three
 
 | lens | last run | runs | accepted | status |
 |---|---|---|---|---|
-| Public surface | 2026-10-23 | 6 | 2 | active (no new surface; two `@internal` tags left on published exports, which the API reference hides) |
-| Dead code (tool) | 2026-10-25 | 7 | 4 | active (48 dead `eslint-disable` comments from the pre-Biome era; 3 unused imports Biome only warns about) |
+| Public surface | 2026-10-27 | 7 | 2 | active (no new surface; published doc comments still describe an action as needing an event and invariants as holding after it) |
+| Dead code (tool) | 2026-10-25 | 7 | 5 | active (48 dead `eslint-disable` comments from the pre-Biome era; 3 unused imports Biome only warns about) |
 | Hotspots (tool) | 2026-10-20 | 5 | 1 | retired 2026-10-20: two runs with no proposal; every branch in the hot functions (correlate, action, drain) is a separate rule |
-| File budget | 2026-10-23 | 7 | 1 | active (InMemoryStream's getters, −67 in the largest adapter file) |
-| Comment noise | 2026-10-25 | 7 | 4 | active (#2115 copied a 21-line `emit` doc 3 times and a `requires` doc twice; two `@returns` went stale) |
-| Concepts and options | 2026-10-23 | 7 | 3 | active (found the filtered-correlate bug: a per-call filter moves the shared checkpoint) |
+| File budget | 2026-10-27 | 8 | 1 | active (9 over 300 code lines; act.ts still seven concepts) |
+| Comment noise | 2026-10-25 | 7 | 6 | active (#2115 copied a 21-line `emit` doc 3 times and a `requires` doc twice; two `@returns` went stale) |
+| Concepts and options | 2026-10-27 | 8 | 3 | active (`validateFoldedState` refuses after the commit; `start_correlations({ limit: 0 })` reads 100) |
 | Core or decorator? | 2026-10-15 | 3 | 0 | retired 2026-10-15: three runs, findings only (PII, audit, breaker, lanes stay; priority is a major-version question) |
-| DRY across adapters and builders | 2026-10-25 | 7 | 5 | active (ten SQL transaction scaffolds; the two rule layers written twice in every layer #2115 touched) |
-| Reading path | 2026-10-23 | 6 | 3 | active (13 runtime files, ~31 names; settle restates correlate's init and checkpoint) |
+| DRY across adapters and builders | 2026-10-25 | 7 | 9 | active (ten SQL transaction scaffolds; the two rule layers written twice in every layer #2115 touched) |
+| Reading path | 2026-10-27 | 7 | 3 | active (13 runtime files, ~33 names; `Query` still travels the internal correlate path for one field) |
 | Newcomer test (quarterly) | 2026-10-17 | 2 | 0 | active (21 concepts, 3 imports; a package.json without name/version crashes) |
-| Tests by concept | 2026-10-25 | 7 | 8 | active (six time-budget tests red after one short stall; two tests that don't pin their names) |
+| Tests by concept | 2026-10-25 | 7 | 10 | active (six time-budget tests red after one short stall; two tests that don't pin their names) |
 | Mutation evidence (monthly, CI) | never | 0 | 0 | retired: setup removed (#1805), see baselines below |
 | Packages earn their place | 2026-10-15 | 4 | 0 | retired 2026-10-15: four runs, no proposal (removal is ruled out; act-tck churn is the snapshot, now P2026-10-15p-1) |
-| Infra | 2026-10-23 | 7 | 2 | active (two report-only workflow steps, a services block written four times; a flake that failed master twice) |
-| One source of truth | 2026-10-23 | 7 | 8 | active (act-sse's status worded seven ways) |
-| Examples | 2026-10-23 | 6 | 3 | active (242 unchecked API snippets compiled by hand: the tRPC `actor`/ctx examples fail in 4 places; the settle scene's debounce is backwards) |
-| Process | 2026-10-23 | 6 | 9 | active (the stability snapshot changed in 25 of 49 commits, 1 with new surface) |
-| Feature interactions | 2026-10-25 | 7 | 9 | active (partials sharing an action schema merge silently; #2106's correlate default) |
+| Infra | 2026-10-27 | 8 | 2 | active (three report-only conformance steps) |
+| One source of truth | 2026-10-27 | 8 | 8 | active (the scaffold skill's rules section twice, one copy teaching a `throw`) |
+| Examples | 2026-10-27 | 7 | 3 | active (the scaffold seed's fixed three correlate/drain rounds) |
+| Process | 2026-10-27 | 7 | 9 | active (PR template in 0 of 300 PR bodies; 17 shipped RFCs still `draft`) |
+| Feature interactions | 2026-10-25 | 7 | 11 | active (partials sharing an action schema merge silently; #2106's correlate default) |
 
 ## Interaction register
 
@@ -68,6 +68,8 @@ Where two features meet, and why. The Feature interactions lens reads this first
 | `.requires`, sensitive fields | one actor-gated snapshot feeds `given`, `requires` and `.emit` | shared primitive | probed: both see `[REDACTED]` for another actor |
 | `.requires`, act-http errors | the class map gives 409 `INVARIANT`; only the message names the layer | shared primitive | `rule` is a constructor argument, not a field |
 | empty block/ack skipped (#2117), breaker / lifecycle | a pass that only blocks makes no ack call and emits no `acked`; `breaker.passed()` still runs | harmless | probed |
+| `validateFoldedState`, commit | `action()` commits, then folds through `validating_patch`, so a bad reducer refuses the caller after its event is stored; reactions run on it, no `committed` event fires, and every later `load` of the stream throws | accidental, documented as a refusal | P2026-10-27-1 (probed in the main loop); the field folds before it appends (Emmett `handleCommand`, Axon's Unit of Work) |
+| `start_correlations` limit, `Query.limit` | the poll stores `query.limit \|\| undefined`, so `0` ("no limit" everywhere else) becomes settle's default 100 | accidental | P2026-10-27-2 |
 
 ## Mutation baselines
 
@@ -88,10 +90,11 @@ The last trusted Stryker scores, recorded when the setup was removed (#1805) bec
 
 Sound proposals that missed a run's cut. The next run ranks these before looking for new ones.
 
-- The unmaintained RFC "Status:" lines.
+- history.md has no budget (119 KB; run entries before 2026-10-22 are 69 KB, read by every run and specialist): keep the tables, the backlog, the self-changes and the last three runs, and fold each older run into one line with its tickets and rejections (~−64 KB). A change to the skill's memory: the user's call. (P2026-10-27p-3)
+- The root `format` script is a subset of `lint:fix` and nothing references it (−1). (P2026-10-27p-5)
+
 - `export *` over `ports.ts`, `utils.ts`, `config.ts` publishes anything added there without an RFC. (The `@internal` tags half is P2026-10-23-3.)
-- Design finding, no action: every runnable example needs `app.on("committed", () => app.settle())` (~10 copies, each with a caveat); worth asking whether that should be a default.
-- Design finding for a future major: priority (required `prioritize` port method, a column and two indexes per SQL adapter, a fairness reserve in 3 claims, the lane-rides-priority rule in 3 subscribes, 7 bugs) has no example user in this repo and no counterpart in other ES frameworks, which use separate processors (Act's lanes). Removing it is breaking; it is the user's question. 2026-10-11: Marten (per shard), Axon (per processor/segment), Kurrent (per group) and Emmett (per processor) all answer "a slow reaction must not block a fast one" with separate processors and none orders claims by priority; priority touches 13 source and 26 test files, and dropping it also drops the lane/priority coupling behind #1599 and #1876.
+- Design finding for a future major: priority (required `prioritize` port method, a column and two indexes per SQL adapter, a fairness reserve in 3 claims, the lane-rides-priority rule in 3 subscribes, 7 bugs) has no example user in this repo and no counterpart in other ES frameworks, which use separate processors (Act's lanes). Removing it is breaking; it is the user's question. 2026-10-11: Marten (per shard), Axon (per processor/segment), Kurrent (per group) and Emmett (per processor) all answer "a slow reaction must not block a fast one" with separate processors and none orders claims by priority; priority touches 13 source and 26 test files (2026-10-27: ~12 and 19), and dropping it also drops the lane/priority coupling behind #1599 and #1876.
 - act-http tests: drop the tRPC and Hono error tables that repeat the parity table and `api/errors.spec.ts` (~170 lines); `audit.spec.ts` collector helper and shared `meta` (~140 lines).
 
 - act-pg / act-sqlite `pii-encryption.spec.ts` run the same 9 cases (~238 shared lines): delete the sqlite `query_stats` duplicate of a TCK case now; moving the rest into a TCK capability adds act-tck surface and needs an RFC (~−400 net, unprobed). (P2026-10-11c-5)
@@ -105,10 +108,10 @@ Sound proposals that missed a run's cut. The next run ranks these before looking
 - Resolved by #1959 (P2026-10-17d-2 → #1949): a local `do()` arms lanes but schedules nothing, while a remote commit (`_wire_notify`) already schedules settle; 22 copies of `app.on("committed", () => app.settle())` in 17 files exist only to close that gap, and no framework in the field asks for it (Marten, Emmett, Axon, Propulsion run processors on their own). Changing it changes what apps observe.
 
 - Workflow and Renovate comments cut to their why: workflow comment lines 164 → 43, `renovate.json` 5.1 → 2.8 KB (ticket-history rule descriptions). Same kind as #2075, outside core. (P2026-10-23p-2)
-- `Act.restore` copies `scan`'s result into three closure variables and rebuilds it (−4); `_build_drain_controllers` re-reads `options.drain !== false` where `this._drain` holds it. (P2026-10-23b-2)
-- `/pr` requires a "Coverage: 100%" line that restates CI. (2026-10-23 process)
 
 ## Self-changes
+
+- 2026-10-27: two smells added. A server-only import in an entry point browser code imports, dynamic ones included: a bundler builds a literal `import()` into its own chunk, and the browser build fails there (#2154 shipped the variable-path workaround first, then removed the import; the gate's header said dynamic imports were safe). A fake clock jump in a test that stands in for a lease or schedule but not for the real-time timer behind it (#2119's fix flaked again; #2153 re-arms the lane). The Examples lens names a downstream build: the Risk upgrade found the browser build failure, an act-pg major that no longer fits `Store`, and an act-sse patch release that dropped four methods, none visible in this repo's CI.
 
 - 2026-10-25: the Tests by concept lens names time-budget tests (a fixed sleep or pass count before an assertion; a "not yet" check inside a real-clock window) and how to prove one (an injected stall and a control). Three such tests flaked in two days and the sweep found six more. Two smells added: a test that waits a time budget instead of an outcome, and a feature added beside an existing one by copying its shape in every layer (#2115). learnings.md merges the debounce-racing entry into a general time-budget rule and gains the copied-layer and shared-value-dedup lessons.
 
@@ -689,3 +692,41 @@ Findings, not proposed: `InvariantError` keeps `rule` only in the message (a fie
 Lens metrics: SQL transaction scaffolds 10 (→ 2 with s-4); #2115 twin copies across layers 5 sites (→ 0 if s-1, s-2, s-5 ship); time-budget tests red after a ≤100 ms stall: 6 probed, 1 by reading; contract-cited tests whose body doesn't pin their name: 1 (row 87), plus 1 uncited; interactions classified 12 (2 accidental, both defects; 8 shared primitive; 1 harmless; 1 none).
 
 Tickets (user: "do it"): #2123 (P2026-10-25-1), #2124 (-2), #2125 (-3), #2126 (-4), #2127 (-5), #2128 (s-1), #2129 (s-2), #2130 (s-3), #2131 (s-4), #2132 (s-5), #2133 (s-6).
+
+### 2026-10-27 — full run (four specialists: file budget + reading path + public surface, concepts and options + field, source of truth + examples, process + infra)
+
+| metric | 2026-10-25 | now | why |
+|---|---|---|---|
+| core lines (libs/act/src) | 17798 | 17699 | #2137 (−74), #2140 (−17), #2141 (−15); #2135, #2136 (+4) |
+| spec files / test lines | 216 / 59838 | 216 / 59958 | #2138, #2139 (+78), #2135, #2136 (+51); #2141 (−21) |
+| CI workflows / lines | 5 / 740 | 5 / 629 | #2144 (comments cut to their why) |
+| docs lines / CLAUDE.md | 9317 / 27 KB | 9344 / 27 KB | #2134 (`.requires` across the docs), #2155 |
+| everything else | | unchanged | 51 exports, 8 / 20 / 18 / 11, 9 files touching 5+ features, 9 files over 300 code lines, 29% / 14% comments, 0 ticket refs |
+
+Audit: 17 PRs since the last run: its eleven tickets (#2135–#2144 and #2134, which taught `.requires` across the docs), and three found while upgrading the Risk app to act 1.34 (#2153, #2154, #2155). Two fix-on-fix chains, both the assistant's: #2153 fixed the recurring-reminder test #2119 had fixed (its fake clock jump covered the lease but not the failed pass's real-time retry wake), and #2154 first hid the framework import behind a variable path, then removed it once the user asked why a browser component imports the backend at all. #2136 fixed `app.correlate`'s default but missed the poll's `query.limit || undefined` (P2026-10-27-2).
+
+Decisions on P2026-10-25*: all accepted and shipped. -1 → #2123 / #2135; -2 → #2124 / #2136; -3 + s-1 → #2125, #2128 / #2137; -4 → #2126 / #2138; -5 → #2127 / #2139; s-2 → #2129 / #2140; s-3 → #2130 / #2141; s-4 → #2131 / #2142; s-5 → #2132 / #2143; s-6 → #2133 / #2144.
+
+Promises kept: -1 source +3 (+21 tests); -2 +1 (+30 tests); s-1 −58 → −74; s-2 −18 → −17; s-3 −49 → −49 (−15 source, −21 tests, the rest benches and act-diagram); s-4 −30 → −30; s-5 −16 → −20; s-6 ~−130 comment lines → workflows −111 lines.
+
+Verified in the main loop before ranking: with `validateFoldedState`, `do("divide")` rejects with `ValidationError` while the store holds `[added, dividedByZero]`, and the next `do("add")` on the stream rejects too (control: a `.given` refusal commits nothing); `act.ts:1052` stores `query.limit || undefined` and settle reads `q.limit ?? this._poll_limit ?? 100`; `GivenHandlers` says invariants "must hold after the action" (types/action.ts:500) and four builder docs say an action must emit an event, while `action()` checks invariants before the handler and returns `[snapshot]` for `undefined` or `[]` (event-sourcing.ts:445, :466-470).
+
+Proposals (pending), ranked. Defects first (outside the cap):
+- P2026-10-27-1 (o-1 + d-D4). `validateFoldedState` refuses the caller after the commit. Its docs (configuration.md:176, `ActOptions` JSDoc, RFC 2086:203, contract row 269) read as a refusal that stores nothing. Docs say plainly that the event is stored, reactions run on it, and the stream then fails every `load` until the reducer is fixed or the flag is off; the JSDoc's hot-path essay becomes a link (−16); a test pins it. A code fix (fold before commit, as Emmett and Axon do) needs a provisional row for reducers that read `id`/`version`/`created`: not proposed, the user's call.
+- P2026-10-27-2 (c-1). `start_correlations({ limit: 0 })` scans 100, because the poll stores `query.limit || undefined`. Store `query.limit` as given and say in the doc that 0 reads everything, or document that 0 means the default here. The user decides which; 0 means "no limit" everywhere else.
+- P2026-10-27-3 (c-2 + d-D2, D3). Published doc comments that contradict the code: `GivenHandlers` "after the action" (before the handler), four "must emit one or more / at least one event" (types/builders.ts:461, :478, :502, :527; types/action.ts:469), `Act.do` and `action()` "checks invariants" without preconditions. Words only.
+- P2026-10-27-4 (d-D1, D5). The scaffold skill teaches a `throw` in `.emit` for a rule that combines state and payload (act-api.md:364-373, "cannot" be declared), and SKILL.md:91 calls `.given` "preconditions". Fixed by s-4.
+- P2026-10-27-5 (p-D1). rfcs/README.md says the snapshot runs in every package (it is the root `test/`), points at a PR-template checkbox 0 of 300 PRs carry, and says the pre-handoff steps live in CLAUDE.md with a required learnings entry. Fixed by s-5.
+Simplifications:
+- P2026-10-27s-1 (c-s-1). The internal correlate path passes `limit`, not a `Query`: `_correlate_pass`, `CorrelateCycle.correlate`, `_scan` and settle's `{ ...q, limit }` carry filters nothing reads since #2106 (−5, one type and one comment off the reading path; public `Act.correlate(query)` stays). Simulated, 100%.
+- P2026-10-27s-2 (c-s-2, backlog P2026-10-23b-2 lane half). Lane wiring derives each fact once: the no-`onlyLanes` check written three times (one redundant), `validate_only_lanes` rebuilding `_declared_lanes`, `options.drain !== false` where `this._drain` holds it (−4). Simulated, 100%.
+- P2026-10-27s-3 (c-s-3). `action()`: one early return for `undefined` or `[]`, and the event array stops sharing the name `valid` with the invariant predicate (−3). Simulated, 100%.
+- P2026-10-27s-4 (d-1 + d-2). The scaffold skill keeps business rules in domain.md only: act-api.md §8 keeps the two type signatures and a link (−30 lines, ~2.2 KB; fixes -4), and server.md's seed drops its three fixed correlate/drain rounds (each `do` settles; −6).
+- P2026-10-27s-5 (p-1 + p-2). Delete the PR template (0 of 300 PR bodies; `/pr` writes the body) and the RFC `Status:` lines (17 of 17 shipped RFCs say `draft`; nothing reads them; mark 0002 rejected in its title); rfcs/README.md points at `/pr` and CONTRIBUTING.md (−1 file, −57 lines; fixes -5).
+- P2026-10-27s-6 (p-4). conformance.yml's two summary-append steps and the stress artifact upload re-print logs and can't fail (−45, 629 → ~584); every gate (`bench:check`, scenario bounds, stress) stays.
+- P2026-10-27s-7 (d-3 + d-4 + o-2). Docs that repeat another page: CLAUDE.md's CLI section and benchmark paragraph (−1.6 KB), real-time.md's copy of the act-sse rename list (link STABILITY.md; "four `getX`" → "four renamed methods", `publishOverlay` isn't one), configuration.md § Circuit breaker's paragraph from error-handling.md (−0.8 KB).
+
+Findings, not proposed: `InvariantError.rule` lives only in the message, so code needing the layer parses text (a field is new surface); ActOptions has 12 fields and apps set 3 (`autoSettle`, `scoped`, `correlator`); `settleDebounceMs` and `SettleOptions.debounceMs` spell one idea twice (both published); 13 of 19 snapshot changes since #2045 were not public surface and four PRs needed a regenerate-only commit, but the snapshot keeps doc comments on purpose (detached docs, #2058) and `runStabilityTck` is published; the `Act.restore` closure-variable item re-measured at −1 and leaves the backlog; perf baselines date from 2026-08-22; the player and the commit-race scene still say "invariant" where they mean either layer.
+
+Lens metrics: files over 300 code lines 9 (act.ts 802, in-memory-store 730, audit 566, event-sourcing 473, types/builders 464, drain-cycle 457, close-cycle 450, correlate-cycle 419, types/action 325); reading path 13 runtime files, ~33 names (~32 with s-1 and s-3); master red from flakes since 2026-10-20: 3 runs (2 tests, both fixed), plus 2 PR flakes hidden by re-runs; PR template use 0 of 300; RFCs still `draft` after shipping 17 of 17.
+
