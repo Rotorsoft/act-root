@@ -463,21 +463,18 @@ export async function action<
           );
 
       const result = me.on[action](validated, snapshot, target);
-      if (!result) return [snapshot];
-
-      if (Array.isArray(result) && result.length === 0) {
+      if (!result || (Array.isArray(result) && !result.length))
         return [snapshot];
-      }
 
       const tuples = Array.isArray(result[0])
         ? (result as Emitted<TEvents>[]) // array of tuples
         : ([result] as Emitted<TEvents>[]); // single tuple
 
-      const valid = tuples.map(([name, data]) => ({
+      const events = tuples.map(([name, data]) => ({
         name,
         data: validate(name as string, data, me.events[name]),
       }));
-      const emitted = valid.map((e) => me.message(e));
+      const emitted = events.map((e) => me.message(e));
 
       const meta: EventMeta = {
         correlation:
@@ -523,7 +520,7 @@ export async function action<
       let { state, patches } = snapshot;
       const snapshots = committed.map((row, i) => {
         // The caller sent the plaintext, so no view/gate round-trip.
-        const event = { ...row, data: valid[i].data };
+        const event = { ...row, data: events[i].data };
         const p = me.patch[event.name](event, state);
         state = patch_fn(me, state, p, event);
         patches++;
