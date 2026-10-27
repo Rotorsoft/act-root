@@ -396,7 +396,7 @@ export async function load<
 }
 
 /**
- * Validates, checks invariants, emits and commits. On {@link ConcurrencyError}
+ * Validates, checks invariants and preconditions, emits and commits. On {@link ConcurrencyError}
  * it re-runs from `load` within the action's `maxRetries`; any other error
  * rethrows. Reactions commit without the inferred version guard.
  */

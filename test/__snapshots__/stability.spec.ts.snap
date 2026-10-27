@@ -152,8 +152,8 @@ export declare class Act<TSchemaReg extends SchemaRegister<TActions>, TEvents ex
     private _wire_notify;
     /**
      * Executes an action: validates the payload, loads the state, checks its
-     * invariants, and commits the events its handler emits, with optimistic
-     * concurrency on the stream. The reactions to those events settle on
+     * invariants and preconditions, and commits the events its handler emits,
+     * with optimistic concurrency on the stream. The reactions to those events settle on
      * their own (unless \`autoSettle: false\`).
      *
      * @template TKey - Action name from registered actions
@@ -1234,7 +1234,7 @@ export type PassthroughPatchHandler = ((event: {
     readonly _passthrough: true;
 };
 /**
- * Handles an action, producing one or more emitted events.
+ * Handles an action, producing the events to emit, or \`undefined\` (or \`[]\`) to commit nothing.
  * @template TState - State schema.
  * @template TEvents - Event schemas.
  * @template TActions - Action schemas.
@@ -1251,7 +1251,7 @@ export type ActionHandlers<TState extends Schema, TEvents extends Schemas, TActi
     [TKey in keyof TActions]: ActionHandler<TState, TEvents, TActions, TKey>;
 };
 /**
- * Maps action names to invariants that must hold after the action.
+ * Maps action names to the invariants checked before the action's handler runs.
  * @template TState - State schema.
  * @template TActions - Action schemas.
  */
@@ -2380,8 +2380,8 @@ type ActionRules<TState extends Schema, TEvents extends Schemas, TActions extend
     requires: (rules: Precondition<TState, TNewActions>[]) => {
         /**
          * Defines the action handler that emits events, as \`.emit()\` after
-         * \`.on()\` does: a handler returning one or more events, or an event
-         * name to pass the payload through as the event data.
+         * \`.on()\` does: a handler returning the events to emit (none is fine),
+         * or an event name to pass the payload through as the event data.
          */
         emit: ActionEmit<TState, TEvents, TActions, TName, TSnap, TKey, TNewActions>;
     };
@@ -2389,8 +2389,9 @@ type ActionRules<TState extends Schema, TEvents extends Schemas, TActions extend
      * Defines the action handler that emits events.
      *
      * The handler receives the action payload and current state snapshot,
-     * and must return one or more events to emit. Events are applied to state
-     * via the patch handlers defined earlier.
+     * and returns the events to emit, or nothing (\`undefined\` or \`[]\`) to
+     * commit nothing. Events are applied to state via the patch handlers
+     * defined earlier.
      *
      * Pass a string event name for passthrough: the action payload becomes
      * the event data directly.
@@ -2412,7 +2413,7 @@ type ActionRules<TState extends Schema, TEvents extends Schemas, TActions extend
  * Builder interface for defining actions (commands) on a state.
  *
  * Actions represent user/system intents to modify state. Each action is validated
- * against a schema, can have business rule invariants, and must emit one or more events.
+ * against a schema, can declare invariants and preconditions, and emits zero or more events.
  *
  * @template TState - State schema type
  * @template TEvents - Event schemas type
@@ -2431,7 +2432,7 @@ export type ActionBuilder<TState extends Schema, TEvents extends Schemas, TActio
      *
      * Actions represent intents to change state - they should be named in imperative form
      * (e.g., "CreateUser", "IncrementCounter", "PlaceOrder"). Actions are validated against
-     * their schema and must emit at least one event.
+     * their schema and emit zero or more events (none commits nothing).
      *
      * Pass a \`{ ActionName: schema }\` record — use shorthand \`{ ActionName }\`
      * when the variable name matches the action name. The key becomes the
@@ -6620,7 +6621,7 @@ export type PassthroughPatchHandler = ((event: {
     readonly _passthrough: true;
 };
 /**
- * Handles an action, producing one or more emitted events.
+ * Handles an action, producing the events to emit, or \`undefined\` (or \`[]\`) to commit nothing.
  * @template TState - State schema.
  * @template TEvents - Event schemas.
  * @template TActions - Action schemas.
@@ -6637,7 +6638,7 @@ export type ActionHandlers<TState extends Schema, TEvents extends Schemas, TActi
     [TKey in keyof TActions]: ActionHandler<TState, TEvents, TActions, TKey>;
 };
 /**
- * Maps action names to invariants that must hold after the action.
+ * Maps action names to the invariants checked before the action's handler runs.
  * @template TState - State schema.
  * @template TActions - Action schemas.
  */
@@ -7766,8 +7767,8 @@ type ActionRules<TState extends Schema, TEvents extends Schemas, TActions extend
     requires: (rules: Precondition<TState, TNewActions>[]) => {
         /**
          * Defines the action handler that emits events, as \`.emit()\` after
-         * \`.on()\` does: a handler returning one or more events, or an event
-         * name to pass the payload through as the event data.
+         * \`.on()\` does: a handler returning the events to emit (none is fine),
+         * or an event name to pass the payload through as the event data.
          */
         emit: ActionEmit<TState, TEvents, TActions, TName, TSnap, TKey, TNewActions>;
     };
@@ -7775,8 +7776,9 @@ type ActionRules<TState extends Schema, TEvents extends Schemas, TActions extend
      * Defines the action handler that emits events.
      *
      * The handler receives the action payload and current state snapshot,
-     * and must return one or more events to emit. Events are applied to state
-     * via the patch handlers defined earlier.
+     * and returns the events to emit, or nothing (\`undefined\` or \`[]\`) to
+     * commit nothing. Events are applied to state via the patch handlers
+     * defined earlier.
      *
      * Pass a string event name for passthrough: the action payload becomes
      * the event data directly.
@@ -7798,7 +7800,7 @@ type ActionRules<TState extends Schema, TEvents extends Schemas, TActions extend
  * Builder interface for defining actions (commands) on a state.
  *
  * Actions represent user/system intents to modify state. Each action is validated
- * against a schema, can have business rule invariants, and must emit one or more events.
+ * against a schema, can declare invariants and preconditions, and emits zero or more events.
  *
  * @template TState - State schema type
  * @template TEvents - Event schemas type
@@ -7817,7 +7819,7 @@ export type ActionBuilder<TState extends Schema, TEvents extends Schemas, TActio
      *
      * Actions represent intents to change state - they should be named in imperative form
      * (e.g., "CreateUser", "IncrementCounter", "PlaceOrder"). Actions are validated against
-     * their schema and must emit at least one event.
+     * their schema and emit zero or more events (none commits nothing).
      *
      * Pass a \`{ ActionName: schema }\` record — use shorthand \`{ ActionName }\`
      * when the variable name matches the action name. The key becomes the

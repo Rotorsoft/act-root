@@ -458,8 +458,8 @@ type ActionRules<
   requires: (rules: Precondition<TState, TNewActions>[]) => {
     /**
      * Defines the action handler that emits events, as `.emit()` after
-     * `.on()` does: a handler returning one or more events, or an event
-     * name to pass the payload through as the event data.
+     * `.on()` does: a handler returning the events to emit (none is fine),
+     * or an event name to pass the payload through as the event data.
      */
     emit: ActionEmit<
       TState,
@@ -475,8 +475,9 @@ type ActionRules<
    * Defines the action handler that emits events.
    *
    * The handler receives the action payload and current state snapshot,
-   * and must return one or more events to emit. Events are applied to state
-   * via the patch handlers defined earlier.
+   * and returns the events to emit, or nothing (`undefined` or `[]`) to
+   * commit nothing. Events are applied to state via the patch handlers
+   * defined earlier.
    *
    * Pass a string event name for passthrough: the action payload becomes
    * the event data directly.
@@ -499,7 +500,7 @@ type ActionRules<
  * Builder interface for defining actions (commands) on a state.
  *
  * Actions represent user/system intents to modify state. Each action is validated
- * against a schema, can have business rule invariants, and must emit one or more events.
+ * against a schema, can declare invariants and preconditions, and emits zero or more events.
  *
  * @template TState - State schema type
  * @template TEvents - Event schemas type
@@ -524,7 +525,7 @@ export type ActionBuilder<
    *
    * Actions represent intents to change state - they should be named in imperative form
    * (e.g., "CreateUser", "IncrementCounter", "PlaceOrder"). Actions are validated against
-   * their schema and must emit at least one event.
+   * their schema and emit zero or more events (none commits nothing).
    *
    * Pass a `{ ActionName: schema }` record — use shorthand `{ ActionName }`
    * when the variable name matches the action name. The key becomes the
