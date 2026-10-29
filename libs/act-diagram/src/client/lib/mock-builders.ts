@@ -73,6 +73,7 @@ export function mock_state(
   const name = Object.keys(entry)[0];
   const info = {
     name,
+    schema: entry[name],
     events: {} as Record<string, any>,
     actions: {} as Record<string, any>,
     given: {} as Record<string, any[]>,

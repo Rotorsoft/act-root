@@ -20,6 +20,9 @@ const { load_project } = await import(
 const { extract_model } = await import(
   `${root}/libs/act-diagram/src/client/lib/evaluate.ts`
 );
+const { schema_text, schema_rules } = await import(
+  `${root}/libs/act-diagram/src/client/lib/schema-text.ts`
+);
 
 const dir = process.argv[2];
 if (!dir) {
@@ -38,6 +41,12 @@ const edge = (from: string, to: string, label?: string) => {
     edges.push(label ? { from, to, label } : { from, to });
 };
 
+// the readable shape of a schema, or the source text when it can't be read
+const with_schema = (zod: unknown, source?: string) => {
+  const schema = schema_text(zod) ?? source;
+  return schema ? { schema } : {};
+};
+
 // actions and events, merged across partial states that share a name
 const emits = new Map<string, string[]>();
 for (const s of model.states) {
@@ -48,6 +57,7 @@ for (const s of model.states) {
       label: a.name,
       state: s.name,
       preconditions: a.preconditions ?? a.invariants,
+      ...with_schema(a.zod),
       ...(s.file ? { file: s.file, line: a.line } : {}),
     });
     emits.set(a.name, a.emits);
@@ -58,7 +68,7 @@ for (const s of model.states) {
       lane: "event",
       label: e.name,
       state: s.name,
-      ...(e.schema ? { schema: e.schema } : {}),
+      ...with_schema(e.zod, e.schema),
       ...(s.file ? { file: s.file, line: e.line } : {}),
     });
   }
@@ -120,12 +130,25 @@ for (const n of nodes.values()) {
   n.col = ((nodes.get(trigger)?.col as number) ?? 0) + (k - (siblings.length - 1) / 2) * 0.9;
 }
 
-// one state bar per state name, listing the partials merged into it
-const partials = new Map<string, Set<string>>();
-for (const s of model.states)
-  (partials.get(s.name) ?? partials.set(s.name, new Set()).get(s.name)!).add(s.file ?? s.varName);
-for (const [name, files] of partials)
-  nodes.set(`state:${name}`, { id: `state:${name}`, lane: "state", label: name, note: `${files.size} partial state(s)` });
+// one state bar per state name, listing the partials merged into it, with the
+// merged schema and its refinements (the state's invariants)
+const partials = new Map<string, { files: Set<string>; zods: unknown[] }>();
+for (const s of model.states) {
+  const p = partials.get(s.name) ?? partials.set(s.name, { files: new Set(), zods: [] }).get(s.name)!;
+  p.files.add(s.file ?? s.varName);
+  p.zods.push(s.zod);
+}
+for (const [name, { files, zods }] of partials) {
+  const invariants = schema_rules(zods);
+  nodes.set(`state:${name}`, {
+    id: `state:${name}`,
+    lane: "state",
+    label: name,
+    note: `${files.size} partial state(s)`,
+    ...with_schema(zods),
+    ...(invariants.length ? { invariants } : {}),
+  });
+}
 
 // slices own the partial states declared in their own file, plus the reactions they declare;
 // the other partials they register are references

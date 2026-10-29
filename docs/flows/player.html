@@ -628,10 +628,20 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
       ${n.note ? `<p class="rel">${esc(n.note)}</p>` : ""}
       ${n.description ? `<p>${esc(n.description)}</p>` : ""}
       ${checksOf(n).length ? `<p class="rel"><span class="pre">▲</span> Preconditions</p><ul>${checksOf(n).map(r => `<li>${esc(r.t)}</li>`).join("")}</ul>` : ""}
-      ${n.schema ? `<pre>${esc(n.schema)}</pre>` : ""}
+      ${schemaOf(n)}
       ${ins.length ? `<p class="rel">From: ${ins.map(e => link(e.a)).join(", ")}</p>` : ""}
       ${outs.length ? `<p class="rel">To: ${outs.map(e => link(e.b)).join(", ")}</p>` : ""}`;
     $("detail").querySelectorAll("button[data-id]").forEach(b => b.onclick = () => select(byId(b.dataset.id)));
+  }
+  // A state's schema is its invariants, checked before every commit; its
+  // refinements are listed by message. Actions and events show their payload.
+  function schemaOf(n) {
+    const isState = kindOf(n) === "state";
+    if (!n.schema && !(isState && n.invariants?.length)) return "";
+    const title = isState ? "Invariants · checked before every commit" : "Payload";
+    const rules = isState && n.invariants?.length ? `<ul>${n.invariants.map(r => `<li>${esc(r)}</li>`).join("")}</ul>` : "";
+    const body = n.schema === "{}" ? `<p>No fields.</p>` : n.schema ? `<pre>${esc(n.schema)}</pre>` : "";
+    return `<p class="rel">${title}</p>${rules}${body}`;
   }
   function showBand(b) {
     const link = x => `<button data-id="${esc(x.id)}">${esc(x.label)}</button>`;
@@ -647,6 +657,7 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
       ${r.file ? `<div class="file">${esc(r.file)}${r.line ? ":" + r.line : ""}</div>` : ""}
       ${inside}
       ${r.description ? `<p>${esc(r.description)}</p>` : ""}
+      ${b.kind === "state" ? schemaOf(r) : ""}
       ${members.length ? `<p class="rel">Inside: ${members.map(link).join(", ")}</p>` : ""}`;
     $("detail").querySelectorAll("button[data-id]").forEach(x => x.onclick = () => select(byId(x.dataset.id)));
   }

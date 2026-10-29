@@ -75,7 +75,7 @@
       "lane": "action",
       "label": "CreateGame",
       "col": 0,
-      "schema": "{ name, turnTimeoutSec? }",
+      "schema": "name: string ≥ 1 chars, ≤ 30 chars\nturnTimeoutSec?: number ≥ 10, ≤ 600",
       "file": "packages/domain/src/game.ts",
       "line": 142,
       "description": "Opens a lobby. The actor becomes the creator.",
@@ -90,7 +90,7 @@
         "Game must be in lobby phase",
         "Game must not be full (max 6 players)"
       ],
-      "schema": "{ playerName, color, bot?, avatar? }",
+      "schema": "playerName: string ≥ 1 chars, ≤ 20 chars\ncolor: string\nbot: boolean\navatar?: string",
       "file": "packages/domain/src/game.ts",
       "line": 146,
       "description": "Takes a seat. Also refuses a player who already joined.",
@@ -109,7 +109,8 @@
       "file": "packages/domain/src/game.ts",
       "line": 159,
       "description": "Shuffles the turn order, deals the 42 territories one army each, and computes each player's setup armies (40 for two players, down to 20 for six).",
-      "slice": "slice:GameSlice"
+      "slice": "slice:GameSlice",
+      "schema": "{}"
     },
     {
       "id": "action:PlaceArmy",
@@ -120,7 +121,7 @@
         "Game must be in setup phase",
         "Must be the current player's turn"
       ],
-      "schema": "{ territory }",
+      "schema": "territory: string",
       "file": "packages/domain/src/game.ts",
       "line": 194,
       "description": "Places one setup army on an owned territory. The last army on the table also emits SetupCompleted.",
@@ -138,7 +139,8 @@
       "file": "packages/domain/src/game.ts",
       "line": 557,
       "description": "Places all of a player's remaining setup armies at once, weakest border territories first. Emits SetupCompleted too when nobody else has armies left.",
-      "slice": "slice:GameSlice"
+      "slice": "slice:GameSlice",
+      "schema": "{}"
     },
     {
       "id": "action:TradeCards",
@@ -146,7 +148,7 @@
       "label": "TradeCards",
       "col": 6,
       "preconditions": ["Must be the current player's turn"],
-      "schema": "{ cardIndices: [i, j, k] }",
+      "schema": "cardIndices: number[] 3 items",
       "file": "packages/domain/src/game.ts",
       "line": 469,
       "description": "Trades a valid set of three cards for bonus armies (4, 6, 8, 10, 12, 15, then +5 each). Only in reinforce, or in attack with 5+ cards.",
@@ -161,7 +163,7 @@
         "Game must be in reinforce phase",
         "Must be the current player's turn"
       ],
-      "schema": "{ territory, armies }",
+      "schema": "territory: string\narmies: number ≥ 1",
       "file": "packages/domain/src/game.ts",
       "line": 220,
       "description": "Deploys reinforcements. A hand of 5+ cards with a valid set must be traded first. When none remain, the phase moves to attack.",
@@ -176,7 +178,7 @@
         "Game must be in attack phase",
         "Must be the current player's turn"
       ],
-      "schema": "{ from, to, attackDice }",
+      "schema": "from: string\nto: string\nattackDice: number ≥ 1, ≤ 3",
       "file": "packages/domain/src/game.ts",
       "line": 242,
       "description": "Rolls one round of dice inside the action, so the event records the outcome. Taking a player's last territory also emits PlayerEliminated, and GameWon when one player remains.",
@@ -191,7 +193,7 @@
         "Game must be in attack phase",
         "Must be the current player's turn"
       ],
-      "schema": "{ from, to, minArmies? }",
+      "schema": "from: string\nto: string\nminArmies?: number ≥ 1",
       "file": "packages/domain/src/game.ts",
       "line": 335,
       "description": "Rolls rounds until the territory falls or the attacker is down to minArmies, and records every round in one event. Same elimination and win rules as Attack.",
@@ -206,7 +208,7 @@
         "Game must be in attack phase",
         "Must be the current player's turn"
       ],
-      "schema": "{ from, to, armies }",
+      "schema": "from: string\nto: string\narmies: number ≥ 0",
       "file": "packages/domain/src/game.ts",
       "line": 456,
       "description": "Moves extra armies into a conquered territory. Attacks, ending the attack and fortifying wait until it is done.",
@@ -224,7 +226,8 @@
       "file": "packages/domain/src/game.ts",
       "line": 445,
       "description": "Ends the attack phase and moves to fortify.",
-      "slice": "slice:GameSlice"
+      "slice": "slice:GameSlice",
+      "schema": "{}"
     },
     {
       "id": "action:Fortify",
@@ -235,7 +238,7 @@
         "Game must be in fortify phase",
         "Must be the current player's turn"
       ],
-      "schema": "{ from, to, armies }",
+      "schema": "from: string\nto: string\narmies: number ≥ 1",
       "file": "packages/domain/src/game.ts",
       "line": 495,
       "description": "Moves armies between two owned territories connected through owned territories, then ends the turn: a card if the player conquered this turn, then TurnStarted for the next player.",
@@ -253,14 +256,15 @@
       "file": "packages/domain/src/game.ts",
       "line": 532,
       "description": "Ends the turn without moving armies, with the same card and next-turn events as Fortify.",
-      "slice": "slice:GameSlice"
+      "slice": "slice:GameSlice",
+      "schema": "{}"
     },
     {
       "id": "action:ReplaceWithBot",
       "lane": "action",
       "label": "ReplaceWithBot",
       "col": 17,
-      "schema": "{ playerId }",
+      "schema": "playerId: string",
       "file": "packages/domain/src/game.ts",
       "line": 615,
       "description": "Hands a seat to the bot engine. The emit refuses any actor but the system.",
@@ -275,7 +279,8 @@
       "file": "packages/domain/src/game.ts",
       "line": 607,
       "description": "Marks the game deleted (it stays in the log). The precondition reuses the creator check, so its message says start.",
-      "slice": "slice:GameSlice"
+      "slice": "slice:GameSlice",
+      "schema": "{}"
     },
     {
       "id": "state:Game",
@@ -283,14 +288,15 @@
       "label": "Game",
       "note": "phase · players · turn · territories · cards",
       "file": "packages/domain/src/game.ts",
-      "description": "One Game state per stream. Every action loads it, checks the phase and turn preconditions, and its events patch it (game-patches.ts). Dice are rolled inside the action, so replaying the events always rebuilds the same board. Snapshots every 20 patches. The panel leaves out the 42 territories and the card deck."
+      "description": "One Game state per stream. Every action loads it, checks the phase and turn preconditions, and its events patch it (game-patches.ts). Dice are rolled inside the action, so replaying the events always rebuilds the same board. Snapshots every 20 patches. The panel leaves out the 42 territories and the card deck.",
+      "schema": "name: string\ncreatedBy: string\nphase: \"lobby\" | \"setup\" | \"reinforce\" | \"attack\" | \"fortify\" | \"ended\"\nplayers: Record<string, {\n  id: string\n  name: string\n  color: string\n  connected: boolean\n  eliminated: boolean\n  eliminatedBy?: string\n  eliminatedAtTurn?: number\n  bot: boolean\n  avatar?: string\n}>\nplayerOrder: string[]\ncurrentPlayerIndex: number\nterritories: Record<string, {\n  owner: string\n  armies: number\n}>\nturnNumber: number\nreinforcementsRemaining: number\nlastAttack: {\n  from: string\n  to: string\n  attackDice: number[]\n  defendDice: number[]\n  attackerLosses: number\n  defenderLosses: number\n} | null\nwinner: string | null\nsetupArmiesRemaining: Record<string, number>\ncards: Record<string, ({\n  type: \"infantry\" | \"cavalry\" | \"artillery\" | \"wild\"\n  territory?: string\n})[]>\ncardDeck: ({\n  type: \"infantry\" | \"cavalry\" | \"artillery\" | \"wild\"\n  territory?: string\n})[]\ncardTradeCount: number\nconqueredThisTurn: boolean\nturnStats: {\n  attacks: number\n  conquered: number\n  attackerLosses: number\n  defenderLosses: number\n  playersEliminated: string[]\n}\npendingConquest: {\n  from: string\n  to: string\n  maxExtra: number\n}\nturnTimeoutSec: number\ndeleted: boolean"
     },
     {
       "id": "evt:GameCreated",
       "lane": "event",
       "label": "GameCreated",
       "col": 0,
-      "schema": "{ name, createdBy, turnTimeoutSec }",
+      "schema": "name: string\ncreatedBy: string\nturnTimeoutSec: number",
       "slice": "slice:GameSlice"
     },
     {
@@ -298,7 +304,7 @@
       "lane": "event",
       "label": "PlayerJoined",
       "col": 1,
-      "schema": "{ playerId, playerName, color, bot, avatar? }",
+      "schema": "playerId: string\nplayerName: string\ncolor: string\nbot: boolean\navatar?: string",
       "slice": "slice:GameSlice"
     },
     {
@@ -306,7 +312,7 @@
       "lane": "event",
       "label": "GameStarted",
       "col": 2,
-      "schema": "{ playerOrder, territories, setupArmiesRemaining }",
+      "schema": "playerOrder: string[]\nterritories: Record<string, {\n  owner: string\n  armies: number\n}>\nsetupArmiesRemaining: Record<string, number>",
       "slice": "slice:GameSlice"
     },
     {
@@ -314,7 +320,7 @@
       "lane": "event",
       "label": "ArmyPlaced",
       "col": 3,
-      "schema": "{ playerId, territory }",
+      "schema": "playerId: string\nterritory: string",
       "slice": "slice:GameSlice"
     },
     {
@@ -330,7 +336,7 @@
       "lane": "event",
       "label": "AutoDeployed",
       "col": 5,
-      "schema": "{ playerId, placements }",
+      "schema": "playerId: string\nplacements: Record<string, number>",
       "slice": "slice:GameSlice"
     },
     {
@@ -338,7 +344,7 @@
       "lane": "event",
       "label": "CardsTraded",
       "col": 6,
-      "schema": "{ playerId, cardIndices, bonusArmies, tradeCount, tradedCards, territoryBonuses }",
+      "schema": "playerId: string\ncardIndices: number[]\nbonusArmies: number\ntradeCount: number\ntradedCards: ({\n  type: \"infantry\" | \"cavalry\" | \"artillery\" | \"wild\"\n  territory?: string\n})[]\nterritoryBonuses: Record<string, number>",
       "slice": "slice:GameSlice"
     },
     {
@@ -346,7 +352,7 @@
       "lane": "event",
       "label": "Reinforced",
       "col": 7,
-      "schema": "{ territory, armies, remaining }",
+      "schema": "territory: string\narmies: number\nremaining: number",
       "slice": "slice:GameSlice"
     },
     {
@@ -354,7 +360,7 @@
       "lane": "event",
       "label": "Attacked",
       "col": 8,
-      "schema": "{ from, to, attackDice, defendDice, attackerLosses, defenderLosses, conquered, fromArmies, toArmies, toOwner }",
+      "schema": "from: string\nto: string\nattackDice: number[]\ndefendDice: number[]\nattackerLosses: number\ndefenderLosses: number\nconquered: boolean\nfromArmies: number\ntoArmies: number\ntoOwner: string",
       "slice": "slice:GameSlice"
     },
     {
@@ -362,7 +368,7 @@
       "lane": "event",
       "label": "BlitzAttacked",
       "col": 9,
-      "schema": "{ from, to, rounds, conquered, fromArmies, toArmies, toOwner }",
+      "schema": "from: string\nto: string\nrounds: {\n  attackDice: number[]\n  defendDice: number[]\n  attackerLosses: number\n  defenderLosses: number\n}[]\nconquered: boolean\nfromArmies: number\ntoArmies: number\ntoOwner: string",
       "slice": "slice:GameSlice"
     },
     {
@@ -370,7 +376,7 @@
       "lane": "event",
       "label": "PlayerEliminated",
       "col": 10,
-      "schema": "{ playerId, conquerorId, transferredCards }",
+      "schema": "playerId: string\nconquerorId: string\ntransferredCards: ({\n  type: \"infantry\" | \"cavalry\" | \"artillery\" | \"wild\"\n  territory?: string\n})[]",
       "slice": "slice:GameSlice"
     },
     {
@@ -378,7 +384,7 @@
       "lane": "event",
       "label": "GameWon",
       "col": 11,
-      "schema": "{ winnerId }",
+      "schema": "winnerId: string",
       "slice": "slice:GameSlice"
     },
     {
@@ -386,7 +392,7 @@
       "lane": "event",
       "label": "ConquestMoved",
       "col": 12,
-      "schema": "{ from, to, armies }",
+      "schema": "from: string\nto: string\narmies: number",
       "slice": "slice:GameSlice"
     },
     {
@@ -402,7 +408,7 @@
       "lane": "event",
       "label": "Fortified",
       "col": 14,
-      "schema": "{ from, to, armies }",
+      "schema": "from: string\nto: string\narmies: number",
       "slice": "slice:GameSlice"
     },
     {
@@ -410,7 +416,7 @@
       "lane": "event",
       "label": "CardEarned",
       "col": 15,
-      "schema": "{ playerId, card }",
+      "schema": "playerId: string\ncard: {\n  type: \"infantry\" | \"cavalry\" | \"artillery\" | \"wild\"\n  territory?: string\n}",
       "slice": "slice:GameSlice"
     },
     {
@@ -418,7 +424,7 @@
       "lane": "event",
       "label": "TurnStarted",
       "col": 16,
-      "schema": "{ playerId, playerIndex, turnNumber, reinforcements }",
+      "schema": "playerId: string\nplayerIndex: number\nturnNumber: number\nreinforcements: number",
       "slice": "slice:GameSlice"
     },
     {
@@ -426,7 +432,7 @@
       "lane": "event",
       "label": "PlayerReplacedByBot",
       "col": 17,
-      "schema": "{ playerId }",
+      "schema": "playerId: string",
       "slice": "slice:GameSlice"
     },
     {
