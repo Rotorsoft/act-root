@@ -88,7 +88,8 @@
       "col": 1,
       "preconditions": [
         "Game must be in lobby phase",
-        "Game must not be full (max 6 players)"
+        "Game must not be full (max 6 players)",
+        "Player already joined"
       ],
       "schema": "playerName: string ≥ 1 chars, ≤ 20 chars\ncolor: string\nbot: boolean\navatar?: string",
       "file": "packages/domain/src/game.ts",
@@ -119,7 +120,10 @@
       "col": 3,
       "preconditions": [
         "Game must be in setup phase",
-        "Must be the current player's turn"
+        "Must be the current player's turn",
+        "No setup armies remaining",
+        "Invalid territory",
+        "You don't own this territory"
       ],
       "schema": "territory: string",
       "file": "packages/domain/src/game.ts",
@@ -134,7 +138,8 @@
       "col": 5,
       "preconditions": [
         "Game must be in setup phase",
-        "Must be the current player's turn"
+        "Must be the current player's turn",
+        "No setup armies remaining"
       ],
       "file": "packages/domain/src/game.ts",
       "line": 557,
@@ -147,7 +152,13 @@
       "lane": "action",
       "label": "TradeCards",
       "col": 6,
-      "preconditions": ["Must be the current player's turn"],
+      "preconditions": [
+        "Must be the current player's turn",
+        "Can only trade cards during reinforce or attack phase",
+        "Can only trade during attack phase when holding 5+ cards",
+        "Invalid card index",
+        "Invalid card set"
+      ],
       "schema": "cardIndices: number[] 3 items",
       "file": "packages/domain/src/game.ts",
       "line": 469,
@@ -161,7 +172,11 @@
       "col": 7,
       "preconditions": [
         "Game must be in reinforce phase",
-        "Must be the current player's turn"
+        "Must be the current player's turn",
+        "Must trade cards first (5+ cards in hand)",
+        "Invalid territory",
+        "You don't own this territory",
+        "Not enough reinforcements"
       ],
       "schema": "territory: string\narmies: number ≥ 1",
       "file": "packages/domain/src/game.ts",
@@ -176,7 +191,14 @@
       "col": 8,
       "preconditions": [
         "Game must be in attack phase",
-        "Must be the current player's turn"
+        "Must be the current player's turn",
+        "Must complete conquest movement first",
+        "Must trade cards first (5+ cards in hand)",
+        "Invalid territory",
+        "You don't own the attacking territory",
+        "Cannot attack your own territory",
+        "Territories are not adjacent",
+        "Not enough armies to attack (must leave at least 1)"
       ],
       "schema": "from: string\nto: string\nattackDice: number ≥ 1, ≤ 3",
       "file": "packages/domain/src/game.ts",
@@ -191,7 +213,14 @@
       "col": 9,
       "preconditions": [
         "Game must be in attack phase",
-        "Must be the current player's turn"
+        "Must be the current player's turn",
+        "Must complete conquest movement first",
+        "Must trade cards first (5+ cards in hand)",
+        "Invalid territory",
+        "You don't own the attacking territory",
+        "Cannot attack your own territory",
+        "Territories are not adjacent",
+        "Not enough armies to attack (must leave at least 1)"
       ],
       "schema": "from: string\nto: string\nminArmies?: number ≥ 1",
       "file": "packages/domain/src/game.ts",
@@ -206,7 +235,10 @@
       "col": 12,
       "preconditions": [
         "Game must be in attack phase",
-        "Must be the current player's turn"
+        "Must be the current player's turn",
+        "No pending conquest movement",
+        "Conquest move must match pending conquest territories",
+        "Can move 0 up to the conquest's extra armies"
       ],
       "schema": "from: string\nto: string\narmies: number ≥ 0",
       "file": "packages/domain/src/game.ts",
@@ -221,7 +253,9 @@
       "col": 13,
       "preconditions": [
         "Game must be in attack phase",
-        "Must be the current player's turn"
+        "Must be the current player's turn",
+        "Must complete conquest movement first",
+        "Must trade cards first (5+ cards in hand)"
       ],
       "file": "packages/domain/src/game.ts",
       "line": 445,
@@ -236,7 +270,12 @@
       "col": 14,
       "preconditions": [
         "Game must be in fortify phase",
-        "Must be the current player's turn"
+        "Must be the current player's turn",
+        "Must complete conquest movement first",
+        "Invalid territory",
+        "You must own both territories",
+        "Must leave at least 1 army behind",
+        "Territories must be connected through your own territories"
       ],
       "schema": "from: string\nto: string\narmies: number ≥ 1",
       "file": "packages/domain/src/game.ts",
@@ -251,7 +290,8 @@
       "col": 16,
       "preconditions": [
         "Game must be in fortify phase",
-        "Must be the current player's turn"
+        "Must be the current player's turn",
+        "Must complete conquest movement first"
       ],
       "file": "packages/domain/src/game.ts",
       "line": 532,
@@ -268,14 +308,18 @@
       "file": "packages/domain/src/game.ts",
       "line": 615,
       "description": "Hands a seat to the bot engine. The emit refuses any actor but the system.",
-      "slice": "slice:GameSlice"
+      "slice": "slice:GameSlice",
+      "preconditions": ["Only the system can replace players with bots"]
     },
     {
       "id": "action:DeleteGame",
       "lane": "action",
       "label": "DeleteGame",
       "col": 18,
-      "preconditions": ["Only the game creator can start the game"],
+      "preconditions": [
+        "Only the game creator can start the game",
+        "Game already deleted"
+      ],
       "file": "packages/domain/src/game.ts",
       "line": 607,
       "description": "Marks the game deleted (it stays in the log). The precondition reuses the creator check, so its message says start.",
@@ -289,7 +333,7 @@
       "note": "phase · players · turn · territories · cards",
       "file": "packages/domain/src/game.ts",
       "description": "One Game state per stream. Every action loads it, checks the phase and turn preconditions, and its events patch it (game-patches.ts). Dice are rolled inside the action, so replaying the events always rebuilds the same board. Snapshots every 20 patches. The panel leaves out the 42 territories and the card deck.",
-      "schema": "name: string\ncreatedBy: string\nphase: \"lobby\" | \"setup\" | \"reinforce\" | \"attack\" | \"fortify\" | \"ended\"\nplayers: Record<string, {\n  id: string\n  name: string\n  color: string\n  connected: boolean\n  eliminated: boolean\n  eliminatedBy?: string\n  eliminatedAtTurn?: number\n  bot: boolean\n  avatar?: string\n}>\nplayerOrder: string[]\ncurrentPlayerIndex: number\nterritories: Record<string, {\n  owner: string\n  armies: number\n}>\nturnNumber: number\nreinforcementsRemaining: number\nlastAttack: {\n  from: string\n  to: string\n  attackDice: number[]\n  defendDice: number[]\n  attackerLosses: number\n  defenderLosses: number\n} | null\nwinner: string | null\nsetupArmiesRemaining: Record<string, number>\ncards: Record<string, ({\n  type: \"infantry\" | \"cavalry\" | \"artillery\" | \"wild\"\n  territory?: string\n})[]>\ncardDeck: ({\n  type: \"infantry\" | \"cavalry\" | \"artillery\" | \"wild\"\n  territory?: string\n})[]\ncardTradeCount: number\nconqueredThisTurn: boolean\nturnStats: {\n  attacks: number\n  conquered: number\n  attackerLosses: number\n  defenderLosses: number\n  playersEliminated: string[]\n}\npendingConquest: {\n  from: string\n  to: string\n  maxExtra: number\n}\nturnTimeoutSec: number\ndeleted: boolean"
+      "schema": "name: string\ncreatedBy: string\nphase: \"lobby\" | \"setup\" | \"reinforce\" | \"attack\" | \"fortify\" | \"ended\"\nplayers: Record<string, {\n  id: string\n  name: string\n  color: string\n  connected: boolean\n  eliminated: boolean\n  eliminatedBy?: string\n  eliminatedAtTurn?: number\n  bot: boolean\n  avatar?: string\n}>\nplayerOrder: string[]\ncurrentPlayerIndex: number\nterritories: Record<string, {\n  owner: string\n  armies: integer ≥ 1\n}>\nturnNumber: number\nreinforcementsRemaining: integer ≥ 0\nlastAttack?: {\n  from: string\n  to: string\n  attackDice: number[]\n  defendDice: number[]\n  attackerLosses: number\n  defenderLosses: number\n} | null\nwinner: string | null\nsetupArmiesRemaining: Record<string, number>\ncards: Record<string, ({\n  type: \"infantry\" | \"cavalry\" | \"artillery\" | \"wild\"\n  territory?: string\n})[]>\ncardDeck: ({\n  type: \"infantry\" | \"cavalry\" | \"artillery\" | \"wild\"\n  territory?: string\n})[]\ncardTradeCount: number\nconqueredThisTurn: boolean\nturnStats: {\n  attacks: number\n  conquered: number\n  attackerLosses: number\n  defenderLosses: number\n  playersEliminated: string[]\n}\npendingConquest: {\n  from: string\n  to: string\n  maxExtra: number\n}\nturnTimeoutSec: number\ndeleted: boolean"
     },
     {
       "id": "evt:GameCreated",
@@ -312,7 +356,7 @@
       "lane": "event",
       "label": "GameStarted",
       "col": 2,
-      "schema": "playerOrder: string[]\nterritories: Record<string, {\n  owner: string\n  armies: number\n}>\nsetupArmiesRemaining: Record<string, number>",
+      "schema": "playerOrder: string[]\nterritories: Record<string, {\n  owner: string\n  armies: integer ≥ 1\n}>\nsetupArmiesRemaining: Record<string, number>",
       "slice": "slice:GameSlice"
     },
     {
