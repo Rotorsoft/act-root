@@ -1,3 +1,10 @@
+# [@rotorsoft/act-diagram-v1.4.0](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-diagram-v1.3.0...@rotorsoft/act-diagram-v1.4.0) (2026-10-29)
+
+
+### Features
+
+* **act-diagram:** show the state, action and event schemas in the flow popups ([#2186](https://github.com/Rotorsoft/act-root/issues/2186)) ([40ee303](https://github.com/Rotorsoft/act-root/commit/40ee3038b7731e0cdc0f7645e896c3c1e08c2b37)), closes [#2184](https://github.com/Rotorsoft/act-root/issues/2184)
+
 # [@rotorsoft/act-diagram-v1.3.0](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-diagram-v1.2.4...@rotorsoft/act-diagram-v1.3.0) (2026-10-29)
 
 
