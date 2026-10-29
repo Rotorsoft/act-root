@@ -1,5 +1,14 @@
 import { z } from "zod";
-import { act, dispose, state, store, ValidationError } from "../src/index.js";
+import {
+  act,
+  dispose,
+  REDACTED,
+  SHREDDED,
+  sensitive,
+  state,
+  store,
+  ValidationError,
+} from "../src/index.js";
 
 /**
  * Invariants are the state's schema. Every action checks the state it
@@ -153,5 +162,132 @@ describe("invariants", () => {
       await app.do("add", { stream: "ok", actor }, { by: 1 });
     const snap = await app.load("Calc", "ok");
     expect(snap.state.result).toBe(25);
+  });
+
+  it("refuses with ValidationError when a refinement throws, as a payload's does", async () => {
+    const thrower = (on: "state" | "payload") =>
+      state({
+        T: z.object({ n: z.number() }).refine((s) => {
+          if (on === "state" && s.n > 0) throw new Error("boom");
+          return true;
+        }),
+      })
+        .init(() => ({ n: 0 }))
+        .emits({ bumped: z.object({}) })
+        .patch({ bumped: (_, s) => ({ n: s.n + 1 }) })
+        .on({
+          bump: z.object({ x: z.number() }).refine((p) => {
+            if (on === "payload" && p.x > 0) throw new Error("boom");
+            return true;
+          }),
+        })
+        .emit(() => ["bumped", {}])
+        .build();
+    for (const on of ["state", "payload"] as const) {
+      const app = act().withState(thrower(on)).build();
+      await expect(
+        app.do("bump", { stream: `t-${on}`, actor }, { x: 1 })
+      ).rejects.toBeInstanceOf(ValidationError);
+      expect(await app.query_array({ stream: `t-${on}` })).toEqual([]);
+    }
+  });
+
+  describe("states with sensitive fields", () => {
+    const owner = { id: "u1", name: "Owner" };
+    const other = { id: "agent", name: "Agent" };
+
+    // The state types the email strictly; only its owner can read it.
+    const user = () =>
+      state({
+        User: z.object({
+          email: z.email().optional(),
+          contact: z.email().optional(),
+          visits: z.number().max(3),
+        }),
+      })
+        .init(() => ({ visits: 0 }))
+        .emits({
+          registered: z.object({ email: sensitive(z.email()) }),
+          registeredWithDomain: z.object({ email: sensitive(z.email()) }),
+          visited: z.object({}),
+        })
+        .patch({
+          registered: (e) => ({ email: e.data.email }),
+          registeredWithDomain: (e) => ({
+            email: e.data.email,
+            contact: e.data.email.toLowerCase(),
+          }),
+          visited: (_, s) => ({ visits: s.visits + 1 }),
+        })
+        .on({ register: z.object({ email: z.email() }) })
+        .emit("registered")
+        .on({ registerWithDomain: z.object({ email: z.email() }) })
+        .emit("registeredWithDomain")
+        .on({ visit: z.object({}) })
+        .emit(() => ["visited", {}])
+        .discloses((e, a) => a.id === e.stream)
+        .build();
+
+    const registered = async (event = "register") => {
+      const app = act().withState(user()).build();
+      await app.do(
+        event as "register",
+        { stream: "u1", actor: owner },
+        { email: "a@b.co" }
+      );
+      return app;
+    };
+
+    it("ignores a value another actor reads as [REDACTED]", async () => {
+      const app = await registered();
+      const [snap] = await app.do("visit", { stream: "u1", actor: other }, {});
+      expect(snap.state.email).toBe(REDACTED);
+      const [own] = await app.do("visit", { stream: "u1", actor: owner }, {});
+      expect(own.state).toMatchObject({ email: "a@b.co", visits: 2 });
+    });
+
+    it("ignores a forgotten value, so the stream keeps working after forget", async () => {
+      const app = await registered();
+      await app.forget("u1");
+      for (const by of [owner, other]) {
+        const [snap] = await app.do("visit", { stream: "u1", actor: by }, {});
+        expect(snap.state.email).toBe(SHREDDED);
+      }
+    });
+
+    it("still refuses a real value that breaks the schema", async () => {
+      const app = await registered();
+      for (let i = 0; i < 3; i++)
+        await app.do("visit", { stream: "u1", actor: owner }, {});
+      const caught = await app
+        .do("visit", { stream: "u1", actor: other }, {})
+        .catch((error: unknown) => error);
+      expect(caught).toBeInstanceOf(ValidationError);
+      const details = String((caught as ValidationError).details);
+      expect(details).toContain("visits");
+      expect(details).not.toContain("email");
+    });
+
+    it("still refuses a field derived from a hidden value", async () => {
+      // The reducer lowercases "[REDACTED]", so `contact` is not a marker.
+      const app = await registered("registerWithDomain");
+      await app.do("visit", { stream: "u1", actor: owner }, {});
+      await expect(
+        app.do("visit", { stream: "u1", actor: other }, {})
+      ).rejects.toBeInstanceOf(ValidationError);
+    });
+
+    it("checks a marker string in full on a state without sensitive events", async () => {
+      const plain = state({ Plain: z.object({ email: z.email().optional() }) })
+        .init(() => ({}))
+        .emits({ set: z.object({ email: z.string() }) })
+        .on({ set: z.object({ email: z.string() }) })
+        .emit("set")
+        .build();
+      const app = act().withState(plain).build();
+      await expect(
+        app.do("set", { stream: "p1", actor }, { email: REDACTED })
+      ).rejects.toBeInstanceOf(ValidationError);
+    });
   });
 });

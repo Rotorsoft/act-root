@@ -119,6 +119,12 @@ The same gating applies to reducers and projections in PII-aware states: the red
 
 When a reaction genuinely needs PII (e.g. a welcome-email handler that has to read the address), opt back in explicitly by calling `app.load(stream, { actor: systemActor })` inside the handler. Pulling PII through the gate at the call site makes the security-relevant path visible in code review.
 
+### The state check on PII-aware states
+
+Every action checks the state it leaves against the state's schema before it commits ([Invariants](../concepts/state-management.md#invariants)). On a PII-aware state that state is folded through the committing actor's view, so a field the actor can't read holds `"[REDACTED]"`, and after `forget` every caller's holds `"[SHREDDED]"`. The check ignores a failure whose value is exactly one of those two strings: it can only come from stored history, which passed the check when it was committed with the real value. Every other failure still refuses the action, and so does a marker string on a state with no sensitive events. A state field can stay typed strictly (`email: z.email().optional()`) and the stream keeps taking actions from any actor, after an erasure too.
+
+One limit: a field a reducer derives from a sensitive value (`contact: data.email.toLowerCase()`) holds `"[redacted]"` for an actor who can't read the source, which is not a marker, so that actor's actions are refused. Copy sensitive values into state as they are, or type a derived field loosely.
+
 ## Forgetting — `app.forget(stream)`
 
 When a user requests deletion, you don't rewrite history. You wipe the PII column for every event on their stream, leaving the rest of the event log intact:
