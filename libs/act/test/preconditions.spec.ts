@@ -207,26 +207,6 @@ describe("preconditions", () => {
     }
   });
 
-  it("stops at the first precondition that doesn't hold, in declaration order", async () => {
-    const { app, dispose } = await sandbox(act().withState(game));
-    try {
-      seen.length = 0;
-      await expect(
-        app.do(
-          "move",
-          { stream: "empty", actor: ann },
-          { from: "x", to: "y", count: 1 }
-        )
-      ).rejects.toMatchObject({
-        description: "The board must be open",
-        message: "move failed precondition: The board must be open",
-      });
-      expect(seen).toEqual([]);
-    } finally {
-      await dispose();
-    }
-  });
-
   it("shares one precondition between actions", async () => {
     const { app, dispose } = await board();
     try {

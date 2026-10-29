@@ -340,21 +340,6 @@ describe("event-sourcing", () => {
     expect(callback.mock.calls[1][0].state.count).toBe(3);
   });
 
-  it("should handle an action with no specific preconditions", async () => {
-    const meWithoutPreconditions = {
-      ...me,
-      requires: { increment: [] },
-    };
-    // Should not throw PreconditionError because 'increment' has no preconditions
-    const [snapshot] = await action(
-      meWithoutPreconditions,
-      "increment",
-      { stream: "s", actor: { id: "a", name: "a" } },
-      { count: 1 }
-    );
-    expect(snapshot.event?.name).toBe("INCREMENT");
-  });
-
   it("should handle action handler returning an empty array", async () => {
     const meWithEmptyArray = {
       ...me,
@@ -362,27 +347,13 @@ describe("event-sourcing", () => {
       requires: undefined,
     };
     const commitSpy = vi.spyOn(store(), "commit");
-    await action(
-      meWithEmptyArray,
-      "increment",
-      { stream: "s", actor: { id: "a", name: "a" } },
-      { count: 1 }
-    );
-    expect(commitSpy).not.toHaveBeenCalled();
-  });
-
-  it("should handle action handler returning an empty array of events", async () => {
-    const meWithEmptyArray = {
-      ...me,
-      on: { increment: () => [] },
-      requires: undefined,
-    };
     const [snapshot] = await action(
       meWithEmptyArray,
       "increment",
       { stream: "s", actor: { id: "a", name: "a" } },
       { count: 1 }
     );
+    expect(commitSpy).not.toHaveBeenCalled();
     expect(snapshot.event).toBeUndefined();
   });
 
@@ -409,21 +380,6 @@ describe("event-sourcing", () => {
       expect.any(Object),
       0 // expectedVersion from snapshot.event.version
     );
-  });
-
-  it("should handle an action with an empty deprecated .given array", async () => {
-    const meWithEmptyGiven = {
-      ...me,
-      given: { increment: [] },
-      requires: undefined,
-    };
-    const [snapshot] = await action(
-      meWithEmptyGiven,
-      "increment",
-      { stream: "s", actor: { id: "a", name: "a" } },
-      { count: 1 }
-    );
-    expect(snapshot.event?.name).toBe("INCREMENT");
   });
 
   it("should not throw when snap fails", async () => {

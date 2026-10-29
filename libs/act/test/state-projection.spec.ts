@@ -1009,4 +1009,41 @@ describe("fold PII treatment is path-independent", () => {
       await ctx.dispose();
     }
   });
+
+  it("passes an event with no sensitive fields through a cold load unchanged", async () => {
+    const Note = state({ Note: z.object({ text: z.string().optional() }) })
+      .init(() => ({}))
+      .emits({ Noted: z.object({ text: z.string() }) })
+      .patch({ Noted: ({ data }) => ({ text: data.text }) })
+      .on({ note: z.object({ text: z.string() }) })
+      .emit("Noted")
+      .build();
+    const table = new Map<string, CacheEntry<{ text?: string }>>();
+    const notes = projection("notes")
+      .of(Note)
+      .flush(async (rows) => {
+        for (const r of rows) table.set(r.stream, { ...r });
+      })
+      .build();
+    const ctx = await sandbox(act().withState(Note).withProjection(notes), {
+      actOptions: { autoSettle: false },
+    });
+    try {
+      const app = ctx.app;
+      // Committed straight to the store, so no state is cached and the
+      // first-sight load replays through the view.
+      await ctx.store.commit(
+        "n",
+        [
+          { name: "Noted", data: { text: "a" } },
+          { name: "Noted", data: { text: "b" } },
+        ],
+        { correlation: "n", causation: {} }
+      );
+      await settle_all(app);
+      expect(table.get("n")?.state).toEqual({ text: "b" });
+    } finally {
+      await ctx.dispose();
+    }
+  });
 });
