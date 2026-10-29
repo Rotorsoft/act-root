@@ -5,7 +5,7 @@ title: WolfDesk
 
 # WolfDesk Example
 
-A complex ticketing system demonstrating advanced Act patterns: partial states, vertical slices, cross-aggregate reactions, projections, business rules as named invariants and preconditions, and deferred-reaction timers.
+A complex ticketing system demonstrating advanced Act patterns: partial states, vertical slices, cross-aggregate reactions, projections, business rules as named preconditions, and deferred-reaction timers.
 
 Inspired by the ticketing system from "Learning Domain-Driven Design" by Vlad Khononov.
 
@@ -22,7 +22,7 @@ ticket-messaging.ts   → TicketMessaging state + TicketMessagingSlice
 ticket-operations.ts  → TicketOperations state + TicketOpsSlice
 ticket-timers.ts      → TicketTimersSlice (deferred escalate / reassign / close timers)
 ticket-projections.ts → TicketProjection (read model)
-ticket-invariants.ts  → Business rules (invariants and preconditions)
+ticket-preconditions.ts  → Business rules (preconditions)
 schemas/              → Zod schemas for actions, events, state
 services/             → External service stubs (agent assignment, notifications)
 ```
@@ -98,35 +98,35 @@ When a ticket is opened, the creation slice automatically assigns an agent by di
 })
 ```
 
-### Invariants with Actor Context
+### Preconditions on the state and the actor
 
-Business rules that check both state and the acting user:
+Rules that check the current state and the acting user, declared with `.requires(...)`. Each is false at some point in a ticket's normal life (a closed ticket, another user), so each is a precondition of the actions that list it. They ignore the payload, typed over `unknown`, so every ticket action can use them:
 
 ```typescript no-check
-// ticket-invariants.ts
-export const mustBeOpen: Invariant<{ status: string }> = {
+// ticket-preconditions.ts
+export const mustBeOpen: Precondition<{ status: string }, unknown> = {
   description: "Ticket must be open",
-  valid: (state) => state.status === "open",
+  holds: (_, state) => state.status === "open",
 };
 
-export const mustBeUserOrAgent: Invariant<
+export const mustBeUserOrAgent: Precondition<
   { userId: string; agentId?: string },
-  Actor
+  unknown
 > = {
   description: "Must be ticket owner or assigned agent",
-  valid: (state, actor) =>
+  holds: (_, state, actor) =>
     state.userId === actor?.id || state.agentId === actor?.id,
 };
 
 // Used in state builder
 .on({ MarkTicketResolved })
-  .given([mustBeOpen, mustBeUserOrAgent])
+  .requires([mustBeOpen, mustBeUserOrAgent])
   .emit((_, __, { actor }) => ["TicketResolved", { resolvedById: actor.id }])
 ```
 
-### Preconditions
+### Preconditions on the payload
 
-Every business rule in wolfdesk is declared, none is thrown from a handler, so the `act` CLI, the diagram and the flow animation list them all. A rule that reads the action's payload is a precondition, declared with `.requires(...)` after the invariants:
+Every business rule in wolfdesk is declared, none is thrown from a handler, so the `act` CLI, the diagram and the flow animation list them all. A rule that reads the action's payload is typed over the part it reads, and sits in the same `.requires(...)` list:
 
 ```typescript no-check
 export const messageExists: Precondition<
@@ -147,12 +147,11 @@ export const mustBeReceiver: Precondition<
 };
 
 .on({ AcknowledgeMessage })
-  .given([mustBeOpen])
-  .requires([messageExists, mustBeReceiver])
+  .requires([mustBeOpen, messageExists, mustBeReceiver])
   .emit("MessageRead")
 ```
 
-A refused action throws `InvariantError`. Its message says which layer refused (`"AcknowledgeMessage failed precondition: Must be receiver to ack"`), and its `description` names the rule.
+A refused action throws `PreconditionError`, with the message `"AcknowledgeMessage failed precondition: Must be receiver to ack"`; its `description` names the rule.
 
 ### Projections (Read Models)
 

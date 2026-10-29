@@ -25,17 +25,19 @@ try {
 
 **Resolution:** Fix the payload to match the schema. This is always a caller error.
 
-## InvariantError
+## PreconditionError
 
-Thrown when a business rule refuses an action before events are emitted: an invariant from `.given()`, or a precondition from `.requires()`. The message says which (`"CloseTicket failed invariant: ..."` or `"... failed precondition: ..."`), and `description` carries the rule's description.
+Thrown when a precondition from `.requires()` refuses an action before events are emitted. The message is `"<action> failed precondition: <description>"`, and `description` carries the rule's description. A broken invariant (the state's schema, checked before every commit) throws `ValidationError` instead.
+
+A rule declared with the deprecated `.given()` refuses with the deprecated `InvariantError` (`"<action> failed invariant: <description>"`, name `ERR_INVARIANT`). `PreconditionError` extends `InvariantError`, so code that catches `InvariantError` still catches every refused action. Both go away in 2.0 ([why](./state-management.md#why-given-and-invarianterror-are-deprecated)).
 
 ```typescript no-check
-import { InvariantError } from "@rotorsoft/act";
+import { PreconditionError } from "@rotorsoft/act";
 
 try {
   await app.do("CloseTicket", target, { reason: "Done" });
 } catch (error) {
-  if (error instanceof InvariantError) {
+  if (error instanceof PreconditionError) {
     console.error("Rule violated:", error.description);
     console.error("Current state:", error.snapshot.state);
   }
@@ -194,7 +196,8 @@ Each error class sets its `name` to one of these constants, which is what serial
 import { Errors } from "@rotorsoft/act";
 
 // Errors.ValidationError    = "ERR_VALIDATION"
-// Errors.InvariantError     = "ERR_INVARIANT"
+// Errors.PreconditionError  = "ERR_PRECONDITION"
+// Errors.InvariantError     = "ERR_INVARIANT" (deprecated, from .given rules)
 // Errors.ConcurrencyError   = "ERR_CONCURRENCY"
 // Errors.StreamClosedError  = "ERR_STREAM_CLOSED"
 // Errors.NonRetryableError  = "ERR_NON_RETRYABLE"
@@ -206,7 +209,7 @@ import { Errors } from "@rotorsoft/act";
 ```typescript no-check
 import {
   ConcurrencyError,
-  InvariantError,
+  PreconditionError,
   ValidationError,
 } from "@rotorsoft/act";
 
@@ -222,7 +225,7 @@ CreateItem: authedProcedure
       if (error instanceof ValidationError) {
         throw new TRPCError({ code: "BAD_REQUEST", message: "Invalid input" });
       }
-      if (error instanceof InvariantError) {
+      if (error instanceof PreconditionError) {
         throw new TRPCError({ code: "PRECONDITION_FAILED", message: error.description });
       }
       if (error instanceof ConcurrencyError) {

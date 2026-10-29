@@ -172,13 +172,11 @@ export function build_es(
   // `options.correlator` still wins — the orchestrator default fills in
   // only when the caller didn't supply one.
   //
-  // The per-event patch step is selected ONCE by the builder
-  // (`act-builder.ts`) — bare vs validating — and passed in here already
-  // bound, so this factory stays agnostic to `validateFoldedState`. It
-  // just bakes the given `patch_fn` into the load/action closures, so
-  // the projection-fold engine and close-cycle callers inherit the same
-  // choice without threading anything through their own signatures. The
-  // default (`bare_patch`) keeps direct callers on the plain path.
+  // The per-event patch step comes from the `Act` constructor and is
+  // baked into the load/action closures, so the projection-fold engine
+  // and close-cycle callers inherit it without threading it through their
+  // own signatures. The builder always uses the default (`bare_patch`);
+  // an action checks its invariants once, on the folded state.
   const bound_action: EsOps["action"] = (
     me,
     action_name,

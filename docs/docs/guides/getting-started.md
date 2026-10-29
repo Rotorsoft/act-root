@@ -79,24 +79,21 @@ Run it: `npx tsx index.ts`. You should see `{ count: 8 }` and `1`.
 What happened:
 
 - `act().withState(Counter).build()` composes everything into a runnable orchestrator. By default it uses an in-memory event store and an in-memory cache — perfect for development and tests.
-- **`app.do(action, target, payload)`** dispatches an action. Act validates the payload, runs any invariants, applies the reducer, commits the resulting events to the store, updates the cache, and returns one snapshot per emitted event.
+- **`app.do(action, target, payload)`** dispatches an action. Act validates the payload, checks any preconditions, applies the reducer, commits the resulting events to the store, updates the cache, and returns one snapshot per emitted event.
 - **`app.load(State, stream)`** reconstructs current state by replaying events from the cache or store. The `version` is the 0-indexed sequence number of the last event.
 
 ## 4. Add business rules
 
-Real domains have rules: "you can't decrement below zero", "you can't close a ticket twice". Act declares them as named rules, checked before an action runs, in two layers:
+Real domains have rules: "you can't decrement below zero", "you can't close a ticket twice". Act declares the ones an action must pass as named **preconditions** with `.requires([...])`, checked before it runs. A precondition reads the state, the actor and the action's payload; one that ignores the payload (typed over `unknown`) serves every action that needs it.
 
-- **Invariants** (`.given([...])`) read only the state and the actor, so one invariant serves every action that needs it.
-- **Preconditions** (`.requires([...])`) also read the action's payload, for rules about *this* request.
-
-"You can't decrement below zero" depends on how much you subtract, so it's a precondition:
+"You can't decrement below zero" depends on how much you subtract, so it reads the payload:
 
 ```typescript no-check
-import { type Invariant, type Precondition } from "@rotorsoft/act";
+import { type Precondition } from "@rotorsoft/act";
 
-const notLocked: Invariant<{ locked?: boolean }> = {
+const notLocked: Precondition<{ locked?: boolean }, unknown> = {
   description: "Counter must not be locked",
-  valid: (state) => !state.locked,
+  holds: (_, state) => !state.locked,
 };
 
 const staysPositive: Precondition<{ count: number }, { by: number }> = {
@@ -105,14 +102,15 @@ const staysPositive: Precondition<{ count: number }, { by: number }> = {
 };
 
 // Add a `decrement` action that reuses the same Incremented event
-// (with a negative amount), gated by both layers:
+// (with a negative amount), gated by both rules:
 .on({ decrement: z.object({ by: z.number() }) })
-  .given([notLocked])
-  .requires([staysPositive])
+  .requires([notLocked, staysPositive])
   .emit((action) => ["Incremented", { amount: -action.by }])
 ```
 
-The invariants run first, then the preconditions, each in the order you declare them. The first rule that fails throws `InvariantError` *before* any event is committed. State doesn't change, and the caller sees a typed error whose message names the layer (`"decrement failed precondition: Count cannot go negative"`) and whose `description` names the rule. The `act` CLI, the domain diagram and the flow animations list both layers by name.
+The rules run in the order you declare them. The first rule that fails throws `PreconditionError` *before* any event is committed. State doesn't change, and the caller sees a typed error whose message is `"decrement failed precondition: Count cannot go negative"` and whose `description` names the rule. The `act` CLI, the domain diagram and the flow animations list them by name.
+
+What must hold after *every* action is an **invariant**, and it belongs in the state's schema rather than on each action: `z.object({ count: z.number().min(0) })` says the count is never negative, whatever action runs. Every action checks it before it commits, so a state that breaks it is refused and never stored. See [state-management § Invariants](../concepts/state-management.md#invariants).
 
 ## 5. Inspect what happened
 
@@ -144,7 +142,7 @@ You've covered the four primitives that show up in every Act app:
 
 - **State** (`state()`) — what your domain looks like and how events transform it
 - **Actions** (`.on().emit()`) — typed intents that produce events
-- **Business rules** (`.given()` invariants, `.requires()` preconditions) — checked before commit
+- **Business rules**: preconditions (`.requires()`) checked before the handler, invariants (the state schema) checked before the commit
 - **Events** (`.emits()`/`.patch()`) — the immutable record
 
 The next things you'll want, in roughly the order you'll need them:

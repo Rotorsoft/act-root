@@ -27,7 +27,7 @@ const apiDoc  = openapi(app, {
   info: { title: "Wolfdesk API", version: "1.0.0" },
 });`;
 
-type PatternId = "slices" | "projections" | "partial" | "invariants" | "orchestrator";
+type PatternId = "slices" | "projections" | "partial" | "rules" | "orchestrator";
 
 const PATTERNS: Record<
   PatternId,
@@ -87,13 +87,13 @@ const TicketCreation = state({ Ticket: TicketCreationState })
   .emits({ TicketOpened, TicketClosed, TicketResolved })
   .patch({ TicketOpened: ... })  // optional — only custom reducers
   .on({ OpenTicket }).emit(...)
-  .on({ CloseTicket }).given([mustBeOpen]).emit("TicketClosed")  // passthrough
+  .on({ CloseTicket }).requires([mustBeOpen]).emit("TicketClosed")  // passthrough
   .build();
 
 const TicketOperations = state({ Ticket: TicketOperationsState })
   .init(() => ({ productId: "", userId: "", messages: {} }))
   .emits({ TicketAssigned, TicketEscalated, TicketReassigned })
-  .on({ AssignTicket }).given([mustBeOpen]).emit("TicketAssigned")  // passthrough
+  .on({ AssignTicket }).requires([mustBeOpen]).emit("TicketAssigned")  // passthrough
   .build();
 
 const TicketMessaging = state({ Ticket: TicketMessagingState })
@@ -101,16 +101,16 @@ const TicketMessaging = state({ Ticket: TicketMessagingState })
   .build();`,
     note: 'All three share the name "Ticket" — the orchestrator merges their schemas via ZodObject.extend().',
   },
-  invariants: {
+  rules: {
     tab: "Business rules",
     title: "Name every rule an action must pass",
     blurb:
-      "Invariants (.given) read only the state and the actor, so one rule serves any action. Preconditions (.requires) also read the action's payload. Both run before the handler, in order, and the first that fails refuses the action with a named InvariantError.",
-    code: `import { type Invariant, type Precondition } from "@rotorsoft/act";
+      "Preconditions (.requires) read the state, the actor and the request; one that ignores the request serves any action. They run before the handler, in order, and the first that fails refuses the action with a named PreconditionError. What must hold after every action (an invariant) lives in the state's schema, checked before every commit.",
+    code: `import { type Precondition } from "@rotorsoft/act";
 
-export const mustBeOpen: Invariant<{ productId: string; closedById?: string }> = {
+export const mustBeOpen: Precondition<{ productId: string; closedById?: string }, unknown> = {
   description: "Ticket must be open",
-  valid: (state) => !!state.productId && !state.closedById,
+  holds: (_, state) => !!state.productId && !state.closedById,
 };
 
 export const mustBeReceiver: Precondition<
@@ -122,8 +122,8 @@ export const mustBeReceiver: Precondition<
 };
 
 // Use in any state builder:
-.on({ CloseTicket }).given([mustBeOpen]).emit("TicketClosed")
-.on({ AcknowledgeMessage }).given([mustBeOpen]).requires([mustBeReceiver]).emit("MessageRead")`,
+.on({ CloseTicket }).requires([mustBeOpen]).emit("TicketClosed")
+.on({ AcknowledgeMessage }).requires([mustBeOpen, mustBeReceiver]).emit("MessageRead")`,
     note: "Typed against minimal interfaces: a rule written for the fields it reads fits every state and payload that has them.",
   },
   orchestrator: {

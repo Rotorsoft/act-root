@@ -9,7 +9,7 @@ import {
 } from "../src/internal/event-sourcing.js";
 import { cache, dispose, store } from "../src/ports.js";
 import type { Snapshot } from "../src/types/action.js";
-import { InvariantError, StreamClosedError } from "../src/types/errors.js";
+import { PreconditionError, StreamClosedError } from "../src/types/errors.js";
 import { SNAP_EVENT } from "../src/types/index.js";
 import { ZodEmpty } from "../src/types/schemas.js";
 
@@ -25,10 +25,10 @@ const me = state({ me: z.object({ count: z.number() }) })
     SNAP_EVENT: (event) => event.data,
   })
   .on({ increment: z.object({ count: z.number() }) })
-  .given([
+  .requires([
     {
-      valid: () => false,
-      description: "should fail invariant",
+      holds: () => false,
+      description: "should fail precondition",
     },
   ])
   .emit((action) => ["INCREMENT", { by: action.count }])
@@ -46,7 +46,7 @@ describe("event-sourcing", () => {
 
   it("should commit events on action with expectedVersion", async () => {
     const [snapshot] = await action(
-      { ...me, given: undefined },
+      { ...me, requires: undefined },
       "increment",
       { stream: "s", actor: { id: "a", name: "a" }, expectedVersion: -1 },
       { count: 1 }
@@ -155,7 +155,7 @@ describe("event-sourcing", () => {
     expect(snapshot.patches).toBe(1);
   });
 
-  it("should throw on action invariant failure", async () => {
+  it("should throw on action precondition failure", async () => {
     await expect(
       action(
         me,
@@ -163,7 +163,7 @@ describe("event-sourcing", () => {
         { stream: "s", actor: { id: "a", name: "a" } },
         { count: 1 }
       )
-    ).rejects.toThrow(InvariantError);
+    ).rejects.toThrow(PreconditionError);
   });
 
   it("should throw on action missing stream", async () => {
@@ -174,7 +174,11 @@ describe("event-sourcing", () => {
   });
 
   it("should return snapshot if result is falsy", async () => {
-    const me2 = { ...me, on: { increment: () => undefined }, given: undefined };
+    const me2 = {
+      ...me,
+      on: { increment: () => undefined },
+      requires: undefined,
+    };
     const result = await action(
       me2,
       "increment",
@@ -196,7 +200,7 @@ describe("event-sourcing", () => {
     };
 
     await action(
-      { ...me, given: undefined },
+      { ...me, requires: undefined },
       "increment",
       { stream: "s", actor: { id: "a", name: "a" } },
       { count: 1 },
@@ -211,7 +215,7 @@ describe("event-sourcing", () => {
 
   it("should call snap function when it returns true", async () => {
     const snapFn = vi.fn().mockReturnValue(true);
-    const meWithSnap = { ...me, snap: snapFn, given: undefined };
+    const meWithSnap = { ...me, snap: snapFn, requires: undefined };
 
     await action(
       meWithSnap,
@@ -232,7 +236,7 @@ describe("event-sourcing", () => {
   });
 
   it("should complete the action and warn when the snapshot write fails", async () => {
-    const meWithSnap = { ...me, snap: () => true, given: undefined };
+    const meWithSnap = { ...me, snap: () => true, requires: undefined };
     const s = store();
     const original = s.commit.bind(s);
     vi.spyOn(s, "commit").mockImplementation((...args) =>
@@ -263,7 +267,7 @@ describe("event-sourcing", () => {
     const meWithoutEmit = {
       ...me,
       on: { increment: () => undefined },
-      given: undefined,
+      requires: undefined,
     };
     const [snapshot] = await action(
       meWithoutEmit,
@@ -281,7 +285,7 @@ describe("event-sourcing", () => {
     );
     await expect(
       action(
-        { ...me, given: undefined },
+        { ...me, requires: undefined },
         "increment",
         { stream: "s", actor: { id: "a", name: "a" } },
         { count: 1 }
@@ -289,13 +293,14 @@ describe("event-sourcing", () => {
     ).rejects.toThrow("Commit failed");
   });
 
-  it("should commit when all invariants pass", async () => {
-    const passingInvariant = {
+  it("should commit when all preconditions pass", async () => {
+    const passing = {
       ...me,
       given: { increment: [{ valid: () => true, description: "always" }] },
+      requires: { increment: [{ holds: () => true, description: "always" }] },
     };
     const [snapshot] = await action(
-      passingInvariant,
+      passing,
       "increment",
       { stream: "s-pass", actor: { id: "a", name: "a" } },
       { count: 1 }
@@ -335,14 +340,14 @@ describe("event-sourcing", () => {
     expect(callback.mock.calls[1][0].state.count).toBe(3);
   });
 
-  it("should handle an action with no specific invariants", async () => {
-    const meWithOtherInvariants = {
+  it("should handle an action with no specific preconditions", async () => {
+    const meWithoutPreconditions = {
       ...me,
-      given: { increment: [] },
+      requires: { increment: [] },
     };
-    // Should not throw InvariantError because 'increment' has no invariants
+    // Should not throw PreconditionError because 'increment' has no preconditions
     const [snapshot] = await action(
-      meWithOtherInvariants,
+      meWithoutPreconditions,
       "increment",
       { stream: "s", actor: { id: "a", name: "a" } },
       { count: 1 }
@@ -354,7 +359,7 @@ describe("event-sourcing", () => {
     const meWithEmptyArray = {
       ...me,
       on: { increment: () => [] },
-      given: undefined,
+      requires: undefined,
     };
     const commitSpy = vi.spyOn(store(), "commit");
     await action(
@@ -370,7 +375,7 @@ describe("event-sourcing", () => {
     const meWithEmptyArray = {
       ...me,
       on: { increment: () => [] },
-      given: undefined,
+      requires: undefined,
     };
     const [snapshot] = await action(
       meWithEmptyArray,
@@ -391,7 +396,7 @@ describe("event-sourcing", () => {
     const commitSpy = vi.spyOn(store(), "commit");
 
     await action(
-      { ...me, given: undefined },
+      { ...me, requires: undefined },
       "increment",
       { stream: "s", actor: { id: "a", name: "a" } },
       { count: 1 }
@@ -406,13 +411,14 @@ describe("event-sourcing", () => {
     );
   });
 
-  it("should handle action with empty invariants array", async () => {
-    const meWithEmptyInvariants = {
+  it("should handle an action with an empty deprecated .given array", async () => {
+    const meWithEmptyGiven = {
       ...me,
       given: { increment: [] },
+      requires: undefined,
     };
     const [snapshot] = await action(
-      meWithEmptyInvariants,
+      meWithEmptyGiven,
       "increment",
       { stream: "s", actor: { id: "a", name: "a" } },
       { count: 1 }
@@ -457,7 +463,7 @@ describe("event-sourcing", () => {
 
     // Execute an action without reactingTo and without an explicit expectedVersion
     await action(
-      { ...me, given: undefined },
+      { ...me, requires: undefined },
       "increment",
       { stream: "s", actor: { id: "a", name: "a" } },
       { count: 1 }
@@ -591,7 +597,7 @@ describe("event-sourcing", () => {
 // truncate then deleted the acknowledged commit: silent data loss.
 describe("event-sourcing — close guard cache poisoning", () => {
   const actor = { id: "a", name: "a" };
-  const guarded = { ...me, given: undefined };
+  const guarded = { ...me, requires: undefined };
 
   beforeEach(() => {
     store(new InMemoryStore());

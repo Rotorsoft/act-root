@@ -7,15 +7,15 @@ sidebar_position: 3.6
 
 # Flow animations
 
-An Act app already knows its own flows. Every action, the state that checks it, the events it commits, the projections that fold them and the reactions that pick them up are declared in the builders. A flow animation draws all of that as one map and plays it: a token leaves a person or an automation, passes through the state where the invariants are checked, lands as an event, feeds the projections, wakes a reaction, and goes on to the next action or out to another system.
+An Act app already knows its own flows. Every action, the state that checks it, the events it commits, the projections that fold them and the reactions that pick them up are declared in the builders. A flow animation draws all of that as one map and plays it: a token leaves a person or an automation, passes through the state where the preconditions are checked, lands as an event, feeds the projections, wakes a reaction, and goes on to the next action or out to another system.
 
 **See one:** [WolfDesk ticket flows](pathname:///flows/wolfdesk.html) · [Calculator flows](pathname:///flows/calculator.html) · [Risk game flows](pathname:///flows/risk.html), from the [Risk board game](https://github.com/Rotorsoft/risk) built on Act · [all animations](pathname:///flows/index.html)
 
 ## What you get
 
-- **The whole model on one screen.** Swimlanes for actors, actions, state, events, projections, reactions and the outside world. Time runs left to right. Select any box for its invariants, schema, source file and neighbors.
+- **The whole model on one screen.** Swimlanes for actors, actions, state, events, projections, reactions and the outside world. Time runs left to right. Select any box for its preconditions, schema, source file and neighbors.
 - **The boundaries the builders declare.** Each `slice()` is a dashed box over the actions and events of the partial states it declares, plus the reactions it declares. An app without slices gets one box per state instead. Partial states of the same name still merge into one state bar. While a scenario plays, the boxes on the current step light up, and a token rings where it crosses from one box into another, for example a timer reaction calling an action owned by another slice.
-- **The checks, one by one.** When a token reaches the state, the action's rules appear in a list beside it: its invariants (◆, in the state's color), then its preconditions from `.requires` (▲, in the action's color), each in the order the action declares them. The action's box counts both, as ◆ and ▲. Each gets a ✓ as it passes. A refused action stops on the rule that failed with ✕, and the rules after it are never checked. A refusal thrown from `.emit(...)` shows as the last row, after every declared rule passed.
+- **The checks, one by one.** When a token reaches the state, the action's preconditions (▲) appear in a list beside it, in the order the state runs them: first the rules on the state (`.given`), then those that also read the payload (`.requires`). The action's box shows how many there are, as ▲. Each gets a ✓ as it passes. A refused action stops on the rule that failed with ✕, and the rules after it are never checked. A refusal thrown from `.emit(...)` shows as the last row, after every declared rule passed.
 - **Scenarios that cover every flow.** Each tab plays one story. Together they walk every connection on the map, including the ones people forget to show: refused actions, retries with backoff, a blocked target, and timers that wake and do nothing.
 - **The state and the stream, live.** The right rail shows the event stream as it grows (global id, stream version, and the person or automation that caused each event) and the state as each event patches it.
 - **Video.** One script exports a 1080p MP4 per scenario for talks, READMEs and release notes.
@@ -31,7 +31,7 @@ animate the flows of packages/wolfdesk
 
 The skill does four things:
 
-1. **Extracts a draft.** It runs the same parser as the [`act` CLI](./contracts-cli.md) over your builders and gets states, actions, invariants, events, reactions and projections.
+1. **Extracts a draft.** It runs the same parser as the [`act` CLI](./contracts-cli.md) over your builders and gets states, actions, preconditions, events, reactions and projections.
 2. **Reads the source.** The parser is best-effort, so the skill fills in what it can't see: actions invoked from helper functions, `webhook()` reactions, `.defer` timers, calls to outside services, and who the actors are (people, or automations such as the actor a reaction runs as).
 3. **Writes the scenarios.** Short, believable stories, each showing one mechanism, until every connection is covered.
 4. **Saves the spec.** The result is one JSON file, `docs/flows/<app>.flow.json`.

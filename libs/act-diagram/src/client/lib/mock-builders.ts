@@ -1,6 +1,6 @@
 /**
  * Mock Act framework builders that capture domain model structure
- * (state names, events, actions, reactions, invariants) without
+ * (state names, events, actions, reactions, preconditions) without
  * needing the real framework runtime.
  */
 import { z } from "zod";
@@ -382,6 +382,13 @@ class InvariantError extends Error {
   }
 }
 
+class PreconditionError extends InvariantError {
+  constructor(message?: string) {
+    super(message);
+    this.name = "PreconditionError";
+  }
+}
+
 const crypto_mock = { randomUUID: () => "mock-uuid" };
 
 /** Module map for the evaluator's require() */
@@ -401,6 +408,7 @@ export const MODULES: Record<string, Record<string, unknown>> = {
     dispose: () => () => Promise.resolve(),
     ZodEmpty: z.record(z.string(), z.never()),
     InvariantError,
+    PreconditionError,
   },
   zod: { z, ...z },
   crypto: crypto_mock,

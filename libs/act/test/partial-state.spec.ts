@@ -575,7 +575,7 @@ describe("partial-state", () => {
     });
   });
 
-  it("should merge given (invariants) from partials", async () => {
+  it("should merge the deprecated .given rules from partials", async () => {
     const PartWithInvariant = state({
       Guarded: z.object({ locked: z.boolean() }),
     })

@@ -162,7 +162,7 @@ export function navigate_to_code(
         if (desc_match) {
           const before = c.slice(0, desc_match.index);
           const decl_re =
-            /(?:export\s+)?(?:const|let|var)\s+(\w+)\s*(?::\s*Invariant[^=]*)?\s*=/g;
+            /(?:export\s+)?(?:const|let|var)\s+(\w+)\s*(?::\s*(?:Invariant|Precondition)[^=]*)?\s*=/g;
           let last_decl: RegExpExecArray | null = null;
           let m: RegExpExecArray | null;
           while ((m = decl_re.exec(before)) !== null) {
@@ -223,7 +223,7 @@ export function navigate_to_code(
       if (desc_match) {
         const before = c.slice(0, desc_match.index);
         const decl_re =
-          /(?:export\s+)?(?:const|let|var)\s+(\w+)\s*(?::\s*Invariant[^=]*)?\s*=/g;
+          /(?:export\s+)?(?:const|let|var)\s+(\w+)\s*(?::\s*(?:Invariant|Precondition)[^=]*)?\s*=/g;
         let last_decl: RegExpExecArray | null = null;
         let m: RegExpExecArray | null;
         while ((m = decl_re.exec(before)) !== null) last_decl = m;

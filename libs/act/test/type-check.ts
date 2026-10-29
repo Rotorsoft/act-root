@@ -562,7 +562,7 @@ const target = { stream: "s1", actor: { id: "1", name: "test" } };
     },
   ]);
 
-  // An invariant isn't a precondition: the shapes differ.
+  // A state precondition isn't a payload precondition: the shapes differ.
   const invariant = { description: "an invariant", valid: () => true };
   // @ts-expect-error - requires takes preconditions
   base().requires([invariant]);

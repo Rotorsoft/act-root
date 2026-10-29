@@ -307,10 +307,10 @@ describe("Builder", () => {
         },
       })
       .on({ increment: z.object({ amount: z.number() }) })
-      .given([
-        // given handler: state narrowed to {count:number}
+      .requires([
+        // precondition: state narrowed to {count:number}
         {
-          valid: (s) => s.count >= 0,
+          holds: (_, s) => s.count >= 0,
           description: "non-negative",
         },
       ])

@@ -46,7 +46,7 @@ export const app = act()
 - `withActor<T>()` takes no runtime argument — it's a pure type-level constraint
 - All `target.actor` objects passed to `app.do()` must satisfy `T`
 - Use `systemActor` in reactions, seed scripts, and internal automation
-- The actor is available in emit handlers via `target.actor` and in invariants via the optional second parameter
+- The actor is available in emit handlers via `target.actor` and in preconditions via the optional `actor` parameter
 
 ## 3. Patch Handler Signature
 
@@ -143,7 +143,7 @@ export const LotAdded = z.object({ ticker: z.string(), lot: Lot });
 // where Lot has transaction_date: z.string() — the actual trade date
 ```
 
-In projections, use `event.created` for the timestamp:
+In projections, use `event.created` for the timestamp. A state's `.patch` reducers fold before the commit, so they see the commit time, not the stored `created`; don't keep it in aggregate state:
 ```typescript
 .on({ ItemCreated })
 .do(async function insertItem(event) {
@@ -335,17 +335,13 @@ Set `source` only when you want to genuinely scope drain to a *stable* stream pa
 ## 8. Business Rules
 
 ```typescript
-type Invariant<S extends Schema> = {
-  description: string;
-  valid: (state: Readonly<S>, actor?: Actor) => boolean;
-};
 type Precondition<S extends Schema, P> = {
   description: string;
   holds: (payload: Readonly<P>, state: Readonly<S>, actor?: Actor) => boolean;
 };
 ```
 
-`.given([...])` declares invariants (state and actor), and `.requires([...])` after it declares preconditions (they also read the payload). Both refuse with an `InvariantError` and commit nothing. Rules on the payload alone belong in the Zod schema. When to use which, typing `S` and `P` with only the fields a rule reads, and why rules live in the aggregate: [domain.md § Invariants](domain.md#invariants).
+`.requires([...])` declares the preconditions; one typed `Precondition<S, unknown>` ignores the payload and serves every action. A failed one refuses with a `PreconditionError` and commits nothing. Rules on the payload alone belong in the action's Zod schema, and rules every state must keep (invariants) in the state's Zod schema, which every action checks before it commits. Don't use the deprecated `.given([...])`. When to use which: [domain.md § Business Rules](domain.md#business-rules).
 
 ## 9. Emit Handler Signature
 

@@ -24,17 +24,17 @@ Act is an event-sourcing framework for TypeScript built on three primitives: act
 <a href="https://rotorsoft.github.io/act-root/flows/wolfdesk.html">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="./assets/flow-dark.gif">
-    <img src="./assets/flow-light.gif" alt="The WolfDesk example's flow animation: a customer opens a ticket, the assign reaction picks an agent, messages are added and delivered, and the ticket is resolved; at each action the state checks its invariants and preconditions one by one before the events commit" width="100%">
+    <img src="./assets/flow-light.gif" alt="The WolfDesk example's flow animation: a customer opens a ticket, the assign reaction picks an agent, messages are added and delivered, and the ticket is resolved; at each action the state checks its preconditions one by one before the events commit" width="100%">
   </picture>
 </a>
 
-<sub>The WolfDesk help desk, animated from its builders: actions pass the state's ◆ invariants and ▲ preconditions and commit events, projections fold them, and reactions pick them up and call more actions. [Play it live](https://rotorsoft.github.io/act-root/flows/wolfdesk.html), or [see how it's made](https://rotorsoft.github.io/act-root/docs/guides/flow-animations).</sub>
+<sub>The WolfDesk help desk, animated from its builders: actions pass the state's ▲ preconditions and commit events, projections fold them, and reactions pick them up and call more actions. [Play it live](https://rotorsoft.github.io/act-root/flows/wolfdesk.html), or [see how it's made](https://rotorsoft.github.io/act-root/docs/guides/flow-animations).</sub>
 
 The primitives:
 
 | | |
 |---|---|
-| Action | The change you want to make. Validated against a Zod schema, checked against named business rules (the state's invariants, then the action's preconditions), emitted as one or more immutable events, committed under optimistic concurrency. |
+| Action | The change you want to make. Validated against a Zod schema, checked against named preconditions (rules on the state, the actor and the payload), emitted as zero or more immutable events that must keep the state's invariants (its schema), committed under optimistic concurrency. |
 | State | The data you care about. Defined as a Zod schema, evolved by emit-and-patch, served back through `load()` with snapshot and cache layers in front of replay. |
 | Reaction | What happens as a result. Fires in commit order, retried under back-pressure with configurable backoff, blocked-stream surfaced to operators when a downstream wedges. |
 

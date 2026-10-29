@@ -146,7 +146,7 @@ it("should accumulate events", async () => {
 
 ## Testing Business Rules
 
-Test each rule by the refusal it causes. A refused action throws `InvariantError`: its `description` names the rule, and its message says which layer refused (`failed invariant` for `.given`, `failed precondition` for `.requires`).
+Test each rule by the refusal it causes. A refused action throws `PreconditionError`: its `description` names the rule, and its message is `"<action> failed precondition: <description>"`. A broken invariant throws `ValidationError`.
 
 ```typescript no-check
 it("should reject closing a non-open ticket", async () => {
@@ -173,7 +173,7 @@ it("should refuse an ack from anyone but the receiver", async () => {
   await expect(
     app.do("AcknowledgeMessage", someoneElse, { messageId })
   ).rejects.toMatchObject({
-    name: "ERR_INVARIANT",
+    name: "ERR_PRECONDITION",
     message: "AcknowledgeMessage failed precondition: Must be receiver to ack",
   });
 });
@@ -258,6 +258,6 @@ it("should detect concurrent modifications", async () => {
 ## Tips
 
 - Use `crypto.randomUUID()` for stream IDs to isolate tests from each other
-- Test both happy paths and error cases (invariants, validation, concurrency)
+- Test both happy paths and error cases (preconditions, invariants, validation, concurrency)
 - For complex reaction chains, call `correlate()` → `drain()` in a loop
 - Never test against projections in the hot path — use `app.load()` for authoritative state

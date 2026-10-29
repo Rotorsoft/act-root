@@ -16,7 +16,8 @@ Build a TypeScript monorepo application using `@rotorsoft/act` from a functional
 | Aggregate / Entity | State | `state({ Name: schema })` |
 | Command | Action | `.on({ ActionName: schema })` |
 | Domain Event | Event + Patch | `.emits({ Event: schema })` + optional `.patch({...})` for custom reducers |
-| Business Rule / Guard | Invariant | `.given([{ description, valid }])` |
+| Business Rule / Guard | Precondition | `.requires([{ description, holds }])` |
+| Rule that always holds | Invariant | a refinement on the state's Zod schema, checked before every commit |
 | Policy / Process Manager | Reaction (Slice or Act) | `.on("Event").do(handler)` |
 | Read Model / Query | Projection | `projection("target").on({ Event }).do(handler)` |
 | Bounded Context / Feature | Slice | `slice().withState(State)` |
@@ -24,7 +25,7 @@ Build a TypeScript monorepo application using `@rotorsoft/act` from a functional
 
 **Event Modeling**: Blue = Action, Orange = Event + Patch, Green = Projection, Lilac = Reaction, Aggregate swim lane = State.
 
-**Event Storming**: Blue = Action, Orange = Event + Patch, Yellow = State, Lilac = Reaction, Green = Projection, Red = Invariant.
+**Event Storming**: Blue = Action, Orange = Event + Patch, Yellow = State, Lilac = Reaction, Green = Projection, Red = Precondition (business rule).
 
 ## Analyze the Specification
 
@@ -47,8 +48,8 @@ Specs use varied terminology. Map to framework concepts:
 | Domain Event, Fact, State Change | Event | `.emits({ Event: schema })` + optional `.patch({})` for custom reducers |
 | Read Model, View, Query Model, Projection | Projection | `projection("target").on({ Event }).do(handler)` |
 | Policy, Process Manager, Automation, Saga, Reactor | Reaction | `slice().withState(State).on("Event").do(handler)` |
-| Invariant, Guard, Business Rule, Constraint (state and actor only) | Invariant | `.given([{ description, valid }])` |
-| Precondition, a rule on the command's data plus the state | Precondition | `.requires([{ description, holds }])` |
+| Guard, Business Rule, Constraint, Precondition | Precondition | `.requires([{ description, holds }])` (typed over `unknown` when it ignores the payload) |
+| Invariant, a rule every state must keep | Invariant | a refinement on the state's Zod schema |
 | Specification, Acceptance Criteria, Given-When-Then, Scenario | Test case | `describe / it` block |
 | Screen, UI, View, Page | Client component | tRPC procedure + React component |
 | Bounded Context, Module, Feature, Slice | Slice | `slice().withState(State)` |
@@ -112,7 +113,7 @@ my-app/
 │   ├── domain/           # Pure domain logic — zero infrastructure deps
 │   │   ├── src/
 │   │   │   ├── schemas.ts        # Zod schemas (actions, events, state) + AppActor type
-│   │   │   ├── invariants.ts     # Business rules
+│   │   │   ├── preconditions.ts  # Business rules
 │   │   │   ├── <feature>.ts      # State + Slice per feature (co-locate projection)
 │   │   │   ├── bootstrap.ts      # act().withActor<T>().withSlice().build()
 │   │   │   └── index.ts          # Barrel exports
@@ -162,7 +163,7 @@ For complete workspace configuration files, see [monorepo-template.md](monorepo-
 | Step | Component | Reference |
 |---|---|---|
 | 1 | Define Schemas & Actor Type | [domain.md](domain.md) § Schemas & Actor Type |
-| 2 | Define Invariants | [domain.md](domain.md) § Invariants |
+| 2 | Define Business Rules | [domain.md](domain.md) § Business Rules |
 | 3 | Define States | [domain.md](domain.md) § States |
 | 4 | Define Slices with Co-located Projections | [domain.md](domain.md) § Slices with Co-located Projections |
 | 5 | Cross-Aggregate Projections | [domain.md](domain.md) § Cross-Aggregate Projections |
@@ -193,7 +194,7 @@ For complete workspace configuration files, see [monorepo-template.md](monorepo-
 | Error | Cause | Resolution |
 |---|---|---|
 | `ValidationError` | Payload fails Zod validation | Fix payload to match schema |
-| `InvariantError` | Business rule failed in `.given()` or `.requires()` (the message says which) | Check the rule's description |
+| `PreconditionError` | A precondition in `.requires()` failed | Check the rule's description |
 | `ConcurrencyError` | Stream version mismatch | Retry: reload state and re-dispatch |
 
 For production deployment (PostgresStore, background processing, automated jobs), see [server.md](server.md).
@@ -204,7 +205,7 @@ For production deployment (PostgresStore, background processing, automated jobs)
 - [ ] AppActor type defined extending Actor, systemActor constant exported
 - [ ] Every action emits at least one event
 - [ ] Patch handlers are pure functions returning partial state
-- [ ] Invariants enforce all business rules
+- [ ] Preconditions (`.requires`) guard every action; invariants live in the state schemas; no deprecated `.given`
 - [ ] Reactions pass triggering event for causation tracking
 - [ ] Projections co-located with slices, with query and clear functions
 - [ ] Projections register only lifecycle event handlers when using @rotorsoft/act-http/sse broadcast

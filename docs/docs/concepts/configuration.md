@@ -142,7 +142,7 @@ const app = act()
 - **`listen`** (default `true`) — subscribe to `Store.notify` on this instance. Set `false` on writer-only instances: commits still notify, but the instance doesn't subscribe to the channel. The subscriber-connection budget is the practical scaling ceiling for the notify/listen pattern; writer-only fleets shouldn't spend it.
 - **`drain`** (default `true`) — run the local reaction pipeline. Set `false` to make `correlate()`, `drain()`, and `settle()` no-ops and skip auto-cycle workers. The `notified` lifecycle event still fires when `listen` is on, so observability sidecars (`listen: true, drain: false`) work.
 - **`circuitBreaker`** (defaults: `failureThreshold` 5, `cooldownMs` 30_000) — see [Circuit breaker](#circuit-breaker) below. Out-of-range values throw a `ZodError` at `build()`.
-- **`validateFoldedState`** (default `false`) — a debugging aid that parses folded state against its declared schema after every reduction. See [Debugging: validating folded state](#debugging-validating-folded-state) below.
+- **`validateFoldedState`** — deprecated and ignored: every action checks its invariants before it commits. See [Invariants](#invariants) below.
 
 ### Circuit breaker
 
@@ -169,24 +169,16 @@ const app = act()
 
 A single-node deployment rarely needs to tune this; raise the threshold for flaky networks, lower the cooldown for faster recovery probing.
 
-### Debugging: validating folded state
+### Invariants
 
-Act validates action inputs (against their `.on({...})` schema) and emitted events (against their `.emits({...})` schema), but it does **not** validate the state a reducer folds those events into — reducers are trusted to be total. A reducer that produces schema-violating state (the calculator divide-by-zero that folds `result: NaN` into a `z.number()` field, #1230) fails silently at the source and surfaces hops later as a confusing downstream error.
+An invariant is what must hold of a state after every action ("every territory keeps at least one army"). Declare it in the state's Zod schema, with refinements where a type can't say it ([state-management § Invariants](./state-management.md#invariants)). There is nothing to configure: every action folds its events before it commits them ([one fold, before the commit](./state-management.md#what-an-action-checks-in-order)) and checks the final state against the schema once.
 
-`validateFoldedState` closes that gap. When set, every reduction — on the command path (`do`), on `load`/cold-replay, and inside the `projection(...).of(state)` projection fold — parses the merged full state against the owning state's declared schema. A bad reduction throws a `ValidationError` **at the triggering event**, whose `target` names the state and the event (`"<state>.<event>#<id>"`), so you see the reducer that produced the bad value instead of the symptom downstream.
+- A state the schema rejects refuses the action with a `ValidationError` whose `target` names the state and the action (`"<state>.<action>"`). Nothing is stored and no reaction runs. This also catches a reducer bug, such as a division by zero folding `NaN` into a `z.number()` field.
+- The check reads the state and never replaces it, so a schema with defaults or transforms doesn't rewrite a valid state.
+- Loads, replays and projection folds don't check. A stream that already holds an event that breaks the schema (written before 1.35, or by another app) still loads.
+- It costs one schema parse per action.
 
-```typescript no-check
-const app = act()
-  .withState(Calculator)
-  .build({ validateFoldedState: true }); // dev / CI only
-```
-
-This is a **debugging and CI aid, not a production guard**. Turn it on while developing new reducers or in CI to catch total-reducer bugs at the source; leave it off in production.
-
-- **Zero cost when off.** The reduction pipeline names three things: a **reducer** (a state's `.patch()` handler) turns one event into a partial, a **patch step** merges that partial into state, and the **fold** is the loop applying the patch step across a stream's events. The patch step is selected once at `build()` — the same way the orchestrator picks bare vs trace-decorated store ops from the log level. When off (the default), the fold loop is byte-identical to a bare reduction: the validating patch step is never selected, so there is no per-event cost, not even a branch. Flipping the flag is the entire opt-in; there is no per-state wiring.
-- **On the projection path**, a bad reduction throws inside the fold batch handler, which blocks the stream — the `ValidationError` message rides the [`blocked`](./error-handling.md#blocked-streams) lifecycle event's `error`. Recover the same way you recover any blocked stream once the reducer is fixed.
-- **Sensitive fields in a folded state.** A projection fold strips `sensitive()` fields from the rows it writes. If a reducer copies a sensitive field into a **required** state key, the stripped row no longer matches the schema, so with `validateFoldedState` on that fold blocks while `do` and `load` still pass. Make such state keys optional, or leave validation off for that state ([#1779](https://github.com/Rotorsoft/act-root/issues/1779)).
-- **Warm cache reads fold nothing**, so they are never validated — the flag guards reductions, not reads. A cold replay (a fresh `load`, a `reset`, or a time-travel `asOf` query) is what re-runs the reducers.
+`ActOptions.validateFoldedState`, which used to turn a check on for every folded event, is deprecated and ignored, and is removed in 2.0.
 
 ### Deployment shapes via `listen` / `drain`
 

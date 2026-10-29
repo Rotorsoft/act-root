@@ -7,7 +7,7 @@
 import { Act } from "../act.js";
 import { synthesize_autoclose_reactions } from "../internal/autoclose-reaction.js";
 import { resolveActConfig } from "../internal/config.js";
-import { bare_patch, validating_patch } from "../internal/event-sourcing.js";
+import { bare_patch } from "../internal/event-sourcing.js";
 import {
   current_version_of,
   deprecated_event_names,
@@ -26,7 +26,6 @@ import type {
   Actor,
   BatchHandler,
   LaneConfig,
-  PatchFn,
   Registry,
   Schema,
   SchemaRegister,
@@ -184,10 +183,9 @@ export function act<
 
   /**
    * Per-Act batch-handler map. Stateless handlers are shared; fold
-   * handlers own a per-stream cache, so each `.build()` gets fresh ones
-   * (and its own `patch_fn`).
+   * handlers own a per-stream cache, so each `.build()` gets fresh ones.
    */
-  const make_batch_handlers = (patch_fn: PatchFn) => {
+  const make_batch_handlers = () => {
     const handlers = new Map(batch_handlers);
     for (const spec of fold_specs) {
       handlers.set(
@@ -197,7 +195,7 @@ export function act<
             spec.merged,
             spec.flush,
             spec.config,
-            patch_fn,
+            bare_patch,
             // Head loads strip sensitive keys like the warm path.
             registry.sensitive_fields
           )
@@ -322,10 +320,6 @@ export function act<
         // circuitBreaker bags are validated by their own resolvers). A bad
         // maxSubscribedStreams / settleDebounceMs throws ZodError here.
         resolveActConfig(options);
-        // The one place the patch step is chosen; folds and `build_es` share
-        // it.
-        const patch_fn: PatchFn =
-          options?.validateFoldedState === true ? validating_patch : bare_patch;
         // Finalize once: repeated builds (per tenant) share the registry.
         if (!_built) {
           for (const proj of pending_projections) add_projection(proj);
@@ -333,8 +327,6 @@ export function act<
           // builder only recorded intent. Resolve here, where every
           // partial has merged, and refuse silently-partial folds: the
           // projection's register must cover the state's whole register.
-          // The `patch_fn` selected once at the top of `build()` feeds the
-          // fold handlers, matching the command/load paths.
           for (const proj of fold_projections) {
             const fold = proj.fold!;
             const merged = states.get(fold.name);
@@ -417,10 +409,9 @@ export function act<
         return new Act<TSchemaReg, TEvents, TActions, TStateMap, TActor>(
           registry,
           states,
-          make_batch_handlers(patch_fn),
+          make_batch_handlers(),
           options,
-          lanes,
-          patch_fn
+          lanes
         );
       },
       events: registry.events,

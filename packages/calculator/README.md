@@ -8,7 +8,7 @@ A minimal Act example — a calculator state machine built around a single aggre
 
 - A focused state machine with custom event reducers
 - Multiple events emitted from a single action
-- Invariants that gate actions (e.g. `Clear` only works on a "dirty" calculator)
+- Preconditions that gate actions (e.g. `Clear` only works on a "dirty" calculator)
 - Snapshotting (`.snap((s) => s.patches > 12)`)
 - Reactions across streams — digit presses on calculators `A`/`B` aggregate into a shared `Board` projection state, and operator presses fan out to per-calculator result streams
 - Source-regex resolvers (`source: "^(A|B)$"`) and dynamic resolvers (`(e) => ({ source: e.stream, target: "Calculator" + e.stream })`)
@@ -39,7 +39,7 @@ The default demo (`pnpm dev:calculator` → `src/main.ts`) loops random `PressKe
 ```
 packages/calculator/
 ├── src/
-│   ├── calculator.ts      # Calculator state — events, patches, actions, invariants
+│   ├── calculator.ts      # Calculator state — events, patches, actions, preconditions
 │   ├── hello.ts           # Smallest app: two counters, one reaction
 │   ├── main.ts            # Demo loop with reactions to a Board + per-stream result projection
 │   ├── rebuild-demo.ts    # Demonstrates app.reset() + drain for projection rebuild
@@ -47,7 +47,7 @@ packages/calculator/
 │   ├── router.ts          # tRPC router exposing PressKey + Clear
 │   └── index.ts           # Re-exports calculator + router
 └── test/
-    └── invariants.spec.ts # Invariant + validation error coverage
+    └── preconditions.spec.ts # Precondition + validation error coverage
 ```
 
 ## The Calculator state
@@ -65,7 +65,7 @@ A single state with five events and two actions:
 | Action     | Schema                       | Notes                                                   |
 |------------|------------------------------|---------------------------------------------------------|
 | `PressKey` | `{ key: digit \| op \| symbol }` | Routes to one of `DigitPressed` / `OperatorPressed` / `DotPressed` / `EqualsPressed` — can emit multiple events. Requires `Equals needs an operator` (a precondition: it reads the key) |
-| `Clear`    | empty                         | Guarded by `Must be dirty` invariant (it reads only the state) |
+| `Clear`    | empty                         | Guarded by the `Must be dirty` precondition (it reads only the state) |
 
 Snapshot after every 12 patches:
 
@@ -168,11 +168,11 @@ const result = await app.close([
 
 ## Tests
 
-`test/invariants.spec.ts` covers:
+`test/preconditions.spec.ts` covers:
 
-- Invariant violation (`Clear` on a clean calculator) → `InvariantError`
+- Refused precondition (`Clear` on a clean calculator) → `PreconditionError`
 - Schema violation (numeric key) → `ValidationError`
-- Precondition violation (`=` with no operator) → `InvariantError` ("PressKey failed precondition: Equals needs an operator")
+- Precondition violation (`=` with no operator) → `PreconditionError` ("PressKey failed precondition: Equals needs an operator")
 - Missing target stream → throws `"Missing target stream"`
 
 Run with `pnpm test` from the root, or `pnpm -F calculator test` for this package only.

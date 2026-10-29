@@ -166,8 +166,6 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
 .checks rect.card { fill: var(--surface); stroke: var(--state); stroke-width: 1.4; }
 .checks text { font: 500 12.5px var(--f-mono); }
 .checks .row { animation: pop .25s ease-out; }
-/* one color per layer: invariants are rules on the state, preconditions rules on the payload */
-.checks .inv, .node .badge .inv, .legend .inv, .read .inv, .detail .inv { fill: var(--state); color: var(--state); }
 .checks .pre, .node .badge .pre, .legend .pre, .read .pre, .detail .pre { fill: var(--action); color: var(--action); }
 .checks .emit { fill: var(--muted); }
 .checks .mark { fill: var(--muted); }
@@ -534,17 +532,15 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
         glyph("automation", n.cx - tw / 2 + 5, ty - 3.4, g, 0.62);
         const t = el("text", { x: n.cx - tw / 2 + 12, y: ty, class: "as" }, g); t.textContent = n.as;
       }
-      // ◆ invariants (rules on the state) and ▲ preconditions (rules on the payload), with their counts
-      const inv = (n.invariants || []).length, pre = (n.preconditions || []).length;
-      if (n.badge || inv || pre) {
+      // ▲ the action's preconditions, with their count
+      const pre = checksOf(n).length;
+      if (n.badge || pre) {
         const b = el("text", { x: n.right - 8, y: n.top + 12, "text-anchor": "end", class: "badge" }, g);
         const part = (text, cls) => { const t = el("tspan", cls ? { class: cls } : {}, b); t.textContent = text; };
-        if (n.badge) part(n.badge + (inv || pre ? " " : ""));
-        if (inv) part(`◆ ${inv}`, "inv");
-        if (inv && pre) part(" ");
+        if (n.badge) part(n.badge + (pre ? " " : ""));
         if (pre) part(`▲ ${pre}`, "pre");
-        if (inv || pre) el("title", {}, b).textContent = "Checked by the state before it commits:\n" +
-          checksOf(n).map(r => `${r.k === "inv" ? "◆ invariant" : "▲ precondition"}: ${r.t}`).join("\n");
+        if (pre) el("title", {}, b).textContent = "Checked by the state before the handler runs:\n" +
+          checksOf(n).map(r => `▲ ${r.t}`).join("\n");
       }
     }
     if (selected) { selected = byId(selected.id); selected?.g.classList.add("sel"); }
@@ -561,12 +557,12 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
   $("legend").innerHTML = Object.entries(KINDS).filter(([k]) => used.has(k))
     .map(([k, v]) => `<div><i style="background:var(${v.color})"></i>${v.name}</div>`).join("") +
     `<div>${svgIcon("person")}Person</div><div>${svgIcon("automation")}Automation</div>` +
-    `<div><span class="mono inv">◆</span>Invariant (rule on the state)</div><div><span class="mono pre">▲</span>Precondition (rule on the payload)</div><div><span class="mono">⏱</span>Timer (deferred)</div>` +
+    `<div><span class="mono pre">▲</span>Precondition (a rule the action needs to run)</div><div><span class="mono">⏱</span>Timer (deferred)</div>` +
     (bands.some(b => b.kind === "state") ? `<div><i class="bx" style="--k:var(--state)"></i>State boundary</div>` : "") +
     (bands.some(b => b.kind === "slice") ? `<div><i class="bx" style="--k:var(--ink)"></i>Slice boundary</div>` : "");
   $("read").innerHTML = `
     <p>Time runs left to right. An <b style="color:var(--actor)">actor</b>, a person or an automation, invokes an <b style="color:var(--action)">action</b>.</p>
-    <p>The <b style="color:var(--state)">state</b> loads from the stream, checks the action's rules one by one: its <b class="inv">◆ invariants</b> (rules on the state), then its <b class="pre">▲ preconditions</b> (rules that also read the payload), each in the order the action declares them. It either refuses the action at the first rule that fails or commits <b style="color:var(--event)">events</b>. Events patch the state, and <b style="color:var(--projection)">projections</b> fold them into read models such as tables and caches.</p>
+    <p>The <b style="color:var(--state)">state</b> loads from the stream, checks the action's <b class="pre">▲ preconditions</b> one by one, in the order the action declares them. It either refuses the action at the first rule that fails or commits <b style="color:var(--event)">events</b>. Events patch the state, and <b style="color:var(--projection)">projections</b> fold them into read models such as tables and caches.</p>
     <p><b style="color:var(--reaction)">Reactions</b> pick events up after the commit and act as automations: they invoke new actions or call the <b style="color:var(--external)">outside world</b>. A clock marks a reaction that waits for a timestamp.</p>
     ${bands.length ? `<p>Dashed boxes are the boundaries the builders declare. ${bands[0].kind === "slice"
       ? "A <b>slice</b> box holds the actions and events of the partial states the slice declares, and the reactions it declares. Partial states of the same name still merge into one state bar."
@@ -631,8 +627,7 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
       ${n.file ? `<div class="file">${esc(n.file)}${n.line ? ":" + n.line : ""}</div>` : ""}
       ${n.note ? `<p class="rel">${esc(n.note)}</p>` : ""}
       ${n.description ? `<p>${esc(n.description)}</p>` : ""}
-      ${(n.invariants || []).length ? `<p class="rel"><span class="inv">◆</span> Invariants</p><ul>${n.invariants.map(i => `<li>${esc(i)}</li>`).join("")}</ul>` : ""}
-      ${(n.preconditions || []).length ? `<p class="rel"><span class="pre">▲</span> Preconditions</p><ul>${n.preconditions.map(i => `<li>${esc(i)}</li>`).join("")}</ul>` : ""}
+      ${checksOf(n).length ? `<p class="rel"><span class="pre">▲</span> Preconditions</p><ul>${checksOf(n).map(r => `<li>${esc(r.t)}</li>`).join("")}</ul>` : ""}
       ${n.schema ? `<pre>${esc(n.schema)}</pre>` : ""}
       ${ins.length ? `<p class="rel">From: ${ins.map(e => link(e.a)).join(", ")}</p>` : ""}
       ${outs.length ? `<p class="rel">To: ${outs.map(e => link(e.b)).join(", ")}</p>` : ""}`;
@@ -855,17 +850,17 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
     const t = el("text", { x: x + 19, y: y + 4 }, g); t.textContent = text;
     return g;
   }
-  // an action's rules in the order the state runs them: invariants, then preconditions
+  // an action's preconditions in the order the state runs them
   function checksOf(n) {
-    return [...(n.invariants || []).map(t => ({ t, k: "inv" })), ...(n.preconditions || []).map(t => ({ t, k: "pre" }))];
+    return (n.preconditions || []).map(t => ({ t, k: "pre" }));
   }
   // the action's checks, listed in the order the state runs them: each row gets a ✓ as it passes,
-  // and a refusal stops on the failing row with ✕. A reason that is not an invariant comes from
-  // .emit(), which runs after every invariant passed, so it is the last row.
+  // and a refusal stops on the failing row with ✕. A reason that is not a precondition comes from
+  // .emit(), which runs after every precondition passed, so it is the last row.
   async function checklist(x, y, rules, reject, token) {
     const rows = reject && !rules.some(r => r.t === reject) ? [...rules, { t: reject, k: "emit" }] : rules;
     const fail = reject ? rows.findIndex(r => r.t === reject) : -1;
-    const ICON = { inv: "◆", pre: "▲", emit: "·" };
+    const ICON = { pre: "▲", emit: "·" };
     const RH = 22, w = Math.max(...rows.map(r => r.t.length)) * 7.5 + 58, h = rows.length * RH + 10;
     const left = x + 14 + w > svg.viewBox.baseVal.width ? x - 14 - w : x + 14;
     const g = el("g", { class: "checks" }, gFx);

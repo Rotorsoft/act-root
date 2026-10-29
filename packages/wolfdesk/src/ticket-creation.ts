@@ -11,12 +11,12 @@ import {
   TicketResolved,
 } from "./schemas/ticket.schemas.js";
 import { assignAgent } from "./services/agent.js";
+import { TicketOperations } from "./ticket-operations.js";
 import {
   mustBeOpen,
   mustBeUserOrAgent,
   mustNotBeOpen,
-} from "./ticket-invariants.js";
-import { TicketOperations } from "./ticket-operations.js";
+} from "./ticket-preconditions.js";
 
 // --- State ---
 export const TicketCreation = state({ Ticket: TicketCreationState })
@@ -48,7 +48,7 @@ export const TicketCreation = state({ Ticket: TicketCreationState })
   })
 
   .on({ OpenTicket })
-  .given([mustNotBeOpen])
+  .requires([mustNotBeOpen])
   .emit((data, _, { actor }) => {
     return [
       "TicketOpened",
@@ -57,11 +57,11 @@ export const TicketCreation = state({ Ticket: TicketCreationState })
   })
 
   .on({ CloseTicket })
-  .given([mustBeOpen])
+  .requires([mustBeOpen])
   .emit((_, __, { actor }) => ["TicketClosed", { closedById: actor.id }])
 
   .on({ MarkTicketResolved })
-  .given([mustBeOpen, mustBeUserOrAgent])
+  .requires([mustBeOpen, mustBeUserOrAgent])
   .emit((_, __, { actor }) => ["TicketResolved", { resolvedById: actor.id }])
 
   // Online close-the-books policy (the operator recipes reference this

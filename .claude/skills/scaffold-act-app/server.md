@@ -192,7 +192,7 @@ setInterval(() => autoClose(10), 15_000);
 ```typescript
 import {
   ConcurrencyError,
-  InvariantError,
+  PreconditionError,
   ValidationError,
 } from "@rotorsoft/act";
 
@@ -200,7 +200,7 @@ try {
   await app.do("CreateItem", target, payload);
 } catch (error) {
   if (error instanceof ValidationError) { /* bad input */ }
-  if (error instanceof InvariantError) { /* rule violated */ }
+  if (error instanceof PreconditionError) { /* rule violated */ }
   if (error instanceof ConcurrencyError) { /* retry */ }
 }
 ```

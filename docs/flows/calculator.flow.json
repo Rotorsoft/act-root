@@ -51,10 +51,10 @@
       "lane": "action",
       "label": "Clear",
       "col": 4,
-      "invariants": ["Must be dirty"],
+      "preconditions": ["Must be dirty"],
       "file": "packages/calculator/src/calculator.ts",
       "line": 128,
-      "description": "Resets the calculator. The invariant refuses it when there is nothing to clear."
+      "description": "Resets the calculator. A precondition refuses it when there is nothing to clear."
     },
     {
       "id": "action:CountDigit",
@@ -499,7 +499,7 @@
         {
           "from": "action:Clear",
           "to": "evt:Cleared",
-          "say": "Nothing to clear: the invariant refuses it.",
+          "say": "Nothing to clear: the precondition refuses it.",
           "reject": "Must be dirty"
         },
         {

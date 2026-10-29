@@ -192,28 +192,12 @@ export type ActOptions<TLanes extends string = string> = {
     readonly timeZone?: string;
   };
   /**
-   * Validate folded state against its declared Zod schema after every
-   * reduction. Off by default.
+   * Ignored: every action checks the state it leaves against the state's
+   * schema before it commits, so a broken invariant refuses the action
+   * with a {@link ValidationError} and nothing is stored. Loads, replays and
+   * projection folds don't check.
    *
-   * When `true`, each time an event is folded into state — on the
-   * command path (`do`), on `load`/replay, and inside projection-fold
-   * projections — the merged full state is parsed against the owning
-   * state's `state({ Name: schema })` schema. A reducer that produces
-   * schema-violating state (the calculator divide-by-zero NaN
-   * class) throws a {@link ValidationError} at the triggering event,
-   * whose `target` names the state and the event (`<state>.<event>#<id>`)
-   * — instead of the bad value propagating and surfacing hops later as a
-   * confusing downstream error.
-   *
-   * This is a **debugging / CI aid, not a production guard**. Turn it on
-   * in development and CI to catch total-reducer bugs at the source; the
-   * framework already validates action inputs and emitted events, so the
-   * reduced state is the one shape it otherwise trusts. The per-event
-   * patch step is selected **once at `build()`** (the same way the
-   * orchestrator picks bare vs trace-decorated store ops from the log
-   * level): when `false` (the default) the fold loop is byte-identical to
-   * a bare reduction — the validating patch step is never selected, so
-   * there is no per-event cost, not even a branch.
+   * @deprecated The check is always on. Remove the option; removed in 2.0.
    */
   readonly validateFoldedState?: boolean;
 };

@@ -31,7 +31,7 @@ import type {
   State,
 } from "../types/index.js";
 import type { FoldConfig } from "./config.js";
-import { bare_patch, load } from "./event-sourcing.js";
+import { load } from "./event-sourcing.js";
 import { pii_strip } from "./pii.js";
 
 /**
@@ -83,7 +83,7 @@ export function make_fold_handler<
   me: State<TState, TEvents, TActions>,
   flush: (rows: ReadonlyArray<CacheEntry<TState>>) => Promise<void>,
   config: FoldConfig,
-  patch_fn: PatchFn = bare_patch,
+  patch_fn: PatchFn,
   sensitive_fields: (event_name: string) => readonly string[]
 ): BatchHandler<TEvents> {
   // First-sight head loads must apply the SAME PII treatment as the warm

@@ -88,7 +88,7 @@
       "actor": "person",
       "label": "Customer",
       "col": 4.5,
-      "description": "Opens tickets, writes messages, reads replies, asks for escalation. Owns the ticket (the mustBeUser invariant)."
+      "description": "Opens tickets, writes messages, reads replies, asks for escalation. Owns the ticket (the mustBeUser precondition)."
     },
     {
       "id": "actor:agent",
@@ -105,7 +105,7 @@
       "file": "packages/wolfdesk/src/ticket-creation.ts",
       "col": 0,
       "slice": "slice:TicketCreation",
-      "invariants": ["Cannot open twice"]
+      "preconditions": ["Cannot open twice"]
     },
     {
       "id": "evt:TicketOpened",
@@ -120,7 +120,7 @@
       "id": "action:AssignTicket",
       "lane": "action",
       "label": "AssignTicket",
-      "invariants": ["Ticket must be open"],
+      "preconditions": ["Ticket must be open"],
       "file": "packages/wolfdesk/src/ticket-operations.ts",
       "col": 6,
       "slice": "slice:TicketOps"
@@ -138,7 +138,10 @@
       "id": "action:AddMessage",
       "lane": "action",
       "label": "AddMessage",
-      "invariants": ["Ticket must be open", "Must be owner or assigned agent"],
+      "preconditions": [
+        "Ticket must be open",
+        "Must be owner or assigned agent"
+      ],
       "file": "packages/wolfdesk/src/ticket-messaging.ts",
       "col": 3,
       "slice": "slice:TicketMessaging"
@@ -156,11 +159,10 @@
       "id": "action:MarkMessageDelivered",
       "lane": "action",
       "label": "MarkMessageDelivered",
-      "invariants": ["Ticket must be open"],
+      "preconditions": ["Ticket must be open", "Message must exist"],
       "file": "packages/wolfdesk/src/ticket-messaging.ts",
       "col": 4,
-      "slice": "slice:TicketMessaging",
-      "preconditions": ["Message must exist"]
+      "slice": "slice:TicketMessaging"
     },
     {
       "id": "evt:MessageDelivered",
@@ -175,8 +177,11 @@
       "id": "action:AcknowledgeMessage",
       "lane": "action",
       "label": "AcknowledgeMessage",
-      "invariants": ["Ticket must be open"],
-      "preconditions": ["Message must exist", "Must be receiver to ack"],
+      "preconditions": [
+        "Ticket must be open",
+        "Message must exist",
+        "Must be receiver to ack"
+      ],
       "file": "packages/wolfdesk/src/ticket-messaging.ts",
       "col": 5,
       "slice": "slice:TicketMessaging"
@@ -194,7 +199,7 @@
       "id": "action:RequestTicketEscalation",
       "lane": "action",
       "label": "RequestTicketEscalation",
-      "invariants": [
+      "preconditions": [
         "Ticket must be open",
         "Must be the owner",
         "Cannot escalate before due date"
@@ -216,7 +221,10 @@
       "id": "action:EscalateTicket",
       "lane": "action",
       "label": "EscalateTicket",
-      "invariants": ["Ticket must be open", "Cannot escalate more than once"],
+      "preconditions": [
+        "Ticket must be open",
+        "Cannot escalate more than once"
+      ],
       "file": "packages/wolfdesk/src/ticket-operations.ts",
       "col": 8,
       "slice": "slice:TicketOps"
@@ -234,7 +242,7 @@
       "id": "action:ReassignTicket",
       "lane": "action",
       "label": "ReassignTicket",
-      "invariants": [
+      "preconditions": [
         "Ticket must be open",
         "Cannot reassign without escalation",
         "Cannot reassign before due date",
@@ -257,7 +265,10 @@
       "id": "action:MarkTicketResolved",
       "lane": "action",
       "label": "MarkTicketResolved",
-      "invariants": ["Ticket must be open", "Must be owner or assigned agent"],
+      "preconditions": [
+        "Ticket must be open",
+        "Must be owner or assigned agent"
+      ],
       "file": "packages/wolfdesk/src/ticket-creation.ts",
       "col": 1,
       "slice": "slice:TicketCreation"
@@ -275,7 +286,7 @@
       "id": "action:CloseTicket",
       "lane": "action",
       "label": "CloseTicket",
-      "invariants": ["Ticket must be open"],
+      "preconditions": ["Ticket must be open"],
       "file": "packages/wolfdesk/src/ticket-creation.ts",
       "col": 2,
       "slice": "slice:TicketCreation"
@@ -295,7 +306,7 @@
       "label": "Ticket",
       "note": "TicketCreation + TicketOperations + TicketMessaging, merged at build",
       "file": "packages/wolfdesk/src/ticket.ts",
-      "description": "One Ticket state assembled from three partial states. Each action loads it from the stream (cache or snapshot plus events), checks its invariants and preconditions against it, and commits events that patch it. Optimistic concurrency on the stream version."
+      "description": "One Ticket state assembled from three partial states. Each action loads it from the stream (cache or snapshot plus events), checks its preconditions against it, and commits events that patch it. Optimistic concurrency on the stream version."
     },
     {
       "id": "proj:tickets",
@@ -653,7 +664,7 @@
         {
           "from": "action:AddMessage",
           "to": "evt:MessageAdded",
-          "say": "Two invariants pass: the ticket is open and Ada is the assigned agent. **MessageAdded** commits.",
+          "say": "Two preconditions pass: the ticket is open and Ada is the assigned agent. **MessageAdded** commits.",
           "data": {
             "to": "carla",
             "body": "Unplug it and step away."
@@ -1238,7 +1249,7 @@
         {
           "from": "action:OpenTicket",
           "to": "evt:TicketOpened",
-          "say": "The state already has a product, so the invariant **Cannot open twice** refuses it.",
+          "say": "The state already has a product, so the precondition **Cannot open twice** refuses it.",
           "reject": "Cannot open twice"
         },
         {
@@ -1260,7 +1271,7 @@
         {
           "from": "action:AcknowledgeMessage",
           "to": "evt:MessageRead",
-          "say": "Only the receiver may acknowledge. The precondition reads the message id from the payload and refuses: an InvariantError comes back.",
+          "say": "Only the receiver may acknowledge. The precondition reads the message id from the payload and refuses: an PreconditionError comes back.",
           "reject": "Must be receiver to ack"
         },
         {
@@ -1288,7 +1299,7 @@
         {
           "from": "action:AddMessage",
           "to": "evt:MessageAdded",
-          "say": "The **Ticket must be open** invariant fails. A closed ticket accepts no more actions.",
+          "say": "The **Ticket must be open** precondition fails. A closed ticket accepts no more actions.",
           "reject": "Ticket must be open"
         }
       ]
