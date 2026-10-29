@@ -1467,6 +1467,7 @@ export class PostgresStore implements Store {
     // Reset retry too: a defer is a deliberate "come back later," not a
     // failure, so the redelivery after the due-time is a fresh attempt.
     return this._update(
+      "defer",
       input,
       "SET deferred_at = to_timestamp($1 / 1000.0), retry = -1",
       [deferred_at]
@@ -1475,9 +1476,11 @@ export class PostgresStore implements Store {
 
   /**
    * `UPDATE ... <set>` on the selected streams. `set`/`where` use `$1..$n`
-   * for `params`; the selection's parameters are numbered after them.
+   * for `params`; the selection's parameters are numbered after them. A
+   * failure throws a {@link StoreError} naming the operation.
    */
   private async _update(
+    operation: string,
     input: string[] | StreamFilter,
     set: string,
     params: unknown[] = [],
@@ -1487,11 +1490,15 @@ export class PostgresStore implements Store {
     const { clause, values } = Array.isArray(input)
       ? { clause: `stream = ANY($${params.length + 1})`, values: [input] }
       : this._filter_clause(input, params.length + 1);
-    const { rowCount } = await this._pool.query(
-      `UPDATE ${this._fqs} ${set} WHERE ${where ? `${where} AND ` : ""}${clause}`,
-      [...params, ...values]
-    );
-    return rowCount ?? 0;
+    try {
+      const { rowCount } = await this._pool.query(
+        `UPDATE ${this._fqs} ${set} WHERE ${where ? `${where} AND ` : ""}${clause}`,
+        [...params, ...values]
+      );
+      return rowCount ?? 0;
+    } catch (error) {
+      throw new StoreError(operation, { cause: error });
+    }
   }
 
   /** A `WHERE` fragment (without the keyword); `true` for an empty filter. */
@@ -1534,6 +1541,7 @@ export class PostgresStore implements Store {
 
   reset(input: string[] | StreamFilter): Promise<number> {
     return this._update(
+      "reset",
       input,
       `SET at = -1, retry = -1, blocked = false, error = NULL,
            leased_by = NULL, leased_until = NULL, deferred_at = NULL`
@@ -1545,6 +1553,7 @@ export class PostgresStore implements Store {
     // Always restricted to blocked rows, whatever the filter says: there is
     // no use case for "unblock unblocked streams."
     return this._update(
+      "unblock",
       Array.isArray(input) ? input : { ...input, blocked: undefined },
       `SET retry = -1, blocked = false, error = NULL,
            leased_by = NULL, leased_until = NULL, deferred_at = NULL`,
@@ -1555,6 +1564,7 @@ export class PostgresStore implements Store {
 
   prioritize(filter: StreamFilter, priority: number): Promise<number> {
     return this._update(
+      "prioritize",
       filter,
       "SET priority = $1",
       [priority],

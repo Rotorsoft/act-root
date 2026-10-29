@@ -1111,18 +1111,14 @@ export class SqliteStore implements Store {
   // Cleared by ack/block/reset/unblock. See {@link Store.defer}.
   async defer(input: string[] | StreamFilter, deferred_at: number) {
     const at_iso = new Date(deferred_at).toISOString();
-    try {
-      return await this._update(input, "SET deferred_at = ?, retry = -1", [
-        at_iso,
-      ]);
-    } catch (e) {
-      throw new StoreError("defer", { cause: e });
-    }
+    return this._update("defer", input, "SET deferred_at = ?, retry = -1", [
+      at_iso,
+    ]);
   }
 
   /**
    * Runs `UPDATE streams <set>` on the streams named by `input`, in one
-   * write transaction that rolls back on failure. An explicit list is
+   * write transaction (`_tx`) that rolls back on failure. An explicit list is
    * de-duplicated, so a repeated name counts once (matching PG's set-based
    * `stream = ANY(...)`), and updated one name per statement, so a long list
    * never meets SQLite's bound-parameter limit. `set` and `where` bind
@@ -1131,7 +1127,8 @@ export class SqliteStore implements Store {
    *
    * @returns Count of rows updated.
    */
-  private async _update(
+  private _update(
+    operation: string,
     input: string[] | StreamFilter,
     set: string,
     params: unknown[] = [],
@@ -1143,8 +1140,7 @@ export class SqliteStore implements Store {
           args: [stream] as unknown[],
         }))
       : [this._filter_clause(input)];
-    const tx = await this.client.transaction("write");
-    try {
+    return this._tx(operation, async (tx) => {
       let count = 0;
       for (const { clause, args } of selections) {
         const r = await tx.execute({
@@ -1153,12 +1149,8 @@ export class SqliteStore implements Store {
         });
         count += r.rowsAffected;
       }
-      await tx.commit();
       return count;
-    } catch (e) {
-      await tx.rollback();
-      throw e;
-    }
+    });
   }
 
   /**
@@ -1205,6 +1197,7 @@ export class SqliteStore implements Store {
   // --- reset: transactional, accepts names or filter ---
   reset(input: string[] | StreamFilter) {
     return this._update(
+      "reset",
       input,
       `SET at = -1, retry = -1, blocked = 0, error = '',
            leased_by = NULL, leased_until = NULL, deferred_at = NULL`
@@ -1218,6 +1211,7 @@ export class SqliteStore implements Store {
   // unblocked streams."
   unblock(input: string[] | StreamFilter) {
     return this._update(
+      "unblock",
       Array.isArray(input) ? input : { ...input, blocked: undefined },
       `SET retry = -1, blocked = 0, error = '',
            leased_by = NULL, leased_until = NULL, deferred_at = NULL`,
@@ -1553,6 +1547,7 @@ export class SqliteStore implements Store {
   // --- prioritize: bulk priority update with filter ---
   prioritize(filter: StreamFilter, priority: number): Promise<number> {
     return this._update(
+      "prioritize",
       filter,
       "SET priority = ?",
       [priority, priority],
