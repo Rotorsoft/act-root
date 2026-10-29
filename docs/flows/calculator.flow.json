@@ -40,7 +40,7 @@
       "lane": "action",
       "label": "PressKey",
       "col": 1.5,
-      "schema": "{ key: 0-9 | + - * / | . | = }",
+      "schema": "key: \"0\" | \"1\" | \"2\" | \"3\" | \"4\" | \"5\" | \"6\" | \"7\" | \"8\" | \"9\" | \"+\" | \"-\" | \"*\" | \"/\" | \".\" | \"=\"",
       "file": "packages/calculator/src/calculator.ts",
       "line": 117,
       "description": "One action for every key. The emit decides which event the key becomes. A precondition refuses = when no operator is pending.",
@@ -54,14 +54,15 @@
       "preconditions": ["Must be dirty"],
       "file": "packages/calculator/src/calculator.ts",
       "line": 128,
-      "description": "Resets the calculator. A precondition refuses it when there is nothing to clear."
+      "description": "Resets the calculator. A precondition refuses it when there is nothing to clear.",
+      "schema": "{}"
     },
     {
       "id": "action:CountDigit",
       "lane": "action",
       "label": "CountDigit",
       "col": 5.5,
-      "schema": "{ digit: 0-9 }",
+      "schema": "digit: \"0\" | \"1\" | \"2\" | \"3\" | \"4\" | \"5\" | \"6\" | \"7\" | \"8\" | \"9\"",
       "file": "packages/calculator/src/main.ts",
       "line": 34,
       "description": "Adds one to a digit's count on the shared Board stream."
@@ -71,7 +72,7 @@
       "lane": "action",
       "label": "ProjectResult",
       "col": 7,
-      "schema": "{ result: number }",
+      "schema": "result: number",
       "file": "packages/calculator/src/main.ts",
       "line": 48,
       "description": "Records a calculator's current result on its own Calculator<stream> stream."
@@ -83,7 +84,8 @@
       "note": "left · operator · right · result",
       "span": [0, 4],
       "file": "packages/calculator/src/calculator.ts",
-      "description": "One calculator per stream (A, B). Each key loads it, and its event patches it: digits and dots append to the left or right operand, an operator or = computes the pending result. A division by zero resets to 0 instead of storing Infinity. Takes a snapshot once more than 12 patches pile up since the last one."
+      "description": "One calculator per stream (A, B). Each key loads it, and its event patches it: digits and dots append to the left or right operand, an operator or = computes the pending result. A division by zero resets to 0 instead of storing Infinity. Takes a snapshot once more than 12 patches pile up since the last one.",
+      "schema": "left?: string\nright?: string\noperator?: \"+\" | \"-\" | \"*\" | \"/\"\nresult: number"
     },
     {
       "id": "state:DigitBoard",
@@ -92,7 +94,8 @@
       "note": "count per digit",
       "span": [5.25, 5.75],
       "file": "packages/calculator/src/main.ts",
-      "description": "A count for each digit 0-9, on one shared Board stream."
+      "description": "A count for each digit 0-9, on one shared Board stream.",
+      "schema": "0: integer\n1: integer\n2: integer\n3: integer\n4: integer\n5: integer\n6: integer\n7: integer\n8: integer\n9: integer"
     },
     {
       "id": "state:CalculatorResult",
@@ -101,21 +104,22 @@
       "note": "result",
       "span": [6.75, 7.25],
       "file": "packages/calculator/src/main.ts",
-      "description": "The last projected result of one calculator, on a CalculatorA or CalculatorB stream."
+      "description": "The last projected result of one calculator, on a CalculatorA or CalculatorB stream.",
+      "schema": "result: number"
     },
     {
       "id": "evt:DigitPressed",
       "lane": "event",
       "label": "DigitPressed",
       "col": 0,
-      "schema": "{ digit: 0-9 }"
+      "schema": "digit: \"0\" | \"1\" | \"2\" | \"3\" | \"4\" | \"5\" | \"6\" | \"7\" | \"8\" | \"9\""
     },
     {
       "id": "evt:OperatorPressed",
       "lane": "event",
       "label": "OperatorPressed",
       "col": 1,
-      "schema": "{ operator: + - * / }"
+      "schema": "operator: \"+\" | \"-\" | \"*\" | \"/\""
     },
     {
       "id": "evt:DotPressed",
@@ -143,14 +147,14 @@
       "lane": "event",
       "label": "DigitCounted",
       "col": 5.5,
-      "schema": "{ digit: 0-9 }"
+      "schema": "digit: \"0\" | \"1\" | \"2\" | \"3\" | \"4\" | \"5\" | \"6\" | \"7\" | \"8\" | \"9\""
     },
     {
       "id": "evt:ResultProjected",
       "lane": "event",
       "label": "ResultProjected",
       "col": 7,
-      "schema": "{ result: number }"
+      "schema": "result: number"
     },
     {
       "id": "reaction:CountDigits",

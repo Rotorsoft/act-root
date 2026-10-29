@@ -32,6 +32,12 @@ export type StateNode = {
   actions: ActionNode[];
   file?: string;
   line?: number;
+  /**
+   * Runtime Zod schema of the state, as declared in `state({ Name: <schema> })`.
+   * Its refinements are the state's invariants. Only present after parsing,
+   * never serialized.
+   */
+  zod?: unknown;
 };
 
 export type EventNode = {
@@ -61,6 +67,12 @@ export type ActionNode = {
   /** Descriptions of the action's preconditions in the order they run: the deprecated `.given([...])`, then `.requires([...])`. */
   preconditions?: string[];
   line?: number;
+  /**
+   * Runtime Zod schema of the action's payload, as declared in
+   * `.on({ ActionName: <schema> })`. Only present after parsing, never
+   * serialized.
+   */
+  zod?: unknown;
 };
 
 export type SliceNode = {

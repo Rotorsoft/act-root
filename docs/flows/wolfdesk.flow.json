@@ -105,13 +105,14 @@
       "file": "packages/wolfdesk/src/ticket-creation.ts",
       "col": 0,
       "slice": "slice:TicketCreation",
-      "preconditions": ["Cannot open twice"]
+      "preconditions": ["Cannot open twice"],
+      "schema": "productId: uuid\nsupportCategoryId: uuid\npriority: \"Low\" | \"Medium\" | \"High\"\ntitle: string ≥ 1 chars\nmessage: string ≥ 1 chars\ncloseAfter?: date"
     },
     {
       "id": "evt:TicketOpened",
       "lane": "event",
       "label": "TicketOpened",
-      "schema": "OpenTicketFields.and(\n  z.object({ userId: z.uuid(), messageId: z.uuid() })\n).describe(\"A new ticket was opened\")",
+      "schema": "productId: uuid\nsupportCategoryId: uuid\npriority: \"Low\" | \"Medium\" | \"High\"\ntitle: string ≥ 1 chars\nmessage: string ≥ 1 chars\ncloseAfter?: date\nuserId: uuid\nmessageId: uuid",
       "file": "packages/wolfdesk/src/ticket-creation.ts",
       "col": 0,
       "slice": "slice:TicketCreation"
@@ -123,13 +124,14 @@
       "preconditions": ["Ticket must be open"],
       "file": "packages/wolfdesk/src/ticket-operations.ts",
       "col": 6,
-      "slice": "slice:TicketOps"
+      "slice": "slice:TicketOps",
+      "schema": "agentId: uuid\nreassignAfter: date\nescalateAfter: date"
     },
     {
       "id": "evt:TicketAssigned",
       "lane": "event",
       "label": "TicketAssigned",
-      "schema": "AssignmentFields.describe(\n  \"An agent was assigned to the ticket\"\n)",
+      "schema": "agentId: uuid\nreassignAfter: date\nescalateAfter: date",
       "file": "packages/wolfdesk/src/ticket-operations.ts",
       "col": 6,
       "slice": "slice:TicketOps"
@@ -144,13 +146,14 @@
       ],
       "file": "packages/wolfdesk/src/ticket-messaging.ts",
       "col": 3,
-      "slice": "slice:TicketMessaging"
+      "slice": "slice:TicketMessaging",
+      "schema": "to: uuid\nbody: string ≥ 1 chars\nattachments: Record<string, {\n  url: uri\n}>"
     },
     {
       "id": "evt:MessageAdded",
       "lane": "event",
       "label": "MessageAdded",
-      "schema": "MessageFields.and(\n  z.object({ from: z.uuid(), messageId: z.uuid() })\n).describe(\"A user added a message to the ticket\")",
+      "schema": "to: uuid\nbody: string ≥ 1 chars\nattachments: Record<string, {\n  url: uri\n}>\nfrom: uuid\nmessageId: uuid",
       "file": "packages/wolfdesk/src/ticket-messaging.ts",
       "col": 3,
       "slice": "slice:TicketMessaging"
@@ -162,13 +165,14 @@
       "preconditions": ["Ticket must be open", "Message must exist"],
       "file": "packages/wolfdesk/src/ticket-messaging.ts",
       "col": 4,
-      "slice": "slice:TicketMessaging"
+      "slice": "slice:TicketMessaging",
+      "schema": "messageId: uuid"
     },
     {
       "id": "evt:MessageDelivered",
       "lane": "event",
       "label": "MessageDelivered",
-      "schema": "MessageIdField.describe(\n  \"The message was delivered to the recepient\"\n)",
+      "schema": "messageId: uuid",
       "file": "packages/wolfdesk/src/ticket-messaging.ts",
       "col": 4,
       "slice": "slice:TicketMessaging"
@@ -184,13 +188,14 @@
       ],
       "file": "packages/wolfdesk/src/ticket-messaging.ts",
       "col": 5,
-      "slice": "slice:TicketMessaging"
+      "slice": "slice:TicketMessaging",
+      "schema": "messageId: uuid"
     },
     {
       "id": "evt:MessageRead",
       "lane": "event",
       "label": "MessageRead",
-      "schema": "MessageIdField.describe(\n  \"The message was acknoledged by the recipient\"\n)",
+      "schema": "messageId: uuid",
       "file": "packages/wolfdesk/src/ticket-messaging.ts",
       "col": 5,
       "slice": "slice:TicketMessaging"
@@ -206,13 +211,14 @@
       ],
       "file": "packages/wolfdesk/src/ticket-operations.ts",
       "col": 7,
-      "slice": "slice:TicketOps"
+      "slice": "slice:TicketOps",
+      "schema": "{}"
     },
     {
       "id": "evt:TicketEscalationRequested",
       "lane": "event",
       "label": "TicketEscalationRequested",
-      "schema": "EscalationFields.describe(\n  \"A ticket escalation was requested\"\n)",
+      "schema": "requestId: uuid\nrequestedById: uuid",
       "file": "packages/wolfdesk/src/ticket-operations.ts",
       "col": 7,
       "slice": "slice:TicketOps"
@@ -227,13 +233,14 @@
       ],
       "file": "packages/wolfdesk/src/ticket-operations.ts",
       "col": 8,
-      "slice": "slice:TicketOps"
+      "slice": "slice:TicketOps",
+      "schema": "requestId: uuid\nrequestedById: uuid"
     },
     {
       "id": "evt:TicketEscalated",
       "lane": "event",
       "label": "TicketEscalated",
-      "schema": "EscalationFields.and(\n  z.object({ escalationId: z.uuid() })\n).describe(\"The ticket was escalated\")",
+      "schema": "requestId: uuid\nrequestedById: uuid\nescalationId: uuid",
       "file": "packages/wolfdesk/src/ticket-operations.ts",
       "col": 8,
       "slice": "slice:TicketOps"
@@ -250,13 +257,14 @@
       ],
       "file": "packages/wolfdesk/src/ticket-operations.ts",
       "col": 9,
-      "slice": "slice:TicketOps"
+      "slice": "slice:TicketOps",
+      "schema": "agentId: uuid\nreassignAfter: date\nescalateAfter: date"
     },
     {
       "id": "evt:TicketReassigned",
       "lane": "event",
       "label": "TicketReassigned",
-      "schema": "AssignmentFields.describe(\n  \"The ticket was reassigned\"\n)",
+      "schema": "agentId: uuid\nreassignAfter: date\nescalateAfter: date",
       "file": "packages/wolfdesk/src/ticket-operations.ts",
       "col": 9,
       "slice": "slice:TicketOps"
@@ -271,13 +279,14 @@
       ],
       "file": "packages/wolfdesk/src/ticket-creation.ts",
       "col": 1,
-      "slice": "slice:TicketCreation"
+      "slice": "slice:TicketCreation",
+      "schema": "{}"
     },
     {
       "id": "evt:TicketResolved",
       "lane": "event",
       "label": "TicketResolved",
-      "schema": "z\n  .object({ resolvedById: z.uuid() })\n  .describe(\"The ticket was marked as resolved\")",
+      "schema": "resolvedById: uuid",
       "file": "packages/wolfdesk/src/ticket-creation.ts",
       "col": 1,
       "slice": "slice:TicketCreation"
@@ -289,13 +298,14 @@
       "preconditions": ["Ticket must be open"],
       "file": "packages/wolfdesk/src/ticket-creation.ts",
       "col": 2,
-      "slice": "slice:TicketCreation"
+      "slice": "slice:TicketCreation",
+      "schema": "{}"
     },
     {
       "id": "evt:TicketClosed",
       "lane": "event",
       "label": "TicketClosed",
-      "schema": "z\n  .object({ closedById: z.uuid() })\n  .describe(\"The ticket was closed\")",
+      "schema": "closedById: uuid",
       "file": "packages/wolfdesk/src/ticket-creation.ts",
       "col": 2,
       "slice": "slice:TicketCreation"
@@ -306,7 +316,8 @@
       "label": "Ticket",
       "note": "TicketCreation + TicketOperations + TicketMessaging, merged at build",
       "file": "packages/wolfdesk/src/ticket.ts",
-      "description": "One Ticket state assembled from three partial states. Each action loads it from the stream (cache or snapshot plus events), checks its preconditions against it, and commits events that patch it. Optimistic concurrency on the stream version."
+      "description": "One Ticket state assembled from three partial states. Each action loads it from the stream (cache or snapshot plus events), checks its preconditions against it, and commits events that patch it. Optimistic concurrency on the stream version.",
+      "schema": "productId: uuid\nuserId: uuid\nmessages: Record<string, {\n  messageId: uuid\n  body: string ≥ 1 chars\n  from: uuid\n  to?: uuid\n  wasDelivered?: boolean\n  wasRead?: boolean\n  attachments: Record<string, {\n    url: uri\n  }>\n}>\nagentId?: uuid\nrequestId?: uuid\nrequestedById?: uuid\nescalationId?: uuid\nreassignAfter?: date\nescalateAfter?: date\nsupportCategoryId: uuid\npriority: \"Low\" | \"Medium\" | \"High\"\ntitle: string ≥ 1 chars\nclosedById?: uuid\nresolvedById?: uuid\ncloseAfter?: date"
     },
     {
       "id": "proj:tickets",

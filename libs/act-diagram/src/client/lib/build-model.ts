@@ -71,6 +71,7 @@ function build_state(
       emits,
       invariants,
       ...(preconditions.length ? { preconditions } : {}),
+      zod: raw_actions[action_name],
     });
   }
 
@@ -80,6 +81,7 @@ function build_state(
     events: event_nodes,
     actions: action_nodes,
     file: st._sourceFile as string | undefined,
+    zod: st.schema,
   };
   model.states.push(node);
   st._modelKey = unique_key;
