@@ -21,37 +21,39 @@ Run vitest from the repo root (`npx vitest run <path>`); from a package director
 
 ## Per-test isolation: `fixture(builder)`
 
-The common case. From `@rotorsoft/act/test`:
+The common case. From `@rotorsoft/act/test`, `fixture` returns a vitest `test` whose callback gets a fresh, isolated `app`; cleanup runs when the test ends:
 
 ```ts
 import { fixture } from "@rotorsoft/act/test";
 
-const f = fixture(() => act().withState(Counter));
+const test = fixture(act().withState(Counter));
 
-test("..." , async () => {
-  const app = f();  // fresh Act, fresh InMemoryStore, fresh InMemoryCache.
-  // No beforeEach, no dispose. Each test gets clean ports.
+test("increments", async ({ app }) => {
+  await app.do("increment", { stream: "c-1", actor }, { by: 1 });
+  expect((await app.load("Counter", "c-1")).state.count).toBe(1);
 });
 ```
 
-Use `fixture` when each test wants independent state. Auto-cleanup, parallel-safe.
+Parallel-safe: `test.concurrent(...)` gives each invocation its own store and cache.
 
-## Shared setup: `sandbox(builder)`
+## Explicit control: `sandbox(builder)`
 
-When `beforeAll` setup is expensive (multi-Act, complex initial state):
+When a test needs the `store` / `cache` handles, setup in `beforeAll`, or two Acts at once. It is async and the caller disposes:
 
 ```ts
 import { sandbox } from "@rotorsoft/act/test";
 
-const sb = sandbox(() => act().withState(Counter));
-
-beforeAll(async () => { /* seed shared state */ });
-afterAll(async () => sb.dispose());
+it("increments", async () => {
+  const { app, store, cache, dispose } = await sandbox(act().withState(Counter));
+  await app.do("increment", { stream: "c-1", actor }, { by: 1 });
+  expect((await app.load("Counter", "c-1")).state.count).toBe(1);
+  await dispose();
+});
 ```
 
-## Drain determinism
+## Waiting for reactions
 
-In integration tests, **prefer `await app.correlate(); await app.drain();` over `settle()`**. Settle's debounce + max-passes can make cycle counts non-deterministic; the explicit pair gives a known number of cycles per assertion.
+Wait for the outcome, never for a time budget or a fixed number of passes. With the default auto settle, `await vi.waitFor(() => expect(...))`. To walk the pipeline step by step, build with `{ autoSettle: false }` and call `await app.correlate(); await app.drain();` (a bare `drain()` after a commit finds nothing), looping until nothing is left when a chain takes several hops. `settle()` returns before its passes run, so an assertion right after it checks nothing.
 
 ## TCK extension
 

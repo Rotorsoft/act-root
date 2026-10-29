@@ -163,32 +163,6 @@ function compile_reaches(
 }
 
 /**
- * Compile a declarative {@link AutoclosePolicy} into an
- * {@link AutoclosePredicate}. The state-builder's
- * `.autocloses({...})` overload calls this; tests can also build a
- * state and read `state.autoclose` to grab the compiled predicate.
- *
- * Returned predicate fires when either:
- *
- *   1. **All** top-level non-`or` fields match (AND), or
- *   2. **Any** field inside the `or` block matches.
- *
- * Top-level with zero non-`or` fields never satisfies path (1) — the
- * `every` check on an empty list is short-circuited to `false` so the
- * policy doesn't truncate the entire universe on an `or`-only
- * declaration. (Validation rejects all-empty bags up front; this guard
- * is the in-cycle equivalent for the synthesized empty AND-group.)
- *
- * Assignable to any `AutoclosePredicate<TEvents>` slot via
- * function-parameter contravariance — the returned predicate inspects
- * `head.name` as a plain string, so narrower event unions stay
- * assignable.
- *
- * Throws `ZodError` at call time when the options are invalid (empty
- * bag, non-positive `reaches`, sub-minute `after`, empty `is`, empty
- * `or`, nested `or`, unknown keys).
- */
-/**
  * The smallest `after` window (in days) anywhere in a policy — across
  * the top-level `after` and the `or.after` block — or `undefined` when
  * the policy has no time component.
@@ -224,6 +198,32 @@ export function policy_keep_days(options: AutoclosePolicy): number | undefined {
   return parsed.keep?.days;
 }
 
+/**
+ * Compile a declarative {@link AutoclosePolicy} into an
+ * {@link AutoclosePredicate}. The state-builder's
+ * `.autocloses({...})` overload calls this; tests can also build a
+ * state and read `state.autoclose` to grab the compiled predicate.
+ *
+ * Returned predicate fires when either:
+ *
+ *   1. **All** top-level non-`or` fields match (AND), or
+ *   2. **Any** field inside the `or` block matches.
+ *
+ * Top-level with zero non-`or` fields never satisfies path (1) — the
+ * `every` check on an empty list is short-circuited to `false` so the
+ * policy doesn't truncate the entire universe on an `or`-only
+ * declaration. (Validation rejects all-empty bags up front; this guard
+ * is the in-cycle equivalent for the synthesized empty AND-group.)
+ *
+ * Assignable to any `AutoclosePredicate<TEvents>` slot via
+ * function-parameter contravariance — the returned predicate inspects
+ * `head.name` as a plain string, so narrower event unions stay
+ * assignable.
+ *
+ * Throws `ZodError` at call time when the options are invalid (empty
+ * bag, non-positive `reaches`, sub-minute `after`, empty `is`, empty
+ * `or`, nested `or`, unknown keys).
+ */
 export function compile_autoclose_policy(
   options: AutoclosePolicy
 ): AutoclosePredicate<Schemas> {

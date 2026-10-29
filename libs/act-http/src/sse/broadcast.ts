@@ -8,40 +8,6 @@ import {
 } from "./types.js";
 
 /**
- * Server-side broadcast channel for incremental state sync over SSE.
- *
- * Manages per-stream subscriber sets and an LRU state cache. When state
- * changes, forwards domain patches (from event handlers) to all subscribers
- * as version-keyed messages.
- *
- * ## Usage
- *
- * ```typescript
- * const broadcast = new BroadcastChannel<MyState>();
- *
- * // After every app.do():
- * const snaps = await app.do(...);
- * const patches = snaps.map(s => s.patch).filter(Boolean);
- * const state = deriveState(snaps.at(-1));
- * broadcast.publish(streamId, state, patches);
- *
- * // In SSE subscription:
- * const cleanup = broadcast.subscribe(streamId, (msg) => {
- *   pending = msg;
- *   resolve?.();
- * });
- *
- * // Initial state for reconnects:
- * const cached = broadcast.state(streamId);
- * ```
- *
- * ## Version Contract
- *
- * The `_v` field on state MUST be set from `snap.event.version` (the event
- * store's monotonic stream version) BEFORE calling `publish()`. This is the
- * single source of truth for ordering — no separate version counters.
- */
-/**
  * Deliver a frame to every subscriber, containing each one individually.
  *
  * SSE subscribers are the least-trusted callbacks in the system — one per
@@ -177,18 +143,48 @@ const tag_overlay_keys = <S extends object>(
   return state;
 };
 
+/**
+ * Server-side broadcast channel for incremental state sync over SSE.
+ *
+ * Manages per-stream subscriber sets and an LRU state cache. When state
+ * changes, forwards domain patches (from event handlers) to all subscribers
+ * as version-keyed messages.
+ *
+ * ## Usage
+ *
+ * ```typescript
+ * const broadcast = new BroadcastChannel<MyState>();
+ *
+ * // After every app.do():
+ * const snaps = await app.do(...);
+ * const patches = snaps.map(s => s.patch).filter(Boolean);
+ * const state = deriveState(snaps.at(-1));
+ * broadcast.publish(streamId, state, patches);
+ *
+ * // In SSE subscription:
+ * const cleanup = broadcast.subscribe(streamId, (msg) => {
+ *   pending = msg;
+ *   resolve?.();
+ * });
+ *
+ * // Initial state for reconnects:
+ * const cached = broadcast.state(streamId);
+ * ```
+ *
+ * ## Version Contract
+ *
+ * The `_v` field on state MUST be set from `snap.event.version` (the event
+ * store's monotonic stream version) BEFORE calling `publish()`. This is the
+ * single source of truth for ordering — no separate version counters.
+ */
 export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
   private channels = new Map<string, Set<Subscriber<S>>>();
   private state_cache: StateCache<S>;
-
-  /**
-   * @param options.cacheSize - Max number of stream states kept in the LRU
-   * cache (default 50).
-   */
   private on_subscriber_error: (error: unknown, streamId: string) => void;
   private on_overlay_miss: (streamId: string) => void;
 
   constructor(options?: {
+    /** Max number of stream states kept in the LRU cache (default 50). */
     cacheSize?: number;
     /**
      * Called when overlay-contributed state is lost, on either of the two

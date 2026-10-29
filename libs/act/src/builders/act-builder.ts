@@ -7,7 +7,6 @@
 import { Act } from "../act.js";
 import { synthesize_autoclose_reactions } from "../internal/autoclose-reaction.js";
 import { resolveActConfig } from "../internal/config.js";
-import { bare_patch } from "../internal/event-sourcing.js";
 import {
   current_version_of,
   deprecated_event_names,
@@ -195,7 +194,6 @@ export function act<
             spec.merged,
             spec.flush,
             spec.config,
-            bare_patch,
             // Head loads strip sensitive keys like the warm path.
             registry.sensitive_fields
           )

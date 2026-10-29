@@ -22,36 +22,6 @@ import { add_reaction } from "./builder-utils.js";
 import { _this_ } from "./merge.js";
 
 /**
- * Creates a new projection builder for composing read-model update handlers.
- *
- * Projections enable separation of read-model concerns from command handling.
- * Each `.on({ Event }).do(handler)` call registers a handler that updates
- * a projection (database table, cache, etc.) in response to events.
- *
- * Pass a target stream name to `projection("target")` so every handler
- * inherits that resolver automatically. Omit it and use per-handler
- * `.to()` when handlers route to different streams.
- *
- * @param target - Optional default target stream for all handlers
- *
- * @example Default target (all handlers routed to "tickets")
- * ```typescript
- * const TicketProjection = projection("tickets")
- *   .on({ TicketOpened })
- *     .do(async function openTicket({ stream, data }) {
- *       await db.insert(tickets).values({ id: stream, ...data });
- *     })
- *   .on({ TicketClosed })
- *     .do(async function closeTicket({ stream, data }) {
- *       await db.update(tickets).set(data).where(eq(tickets.id, stream));
- *     })
- *   .build();
- * ```
- *
- * @see {@link ProjectionBuilder} for builder methods
- * @see {@link Projection} for the output type
- */
-/**
  * @internal Build the core builder object (shared between overloads). One
  * mutable `events` register threaded through every fluent call; .on()
  * mutates and returns the same builder cast to its widened generic.
@@ -208,12 +178,34 @@ function _projection<
 }
 
 /**
- * Creates a new projection builder with a static target stream.
+ * Creates a new projection builder for composing read-model update handlers,
+ * with a static target stream.
  *
- * All handlers inherit the target resolver automatically. Enables `.batch()`
- * for bulk event processing in a single transaction.
+ * Projections enable separation of read-model concerns from command handling.
+ * Each `.on({ Event }).do(handler)` call registers a handler that updates
+ * a projection (database table, cache, etc.) in response to events. All
+ * handlers inherit the target resolver automatically, and `.batch()` is
+ * enabled for bulk event processing in a single transaction. Omit the target
+ * and use per-handler `.to()` when handlers route to different streams.
  *
  * @param target - Static target stream for all handlers
+ *
+ * @example Default target (all handlers routed to "tickets")
+ * ```typescript
+ * const TicketProjection = projection("tickets")
+ *   .on({ TicketOpened })
+ *     .do(async function openTicket({ stream, data }) {
+ *       await db.insert(tickets).values({ id: stream, ...data });
+ *     })
+ *   .on({ TicketClosed })
+ *     .do(async function closeTicket({ stream, data }) {
+ *       await db.update(tickets).set(data).where(eq(tickets.id, stream));
+ *     })
+ *   .build();
+ * ```
+ *
+ * @see {@link ProjectionBuilder} for builder methods
+ * @see {@link Projection} for the output type
  */
 export function projection<TEvents extends Schemas = {}>(
   target: string

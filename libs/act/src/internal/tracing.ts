@@ -171,12 +171,8 @@ export function build_es(
   // so EsOps callers don't need to thread it. A per-call
   // `options.correlator` still wins — the orchestrator default fills in
   // only when the caller didn't supply one.
-  //
-  // The per-event patch step comes from the `Act` constructor and is
-  // baked into the load/action closures, so the projection-fold engine
-  // and close-cycle callers inherit it without threading it through their
-  // own signatures. The builder always uses the default (`bare_patch`);
-  // an action checks its invariants once, on the folded state.
+  // The `Act` constructor's patch step is baked into load and action, so
+  // close-cycle callers get it without threading it.
   const bound_action: EsOps["action"] = (
     me,
     action_name,
