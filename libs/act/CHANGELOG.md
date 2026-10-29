@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v1.35.0](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.34.4...@rotorsoft/act-v1.35.0) (2026-10-29)
+
+
+### Features
+
+* **act:** preconditions replace .given; the state schema is checked before every commit ([#2180](https://github.com/Rotorsoft/act-root/issues/2180)) ([8a28d5f](https://github.com/Rotorsoft/act-root/commit/8a28d5f6e58c89df05ad6de0ea5d0d3749f9ce78)), closes [#2179](https://github.com/Rotorsoft/act-root/issues/2179) [#2183](https://github.com/Rotorsoft/act-root/issues/2183) [#2182](https://github.com/Rotorsoft/act-root/issues/2182)
+
 # [@rotorsoft/act-v1.34.4](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.34.3...@rotorsoft/act-v1.34.4) (2026-10-27)
 
 # [@rotorsoft/act-v1.34.3](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.34.2...@rotorsoft/act-v1.34.3) (2026-10-26)
