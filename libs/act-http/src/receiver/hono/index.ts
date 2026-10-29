@@ -36,7 +36,7 @@
  * finalizes the claim automatically after `await next()`: a downstream
  * 2xx/3xx **commits** the key (later retries dedup); any **4xx or 5xx**
  * (or a thrown handler) **releases** it, so the sender's corrected retry
- * re-processes instead of being silently dropped (#1364). Fail-safe is
+ * re-processes instead of being silently dropped. Fail-safe is
  * toward reprocessing: releasing a deterministic 4xx costs bounded
  * re-delivery, while committing it would lose a delivery the handler
  * never accepted (the shipped `receiver()` returns 422 on a schema
@@ -96,7 +96,7 @@ export function webhookMiddleware(
     }
     // Commit only a genuine success (2xx/3xx); release on any 4xx/5xx so a
     // failed delivery's corrected same-key retry re-processes instead of being
-    // deduped into a silent success (#1364).
+    // deduped into a silent success.
     if (c.res.status >= 400) await idempotency.release();
     else await idempotency.commit();
   };

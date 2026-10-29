@@ -69,7 +69,7 @@ export type SseOptions = {
    *
    * Version-neutral frames (`_overlay`, `_resync`) are never dropped
    * silently — they create no gap to notice, so a backlog made only of
-   * them collapses into a single `_resync` instead (#1649).
+   * them collapses into a single `_resync` instead.
    *
    * Default `256`. Validated range `[1, 100_000]`.
    */
@@ -113,7 +113,7 @@ export const DEFAULT_SSE_HEARTBEAT_MS = 30_000;
  * version-keyed patch, so the consumer sees the gap and converges on
  * current state regardless of which intermediate versions it missed.
  * Version-neutral frames create no gap, so they collapse into a
- * `_resync` rather than being dropped silently (#1649).
+ * `_resync` rather than being dropped silently.
  */
 export const DEFAULT_SSE_MAX_PENDING_PER_CONNECTION = 256;
 
@@ -321,7 +321,7 @@ export async function* runSseSubscription<S extends { _v: number } = any>(
    * safely — the client sees the version gap, reports `behind`, and
    * refetches. A version-neutral frame (`_overlay`, `_resync`) carries no
    * versions at all, so dropping one leaves no gap to notice and the update
-   * is lost silently (#1649). So: evict the oldest version-keyed frame if
+   * is lost silently. So: evict the oldest version-keyed frame if
    * there is one, and only if the whole backlog is version-neutral collapse
    * it into the single frame that says "you missed something".
    */

@@ -23,9 +23,9 @@
  *
  * Sibling subpaths in the same package consume the utilities here:
  *
- * - `@rotorsoft/act-http/trpc` — tRPC adapter (#843).
- * - `@rotorsoft/act-http/hono` — Hono adapter (#844).
- * - `@rotorsoft/act-http/openapi` — OpenAPI emitter (#845).
+ * - `@rotorsoft/act-http/trpc` — tRPC adapter.
+ * - `@rotorsoft/act-http/hono` — Hono adapter.
+ * - `@rotorsoft/act-http/openapi` — OpenAPI emitter.
  *
  * Existing siblings unrelated to the generated-API work:
  *

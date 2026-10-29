@@ -6,7 +6,7 @@
  *
  * Wraps `fetch` with timeouts, automatic `Idempotency-Key` derivation, and
  * status-classified errors. Designed to be composed with the reaction
- * options shipped in ACT-601 (`maxRetries`, `blockOnError`, `backoff`):
+ * options (`maxRetries`, `blockOnError`, `backoff`):
  *
  * ```ts
  * import { webhook } from "@rotorsoft/act-http/webhook";
@@ -35,9 +35,7 @@ import {
 } from "./types.js";
 
 export type { HttpDisposition, TryOkOptions } from "./classify.js";
-// Documented in this subpath's README as public API since the helpers were
-// written — implemented, tested, and with a doc-comment describing external
-// use — but never actually exported (#1621). See rfcs/1621-webhook-classify-exports.md.
+// See rfcs/1621-webhook-classify-exports.md.
 export { classifyHttpResponse, tryOk } from "./classify.js";
 export type {
   HttpDeliveryErrorInit,
@@ -130,14 +128,11 @@ export function webhook<TEvents extends Schemas = Schemas>(
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
 
-    // The timer has to outlive the fetch. `fetch` resolves on response
-    // HEADERS, so clearing it as soon as the fetch settled left the
-    // error-path body read below unbounded: a receiver that answers with
-    // headers and then never ends the body hung the handler forever, with
-    // no timer and no signal still watching it (#1701). A hang is worse
-    // than a throw here — an overrun lease is re-claimed by the next
-    // holder and the attempt never spends its retry budget loudly, so the
-    // stream never reaches its `blockOnError` verdict (the #1418 shape).
+    // The timer has to outlive the fetch: `fetch` resolves on response
+    // headers, so the error-path body read below needs the timer too, or a
+    // receiver that never ends the body hangs the handler. A hang is worse
+    // than a throw: the lease is re-claimed and the attempt never spends its
+    // retry budget, so the stream never reaches its `blockOnError` verdict.
     try {
       let response: Response;
       try {

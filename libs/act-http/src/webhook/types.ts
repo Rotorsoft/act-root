@@ -59,7 +59,7 @@ export type WebhookConfig<TEvents extends Schemas = Schemas> = {
    * `fetch` resolves on response headers, so the timer stays armed through
    * the error-path body read as well. A receiver that answers with headers
    * and then stalls its body times out like any other overrun instead of
-   * hanging the handler forever (#1701).
+   * hanging the handler forever.
    */
   readonly timeoutMs?: number;
   /**

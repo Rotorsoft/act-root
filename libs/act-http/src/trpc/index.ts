@@ -2,7 +2,7 @@
  * @packageDocumentation
  * @module act-http/trpc
  *
- * tRPC subpath for the auto-generated API epic (#835). Walks the
+ * tRPC subpath of the auto-generated API. Walks the
  * registry of a built `Act` once at function call and emits a typed
  * router that exposes every registered action as a flat `mutation`,
  * matching the shape hand-written tRPC routers in the Act ecosystem
@@ -32,9 +32,7 @@
  * the top level. Action names are the unique identifiers across
  * the registry (the framework already enforces no duplicates), so
  * an extra namespace tier would be overhead in the common case.
- * Pure mutations for this slice; query/projection wiring lives in
- * a follow-up. See `libs/act-http/README.md` for the full surface
- * walkthrough.
+ * See `libs/act-http/README.md` for the full surface walkthrough.
  *
  * **Actor lives on the context.** The generator wires an internal
  * tRPC middleware that runs the host's
@@ -205,8 +203,8 @@ export function authenticated(
  * their conventional tRPC code (`ConcurrencyError` → `PRECONDITION_FAILED`,
  * `StreamClosedError` → `NOT_FOUND`, `ValidationError` →
  * `UNPROCESSABLE_CONTENT`, etc.); unknown throws
- * surface as `INTERNAL_SERVER_ERROR`. Every transport in the
- * act-http epic passes through the same {@link toApiError} table,
+ * surface as `INTERNAL_SERVER_ERROR`. Every act-http transport
+ * passes through the same {@link toApiError} table,
  * so a client talking to both this subpath and the REST sibling
  * sees one envelope per framework error.
  *
@@ -244,7 +242,7 @@ function status_to_trpc_code(status: number): TRPCError["code"] {
     case 412:
       // ConcurrencyError is HTTP 412 Precondition Failed. Map by error
       // identity, not by round-tripping the status: PRECONDITION_FAILED
-      // serializes back to 412, matching Hono/OpenAPI (#1280).
+      // serializes back to 412, matching Hono/OpenAPI.
       return "PRECONDITION_FAILED";
     case 422:
       return "UNPROCESSABLE_CONTENT";
@@ -327,11 +325,8 @@ export function trpc<
    * Run the actor extractor for a generated procedure, mapping a
    * "throw to deny" onto `UNAUTHORIZED` rather than a framework 500.
    *
-   * Shared by mutations and subscriptions on purpose. Each used to carry
-   * its own copy of this block, and the subscription copy was simply
-   * missing — a denied caller got a live subscription and the cached
-   * state frame with it (#1620). One helper is what keeps the two paths
-   * from drifting again.
+   * Shared by mutations and subscriptions, so a denied caller gets
+   * neither a mutation nor a live subscription.
    */
   const resolve_actor = async (host_ctx: Ctx): Promise<Actor> => {
     try {
@@ -356,22 +351,22 @@ export function trpc<
       // bypassed because a Zod failure there surfaces as a hardcoded
       // BAD_REQUEST (400) that never reaches `to_trpc_error`. Validation runs
       // in the resolver (below) instead, so a malformed body maps to the SAME
-      // 422 / ApiError a `ValidationError` thrown inside `app.do` produces —
-      // cross-transport parity with Hono/OpenAPI (#1295).
+      // 422 / ApiError a `ValidationError` thrown inside `app.do` produces,
+      // as Hono and OpenAPI do.
       .input((raw: unknown) => raw)
       .mutation(async ({ input, ctx }) => {
         const host_ctx = ctx as unknown as Ctx;
         // Resolve the actor first, mirroring Hono's `authenticated` middleware:
         // a "throw to deny" from the extractor is 401 UNAUTHORIZED, not a 500.
         // The actor step is auth — distinct from a framework error inside
-        // `app.do`, which the main try below maps via `to_trpc_error` (#1286).
+        // `app.do`, which the main try below maps via `to_trpc_error`.
         const actor: Actor = await resolve_actor(host_ctx);
         try {
           // Validate the payload before the stream / expectedVersion resolvers
           // see it, mirroring Hono's zValidator-then-handler order. `validate`
           // throws the framework `ValidationError`, which `to_trpc_error` maps
-          // to 422 / UNPROCESSABLE_CONTENT with the shared ApiError envelope
-          // (#1295). The resolvers get the parsed value, but `app.do` gets the
+          // to 422 / UNPROCESSABLE_CONTENT with the shared ApiError envelope.
+          // The resolvers get the parsed value, but `app.do` gets the
           // raw `input`: it parses again itself, and a second parse of the
           // output would run every `.transform()` twice.
           const validated = validate(

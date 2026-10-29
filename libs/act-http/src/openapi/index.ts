@@ -2,7 +2,7 @@
  * @packageDocumentation
  * @module act-http/openapi
  *
- * OpenAPI subpath for the auto-generated API epic (#835). Walks the
+ * OpenAPI subpath of the auto-generated API. Walks the
  * registry of a built `Act` once at function call and returns a
  * valid OpenAPI 3.1 document describing the same action surface the
  * Hono sibling at `@rotorsoft/act-http/hono` serves. The doc is
@@ -362,7 +362,7 @@ function build_operation(
       in: "header",
       // Required: the generated route fail-closes with 400 when idempotency is
       // enabled and the header is absent, so the doc must not advertise it as
-      // optional (#1287).
+      // optional.
       required: true,
       description:
         "Required idempotency token. A duplicate of a request that already succeeded produces a 409 Conflict (the first result is not cached on the server). A duplicate that arrives while the original is still running produces a retryable 503 with Retry-After, because the original may yet fail.",
@@ -453,7 +453,7 @@ export function openapi<TApp extends Pick<ActSurface, "registry">>(
         // `unrepresentable: "any"` emits an open (`{}`) schema for a Zod type
         // with no JSON-Schema form (z.date/z.bigint/z.map/z.set/...) instead of
         // Zod 4's default `"throw"`, which would abort the WHOLE document over
-        // one such field — while hono() serves the same action fine (#1328).
+        // one such field, while hono() serves the same action fine.
         // `io: "input"` describes what a client must SEND: a `.default()`
         // field is optional, extra keys are not rejected (Zod strips them),
         // and a `.pipe()`/`.transform()` documents its input type. Zod's

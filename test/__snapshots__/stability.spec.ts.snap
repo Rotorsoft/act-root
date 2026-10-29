@@ -10985,9 +10985,9 @@ export declare function withIdempotency<T>(store: IdempotencyStore, key: string,
  *
  * Sibling subpaths in the same package consume the utilities here:
  *
- * - \`@rotorsoft/act-http/trpc\` — tRPC adapter (#843).
- * - \`@rotorsoft/act-http/hono\` — Hono adapter (#844).
- * - \`@rotorsoft/act-http/openapi\` — OpenAPI emitter (#845).
+ * - \`@rotorsoft/act-http/trpc\` — tRPC adapter.
+ * - \`@rotorsoft/act-http/hono\` — Hono adapter.
+ * - \`@rotorsoft/act-http/openapi\` — OpenAPI emitter.
  *
  * Existing siblings unrelated to the generated-API work:
  *
@@ -11064,7 +11064,7 @@ export type SseOptions = {
      *
      * Version-neutral frames (\`_overlay\`, \`_resync\`) are never dropped
      * silently — they create no gap to notice, so a backlog made only of
-     * them collapses into a single \`_resync\` instead (#1649).
+     * them collapses into a single \`_resync\` instead.
      *
      * Default \`256\`. Validated range \`[1, 100_000]\`.
      */
@@ -11104,7 +11104,7 @@ export declare const DEFAULT_SSE_HEARTBEAT_MS = 30000;
  * version-keyed patch, so the consumer sees the gap and converges on
  * current state regardless of which intermediate versions it missed.
  * Version-neutral frames create no gap, so they collapse into a
- * \`_resync\` rather than being dropped silently (#1649).
+ * \`_resync\` rather than being dropped silently.
  */
 export declare const DEFAULT_SSE_MAX_PENDING_PER_CONNECTION = 256;
 /**
@@ -11580,13 +11580,13 @@ export declare function checkWebhook(headers: Record<string, string | string[] |
  * Pair with \`IdempotencyStore.claim\` from
  * \`@rotorsoft/act-ops/idempotency\`: extract the key from the inbound
  * request, claim it on the store, return a \`deduped\` marker when the
- * claim fails. The framework-agnostic middleware that wires these
- * together lands in #744.
+ * claim fails. The receiver subpaths' \`webhookMiddleware\` wires these
+ * together.
  *
  * Validation beyond "is there a usable key?" (length bounds, format
  * checks, normalization) is intentionally out of scope. Receivers
- * picking a policy can layer it on top — or, when #744 ships, opt
- * into the middleware's opinionated defaults.
+ * picking a policy can layer it on top, or use the middleware's
+ * defaults.
  */
 export declare function extractIdempotencyKey(headers: Record<string, string | string[] | undefined>): string | undefined;
 //# sourceMappingURL=extract.d.ts.map
@@ -11733,8 +11733,8 @@ export type VerifyOptions = {
  * The signed payload is \`\${timestamp}.\${body}\`, so \`body\` must be
  * the **raw request body bytes**. Any pre-parse normalization
  * (whitespace trimming, JSON re-stringification) would change the
- * hash and reject every otherwise-valid request. Framework adapters
- * in #744 will provide the raw body alongside the parsed one.
+ * hash and reject every otherwise-valid request. The receiver
+ * subpaths' adapters pass the raw body alongside the parsed one.
  *
  * Uses Node's \`crypto.timingSafeEqual\` for the final comparison to
  * avoid signature-equality timing attacks.
@@ -11937,7 +11937,7 @@ exports[`@rotorsoft/act-http — public API stability > stable public surface fo
  * finalizes the claim automatically after \`await next()\`: a downstream
  * 2xx/3xx **commits** the key (later retries dedup); any **4xx or 5xx**
  * (or a thrown handler) **releases** it, so the sender's corrected retry
- * re-processes instead of being silently dropped (#1364). Fail-safe is
+ * re-processes instead of being silently dropped. Fail-safe is
  * toward reprocessing: releasing a deterministic 4xx costs bounded
  * re-delivery, while committing it would lose a delivery the handler
  * never accepted (the shipped \`receiver()\` returns 422 on a schema
@@ -12125,34 +12125,16 @@ export declare class BroadcastChannel<S extends BroadcastState = BroadcastState>
      */
     private broadcast_resync;
     /**
-     * The LRU dropped an entry. If it carried overlay-contributed keys, that
-     * data existed only in the cache and is now gone: a later \`publish()\` has
-     * no baseline to carry it from, and the reseed a reconnecting client gets
-     * would silently lack presence a live client is still showing (#1648).
-     *
-     * \`overlay()\` was hardened for the same loss on its own path (#1423);
-     * catching it here covers \`publish()\` too, and does it at the moment the
-     * data is lost rather than at a later commit that may never come. Reading
-     * the marker off the entry being evicted is what avoids the parallel
-     * bookkeeping structure the \`OVERLAY_KEYS\` design explicitly rejected.
+     * The LRU dropped an entry. Overlay-contributed keys lived only in the
+     * cache, so their loss is reported now, when it happens, rather than at a
+     * later commit that may never come.
      */
     private on_cache_evict;
     /**
      * Overlay-contributed state for \`streamId\` is gone. Recover first, report
-     * second.
-     *
-     * The resync goes out before the host hook runs, and the hook is contained
-     * the way \`fan_out\` contains subscribers: a bad consumer must not break the
-     * publisher (#1423), and the same applies to a bad observer. Without this,
-     * a throwing \`onOverlayMiss\` escapes on the eviction path — which runs
-     * inside \`publish()\`, before that stream's own \`fan_out\` — so one host bug
-     * costs the evicted stream its recovery frame *and* an unrelated stream the
-     * frame for a version already written to the cache. The evicted stream's
-     * clients never self-heal from that, which is the silent loss #1648 exists
-     * to end.
-     *
-     * Routing the throw to \`onSubscriberError\` rather than swallowing it keeps
-     * it wherever the host already reads framework delivery failures.
+     * second: the resync goes out before the host hook, and a throwing hook is
+     * routed to \`onSubscriberError\`. Eviction runs inside \`publish()\` for
+     * another stream, so an escaping throw would cost that stream its frame.
      */
     private report_overlay_miss;
     /**
@@ -12295,7 +12277,7 @@ export declare class StateCache<S extends BroadcastState = BroadcastState> {
      * @param maxSize - Max entries before the LRU drops its oldest.
      * @param onEvict - Called with the entry the LRU just dropped. Eviction is
      *   the moment cached-only data is lost, so it is the only place a caller
-     *   can still see what went (#1648).
+     *   can still see what went.
      */
     constructor(maxSize?: number, onEvict?: (key: string, state: S) => void);
     /** Get a cached state, promoting it to MRU position. */
@@ -12335,11 +12317,10 @@ export type BroadcastState = Record<string, unknown> & {
  * stale). Ordinary version-bumping patches from \`publish()\` omit it.
  *
  * \`_resync\` carries no versions at all. The server emits it when it cannot
- * construct a patch — today, when \`overlay()\` finds the stream's baseline
- * evicted from the LRU. A client that receives one always reports \`behind\`
- * and refetches. Without it the server had nothing to say in that case, so
- * live subscribers silently stopped receiving presence updates and had no
- * way to notice (#1423).
+ * construct a patch: when overlay-contributed state is lost, because
+ * \`overlay()\` finds no cached baseline or the LRU evicts an entry that
+ * carried overlay keys. A client that receives one always reports \`behind\`
+ * and refetches, so live subscribers don't silently miss updates.
  */
 export type PatchMessage<S extends BroadcastState = BroadcastState> = Record<number, DeepPartial<S>> & {
     readonly _overlay?: true;
@@ -12601,7 +12582,7 @@ export declare function tryOk(response: Response, options: TryOkOptions): Promis
  *
  * Wraps \`fetch\` with timeouts, automatic \`Idempotency-Key\` derivation, and
  * status-classified errors. Designed to be composed with the reaction
- * options shipped in ACT-601 (\`maxRetries\`, \`blockOnError\`, \`backoff\`):
+ * options (\`maxRetries\`, \`blockOnError\`, \`backoff\`):
  *
  * \`\`\`ts
  * import { webhook } from "@rotorsoft/act-http/webhook";
@@ -12691,7 +12672,7 @@ export type WebhookConfig<TEvents extends Schemas = Schemas> = {
      * \`fetch\` resolves on response headers, so the timer stays armed through
      * the error-path body read as well. A receiver that answers with headers
      * and then stalls its body times out like any other overrun instead of
-     * hanging the handler forever (#1701).
+     * hanging the handler forever.
      */
     readonly timeoutMs?: number;
     /**
