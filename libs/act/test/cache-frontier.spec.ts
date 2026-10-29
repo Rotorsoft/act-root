@@ -1,5 +1,11 @@
 import { z } from "zod";
-import { act, InMemoryCache, InMemoryStore, state } from "../src/index.js";
+import {
+  act,
+  ConcurrencyError,
+  InMemoryCache,
+  InMemoryStore,
+  state,
+} from "../src/index.js";
 import { sandbox } from "../src/test/index.js";
 import type {
   Committed,
@@ -32,10 +38,8 @@ class GatedStore extends InMemoryStore {
 
 /**
  * The cache never lies: an entry's state must equal the fold of events
- * at or below its event_id. Guardless commits (reaction-driven appends,
- * or a lost optimistic guard on warm cache hits) used to write
- * post-commit entries folded from a stale base but stamped at the head
- * frontier — invisible until a warm load trusted them.
+ * at or below its event_id. Every commit is version-guarded, so a writer
+ * whose fold is stale is refused before anything is cached.
  */
 describe("cache frontier integrity", () => {
   const Counter = state({ Counter: z.object({ count: z.number() }) })
@@ -85,7 +89,37 @@ describe("cache frontier integrity", () => {
     }
   });
 
-  it("logs and swallows a failing invalidate on the gapped path", async () => {
+  // Lands a fast reaction's commit inside a slow one's load-to-commit window.
+  const race = async (
+    gated: GatedStore,
+    app: { do: (...args: any[]) => Promise<unknown> }
+  ) => {
+    await app.do("increment", { stream: "c1", actor }, { by: 1 });
+    let release!: () => void;
+    gated.gate = new Promise<void>((r) => {
+      release = r;
+    });
+    const slow = app.do(
+      "increment",
+      { stream: "c1", actor },
+      { by: 100 },
+      {
+        reactingTo: fake_reacting_to(2),
+      }
+    );
+    await new Promise((r) => setTimeout(r, 5)); // slow writer has loaded
+    await app.do(
+      "increment",
+      { stream: "c1", actor },
+      { by: 10 },
+      {
+        reactingTo: fake_reacting_to(1),
+      }
+    );
+    return { slow, release };
+  };
+
+  it("logs and swallows a failing invalidate when a reaction loses the race", async () => {
     const gated = new GatedStore();
     class FaultyCache extends InMemoryCache {
       fail_next = false;
@@ -103,64 +137,31 @@ describe("cache frontier integrity", () => {
       cache: () => faulty,
     });
     try {
-      const app = ctx.app;
-      await app.do("increment", { stream: "c1", actor }, { by: 1 });
-      let release!: () => void;
-      gated.gate = new Promise<void>((r) => {
-        release = r;
-      });
-      const slow = app.do("increment", { stream: "c1", actor }, { by: 100 }, {
-        reactingTo: fake_reacting_to(2),
-      } as never);
-      await new Promise((r) => setTimeout(r, 5));
-      await app.do("increment", { stream: "c1", actor }, { by: 10 }, {
-        reactingTo: fake_reacting_to(1),
-      } as never);
-      faulty.fail_next = true; // the gapped writer's invalidate rejects
+      const { slow, release } = await race(gated, ctx.app as never);
+      faulty.fail_next = true; // the loser's invalidate rejects
       release();
-      // the action itself must not fail on a cache maintenance error
-      await expect(slow).resolves.toBeDefined();
+      // the caller hears the conflict, not the cache error
+      await expect(slow).rejects.toThrow(ConcurrencyError);
     } finally {
       await ctx.dispose();
     }
   });
 
-  it("never leaves a stale-at-head cache entry after guardless commits", async () => {
+  it("never leaves a stale-at-head cache entry when a reaction loses the race", async () => {
     const gated = new GatedStore();
     const ctx = await sandbox(act().withState(Counter), {
       store: () => gated,
     });
     try {
-      const app = ctx.app;
-      await app.do("increment", { stream: "c1", actor }, { by: 1 });
-      // Reaction-driven appends skip the guard by design (leases pace
-      // them). Gate the slow writer's commit so the fast writer's commit
-      // lands inside its load-to-commit window — the slow fold's base is
-      // then one event behind its committed position.
-      let release!: () => void;
-      gated.gate = new Promise<void>((r) => {
-        release = r;
-      });
-      const slow = app.do("increment", { stream: "c1", actor }, { by: 100 }, {
-        reactingTo: fake_reacting_to(2),
-      } as never);
-      await new Promise((r) => setTimeout(r, 5)); // slow writer has loaded
-      await app.do("increment", { stream: "c1", actor }, { by: 10 }, {
-        reactingTo: fake_reacting_to(1),
-      } as never);
+      const { slow, release } = await race(gated, ctx.app as never);
       release();
-      await slow;
-      // The contract: a cache entry, when present, equals the fold of
-      // events at or below its event_id. The gapped writer must drop
-      // the checkpoint rather than cache a lie — and the next load
-      // replays to truth and re-warms honestly.
-      const gapped = await ctx.cache.get<{ count: number }>("c1");
-      expect(gapped).toBeUndefined();
-      const truth = await app.load(Counter, "c1");
-      expect(truth.state).toEqual({ count: 111 });
-      const rewarmed = await ctx.cache.get<{ count: number }>("c1");
-      expect(rewarmed?.state).toEqual(truth.state);
-      expect(rewarmed?.version).toBe(truth.version);
+      // A reaction is guarded like any action: the stale writer is refused
+      // and nothing it folded reaches the store or the cache.
+      await expect(slow).rejects.toThrow(ConcurrencyError);
+      const truth = await ctx.app.load(Counter, "c1");
+      expect(truth.state).toEqual({ count: 11 });
+      const cached = await ctx.cache.get<{ count: number }>("c1");
+      expect(cached?.state ?? truth.state).toEqual(truth.state);
     } finally {
       await ctx.dispose();
     }

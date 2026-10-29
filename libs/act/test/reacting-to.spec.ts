@@ -458,7 +458,7 @@ describe("auto-inject reactingTo", () => {
 
     let captured: { do: (...args: any[]) => Promise<unknown> };
     let thrown: unknown = "NOT-THROWN";
-    let unguarded_ok = false;
+    let inferred_ok = false;
 
     const { app, dispose } = await sandbox(
       act()
@@ -481,14 +481,14 @@ describe("auto-inject reactingTo", () => {
           } catch (e) {
             thrown = e;
           }
-          // ...while an omitted guard still skips the INFERRED check, so
-          // ordinary catch-up never turns into a spurious retry.
+          // ...while an omitted guard infers the loaded version, which
+          // holds when nothing raced.
           await captured.do(
             "receive6",
             { stream: "sink6-1", actor: { id: "sys", name: "system" } },
             { val: 2 }
           );
-          unguarded_ok = true;
+          inferred_ok = true;
         })
         .to(() => ({ target: "sink6-1" })),
       { actOptions: { autoSettle: false } }
@@ -501,12 +501,12 @@ describe("auto-inject reactingTo", () => {
     await app.drain();
 
     expect(thrown).toBeInstanceOf(ConcurrencyError);
-    expect(unguarded_ok).toBe(true);
+    expect(inferred_ok).toBe(true);
 
     await dispose();
   });
 
-  it("should restore the inferred guard for work that outlived the handler", async () => {
+  it("should guard a reaction's own dispatch and work that outlived the handler", async () => {
     const Ledger = state({ Ledger6: z.object({ n: z.number() }) })
       .init(() => ({ n: 0 }))
       .emits({ Spent6: z.object({}), Fired6: z.object({}) })
@@ -527,8 +527,8 @@ describe("auto-inject reactingTo", () => {
         .withState(Ledger)
         .on("Fired6")
         .do(async function handler() {
-          // Dispatched by the handler itself: a reaction, so the inferred
-          // guard is skipped.
+          // Dispatched by the handler itself: a reaction, guarded like any
+          // action.
           await captured.do("spend6", { stream: "L6", actor: sys }, {});
           // Started by the handler and left running: lands on a later tick,
           // after the reaction is over, so it is ordinary work.
@@ -541,8 +541,6 @@ describe("auto-inject reactingTo", () => {
     );
     captured = app as unknown as typeof captured;
 
-    // Seed the stream first — a brand-new stream is legitimately unguarded
-    // (`snapshot.version < 0`), which would hide the difference.
     await app.do("spend6", { stream: "L6", actor }, {});
 
     const commit = store.commit.bind(store);
@@ -562,7 +560,7 @@ describe("auto-inject reactingTo", () => {
     await outlived;
 
     // In order: the handler's own dispatch, then the one that outlived it.
-    expect(guards).toEqual([undefined, 1]);
+    expect(guards).toEqual([0, 1]);
 
     await dispose();
   });
