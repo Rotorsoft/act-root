@@ -31,7 +31,7 @@ function richModel(): DomainModel {
             name: "placeOrder",
             emits: ["OrderPlaced", "OrderPlaced_v2"],
             invariants: ["fresh-cart", "non-empty"],
-            preconditions: ["owns-cart"],
+            preconditions: ["fresh-cart", "non-empty", "owns-cart"],
             line: 30,
           },
           { name: "noop", emits: [], invariants: [] },
@@ -111,13 +111,12 @@ describe("format_markdown", () => {
     expect(md).toContain("projection `OrdersByCustomer`");
   });
 
-  it("renders an Actions section with invariants and emits", () => {
+  it("renders an Actions section with preconditions and emits", () => {
     expect(md).toContain("## Actions");
     expect(md).toContain("### `placeOrder`");
-    expect(md).toContain("**invariants:**");
+    expect(md).toContain("**preconditions:**");
     expect(md).toContain("- fresh-cart");
     expect(md).toContain("- non-empty");
-    expect(md).toContain("**requires:**");
     expect(md).toContain("- owns-cart");
     expect(md).toContain("- `OrderPlaced`");
     expect(md).toContain("- `OrderPlaced_v2`");

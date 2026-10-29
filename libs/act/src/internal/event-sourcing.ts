@@ -4,11 +4,14 @@
  */
 
 import { patch } from "@rotorsoft/act-patch";
+import { prettifyError, type ZodType } from "zod";
 import { cache, log, store } from "../ports.js";
 import {
   ConcurrencyError,
   InvariantError,
+  PreconditionError,
   StreamClosedError,
+  ValidationError,
 } from "../types/errors.js";
 import type {
   CacheEntry,
@@ -37,15 +40,18 @@ export const bare_patch: PatchFn = (_me, state, partial) =>
   patch(state, partial) as typeof state;
 
 /**
- * `validateFoldedState`: merge, then parse against the state schema, so a
- * bad reducer fails at its own event. On `do` this runs before the commit,
- * so the action is refused and nothing is stored.
+ * Checks the state an action leaves against the state's schema (its
+ * invariants), without replacing it: a schema with defaults or transforms
+ * never rewrites a valid state.
  */
-export const validating_patch: PatchFn = (me, state, partial, event) => {
-  const next = patch(state, partial) as typeof state;
-  // Before the commit there is no id yet (`-1`).
-  const id = event.id >= 0 ? `#${event.id}` : "";
-  return validate(`${me.name}.${String(event.name)}${id}`, next, me.state);
+const check_invariants = <TState extends Schema>(
+  target: string,
+  state: TState,
+  schema: ZodType<TState>
+): void => {
+  const result = schema.safeParse(state);
+  if (!result.success)
+    throw new ValidationError(target, state, prettifyError(result.error));
 };
 
 const DEFAULT_BATCH = 500;
@@ -395,7 +401,7 @@ export async function load<
 }
 
 /**
- * Validates, checks invariants and preconditions, emits and commits. On {@link ConcurrencyError}
+ * Validates, checks preconditions, folds, checks the invariants and commits. On {@link ConcurrencyError}
  * it re-runs from `load` within the action's `maxRetries`; any other error
  * rethrows. Reactions commit without the inferred version guard.
  */
@@ -439,8 +445,8 @@ export async function action<
         expectedVersion ??
         (snapshot.version >= 0 ? snapshot.version : undefined);
 
-      // Invariants, then preconditions, each in declaration order: the
-      // first rule that fails refuses the action.
+      // Deprecated `.given` rules, then preconditions, each in declaration
+      // order: the first rule that fails refuses the action.
       for (const { valid, description } of me.given?.[action] ?? [])
         if (!valid(snapshot.state, actor))
           throw new InvariantError(
@@ -452,13 +458,12 @@ export async function action<
           );
       for (const { holds, description } of me.requires?.[action] ?? [])
         if (!holds(validated, snapshot.state, actor))
-          throw new InvariantError(
+          throw new PreconditionError(
             action,
             validated,
             target,
             snapshot,
-            description,
-            "precondition"
+            description
           );
 
       const result = me.on[action](validated, snapshot, target);
@@ -500,10 +505,11 @@ export async function action<
         },
       };
 
-      // Fold before the commit (the decider rule), so `validateFoldedState`
-      // refuses a bad state before anything is stored. Reducers see the
-      // event data and the next version; the store assigns `id` and
-      // `created`, so they get placeholders here (`-1`, the commit time).
+      // Fold before the commit (the decider rule), so a state that breaks
+      // its schema (the invariants) is refused before anything is stored.
+      // Reducers see the event data and the next version; the store assigns
+      // `id` and `created`, so they get placeholders here (`-1`, the commit
+      // time).
       let { state, patches } = snapshot;
       const created = new Date();
       const folded = events.map((e, i) => {
@@ -520,6 +526,9 @@ export async function action<
         patches++;
         return { state, patch, patches };
       });
+      // Once, on the state the action leaves: invariants hold between
+      // actions, not between one action's events.
+      check_invariants(`${me.name}.${action as string}`, state, me.state);
 
       let committed: Committed<TEvents, keyof TEvents>[];
       try {

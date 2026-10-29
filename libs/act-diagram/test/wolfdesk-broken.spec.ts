@@ -14,7 +14,7 @@ describe("wolfdesk broken import", () => {
     readFile("schemas/ticket.schemas.ts"),
     readFile("services/agent.ts"),
     readFile("services/notification.ts"),
-    readFile("ticket-invariants.ts"),
+    readFile("ticket-preconditions.ts"),
     readFile("ticket-creation.ts"),
     readFile("ticket-messaging.ts"),
     readFile("ticket-projections.ts"),

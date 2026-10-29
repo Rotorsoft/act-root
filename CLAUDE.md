@@ -60,7 +60,7 @@ pnpm dev:http         # multi-transport demo (trpc + hono rest + openapi) — se
 
 vitest                                                # watch mode (from the REPO ROOT)
 pnpm -F calculator test                               # one package
-npx vitest run packages/calculator/test/invariants.spec.ts   # one file
+npx vitest run packages/calculator/test/preconditions.spec.ts   # one file
 
 pnpm -F wolfdesk drizzle:migrate   # wolfdesk migrations (its tests also self-migrate)
 
@@ -160,8 +160,8 @@ Easy to get subtly wrong. Read the linked doc before editing related code.
 - **Windowed close prunes, it does not retire:** it deletes only below the closest safe snapshot; `keep` needs `.snap(...)` and is in days, never ms, seconds or minutes. [close-policies](docs/docs/guides/close-policies.md)
 - **Layering is enforced by `libs/act/test/architecture.spec.ts`:** `internal/` receives what it needs and never reaches for ambient state; `scoped.ts` owns every `AsyncLocalStorage`. If a rule blocks you, inject the thing; don't widen the rule. The spec's header explains each rule.
 - **`reactingTo` is auto-injected** inside reaction handlers; pass it only to override. [state-management § Auto-injected `reactingTo`](docs/docs/concepts/state-management.md#auto-injected-reactingto)
-- **Business rules have two named layers:** `.given([...])` holds invariants (`{ description, valid(state, actor) }`, reusable across actions), and `.requires([...])` holds preconditions that also read the payload (`{ description, holds(payload, state, actor) }`). Both refuse with `InvariantError` and show in the CLI, diagram and flow animations. Keep a `throw` in `.emit` only for a rule that branches on the state or needs its own error type. [state-management § Preconditions](docs/docs/concepts/state-management.md#preconditions)
-- **One fold, before the commit (the decider rule):** an action folds its events before the store assigns `id` and `created`, so reducers see `-1` and the commit time for them; read `data` and `version`. `validateFoldedState` checks that fold, so a bad state is refused and never stored. [state-management § What an action checks](docs/docs/concepts/state-management.md#what-an-action-checks-in-order)
+- **Business rules are preconditions; invariants are the state schema.** `.requires([...])` holds them (`{ description, holds(payload, state, actor) }`; one typed `Precondition<S, unknown>` ignores the payload and serves every action). They refuse with `PreconditionError` and show in the CLI, diagram and flow animations. What must hold after every action goes in the state's Zod schema, which every action checks before it commits. `.given`, `Invariant`, `InvariantError` and `validateFoldedState` are deprecated until 2.0 (#2183): don't add uses. Keep a `throw` in `.emit` only for a rule that branches on the state or needs its own error type. [state-management § Preconditions](docs/docs/concepts/state-management.md#preconditions)
+- **One fold, before the commit (the decider rule):** an action folds its events before the store assigns `id` and `created`, so reducers see `-1` and the commit time for them; read `data` and `version`. That fold's final state is checked once against the state schema, so a state that breaks it is refused and never stored; loads don't check. [state-management § What an action checks](docs/docs/concepts/state-management.md#what-an-action-checks-in-order)
 - **Single-key records:** `state({})`, a state's `.on({})` and a projection's `.on({})` take exactly one key; more throws. `.emits({})` takes any number of events.
 - **Cross-slice event schemas:** two partials declaring the same event must share one Zod schema instance; export it from a module. [state-management § Cross-slice event schemas](docs/docs/concepts/state-management.md#cross-slice-event-schemas--reference-identity)
 - **`_v<n>` event names are load-bearing:** adding `Foo_v2` deprecates `Foo`, and a static `.emit("Foo")` then throws at build. [event-schema-evolution](docs/docs/architecture/event-schema-evolution.md#the-versioning-convention-is-the-deprecation-signal-act-403)
@@ -228,7 +228,7 @@ Every options bag an entry point takes (`act().build()`, `openapi(app, ...)`, ..
 
 ## Troubleshooting
 
-See [error-handling.md](docs/docs/concepts/error-handling.md) — covers `ValidationError`, `InvariantError`, `ConcurrencyError`, `StreamClosedError`, `NonRetryableError`, the retry pattern, blocked streams, per-reaction options, recovery via `app.unblock` / `app.blocked_streams`, and debugging (logging, lifecycle events, `query_array`/`query_streams` introspection).
+See [error-handling.md](docs/docs/concepts/error-handling.md) — covers `ValidationError`, `PreconditionError`, `ConcurrencyError`, `StreamClosedError`, `NonRetryableError`, the retry pattern, blocked streams, per-reaction options, recovery via `app.unblock` / `app.blocked_streams`, and debugging (logging, lifecycle events, `query_array`/`query_streams` introspection).
 
 For UI/frontend changes, start the dev server and exercise the feature in a browser before reporting done — type-check and tests verify code correctness, not feature correctness.
 

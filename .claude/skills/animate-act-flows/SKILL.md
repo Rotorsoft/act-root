@@ -26,7 +26,7 @@ User-facing guide: `docs/docs/guides/flow-animations.md`. Keep it in step when t
 npx tsx .claude/skills/animate-act-flows/scripts/extract.mts <app-src-dir> > <scratch>/draft.json
 ```
 
-It reuses the `act-diagram` parser (the one behind `pnpm act`): states, actions with their invariants, preconditions and emitted events, reactions with the actions they invoke, and projections. The draft has nodes, edges, one state bar per state name and rough columns.
+It reuses the `act-diagram` parser (the one behind `pnpm act`): states, actions with their preconditions and emitted events, reactions with the actions they invoke, and projections. The draft has nodes, edges, one state bar per state name and rough columns.
 
 ### 2. Read the source and fill what the parser misses
 
@@ -36,9 +36,9 @@ The parser is best-effort. Always read the slice and state files and check each 
 - **Mislabeled reactions.** A `webhook(...)` handler or another factory-built handler can get a neighbor's name. Fix the label and `file`.
 - **Timers.** `.defer(...)`, or a `DeferSignal` thrown in the handler, means the reaction waits. Put `"timer": true` on the `event → reaction` edge and `"badge": "⏱"` on the reaction.
 - **Outside world.** Webhooks, notification services, payment providers and other calls out of the process become `external` nodes with a `reaction → external` edge.
-- **Actors.** The parser has no actors. Read invariants ("Must be the owner") and the app's API to decide who invokes which action. Add `actor` nodes with `"actor": "person"` or `"actor": "automation"` (a cron job, an importer, another system calling the API) and `actor → action` edges. Actions invoked only by reactions get no actor node. Instead, set `"as"` on the reaction to the actor name its `app.do` uses (`"ticket-timers"`, `"assign reaction"`), so the map shows it as an automation.
+- **Actors.** The parser has no actors. Read preconditions ("Must be the owner") and the app's API to decide who invokes which action. Add `actor` nodes with `"actor": "person"` or `"actor": "automation"` (a cron job, an importer, another system calling the API) and `actor → action` edges. Actions invoked only by reactions get no actor node. Instead, set `"as"` on the reaction to the actor name its `app.do` uses (`"ticket-timers"`, `"assign reaction"`), so the map shows it as an automation.
 - **Slices (boundaries).** Draw only the boundaries the builders declare. A slice **owns** the partial states declared in its own file (their actions and events) and the reactions it declares. Every other partial it lists in `.withState(...)` is a **reference**: its reactions call those actions, but it doesn't own them. The draft sets `slice` on owned nodes and lists `owns` and `registers` per slice, naming partials by file. Replace those with the source variable names (`TicketCreation`, `TicketOperations`). Add a short `description` for each slice. A slice that declares no partial (wolfdesk's timers and webhooks) owns only its reactions. Never invent boundaries the source doesn't declare (phases, inferred contexts). Partials of the same name still merge into one state bar, even when different slices own them. Without slices, the player draws one box per state instead.
-- **State.** Give the state bar a `note` naming the partial states merged into it and a `description`. Actions pass through it on the way to events: that is where invariants are checked and where events patch the state. With several states (the calculator's `Calculator`, `DigitBoard`, `CalculatorResult`), add one bar per state with a `span` over the columns of the actions that load it; each action passes through the bar above its column. A bar too narrow for its `note` drops it from the map (the detail panel still shows it).
+- **State.** Give the state bar a `note` naming the partial states merged into it and a `description`. Actions pass through it on the way to events: that is where preconditions are checked and where events patch the state. With several states (the calculator's `Calculator`, `DigitBoard`, `CalculatorResult`), add one bar per state with a `span` over the columns of the actions that load it; each action passes through the bar above its column. A bar too narrow for its `note` drops it from the map (the detail panel still shows it).
 - **Lanes, retries, targets.** Put `.withLane`, backoff and `.to(...)` targets in the node `description` (shown when a box is selected).
 - One node per reaction. When two handlers share a name, keep separate ids.
 
@@ -57,7 +57,7 @@ Time runs left to right. Set `col` (fractions allowed) on every node except the 
 
 Each scenario is one believable story, with a real-looking stream name (`"stream": "ticket-4821"`) and names for people. Together the scenarios must walk **every edge**: `flows.mjs` warns about any edge no scenario walks, and the job isn't done until that warning is gone. Also cover these when the app has them:
 
-- **Refused actions.** Each invariant, each precondition and each `throw` in an `.emit(...)` that a caller can actually hit.
+- **Refused actions.** Each precondition and each `throw` in an `.emit(...)` that a caller can actually hit.
 - **Retries.** Reactions with `maxRetries`/`backoff`, and outside calls that can fail.
 - **Blocking.** A target that runs out of retries. Say whether it is shared (a constant `.to({ target })`) and how to recover (`app.unblock`).
 - **Timers that wake and do nothing.** The guard that ends a deferred chain.
@@ -69,7 +69,7 @@ Each step walks one existing edge (`from`, `to`) or stands at one node (`at`):
 - `say`: one or two plain sentences for the caption. `**bold**` and `` `code` `` render.
 - Steps that reach an event: `data` (the fields that matter) and `patch` (the change to the state, mirroring the real `.patch(...)`; defaults to `data`). Set `patch` (`{}` when nothing shows) whenever the data fields aren't state fields, or they land in the state panel. The panel folds only events on the scenario's `stream`; a step on another stream sets `"stream"` and shows up in the event stream only. `null` in a patch shows a cleared field.
 - `wait` on a step leaving a deferred reaction ("deferred until escalateAfter").
-- `action → event` with `"reject": "<reason>"`: the state refuses, nothing commits. Use the real invariant description or error message. While the token stands on the state bar, the player lists the action's `invariants`, then its `preconditions`, and checks them one by one. A reason that matches one of them stops the list on that row with ✕. Any other reason is a `throw` in `.emit(...)`, which runs only after every declared rule passed, so it shows as one more row after them. Keep both lists in the order of the `.given([...])` and `.requires([...])` arrays (the extractor does).
+- `action → event` with `"reject": "<reason>"`: the state refuses, nothing commits. Use the real precondition description or error message. While the token stands on the state bar, the player lists the action's `preconditions` and checks them one by one. A reason that matches one of them stops the list on that row with ✕. Any other reason is a `throw` in `.emit(...)`, which runs only after every declared rule passed, so it shows as one more row after them. Keep the list in the order of the `.requires([...])` array (the extractor does; rules from the deprecated `.given([...])` come first).
 - `reaction → external` with `"retries": n` and `"backoff": ["~200 ms", ...]`: fails n times, then succeeds. Add `"blocked": true` and `"target"` when it runs out instead.
 - `{ "at": "<node>", "say": "...", "wait": "...", "noop": true }`: a timer that wakes and does nothing.
 
@@ -127,7 +127,7 @@ It needs Chrome and ffmpeg, and runs the whole scenario in real time, so record 
   "nodes": [
     { "id": "actor:customer", "lane": "actor", "actor": "person", "label": "Customer", "col": 1.5 },
     { "id": "action:OpenTicket", "lane": "action", "label": "OpenTicket", "col": 0,
-      "invariants": ["..."], "preconditions": ["..."], "schema": "...", "file": "src/x.ts", "line": 12,
+      "preconditions": ["..."], "schema": "...", "file": "src/x.ts", "line": 12,
       "description": "Shown when the box is selected.", "slice": "slice:TicketCreation" },
     { "id": "state:Ticket", "lane": "state", "label": "Ticket", "note": "TicketCreation + TicketOperations" },
     { "id": "reaction:autoClose", "lane": "reaction", "label": "autoClose", "col": 10, "badge": "⏱", "as": "ticket-timers", "slice": "slice:TicketTimers" },

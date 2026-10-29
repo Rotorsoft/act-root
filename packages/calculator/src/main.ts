@@ -3,7 +3,7 @@ import {
   type Actor,
   act,
   config,
-  InvariantError,
+  PreconditionError,
   sleep,
   state,
 } from "@rotorsoft/act";
@@ -104,6 +104,8 @@ async function main() {
       target: "Calculator" + e.stream,
       lane: "result",
     }))
+    // The state schemas are the invariants (the result is a finite number),
+    // checked before every commit.
     .build();
 
   // Lane routing shows up in the per-cycle `>> drained` trace
@@ -171,8 +173,8 @@ async function main() {
     try {
       await app.do("PressKey", { stream, actor }, { key });
     } catch (err) {
-      if (err instanceof InvariantError) {
-        console.log("[InvariantError]", err.message);
+      if (err instanceof PreconditionError) {
+        console.log("[PreconditionError]", err.message);
         continue;
       } else {
         err instanceof Error && console.log(err.message);

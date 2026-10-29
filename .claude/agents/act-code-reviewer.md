@@ -54,8 +54,9 @@ Apply `.claude/rules/naming.md`: anything reachable from a package's `index.ts` 
 
 ## 6. Business rules
 
-- A rule thrown from an `.emit(...)` handler that is a plain predicate (it reads the payload and the state and returns yes or no) belongs in `.requires([...])` as a named `Precondition`, so the CLI, the diagram and the flow animations can see it. One that reads only the state and the actor belongs in `.given([...])`. Flag both as concerns, not blockers.
-- A precondition's predicate is `holds`, never `valid`: `valid`/`validate` belong to the schema layer and to `Invariant`.
+- Business rules are preconditions (true for an action to run now), declared with `.requires([...])`; an invariant (true after every action) belongs in the state's Zod schema, which every action checks before it commits. Flag a rule named or documented as an invariant that can be false between actions.
+- `.given`, `Invariant`, `InvariantError` and `validateFoldedState` are deprecated until 2.0. Flag new uses in code, docs, examples or skills; a test that covers the deprecated path on purpose is fine.
+- A rule thrown from an `.emit(...)` handler that is a plain predicate (it reads the payload, the state or the actor and returns yes or no) belongs in `.requires([...])` as a named `Precondition` (typed over `unknown` when it ignores the payload), so the CLI, the diagram and the flow animations can see it. Flag it as a concern, not a blocker.
 
 ## 7. Wolfdesk + calculator + tRPC example
 

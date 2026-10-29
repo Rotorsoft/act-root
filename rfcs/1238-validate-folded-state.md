@@ -4,6 +4,8 @@
 - **Author:** Roger Torres
 - **Created:** 2026-07-11
 
+> **Later:** since #2179 an action folds before the commit, and [RFC 2182](2182-preconditions-and-invariants.md) made the check always on, once per action, before the commit. `validateFoldedState` is deprecated and ignored, and loads no longer check. The text below describes the option as this RFC proposed it.
+
 ## Motivation
 
 Act validates two of the three shapes a reducer touches. Action inputs are

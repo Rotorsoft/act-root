@@ -3,18 +3,21 @@ import { z } from "zod";
 import {
   act,
   ConcurrencyError,
+  Errors,
   type Invariant,
   InvariantError,
   type Precondition,
+  PreconditionError,
   state,
 } from "../src/index.js";
 import { sandbox } from "../src/test/index.js";
 
 /**
  * Preconditions: named rules an action requires, declared with
- * `.requires([...])`, that read the payload as well as the state. They run
- * after the invariants in `.given([...])`, in declaration order, and the
- * first that doesn't hold refuses the action with an `InvariantError`.
+ * `.requires([...])`, that read the state, the actor and the payload. They
+ * run in declaration order, and the first that doesn't hold refuses the
+ * action with a `PreconditionError`. The deprecated `.given([...])` rules
+ * run before them and refuse with `InvariantError`.
  */
 type Board = { owner: Record<string, string>; armies: Record<string, number> };
 const Board = z.object({
@@ -24,9 +27,10 @@ const Board = z.object({
 const Move = z.object({ from: z.string(), to: z.string(), count: z.number() });
 const Claim = z.object({ from: z.string() });
 
-const open: Invariant<Board> = {
+// Typed over `unknown`: it ignores the payload, so every action can use it.
+const open: Precondition<Board, unknown> = {
   description: "The board must be open",
-  valid: (s) => Object.keys(s.owner).length > 0,
+  holds: (_, s) => Object.keys(s.owner).length > 0,
 };
 // Typed over the part of the payload it reads, so both actions can use it.
 const ownsFrom: Precondition<Board, { from: string }> = {
@@ -71,10 +75,8 @@ const game = state({ Board })
   .on({ seed: z.object({ territory: z.string(), owner: z.string() }) })
   .emit("Seeded")
   .on({ move: Move })
-  .given([open])
-  .requires([traced(ownsFrom), traced(enoughArmies)])
+  .requires([open, traced(ownsFrom), traced(enoughArmies)])
   .emit("Moved")
-  // `.requires` without `.given`, reusing the same precondition.
   .on({ claim: Claim })
   .requires([ownsFrom])
   .emit("Claimed")
@@ -121,8 +123,9 @@ describe("preconditions", () => {
         { stream: "b", actor: bob },
         { from: "x", to: "y", count: 1 }
       );
-      await expect(refused).rejects.toBeInstanceOf(InvariantError);
+      await expect(refused).rejects.toBeInstanceOf(PreconditionError);
       await expect(refused).rejects.toMatchObject({
+        name: Errors.PreconditionError,
         description: "You must own the source",
         message: "move failed precondition: You must own the source",
         payload: { from: "x", to: "y", count: 1 },
@@ -204,7 +207,7 @@ describe("preconditions", () => {
     }
   });
 
-  it("checks the invariants first: a failing invariant runs no precondition", async () => {
+  it("stops at the first precondition that doesn't hold, in declaration order", async () => {
     const { app, dispose } = await sandbox(act().withState(game));
     try {
       seen.length = 0;
@@ -216,7 +219,7 @@ describe("preconditions", () => {
         )
       ).rejects.toMatchObject({
         description: "The board must be open",
-        message: "move failed invariant: The board must be open",
+        message: "move failed precondition: The board must be open",
       });
       expect(seen).toEqual([]);
     } finally {
@@ -224,7 +227,7 @@ describe("preconditions", () => {
     }
   });
 
-  it("shares one precondition between actions, and works without .given", async () => {
+  it("shares one precondition between actions", async () => {
     const { app, dispose } = await board();
     try {
       await expect(
@@ -270,6 +273,53 @@ describe("preconditions", () => {
       ).rejects.toMatchObject({
         message: "claim failed precondition: You must own the source",
       });
+    } finally {
+      await dispose();
+    }
+  });
+});
+
+describe("deprecated .given", () => {
+  const notEmpty: Invariant<Board> = {
+    description: "The board must be open",
+    valid: (s) => Object.keys(s.owner).length > 0,
+  };
+  const Legacy = state({ Board })
+    .init(() => ({ owner: {}, armies: {} }))
+    .emits({ Claimed: Claim })
+    .on({ claim: Claim })
+    .given([notEmpty])
+    .requires([traced(ownsFrom)])
+    .emit("Claimed")
+    .build();
+
+  it("refuses with InvariantError, as before, and runs no precondition", async () => {
+    const { app, dispose } = await sandbox(act().withState(Legacy));
+    try {
+      seen.length = 0;
+      const refused = app.do(
+        "claim",
+        { stream: "l", actor: ann },
+        { from: "x" }
+      );
+      await expect(refused).rejects.toBeInstanceOf(InvariantError);
+      await expect(refused).rejects.not.toBeInstanceOf(PreconditionError);
+      await expect(refused).rejects.toMatchObject({
+        name: Errors.InvariantError,
+        message: "claim failed invariant: The board must be open",
+      });
+      expect(seen).toEqual([]);
+    } finally {
+      await dispose();
+    }
+  });
+
+  it("lets code that catches InvariantError keep catching preconditions", async () => {
+    const { app, dispose } = await board();
+    try {
+      await expect(
+        app.do("claim", { stream: "b", actor: bob }, { from: "x" })
+      ).rejects.toBeInstanceOf(InvariantError);
     } finally {
       await dispose();
     }

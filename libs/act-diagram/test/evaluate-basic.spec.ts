@@ -375,7 +375,7 @@ export const S = state({ S: z.object({ v: z.string() }) })
     expect(model.states[0].events[0].hasCustomPatch).toBe(false);
   });
 
-  it("lists an action's preconditions after its invariants", () => {
+  it("lists an action's .given rules first among its preconditions", () => {
     const files: FileTab[] = [
       {
         path: "src/app.ts",
@@ -398,7 +398,7 @@ export const S = state({ S: z.object({}) })
     const { model } = extract_model(files);
     const [a, b] = model.states[0].actions;
     expect(a.invariants).toEqual(["is open"]);
-    expect(a.preconditions).toEqual(["owns from"]);
+    expect(a.preconditions).toEqual(["is open", "owns from"]);
     expect(b.preconditions).toBeUndefined();
   });
 

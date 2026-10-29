@@ -1,7 +1,7 @@
 import {
   type Actor,
   act,
-  InvariantError,
+  PreconditionError,
   ValidationError,
 } from "@rotorsoft/act";
 import { sandbox } from "@rotorsoft/act/test";
@@ -9,7 +9,7 @@ import { Calculator } from "../src/index.js";
 
 const builder = act().withState(Calculator);
 
-describe("calculator invariants", () => {
+describe("calculator preconditions", () => {
   const actor: Actor = { id: "1", name: "Calculator" };
   const stream = "I";
   // Shared isolated Act for the whole suite (the cases build on each other's
@@ -18,6 +18,8 @@ describe("calculator invariants", () => {
   let dispose: () => Promise<void>;
 
   beforeAll(async () => {
+    // The state schema is the calculator's invariant (the result is always a
+    // finite number), checked before every commit.
     ({ app, dispose } = await sandbox(builder));
   });
 
@@ -25,11 +27,11 @@ describe("calculator invariants", () => {
     await dispose();
   });
 
-  it("should throw invariant error", async () => {
+  it("should throw precondition error", async () => {
     await app.do("PressKey", { stream, actor }, { key: "1" });
     await app.do("Clear", { stream, actor }, {});
     await expect(app.do("Clear", { stream, actor }, {})).rejects.toThrow(
-      InvariantError
+      PreconditionError
     );
   });
 
@@ -44,7 +46,7 @@ describe("calculator invariants", () => {
     await expect(
       app.do("PressKey", { stream: "C", actor }, { key: "=" })
     ).rejects.toMatchObject({
-      name: "ERR_INVARIANT",
+      name: "ERR_PRECONDITION",
       message: "PressKey failed precondition: Equals needs an operator",
     });
   });

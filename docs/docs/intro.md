@@ -53,7 +53,7 @@ console.log(snapshot.state.count); // 5
 
 ### Builders
 
-- **`state()`** — define state machines with actions, events, business rules (invariants and preconditions), and snapshots
+- **`state()`** — define state machines with actions, events, business rules (preconditions), invariants in the state schema, and snapshots
 - **`projection()`** — read-model updaters that react to events (with optional `.batch()` for high-throughput replay)
 - **`slice()`** — vertical feature modules grouping states, projections, and scoped reactions
 - **`act()`** — orchestrator that composes states, slices, and projections into an application

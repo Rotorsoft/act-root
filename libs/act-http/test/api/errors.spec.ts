@@ -2,6 +2,7 @@ import {
   ConcurrencyError,
   InvariantError,
   NonRetryableError,
+  PreconditionError,
   StreamClosedError,
   ValidationError,
 } from "@rotorsoft/act";
@@ -14,6 +15,7 @@ describe("ERROR_MAP", () => {
       "ConcurrencyError",
       "InvariantError",
       "NonRetryableError",
+      "PreconditionError",
       "StreamClosedError",
       "ValidationError",
     ]);
@@ -23,6 +25,10 @@ describe("ERROR_MAP", () => {
     expect(ERROR_MAP.ValidationError).toEqual({
       status: 422,
       code: "VALIDATION",
+    });
+    expect(ERROR_MAP.PreconditionError).toEqual({
+      status: 409,
+      code: "PRECONDITION",
     });
     expect(ERROR_MAP.InvariantError).toEqual({
       status: 409,
@@ -58,7 +64,24 @@ describe("toApiError", () => {
     expect(result.body.detail).toBe(err.message);
   });
 
-  it("maps InvariantError to 409 + INVARIANT", () => {
+  it("maps PreconditionError to 409 + PRECONDITION", () => {
+    const err = new PreconditionError(
+      "doIt",
+      // `any`: placeholder payload for the mapping test
+      { foo: "bar" } as any,
+      { stream: "s", actor: { id: "1", name: "u" } },
+      // `any`: minimal snapshot stand-in for the mapping test
+      {} as any,
+      "guard tripped"
+    );
+    const result = toApiError(err);
+    expect(result.status).toBe(409);
+    expect(result.body.error).toBe("PreconditionError");
+    expect(result.body.code).toBe("PRECONDITION");
+    expect(result.body.detail).toBe(err.message);
+  });
+
+  it("maps the deprecated InvariantError to 409 + INVARIANT", () => {
     const err = new InvariantError(
       "doIt",
       // `any`: placeholder payload for the mapping test
@@ -72,7 +95,7 @@ describe("toApiError", () => {
     expect(result.status).toBe(409);
     expect(result.body.error).toBe("InvariantError");
     expect(result.body.code).toBe("INVARIANT");
-    expect(result.body.detail).toBe(err.message);
+    expect(result.body.detail).toBe("doIt failed invariant: guard tripped");
   });
 
   it("maps ConcurrencyError to 412 + CONCURRENCY", () => {

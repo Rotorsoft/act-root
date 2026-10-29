@@ -44,7 +44,7 @@ function build_model(): DomainModel {
             name: "placeOrder",
             emits: ["OrderPlaced", "OrderPlaced_v2"],
             invariants: ["fresh-cart"],
-            preconditions: ["owns-cart"],
+            preconditions: ["fresh-cart", "owns-cart"],
             line: 30,
           },
         ],
@@ -345,12 +345,12 @@ describe("format_event", () => {
 });
 
 describe("format_action", () => {
-  it("shows owning state, invariants, and emits", () => {
+  it("shows owning state, preconditions, and emits", () => {
     const out = format_action(idx, findEntry("action", "placeOrder"));
     expect(out).toContain("placeOrder");
     expect(out).toContain("on:      Order");
+    expect(out).toContain("preconditions:");
     expect(out).toContain("- fresh-cart");
-    expect(out).toContain("requires:");
     expect(out).toContain("- owns-cart");
     expect(out.indexOf("- fresh-cart")).toBeLessThan(
       out.indexOf("- owns-cart")

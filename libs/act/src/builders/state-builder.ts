@@ -49,7 +49,7 @@ import type {
  * 2. Event types via `.emits()` — all events default to passthrough (`({ data }) => data`)
  * 3. Custom event reducers via `.patch()` (optional — only for events that need custom logic)
  * 4. Actions (commands) via `.on()` → `.emit()` — pass an event name string for passthrough
- * 5. Business rules: invariants via `.given()`, preconditions on the payload via `.requires()`
+ * 5. Business rules: preconditions via `.requires()` (`.given()` is deprecated)
  * 6. Snapshotting strategy via `.snap()`
  *
  * @template TState - Zod schema type defining the shape of the state

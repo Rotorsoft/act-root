@@ -6,9 +6,12 @@
  */
 import type { ActionNode, DomainModel, StateNode } from "../types/index.js";
 
-/** The rules guarding an action, invariants first, or undefined when none. */
+/**
+ * The preconditions guarding an action, or undefined when none. A model
+ * built by hand with only the deprecated `invariants` still shows them.
+ */
 function rules_of(action: ActionNode): string[] | undefined {
-  const rules = [...action.invariants, ...(action.preconditions ?? [])];
+  const rules = action.preconditions ?? action.invariants;
   return rules.length ? rules : undefined;
 }
 

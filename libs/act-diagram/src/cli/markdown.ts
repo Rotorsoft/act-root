@@ -200,13 +200,10 @@ export function format_markdown(idx: ContractIndex): string {
         `- **defined in:** \`${loc(state_file, action?.line ?? a.line)}\``
       );
     if (action) {
-      if (action.invariants.length > 0) {
-        lines.push("- **invariants:**");
-        for (const inv of action.invariants) lines.push(`  - ${inv}`);
-      }
-      if (action.preconditions?.length) {
-        lines.push("- **requires:**");
-        for (const pre of action.preconditions) lines.push(`  - ${pre}`);
+      const preconditions = action.preconditions ?? action.invariants;
+      if (preconditions.length) {
+        lines.push("- **preconditions:**");
+        for (const pre of preconditions) lines.push(`  - ${pre}`);
       }
       if (action.emits.length > 0) {
         lines.push("- **emits:**");

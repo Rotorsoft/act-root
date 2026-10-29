@@ -14,7 +14,7 @@ A larger Act example — a help-desk ticketing system adapted from *Learning Dom
   - `TicketOpsSlice` — on `TicketEscalationRequested`, dispatches `EscalateTicket`
 - **Standalone projection** — `TicketProjection` writes a denormalized read model into a Drizzle/SQLite `tickets` table
 - **Deferred-reaction timers** — escalate, reassign, and close-on-inactivity run as `.defer`-based reactions that sleep until each ticket's deadline and act when they wake, with no polling loop and no read-model scan
-- **Every business rule declared** — invariants in `.given` (`mustBeOpen`, `mustBeUser`, the escalation and reassignment rules) and preconditions in `.requires` (`messageExists`, `mustBeReceiver`), shared across slices
+- **Every business rule declared** — preconditions in `.requires`, on the state and actor (`mustBeOpen`, `mustBeUser`, the escalation and reassignment rules) and on the payload (`messageExists`, `mustBeReceiver`), shared across slices
 - **Correlation tracing** — the demo prints causation chains across reactions
 - **PostgreSQL event store** — uses `@rotorsoft/act-pg` for events, SQLite (libSQL via Drizzle) for the read model
 
@@ -41,11 +41,11 @@ The `dev` script runs migrations first, then `tsx watch src/main.ts`. The demo:
 ```
 packages/wolfdesk/
 ├── src/
-│   ├── ticket.ts                # Re-exports the three slices, invariants, and projection
+│   ├── ticket.ts                # Re-exports the three slices, preconditions, and projection
 │   ├── ticket-creation.ts       # TicketCreation partial + TicketCreationSlice (Open / Close / Resolve + auto-assign reaction)
 │   ├── ticket-messaging.ts      # TicketMessaging partial + TicketMessagingSlice (Add/Deliver/Ack + delivery reaction)
 │   ├── ticket-operations.ts     # TicketOperations partial + TicketOpsSlice (Assign / Escalate / Reassign + escalate reaction)
-│   ├── ticket-invariants.ts     # Invariants and preconditions
+│   ├── ticket-preconditions.ts  # The business rules (preconditions)
 │   ├── ticket-projections.ts    # TicketProjection — Drizzle/SQLite read model updater
 │   ├── bootstrap.ts             # Composes act() with the slices + the projection
 │   ├── ticket-timers.ts         # TicketTimersSlice — deferred escalate / reassign / close timers
@@ -58,7 +58,7 @@ packages/wolfdesk/
     ├── actions.ts               # Helpers for action dispatch in tests
     ├── ticket.spec.ts           # Single-ticket happy paths
     ├── tickets.spec.ts          # Multi-ticket scenarios + projection asserts + deferred timers
-    └── invariants.spec.ts       # Every rule's refusal
+    └── preconditions.spec.ts    # Every rule's refusal
 ```
 
 ## Vertical slice architecture
@@ -161,13 +161,13 @@ pnpm -F wolfdesk test
 
 - `ticket.spec.ts` — single ticket open/assign/message/close happy path
 - `tickets.spec.ts` — multi-ticket flows, projection assertions, and defer-driven escalation/reassignment/close (set a due-now deadline, then `correlate` + `drain` to settle the deferred reactions)
-- `invariants.spec.ts` — every invariant and precondition refusing its action
+- `preconditions.spec.ts` — every precondition refusing its action
 
 Tests use the InMemoryStore for events and a freshly initialized SQLite file for the projection (`init_tickets_db()` in `beforeAll`).
 
 ## Related
 
-- [`@rotorsoft/act`](../../libs/act) — core framework (slices, projections, invariants)
+- [`@rotorsoft/act`](../../libs/act) — core framework (slices, projections, preconditions)
 - [`@rotorsoft/act-pg`](../../libs/act-pg) — PostgreSQL event store adapter
 - [`@act/calculator`](../calculator) — single-aggregate, simpler example
 - [Learning Domain-Driven Design](https://www.oreilly.com/library/view/learning-domain-driven-design/9781098100124/) — the Wolfdesk case study Vlad Khononov uses to teach DDD strategic and tactical patterns

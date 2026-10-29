@@ -25,7 +25,7 @@ const scene: SceneSpec = {
       ],
     },
     {
-      say: "Both pass their invariants against v5 and emit their events, each expecting the head to still be 5.",
+      say: "Both pass their preconditions against v5 and emit their events, each expecting the head to still be 5.",
       notes: [
         { at: "act", text: "A: expectedVersion 5\nB: expectedVersion 5" },
       ],
@@ -63,7 +63,7 @@ const scene: SceneSpec = {
       ],
     },
     {
-      say: "B decides again on the state A left behind (its invariants may now refuse it) and commits as v7.",
+      say: "B decides again on the state A left behind (its preconditions may now refuse it) and commits as v7.",
       messages: [
         { from: "act", to: "store", label: "commit B, expect 6" },
         { from: "store", to: "act", label: "committed v7", tone: "good" },

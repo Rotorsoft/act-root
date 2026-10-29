@@ -8,7 +8,7 @@ _Event-sourcing framework for TypeScript — three primitives, Zod end to end, n
 
 ## Why this package
 
-This is the framework core: the builders (`state`, `slice`, `projection`, `act`), the port interfaces (`Store`, `Cache`, `Logger`) with bundled in-memory implementations, the orchestrator that runs the correlate → drain loop, and the snapshot/cache layer that keeps `load()` fast on long streams. Around three primitives — **actions** (the changes you want to make), **state** (the data you care about), and **reactions** (what happens as a result) — it provides input validation against Zod schemas, named business rules (invariants on the state with `.given`, preconditions on the payload with `.requires`), optimistic-concurrency commit, derived state via patch reducers, fan-out reactions with backoff, blocked-stream recovery, time-travel queries against the same log.
+This is the framework core: the builders (`state`, `slice`, `projection`, `act`), the port interfaces (`Store`, `Cache`, `Logger`) with bundled in-memory implementations, the orchestrator that runs the correlate → drain loop, and the snapshot/cache layer that keeps `load()` fast on long streams. Around three primitives — **actions** (the changes you want to make), **state** (the data you care about), and **reactions** (what happens as a result) — it provides input validation against Zod schemas, named preconditions (`.requires`), invariants (the state schema) checked on the folded state before every commit, optimistic-concurrency commit, derived state via patch reducers, fan-out reactions with backoff, blocked-stream recovery, time-travel queries against the same log.
 
 Your domain stays in TypeScript; your schemas stay in Zod. Pick a store at bootstrap — Postgres (`@rotorsoft/act-pg`), SQLite (`@rotorsoft/act-sqlite`), or the bundled in-memory default — and the application code stays the same. The published surface is stable under [SemVer](../../STABILITY.md) as of 1.0.0.
 
@@ -54,7 +54,7 @@ Top-level exports:
 - **Builders** — `state()`, `slice()`, `projection()`, `act()` build the domain. `withState`, `withSlice`, `withProjection` compose them.
 - **Ports** — `store()`, `cache()`, `log()` are first-call-wins singletons; pass an adapter on first call to override the default. `dispose()` registers shutdown callbacks.
 - **`Act` orchestrator** — `do`, `load`, `query`, `query_array`, `drain`, `correlate`, `settle`, `start_correlations`, `reset`, `unblock`, `blocked_streams`, `prioritize`, `close`, `forget`, `restore`, `audit`, `shutdown` plus lifecycle events (`committed`, `notified`, `settled`, `blocked`, `closed`, …). Subscription introspection (`query_streams`, `query_stats`) is on the store: `store().query_streams(...)`.
-- **Errors** — `ValidationError`, `InvariantError`, `ConcurrencyError`, `StreamClosedError`, `NonRetryableError` plus the `Errors` constants (each error's `name`); match with `instanceof`.
+- **Errors** — `ValidationError`, `PreconditionError`, `ConcurrencyError`, `StreamClosedError`, `NonRetryableError` plus the `Errors` constants (each error's `name`); match with `instanceof`.
 - **In-memory adapters** — `InMemoryStore`, `InMemoryCache`, `ConsoleLogger`.
 - **Constants** — `SNAP_EVENT`, `TOMBSTONE_EVENT`.
 - **Types** — full re-export of port interfaces, builder result types, lifecycle event payloads.

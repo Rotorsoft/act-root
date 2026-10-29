@@ -4,7 +4,7 @@ Pure domain logic in `packages/domain/` — zero infrastructure deps (only `@rot
 
 **Why a separate domain package?** Domain logic must be testable without databases, HTTP servers, or React. Keeping it isolated forces clean boundaries — if you find yourself importing `cors` or `@trpc/server` here, the dependency is going the wrong direction. The domain package is the only one that matters for correctness; everything else is infrastructure glue.
 
-**Build order matters.** States must exist before slices (slices merge state partials). Schemas must exist before states (states reference them). Invariants can be defined alongside or before states. Bootstrap comes last — it wires everything together. If you define slices before their states, the build will fail with missing event errors.
+**Build order matters.** States must exist before slices (slices merge state partials). Schemas must exist before states (states reference them). Preconditions can be defined alongside or before states. Bootstrap comes last — it wires everything together. If you define slices before their states, the build will fail with missing event errors.
 
 ## Schemas & Actor Type
 
@@ -48,26 +48,31 @@ Use `ZodEmpty` for empty payloads. Use `.and()` or `.extend()` for composition.
 
 **AppActor pattern**: Extend the base `Actor` type with domain-specific fields like `role` for authorization. Define a `systemActor` constant for reactions and seed scripts.
 
-## Invariants
+## Business Rules
 
-**When to create an invariant vs inline validation:** Invariants enforce business rules that depend on *current state* — "ticket must be open to close it." If the rule only validates *input shape* (e.g., "name must be non-empty"), that belongs in the Zod schema, not an invariant. Invariants run *after* Zod validation, *before* the emit handler. If an invariant fails, no event is emitted.
+An action runs only when its **preconditions** hold, and the state it leaves behind must keep the state's **invariants**. They are different things:
 
-**Actor-aware invariants:** The `valid` function receives an optional second parameter `actor`. Use this for authorization rules like "only the assigned user can close this ticket." Keep authorization invariants separate from state invariants for clarity.
+- **A precondition** must be true for one action to run *now*, and can be false at other times: "the ticket must be open to close it", "it's your turn". Declare it on the action.
+- **An invariant** must be true of the state *after every action*: "every territory keeps at least one army", "a closed ticket has a closer". Declare it in the state's Zod schema.
 
-In `packages/domain/src/invariants.ts`:
+A rule that only checks the *input shape* ("name must be non-empty") belongs in the action's Zod schema, not in either.
+
+### Preconditions
+
+Declare them with `.requires()`. `Precondition<S, P>` is `{ description: string; holds: (payload: Readonly<P>, state: Readonly<S>, actor?: Actor) => boolean }`. Type `S` and `P` with the minimal fields the rule reads (contravariance allows assignment to subtypes).
+
+**On the state and actor.** A rule that ignores the payload is typed over `unknown`, so one rule serves every action that needs it. Use the actor for authorization ("only the assigned user can close this ticket"). In `packages/domain/src/preconditions.ts`:
 
 ```typescript
-import { type Invariant } from "@rotorsoft/act";
+import { type Precondition } from "@rotorsoft/act";
 
-export const mustBeOpen: Invariant<{ status: string }> = {
+export const mustBeOpen: Precondition<{ status: string }, unknown> = {
   description: "Item must be open",
-  valid: (state) => state.status === "Open",
+  holds: (_, state) => state.status === "Open",
 };
 ```
 
-`Invariant<S>` requires `{ description: string; valid: (state: Readonly<S>, actor?: Actor) => boolean }`. Type `S` with minimal fields (contravariance allows assignment to subtypes).
-
-**When the rule depends on the action payload — a precondition with `.requires()`.** Invariants see only `(state, actor)`. A rule that combines the state with the incoming action data (e.g., "amount + current ≤ cap") is a `Precondition`, declared after `.given()`. It runs after the invariants, and the first that doesn't hold refuses the action with an `InvariantError` (message "failed precondition"). No event is committed, and the CLI, diagram and flow animation list it by name:
+**On the payload too.** A rule that combines the state with the incoming action data ("amount + current ≤ cap") is typed over the payload fields it reads:
 
 ```typescript
 import { type Precondition } from "@rotorsoft/act";
@@ -82,6 +87,22 @@ export const withinCap: Precondition<{ contributed: number; cap: number }, { amo
 .emit("ContributionAdded")
 ```
 
+They run after the payload's Zod validation and before the emit handler, in declaration order. The first that fails refuses the action with a `PreconditionError` (message "failed precondition"); no event is committed, and the CLI, diagram and flow animation list them by name.
+
+### Invariants
+
+Put what must always hold in the state's Zod schema, with refinements where a type can't say it:
+
+```typescript
+const Ticket = z
+  .object({ status: z.enum(["open", "closed"]), closedBy: z.string().optional() })
+  .refine((t) => t.status !== "closed" || !!t.closedBy, "A closed ticket has a closer");
+```
+
+Every action checks the state its events fold into against that schema before the commit, and a state the schema rejects refuses the action with a `ValidationError`. Nothing is stored. There's nothing to turn on.
+
+Don't use `.given([...])`, `Invariant` or `InvariantError`: they're deprecated (the rules they declared were always preconditions) and go away in Act 2.0.
+
 Keep a `throw` inside `.emit()` only for rules that don't fit a predicate: a rule that branches on the state, or one that needs an app-specific error type.
 
 Keep this validation in the aggregate, not the router. The aggregate is the system of record for its rules — router-level checks are invisible to other callers (CLI, reactions, replays) and let bad events sneak in via internal `app.do()` calls.
@@ -95,7 +116,7 @@ Keep this validation in the aggregate, not the router. The aggregate is the syst
 ```typescript
 import { state } from "@rotorsoft/act";
 import { CreateItem, CloseItem, ItemCreated, ItemClosed, ItemState } from "./schemas.js";
-import { mustBeOpen } from "./invariants.js";
+import { mustBeOpen } from "./preconditions.js";
 
 export const Item = state({ Item: ItemState })
   .init(() => ({ name: "", status: "Open", createdBy: "" }))
@@ -107,12 +128,12 @@ export const Item = state({ Item: ItemState })
   .on({ CreateItem })
   .emit((data, { state }, { actor }) => ["ItemCreated", { ...data, createdBy: actor.id }])
   .on({ CloseItem })
-  .given([mustBeOpen])
+  .requires([mustBeOpen])
   .emit((_, __, { actor }) => ["ItemClosed", { closedBy: actor.id }])
   .build();
 ```
 
-**Builder chain**: `state({})` → `.init()` → `.emits({})` → optional `.patch({})` → `.on({})` → optional `.given([])` → optional `.requires([])` → `.emit(handler | "EventName")` → `.build()`
+**Builder chain**: `state({})` → `.init()` → `.emits({})` → optional `.patch({})` → `.on({})` → optional `.requires([])` → `.emit(handler | "EventName")` → `.build()`
 
 **Passthrough defaults**: `.emits()` creates default passthrough reducers (`({ data }) => data`) for all events. Use `.patch()` only to override events that need custom logic. Use `.emit("EventName")` when the action payload maps directly to event data.
 
@@ -341,7 +362,7 @@ export const app = appBuilder.build();
 
 ## Tests
 
-**What to test and what not to:** Test domain behavior — actions produce correct events, invariants reject invalid state transitions, reactions trigger expected downstream actions, projections build correct read models. Do NOT test framework internals (event storage, cache behavior, version numbering). Trust the framework for infrastructure; verify your business logic.
+**What to test and what not to:** Test domain behavior — actions produce correct events, preconditions refuse actions that can't run now, invariants refuse states that must never exist, reactions trigger expected downstream actions, projections build correct read models. Do NOT test framework internals (event storage, cache behavior, version numbering). Trust the framework for infrastructure; verify your business logic.
 
 **Testing reactions requires two steps** (on an app built with `autoSettle: false`, so nothing settles in the background): First `correlate()` — which discovers target streams *and* marks the work waiting on them — then `drain()` to claim and process it. A common AI mistake is calling only `drain()`; it returns empty, because `claim` follows the mark and nothing has raised one. That applies to already-registered and static targets too, not just newly discovered ones. In tests, always call both explicitly. In production, `settle()` handles this automatically.
 
@@ -365,7 +386,7 @@ test("creates an item", async ({ app }) => {
   expect(snap.state.name).toBe("Test");
 });
 
-test("enforces invariants", async ({ app }) => {
+test("enforces preconditions", async ({ app }) => {
   await expect(app.do("CloseItem", target(), {})).rejects.toThrow();
 });
 
@@ -382,6 +403,6 @@ test("processes reactions and projections", async ({ app }) => {
 });
 ```
 
-To test a precondition or an invariant by name, assert on the rule's description: `rejects.toMatchObject({ description: "Contribution must stay within the cap" })`.
+To test a precondition by name, assert on the rule's description: `rejects.toMatchObject({ description: "Contribution must stay within the cap" })`.
 
 **Test isolation**: `fixture(appBuilder)` gives each test a fresh, auto-seeded store + cache and disposes them automatically — no `store().seed()` / `dispose()()` boilerplate. Reach for `sandbox(appBuilder)` when you need `beforeAll`-shared setup, multiple Acts in one test, or direct `store`/`cache` handles. In-memory projections live outside the store, so still call `clear*()` at the start of any test that asserts on them. Legacy `store().seed()` + `dispose()()` stays valid only for tests that exercise the singleton port mechanism itself.

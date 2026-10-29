@@ -3,7 +3,7 @@
  * that resemble production apps.
  *
  * Each scenario exercises the full pipeline a real app pays for:
- * payload validation, invariant checking, multi-event commits, reaction
+ * payload validation, precondition checking, multi-event commits, reaction
  * dispatch + drain, and projection updates.
  *
  * Runs on-demand (not in CI). Document results in PERFORMANCE.md under
@@ -79,7 +79,7 @@ const resetPorts = async () => {
 };
 
 // ---------------------------------------------------------------------------
-// Scenario 1 — Ticket workflow (open → assign → close, invariants + reaction)
+// Scenario 1 — Ticket workflow (open → assign → close, preconditions + reaction)
 // ---------------------------------------------------------------------------
 
 const Ticket = state({
@@ -105,18 +105,18 @@ const Ticket = state({
   .on({ open: z.object({ title: z.string() }) })
   .emit("TicketOpened")
   .on({ assign: z.object({ assignee: z.string() }) })
-  .given([
+  .requires([
     {
       description: "must be new",
-      valid: (s) => s.status === "new",
+      holds: (_, s) => s.status === "new",
     },
   ])
   .emit("TicketAssigned")
   .on({ close: z.object({ resolution: z.string() }) })
-  .given([
+  .requires([
     {
       description: "must be assigned",
-      valid: (s) => s.status === "assigned",
+      holds: (_, s) => s.status === "assigned",
     },
   ])
   .emit("TicketClosed")
@@ -147,7 +147,7 @@ let calcApp: ReturnType<
 let calcCounter = 0;
 
 // ---------------------------------------------------------------------------
-// Scenario 3 — Shared inventory (10 contending reservations with invariants)
+// Scenario 3 — Shared inventory (10 contending reservations with preconditions)
 // ---------------------------------------------------------------------------
 
 const Inventory = state({ Inventory: z.object({ stock: z.number() }) })
@@ -157,10 +157,10 @@ const Inventory = state({ Inventory: z.object({ stock: z.number() }) })
     Reserved: ({ data }, s) => ({ stock: s.stock - data.qty }),
   })
   .on({ reserve: z.object({ qty: z.number() }) })
-  .given([
+  .requires([
     {
       description: "stock must be positive",
-      valid: (s) => s.stock > 0,
+      holds: (_, s) => s.stock > 0,
     },
   ])
   .emit("Reserved")
@@ -179,7 +179,7 @@ const actor = { id: "u", name: "u" };
 
 const scenarios: Scenario[] = [
   {
-    name: "ticket workflow: open → assign → close (3 actions, 3 events, 2 invariants)",
+    name: "ticket workflow: open → assign → close (3 actions, 3 events, 2 preconditions)",
     batchSize: 3,
     async setup() {
       await resetPorts();
@@ -219,7 +219,7 @@ const scenarios: Scenario[] = [
     },
   },
   {
-    name: "shared inventory: 10 contending reservations (same stream, invariant + retries)",
+    name: "shared inventory: 10 contending reservations (same stream, precondition + retries)",
     batchSize: 10,
     async setup() {
       await resetPorts();
@@ -252,9 +252,9 @@ const scenarios: Scenario[] = [
 async function main() {
   // Tuned to keep total time < 60s.
   const counts: Record<string, number> = {
-    "ticket workflow: open → assign → close (3 actions, 3 events, 2 invariants)": 100,
+    "ticket workflow: open → assign → close (3 actions, 3 events, 2 preconditions)": 100,
     "calculator session: 10 key presses + projection updating": 50,
-    "shared inventory: 10 contending reservations (same stream, invariant + retries)": 50,
+    "shared inventory: 10 contending reservations (same stream, precondition + retries)": 50,
   };
 
   const results: Result[] = [];

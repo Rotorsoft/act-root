@@ -435,15 +435,15 @@ type ActionRules<
   TNewActions extends Schema,
 > = {
   /**
-   * Adds named preconditions the action requires: rules that read the
-   * action's payload as well as the state.
+   * Adds named preconditions the action requires: what the state, the
+   * actor and the payload must meet for the action to run now.
    *
-   * They're checked after the invariants in `.given()`, in declaration
-   * order, before the handler runs. Each pairs a `description` with a
-   * `holds(payload, state, actor?)` predicate; the first that returns
-   * `false` refuses the action with `InvariantError` carrying its
-   * description. Rules that read only the state and the actor belong in
-   * `.given()`, where every action can reuse them.
+   * They're checked in declaration order, before the handler runs. Each
+   * pairs a `description` with a `holds(payload, state, actor?)` predicate;
+   * the first that returns `false` refuses the action with
+   * `PreconditionError` carrying its description. A rule that ignores the
+   * payload (typed `Precondition<S, unknown>`) fits every action, so
+   * declare it once and reuse it.
    *
    * @param rules - Array of {@link Precondition} objects (`{ description, holds }`)
    * @returns An object with `.emit()` to finalize the action
@@ -451,6 +451,7 @@ type ActionRules<
    * @example
    * ```typescript
    * .requires([
+   *   { description: "Must be active", holds: (_, s) => s.status === "active" },
    *   { description: "Must own the territory", holds: (p, s, actor) => s.owners[p.from] === actor?.id },
    * ])
    * ```
@@ -500,7 +501,7 @@ type ActionRules<
  * Builder interface for defining actions (commands) on a state.
  *
  * Actions represent user/system intents to modify state. Each action is validated
- * against a schema, can declare invariants and preconditions, and emits zero or more events.
+ * against a schema, can declare preconditions, and emits zero or more events.
  *
  * @template TState - State schema type
  * @template TEvents - Event schemas type
@@ -545,7 +546,7 @@ export type ActionBuilder<
    *   ({@link ActionOptions}).
    * @returns An object with `.given()`, `.requires()` and `.emit()` for further configuration
    *
-   * @example Simple action without invariants
+   * @example Simple action without preconditions
    * ```typescript
    * .on({ increment: z.object({ by: z.number() }) })
    *   .emit((action) => ["Incremented", { amount: action.by }])
@@ -564,24 +565,18 @@ export type ActionBuilder<
     TNewActions
   > & {
     /**
-     * Adds business rule invariants that must hold before the action can execute.
+     * Adds rules the current state (and the actor) must meet for the action
+     * to run now, checked before `.requires()`. A rule whose
+     * `valid(state, actor?)` returns `false` refuses the action with the
+     * deprecated `InvariantError` (`"<action> failed invariant: ..."`).
      *
-     * Invariants are checked after loading the current state but before emitting
-     * events. Each invariant pairs a `description` with a `valid(state, actor?)`
-     * predicate — when a predicate returns `false`, the action throws
-     * `InvariantError` carrying the description. All invariants must pass for
-     * the action to succeed.
+     * @deprecated These rules are preconditions, not invariants. Declare
+     * them with `.requires()`, whose `holds(payload, state, actor?)` can
+     * ignore the payload; invariants belong in the state's schema. Removed
+     * in 2.0.
      *
      * @param rules - Array of {@link Invariant} objects (`{ description, valid }`)
      * @returns An object with `.requires()` and `.emit()` to finish the action
-     *
-     * @example
-     * ```typescript
-     * .given([
-     *   { description: "Must be active", valid: (state) => state.status === "active" },
-     *   { description: "Must be the owner", valid: (state, actor) => state.ownerId === actor?.id }
-     * ])
-     * ```
      */
     given: (
       rules: Invariant<TState>[]
@@ -737,7 +732,7 @@ export type ActionBuilder<
   /**
    * Finalizes and builds the state definition.
    *
-   * Call this method after defining all actions, invariants, and patches to create
+   * Call this method after defining all actions, preconditions, and patches to create
    * the complete State object that can be registered with Act.
    *
    * @returns The complete strongly-typed State definition

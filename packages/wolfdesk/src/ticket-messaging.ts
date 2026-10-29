@@ -15,7 +15,7 @@ import {
   mustBeOpen,
   mustBeReceiver,
   mustBeUserOrAgent,
-} from "./ticket-invariants.js";
+} from "./ticket-preconditions.js";
 
 // --- State ---
 export const TicketMessaging = state({ Ticket: TicketMessagingState })
@@ -38,7 +38,7 @@ export const TicketMessaging = state({ Ticket: TicketMessagingState })
   })
 
   .on({ AddMessage })
-  .given([mustBeOpen, mustBeUserOrAgent])
+  .requires([mustBeOpen, mustBeUserOrAgent])
   .emit((data, _, { actor }) => [
     "MessageAdded",
     {
@@ -49,13 +49,11 @@ export const TicketMessaging = state({ Ticket: TicketMessagingState })
   ])
 
   .on({ MarkMessageDelivered })
-  .given([mustBeOpen])
-  .requires([messageExists])
+  .requires([mustBeOpen, messageExists])
   .emit("MessageDelivered")
 
   .on({ AcknowledgeMessage })
-  .given([mustBeOpen])
-  .requires([messageExists, mustBeReceiver])
+  .requires([mustBeOpen, messageExists, mustBeReceiver])
   .emit("MessageRead")
 
   .build();

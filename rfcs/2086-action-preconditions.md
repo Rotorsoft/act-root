@@ -4,6 +4,8 @@
 - **Author:** Claude, for rotorsoft
 - **Created:** 2026-10-24
 
+> **Later:** [RFC 2182](2182-preconditions-and-invariants.md) deprecated the `.given` layer: its rules were always preconditions, so they move to `.requires`, which throws `PreconditionError`, and invariants live in the state schema, checked before every commit. The text below keeps the names this RFC used.
+
 ## Motivation
 
 An action is checked in three layers before it commits: the Zod schema on its payload, the invariants in `.given([...])`, and whatever its `.emit(...)` handler throws. The first two are named and visible: the `act` CLI lists invariants, the diagram counts them, and the flow player checks them one by one (#2085). The third layer is a plain `throw` buried in the handler. No tool can see it: it has no name, no listing, no place in the animation. Each app also throws its own error type.
@@ -199,7 +201,7 @@ All additive: one builder method on the state action chain (`.requires`), two pu
 
 ## Postconditions
 
-Not proposed. A postcondition checks the state after the action's events are applied, before they commit: a promise the code makes, not a condition the caller must meet. Act covers the structural part. An action folds its events before it commits them, and `ActOptions.validateFoldedState` (RFC 1238) parses each folded state against the state's schema there, so a reducer that produces `NaN` refuses the action and nothing is stored. Domain postconditions ("armies are never negative") detect bugs, not bad requests, so they belong in tests (given/when/then and property tests), which catch them without a runtime check on every commit. If one is ever needed, it fits the same chain as `.ensures([...])`, Eiffel's word for it. It would run at the same point, after the fold and before the commit, and throw an internal error rather than a refusal.
+Not proposed. A postcondition checks the state after the action's events are applied, before they commit: a promise the code makes, not a condition the caller must meet. Act covers the structural part. An action folds its events before it commits them, and `ActOptions.validateInvariants` parses each folded state against the state's schema there, so a reducer that produces `NaN` refuses the action and nothing is stored. Domain postconditions ("armies are never negative") detect bugs, not bad requests, so they belong in tests (given/when/then and property tests), which catch them without a runtime check on every commit. If one is ever needed, it fits the same chain as `.ensures([...])`, Eiffel's word for it. It would run at the same point, after the fold and before the commit, and throw an internal error rather than a refusal.
 
 ## Open questions
 

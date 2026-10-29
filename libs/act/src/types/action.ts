@@ -368,7 +368,16 @@ export type Snapshot<TState extends Schema, TEvents extends Schemas> = {
 };
 
 /**
- * An invariant is a condition that must always hold true for a state.
+ * A rule declared with the deprecated `.given([...])`: a condition the
+ * current state (and the actor) must meet for an action to run now.
+ *
+ * Despite the name, it's a precondition, not an invariant: it guards one
+ * action and is false at other times by design. What must hold after every
+ * action belongs in the state's schema, which every action checks before it
+ * commits.
+ *
+ * @deprecated Declare the rule with `.requires([...])` as a
+ * {@link Precondition} that ignores the payload. Removed in 2.0.
  * @template TState - State schema.
  * @template TActor - Actor type extending base Actor.
  */
@@ -378,15 +387,19 @@ export type Invariant<TState extends Schema, TActor extends Actor = Actor> = {
 };
 
 /**
- * A precondition is a named rule an action requires before it runs, one
- * that reads the action's payload as well as the state. Declared with
- * `.requires([...])` and checked after the invariants in `.given([...])`:
- * a precondition whose `holds` returns `false` refuses the action with an
- * {@link InvariantError} carrying its description.
+ * A precondition is a named rule an action requires before it runs: what
+ * the state, the actor and the payload must meet for the action to run now,
+ * such as "the ticket must be open". Declared with `.requires([...])` and
+ * checked before the handler: a precondition whose `holds` returns `false`
+ * refuses the action with a {@link PreconditionError} carrying its
+ * description.
  *
- * Keep rules that read only the state and the actor as invariants, which
- * every action can reuse. A precondition typed over a narrower payload
- * (`{ from: string }`) fits every action whose payload has those fields.
+ * A precondition typed over a narrower payload (`{ from: string }`) fits
+ * every action whose payload has those fields, and one typed over `unknown`
+ * reads only the state and the actor and fits every action.
+ *
+ * Not an invariant: what must hold after every action belongs in the
+ * state's schema, which every action checks before it commits.
  *
  * @template TState - State schema.
  * @template TPayload - The action payload, or the part of it the rule reads.
@@ -503,7 +516,7 @@ export type ActionHandlers<
 };
 
 /**
- * Maps action names to the invariants checked before the action's handler runs.
+ * Maps action names to the deprecated `.given` rules checked before the action's handler runs.
  * @template TState - State schema.
  * @template TActions - Action schemas.
  */
@@ -710,7 +723,7 @@ export type AutoclosePolicy = {
 };
 
 /**
- * The full state definition, including schemas, handlers, and optional invariants and snapshot logic.
+ * The full state definition, including schemas, handlers, and optional preconditions and snapshot logic.
  * @template TState - State schema.
  * @template TEvents - Event schemas.
  * @template TActions - Action schemas.
@@ -1286,9 +1299,9 @@ export interface IAct<
 }
 
 /**
- * The patch step: merges a reducer's partial into state. The builder picks
- * one per app, never per event. `me` and `event` let a validating patch
- * name the reduction that produced an invalid state.
+ * The patch step: merges a reducer's partial into state, one per app,
+ * never per event. The builder always uses a bare merge; `me` and `event`
+ * name the reduction for a patch step that reports on it.
  */
 export type PatchFn = <
   TState extends Schema,

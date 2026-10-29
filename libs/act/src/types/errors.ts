@@ -15,11 +15,14 @@ import type {
  * Application error type constants and error classes for the Act Framework.
  *
  * - `ERR_VALIDATION`: Schema validation error
- * - `ERR_INVARIANT`: Invariant validation error
+ * - `ERR_PRECONDITION`: A precondition refused the action
+ * - `ERR_INVARIANT`: A deprecated `.given` rule refused the action
  * - `ERR_CONCURRENCY`: Optimistic concurrency validation error on commits
  */
 export const Errors = {
   ValidationError: "ERR_VALIDATION",
+  PreconditionError: "ERR_PRECONDITION",
+  /** @deprecated `.given` rules are preconditions; use `PreconditionError`. Removed in 2.0. */
   InvariantError: "ERR_INVARIANT",
   ConcurrencyError: "ERR_CONCURRENCY",
   StreamClosedError: "ERR_STREAM_CLOSED",
@@ -73,41 +76,22 @@ export class ValidationError extends Error {
 }
 
 /**
- * Thrown when a business rule refuses an action: an invariant from
- * `.given([...])` or a precondition from `.requires([...])`.
+ * Thrown when a rule declared with the deprecated `.given([...])` refuses
+ * an action, with the message `"<action> failed invariant: <description>"`.
  *
- * Both are conditions the caller must meet for the action to run, so both
- * refuse it the same way; the message says which layer refused. They're
- * checked after loading the current state but before emitting events.
- * This error provides complete context about what action was attempted and
- * why it was rejected.
+ * Those rules were always preconditions, not invariants: what must hold
+ * after every action lives in the state's schema. {@link PreconditionError}
+ * extends this class, so `instanceof InvariantError` still catches every
+ * refused action.
+ *
+ * @deprecated Declare the rule with `.requires([...])` and catch
+ * {@link PreconditionError}. Removed in 2.0.
  *
  * @template TState - State schema type
  * @template TEvents - Event schemas type
  * @template TActions - Action schemas type
  * @template TKey - Action name
  * @template TActor - Actor type extending base Actor
- *
- * @example Catching invariant violations
- * ```typescript
- * import { InvariantError } from "@rotorsoft/act";
- *
- * try {
- *   await app.do("withdraw",
- *     { stream: "account-123", actor: { id: "user1", name: "Alice" } },
- *     { amount: 1000 }
- *   );
- * } catch (error) {
- *   if (error instanceof InvariantError) {
- *     console.error("Action:", error.action);
- *     console.error("Reason:", error.description);
- *     console.error("Current state:", error.snapshot.state);
- *     console.error("Attempted payload:", error.payload);
- *   }
- * }
- * ```
- *
- * @see {@link Invariant} for defining business rules
  */
 export class InvariantError<
   TState extends Schema,
@@ -128,9 +112,9 @@ export class InvariantError<
   readonly description: string;
 
   /**
-   * @param rule - Which layer refused the action: an invariant from
-   *   `.given([...])` (the default) or a precondition from
-   *   `.requires([...])`. It names the layer in the message.
+   * @param rule - Which layer refused the action: a `.given([...])` rule
+   *   (the default) or a precondition from `.requires([...])`. It names the
+   *   layer in the message.
    */
   constructor(
     action: TKey,
@@ -147,6 +131,65 @@ export class InvariantError<
     this.target = target;
     this.snapshot = snapshot;
     this.description = description;
+  }
+}
+
+/**
+ * Thrown when a precondition from `.requires([...])` refuses an action,
+ * with the message `"<action> failed precondition: <description>"`.
+ *
+ * Preconditions are what the caller must meet for the action to run now.
+ * They're checked after loading the current state and before the handler
+ * emits anything, so nothing is stored. Invariants (what must hold after
+ * every action) live in the state's schema instead; a broken one throws
+ * {@link ValidationError}.
+ *
+ * It extends the deprecated {@link InvariantError} until 2.0, so code that
+ * catches `InvariantError` keeps catching every refused action.
+ *
+ * @template TState - State schema type
+ * @template TEvents - Event schemas type
+ * @template TActions - Action schemas type
+ * @template TKey - Action name
+ * @template TActor - Actor type extending base Actor
+ *
+ * @example Catching a refused action
+ * ```typescript
+ * import { PreconditionError } from "@rotorsoft/act";
+ *
+ * try {
+ *   await app.do("withdraw",
+ *     { stream: "account-123", actor: { id: "user1", name: "Alice" } },
+ *     { amount: 1000 }
+ *   );
+ * } catch (error) {
+ *   if (error instanceof PreconditionError) {
+ *     console.error("Action:", error.action);
+ *     console.error("Reason:", error.description);
+ *     console.error("Current state:", error.snapshot.state);
+ *     console.error("Attempted payload:", error.payload);
+ *   }
+ * }
+ * ```
+ *
+ * @see {@link Precondition} for declaring them
+ */
+export class PreconditionError<
+  TState extends Schema,
+  TEvents extends Schemas,
+  TActions extends Schemas,
+  TKey extends keyof TActions,
+  TActor extends Actor = Actor,
+> extends InvariantError<TState, TEvents, TActions, TKey, TActor> {
+  constructor(
+    action: TKey,
+    payload: Readonly<TActions[TKey]>,
+    target: Target<TActor>,
+    snapshot: Snapshot<TState, TEvents>,
+    description: string
+  ) {
+    super(action, payload, target, snapshot, description, "precondition");
+    this.name = Errors.PreconditionError;
   }
 }
 

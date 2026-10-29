@@ -2,6 +2,7 @@ import {
   ConcurrencyError,
   InvariantError,
   NonRetryableError,
+  PreconditionError,
   StreamClosedError,
   ValidationError,
 } from "@rotorsoft/act";
@@ -13,7 +14,7 @@ import {
  * error parsers.
  *
  * - `error` — the framework error name (`"ValidationError"`,
- *   `"InvariantError"`, …). Stable identifier, safe to switch on.
+ *   `"PreconditionError"`, …). Stable identifier, safe to switch on.
  * - `detail` — the framework's message text. Human-readable; not
  *   parsed by clients.
  * - `code` — a machine-readable status code from {@link ERROR_MAP}
@@ -45,6 +46,8 @@ export type ErrorMapEntry = {
  */
 export const ERROR_MAP = {
   ValidationError: { status: 422, code: "VALIDATION" },
+  PreconditionError: { status: 409, code: "PRECONDITION" },
+  /** @deprecated Thrown only by the deprecated `.given` rules. Removed in 2.0. */
   InvariantError: { status: 409, code: "INVARIANT" },
   ConcurrencyError: { status: 412, code: "CONCURRENCY" },
   StreamClosedError: { status: 410, code: "STREAM_CLOSED" },
@@ -55,6 +58,8 @@ const lookup_known = (
   err: unknown
 ): { name: keyof typeof ERROR_MAP } | null => {
   if (err instanceof ValidationError) return { name: "ValidationError" };
+  // Before `InvariantError`, which it extends.
+  if (err instanceof PreconditionError) return { name: "PreconditionError" };
   if (err instanceof InvariantError) return { name: "InvariantError" };
   if (err instanceof ConcurrencyError) return { name: "ConcurrencyError" };
   if (err instanceof StreamClosedError) return { name: "StreamClosedError" };

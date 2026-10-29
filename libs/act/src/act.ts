@@ -610,9 +610,10 @@ export class Act<
 
   /**
    * Executes an action: validates the payload, loads the state, checks its
-   * invariants and preconditions, and commits the events its handler emits,
-   * with optimistic concurrency on the stream. The reactions to those events settle on
-   * their own (unless `autoSettle: false`).
+   * preconditions, runs the handler, folds the events it emits, checks the
+   * state's invariants (its schema) on the result, and commits them with
+   * optimistic concurrency on the stream. The reactions to those events
+   * settle on their own (unless `autoSettle: false`).
    *
    * @template TKey - Action name from registered actions
    * @param action - The name of the action to execute
@@ -623,8 +624,9 @@ export class Act<
    *   framework or orchestrator-level correlator for this call only.
    * @returns Array of snapshots for all affected states (usually one)
    *
-   * @throws {ValidationError} If payload doesn't match action schema
-   * @throws {InvariantError} If business rules are violated
+   * @throws {ValidationError} If the payload doesn't match the action schema,
+   *   or the state the action leaves breaks the state schema
+   * @throws {PreconditionError} If business rules are violated
    * @throws {ConcurrencyError} If another process modified the stream
    *
    * @example Basic action execution
@@ -643,7 +645,7 @@ export class Act<
    *
    * @see {@link Target} for target structure
    * @see {@link Snapshot} for return value structure
-   * @see {@link ValidationError}, {@link InvariantError}, {@link ConcurrencyError}
+   * @see {@link ValidationError}, {@link PreconditionError}, {@link ConcurrencyError}
    */
   async do<TKey extends keyof TActions>(
     action: TKey,

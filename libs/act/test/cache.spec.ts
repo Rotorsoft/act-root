@@ -16,7 +16,7 @@ const Counter = state({ Counter: z.object({ count: z.number() }) })
   .emit((a) => ["Incremented", { by: a.count }])
   .build();
 
-// A guarded counter whose action fails an invariant once count reaches 5.
+// A guarded counter whose action fails a precondition once count reaches 5.
 // Used to exercise the post-load / pre-commit failure path that must NOT
 // invalidate the warm cache.
 const Guarded = state({ Guarded: z.object({ count: z.number() }) })
@@ -26,8 +26,8 @@ const Guarded = state({ Guarded: z.object({ count: z.number() }) })
     Bumped: (event, s) => ({ count: s.count + event.data.by }),
   })
   .on({ bump: z.object({ by: z.number() }) })
-  .given([
-    { description: "count must stay below 5", valid: (s) => s.count < 5 },
+  .requires([
+    { description: "count must stay below 5", holds: (_, s) => s.count < 5 },
   ])
   .emit((a) => ["Bumped", { by: a.by }])
   .build();
@@ -105,14 +105,14 @@ describe("cache integration", () => {
   // leaves the cache untouched. The cache reflects committed state; if no
   // commit happened, no invalidation needed." Only ConcurrencyError (above)
   // invalidates. These two cases pin the negative half of the contract.
-  it("invariant failure leaves the warm cache untouched (no commit)", async () => {
+  it("precondition failure leaves the warm cache untouched (no commit)", async () => {
     await action(Guarded, "bump", target, { by: 4 });
     await action(Guarded, "bump", target, { by: 1 }); // count = 5, cache warm
 
     const c = cache() as InMemoryCache;
     expect((await c.get("c1"))?.state).toEqual({ count: 5 });
 
-    // count is now 5 → invariant "count must stay below 5" fails on load,
+    // count is now 5 → precondition "count must stay below 5" fails on load,
     // before any commit. The cache must survive unchanged.
     await expect(action(Guarded, "bump", target, { by: 1 })).rejects.toThrow();
 

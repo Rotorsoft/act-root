@@ -19,7 +19,7 @@ import {
   mustBeUser,
   mustNotBeAcknowledgedByAgent,
   mustNotBeEscalated,
-} from "./ticket-invariants.js";
+} from "./ticket-preconditions.js";
 
 // --- State ---
 export const TicketOperations = state({ Ticket: TicketOperationsState })
@@ -36,11 +36,11 @@ export const TicketOperations = state({ Ticket: TicketOperationsState })
   })
 
   .on({ AssignTicket })
-  .given([mustBeOpen])
+  .requires([mustBeOpen])
   .emit("TicketAssigned")
 
   .on({ RequestTicketEscalation })
-  .given([mustBeOpen, mustBeUser, mustBeDueForEscalation])
+  .requires([mustBeOpen, mustBeUser, mustBeDueForEscalation])
   .emit((_, __, { actor }) => {
     return [
       "TicketEscalationRequested",
@@ -52,11 +52,11 @@ export const TicketOperations = state({ Ticket: TicketOperationsState })
   })
 
   .on({ EscalateTicket })
-  .given([mustBeOpen, mustNotBeEscalated])
+  .requires([mustBeOpen, mustNotBeEscalated])
   .emit((data) => ["TicketEscalated", { ...data, escalationId: randomUUID() }])
 
   .on({ ReassignTicket })
-  .given([
+  .requires([
     mustBeOpen,
     mustBeEscalated,
     mustBeDueForReassignment,

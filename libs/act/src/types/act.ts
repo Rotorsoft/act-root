@@ -192,16 +192,12 @@ export type ActOptions<TLanes extends string = string> = {
     readonly timeZone?: string;
   };
   /**
-   * Check the state each event folds into against the state's schema.
-   * Off by default.
+   * Ignored: every action checks the state it leaves against the state's
+   * schema before it commits, so a broken invariant refuses the action
+   * with a {@link ValidationError} and nothing is stored. Loads, replays and
+   * projection folds don't check.
    *
-   * An action folds its events before it commits them, so on `do` a
-   * reducer that produces state the schema rejects (a `NaN` in a
-   * `z.number()` field) refuses the action with a {@link ValidationError}
-   * whose `target` names the state and the event (`<state>.<event>`), and
-   * nothing is stored. On `load`, replay and projection folds it catches a
-   * bad event already in the store (`<state>.<event>#<id>`). Off, the fold
-   * runs no check at all.
+   * @deprecated The check is always on. Remove the option; removed in 2.0.
    */
   readonly validateFoldedState?: boolean;
 };

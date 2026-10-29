@@ -36,20 +36,20 @@ describe("state-builder", () => {
     ).toThrow(".on() requires exactly one key");
   });
 
-  it("should build a state with given and snap", () => {
+  it("should build a state with requires and snap", () => {
     const machine = state({ test: counter })
       .init(() => ({ count: 0 }))
       .emits(events)
       .patch(patch)
       .on({ inc: z.object({}) })
-      .given([])
+      .requires([])
       .emit(() => ["Incremented", { by: 1 }])
       .snap(() => true)
       .build();
 
     expect(machine.name).toBe("test");
     expect(machine.on.inc).toBeDefined();
-    expect(machine.given?.inc).toBeDefined();
+    expect(machine.requires?.inc).toBeDefined();
     expect(machine.snap).toBeDefined();
   });
 
@@ -94,20 +94,20 @@ describe("state-builder", () => {
       );
     });
 
-    it("should support full builder chain with given and snap", () => {
+    it("should support full builder chain with requires and snap", () => {
       const machine = state({ test: counter })
         .init(() => ({ count: 0 }))
         .emits(events)
         .patch(patch)
         .on({ inc: z.object({}) })
-        .given([])
+        .requires([])
         .emit(() => ["Incremented", { by: 1 }])
         .snap(() => true)
         .build();
 
       expect(machine.name).toBe("test");
       expect(machine.on.inc).toBeDefined();
-      expect(machine.given?.inc).toBeDefined();
+      expect(machine.requires?.inc).toBeDefined();
       expect(machine.snap).toBeDefined();
     });
 
@@ -126,7 +126,7 @@ describe("state-builder", () => {
   });
 
   // Compile-time evidence that the fluent chain preserves type narrowing
-  // for action payloads, state shape, patch handlers, given handlers,
+  // for action payloads, state shape, patch handlers, precondition handlers,
   // emitted event tuples, and snap callbacks — i.e. the DevEx experience
   // of using act() doesn't degrade to `any`.
   describe("type narrowing", () => {
@@ -182,14 +182,14 @@ describe("state-builder", () => {
       expect(true).toBe(true);
     });
 
-    it("preserves state type in .given invariants", () => {
+    it("preserves state type in .requires preconditions", () => {
       state({ Counter: counter })
         .init(() => ({ count: 0 }))
         .emits({ Incremented: z.object({ by: z.number() }) })
         .on({ inc: z.object({ amount: z.number() }) })
-        .given([
+        .requires([
           {
-            valid: (s) => {
+            holds: (_, s) => {
               // state narrowed to { count: number }
               const _count: number = s.count;
               return _count >= 0;

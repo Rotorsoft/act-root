@@ -5,7 +5,7 @@ title: Calculator
 
 # Calculator Example
 
-A simple calculator demonstrating core Act patterns: state machines, multiple event types, conditional emit logic, invariants, and snapshotting.
+A simple calculator demonstrating core Act patterns: state machines, multiple event types, conditional emit logic, preconditions, and snapshotting.
 
 **Source:** [packages/calculator/src/](https://github.com/rotorsoft/act-root/tree/master/packages/calculator/src)
 
@@ -67,15 +67,15 @@ Each event type has its own reducer logic:
 })
 ```
 
-### Invariants
+### Preconditions
 
-The `Clear` action enforces that the calculator has state to clear. That rule reads only the state, so it's an invariant, declared with `.given(...)`:
+The `Clear` action needs a calculator with something to clear. That rule is a precondition, declared with `.requires(...)`; it reads only the state, so it ignores the payload. It's false for a fresh calculator, which is a valid state: only `Clear` can't run on it.
 
 ```typescript no-check
 .on({ Clear: ZodEmpty })
-  .given([{
+  .requires([{
     description: "Must be dirty",
-    valid: (state) => !!state.left || !!state.right || !!state.result || !!state.operator,
+    holds: (_, state) => !!state.left || !!state.right || !!state.result || !!state.operator,
   }])
   .emit(() => ["Cleared", {}])
 ```

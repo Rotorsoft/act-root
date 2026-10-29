@@ -115,7 +115,7 @@ const Calculator = state({ Calculator: State })
     }),
   })
   .on({ PressKey: Actions.PressKey })
-  // A precondition: the rule reads the key the action carries, not just the state.
+  // A precondition that reads the key the action carries, not just the state.
   .requires([
     {
       description: "Equals needs an operator",
@@ -130,10 +130,11 @@ const Calculator = state({ Calculator: State })
       : ["OperatorPressed", { operator: key as Operators }];
   })
   .on({ Clear: Actions.Clear })
-  .given([
+  // A precondition that ignores the payload and reads only the state.
+  .requires([
     {
       description: "Must be dirty",
-      valid: (state) =>
+      holds: (_, state) =>
         !!state.left || !!state.right || !!state.result || !!state.operator,
     },
   ])

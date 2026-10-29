@@ -737,6 +737,13 @@ describe("MODULES", () => {
     expect(e.name).toBe("InvariantError");
     expect(e.message).toBe("test");
   });
+
+  it("PreconditionError extends InvariantError", () => {
+    const mod = MODULES["@rotorsoft/act"] as any;
+    const e = new mod.PreconditionError("test");
+    expect(e).toBeInstanceOf(mod.InvariantError);
+    expect(e.name).toBe("PreconditionError");
+  });
 });
 
 /**

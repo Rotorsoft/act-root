@@ -116,10 +116,10 @@ const Calculator = state({ Calculator: State })
       : ["OperatorPressed", { operator: key as Operators }];
   })
   .on({ Clear: Actions.Clear })
-  .given([
+  .requires([
     {
       description: "Must be dirty",
-      valid: (state) =>
+      holds: (_, state) =>
         !!state.left || !!state.right || !!state.result || !!state.operator,
     },
   ])

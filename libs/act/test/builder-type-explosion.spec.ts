@@ -15,7 +15,7 @@
 import { delta } from "@rotorsoft/act-patch";
 import { z } from "zod";
 import { projection, state } from "../src/index.js";
-import type { Invariant } from "../src/types/index.js";
+import type { Precondition } from "../src/types/index.js";
 
 // Realistic-shaped Zod schemas: a string-literal union fed through
 // `z.enum(...)` plus ~10 fields with mixed required / optional /
@@ -154,14 +154,14 @@ describe("builder type narrowing regressions", () => {
     expect(true).toBe(true);
   });
 
-  // ── Partial-state Invariant<{slug: string}> still accepted ─────────────
-  // A common pattern: write an invariant against a tiny subset of state
+  // ── Partial-state Precondition<{slug: string}, unknown> still accepted ──
+  // A common pattern: write a precondition against a tiny subset of state
   // (one field) and pass it where the full state is expected. This is
   // contravariantly safe and must continue to type-check.
-  it(".given([Invariant<Subset>]) accepts narrower-than-state invariants", () => {
-    const slugMustBeUnused: Invariant<{ slug: string }> = {
+  it(".requires([Precondition<Subset, unknown>]) accepts narrower-than-state preconditions", () => {
+    const slugMustBeUnused: Precondition<{ slug: string }, unknown> = {
       description: "A client with this slug is already registered",
-      valid: (s) => s.slug === "",
+      holds: (_, s) => s.slug === "",
     };
 
     const Client = state({ Client: ClientState })
@@ -184,11 +184,11 @@ describe("builder type narrowing regressions", () => {
         ClientUpdated: ({ data }) => ({ ...data }),
       })
       .on({ RegisterClient })
-      .given([slugMustBeUnused])
+      .requires([slugMustBeUnused])
       .emit("ClientRegistered")
       .build();
 
-    expect(Client.given?.RegisterClient).toBeDefined();
+    expect(Client.requires?.RegisterClient).toBeDefined();
   });
 
   // ── Projection chain over realistic schemas type-checks cleanly ────────

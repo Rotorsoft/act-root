@@ -28,7 +28,7 @@ const Counter = state({ Counter: z.object({ count: z.number() }) })
 
 ### Builder Chain
 
-`state({})` → `.init()` → `.emits({})` → optional `.patch({})` → `.on({}, options?)` → optional `.given([])` → optional `.requires([])` → `.emit()` → `.build()`
+`state({})` → `.init()` → `.emits({})` → optional `.patch({})` → `.on({}, options?)` → optional `.requires([])` → `.emit()` → `.build()`
 
 - **`.emits()`** declares events with passthrough reducers by default (`({ data }) => data`)
 - **`.patch()`** overrides only events that need custom reducers. A reducer reads the event's `data` (and `version`, if it must): an action folds before the store assigns `id` and `created`, so during an action those are `-1` and the commit time. Keep a business timestamp in the event data, or read `created` in a projection, which sees the stored row.
@@ -115,59 +115,79 @@ Cross-state collisions (two slices declaring the same event name in *different* 
 
 ## What an action checks, in order
 
+An action runs only when its **preconditions** hold, and the state it leaves behind must keep the state's **invariants**. In design by contract the two mean different things, and Act keeps them apart:
+
+- **A precondition** must be true for one action to run *now*, and can be false at other times: "the ticket is open", "it's your turn". It belongs to the action.
+- **An invariant** must be true of the state *after every action*: "every territory keeps at least one army", "a closed ticket has a closer". It belongs to the state, so it lives in the state's Zod schema.
+
 `app.do(...)` refuses at the first check that fails, and nothing is stored:
 
 1. **The payload** against the action's schema (`ValidationError`).
-2. **Invariants** (`.given`): rules the current state and actor must meet for the action to run (`InvariantError`).
-3. **Preconditions** (`.requires`): rules that also read the payload (`InvariantError`, "failed precondition").
+2. **The state loads.**
+3. **The preconditions** (`.requires`): rules the state, the actor and the payload must meet (`PreconditionError`).
 4. The handler decides the events; each is checked against its schema (`ValidationError`).
-5. **One fold, before the commit:** the events fold into the new state. With [`validateFoldedState`](./configuration.md#debugging-validating-folded-state), that state is checked against the state's schema (`ValidationError`).
+5. **One fold, before the commit:** the events fold into the new state, and that state is checked once against the state's schema, its invariants (`ValidationError`).
 6. The events commit, with optimistic concurrency on the stream, and the returned snapshots carry the stored rows.
-
-A note on the word: in design by contract, an *invariant* is what must hold after every operation. Act's invariants are checked *before* the handler, on the current state, so they read like preconditions on the state; the names stay because they are the API. What must hold after every action is the state schema, which step 5 checks.
-
-## Invariants
-
-Business rules enforced before actions execute:
-
-```typescript no-check
-import { type Invariant } from "@rotorsoft/act";
-
-const mustBeOpen: Invariant<{ status: string }> = {
-  description: "Ticket must be open",
-  valid: (state) => state.status === "open",
-};
-
-.on({ CloseTicket: z.object({ reason: z.string() }) })
-  .given([mustBeOpen])
-  .emit("TicketClosed")
-```
-
-When an invariant fails, the framework throws an `InvariantError` with the description.
 
 ## Preconditions
 
-An invariant sees only the state and the actor, so one invariant serves every action that needs it. A rule that also needs the action's payload ("you must own *this* territory") is a precondition. Declare it with `.requires([...])`, after `.given([...])`:
+A precondition is declared with `.requires([...])`: a `description` and a `holds(payload, state, actor?)` predicate. One that reads only the state and the actor ignores the payload and is typed over `unknown`, so every action can use it:
 
 ```typescript no-check
 import { type Precondition } from "@rotorsoft/act";
 
-// Typed over the part of the payload it reads, so any action with a
-// `from` field can use it.
+const mustBeOpen: Precondition<{ status: string }, unknown> = {
+  description: "Ticket must be open",
+  holds: (_, state) => state.status === "open",
+};
+
+.on({ CloseTicket: z.object({ reason: z.string() }) })
+  .requires([mustBeOpen])
+  .emit("TicketClosed")
+```
+
+One that also reads the payload ("you must own *this* territory") is typed over the part of the payload it reads, so any action with those fields can use it:
+
+```typescript no-check
+// Any action with a `from` field can use it.
 const ownsFrom: Precondition<Board, { from: string }> = {
   description: "You must own the attacking territory",
   holds: ({ from }, state, actor) => state.owner[from] === actor?.id,
 };
 
 .on({ Attack })
-  .given([mustBeInAttack, mustBeCurrentPlayer])
-  .requires([ownsFrom, adjacent, enoughArmies])
+  .requires([mustBeInAttack, mustBeCurrentPlayer, ownsFrom, adjacent, enoughArmies])
   .emit((data, { state }) => { /* the dice and the outcome only */ })
 ```
 
-The action checks its schema, then its invariants, then its preconditions, each in the order they're declared, and stops at the first that fails. A failed precondition throws the same `InvariantError`, with the message `"<action> failed precondition: <description>"`. Nothing commits. The `act` CLI, the domain diagram and the flow animations list the preconditions after the invariants.
+They run in the order they're declared and stop at the first that fails. A failed one throws `PreconditionError`, with the message `"<action> failed precondition: <description>"`, and nothing commits. The `act` CLI, the domain diagram and the flow animations list them as the action's preconditions.
 
 Rules that don't fit a predicate stay as a `throw` in `.emit`: a rule that branches on the state, one that needs a value the handler computes anyway, or one that needs an app-specific error type.
+
+## Invariants
+
+Put what must always hold in the state's Zod schema, with refinements where a type can't say it:
+
+```typescript no-check
+const Ticket = z
+  .object({
+    status: z.enum(["open", "closed"]),
+    closedBy: z.string().optional(),
+  })
+  .refine((t) => t.status !== "closed" || !!t.closedBy, "A closed ticket has a closer");
+```
+
+Every action checks the state it leaves against that schema before it commits (step 5), so a state the schema rejects is refused and never stored. The check runs once per action, on the final state, because an invariant must hold between actions, not between the events of one action. It only reads the state: a schema with defaults or transforms never rewrites it. Loads, replays and projection folds don't check, so a stream that already holds a bad event still loads. A reducer reads the event's `data` and `version`; during an action `id` and `created` are placeholders, as the builder chain notes above.
+
+## Why `.given` and `InvariantError` are deprecated
+
+Act used to call the rules in `.given([...])` invariants, typed `Invariant` and refused with `InvariantError`. That was the wrong word: every one of them guards one action and is false at some point in a normal lifecycle, so each was a precondition. The real invariants of a domain were written nowhere.
+
+So, since 1.35:
+
+- Business rules are preconditions: write `.given([rule])` as `.requires([rule])`, with `valid: (state, actor) => ...` becoming `holds: (_, state, actor) => ...`, and catch `PreconditionError`. It extends `InvariantError`, so a `catch` on `InvariantError` still catches every refused action.
+- Invariants are the state's schema, checked before every commit. The `validateFoldedState` option is ignored, because the check is always on.
+- `.given`, `Invariant`, `InvariantError`, `Errors.InvariantError` and `validateFoldedState` keep working, are marked `@deprecated`, and are removed in 2.0.
 
 ## Snapshots
 
