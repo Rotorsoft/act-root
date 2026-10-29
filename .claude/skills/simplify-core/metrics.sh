@@ -8,7 +8,7 @@ files() { find "$SRC" -name '*.ts'; }
 lines=$(files | xargs cat | wc -l | tr -d ' ')
 comments=$(files | xargs cat | grep -cE '^\s*(//|\*|/\*)' || true)
 code=$((lines - comments))
-tickets=$(files | xargs cat | { grep -oE '#[0-9]{3,4}|ACT-[0-9]+' || true; } | wc -l | tr -d ' ')
+tickets=$(files | xargs cat | { grep -oiE '#[0-9]{3,4}|act-[0-9]{3,}' || true; } | wc -l | tr -d ' ')
 # Orthogonality: core files whose code mentions 5+ feature vocabularies.
 features='\blane|\bpriority|lagging|correlating|correlated_at|deferred_at|DeferSignal|backoff|maxRetries|breaker|tombstone|autoclose|notify|\bpii|\bsnap|\bbatch|\bblocked'
 coupled=$(for f in $(files); do n=$(grep -vE '^\s*(//|\*|/\*)' "$f" | grep -oE "$features" | sort -u | wc -l | tr -d ' '); if [ "$n" -ge 5 ]; then echo; fi; done | wc -l | tr -d ' ')

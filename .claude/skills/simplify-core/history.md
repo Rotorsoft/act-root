@@ -9,23 +9,23 @@ Least recently run goes next. A lens with no accepted proposal in its last three
 | lens | last run | runs | accepted | status |
 |---|---|---|---|---|
 | Public surface | 2026-10-27 | 7 | 2 | active (no new surface; published doc comments still describe an action as needing an event and invariants as holding after it) |
-| Dead code (tool) | 2026-10-25 | 7 | 5 | active (48 dead `eslint-disable` comments from the pre-Biome era; 3 unused imports Biome only warns about) |
+| Dead code (tool) | 2026-10-29 | 8 | 5 | active (the `patch_fn` plumbing #2180 left with one value; four doc blocks stacked above the wrong declaration) |
 | Hotspots (tool) | 2026-10-20 | 5 | 1 | retired 2026-10-20: two runs with no proposal; every branch in the hot functions (correlate, action, drain) is a separate rule |
 | File budget | 2026-10-27 | 8 | 1 | active (9 over 300 code lines; act.ts still seven concepts) |
-| Comment noise | 2026-10-25 | 7 | 6 | active (#2115 copied a 21-line `emit` doc 3 times and a `requires` doc twice; two `@returns` went stale) |
+| Comment noise | 2026-10-29 | 8 | 6 | active (act-http 50% comments, 51 ticket refs; 85 ticket refs outside core) |
 | Concepts and options | 2026-10-27 | 8 | 3 | active (`validateFoldedState` refuses after the commit; `start_correlations({ limit: 0 })` reads 100) |
 | Core or decorator? | 2026-10-15 | 3 | 0 | retired 2026-10-15: three runs, findings only (PII, audit, breaker, lanes stay; priority is a major-version question) |
-| DRY across adapters and builders | 2026-10-25 | 7 | 9 | active (ten SQL transaction scaffolds; the two rule layers written twice in every layer #2115 touched) |
+| DRY across adapters and builders | 2026-10-29 | 8 | 9 | active (`check_invariants` copies `validate` and drifted; the SQL recovery writes wrap driver errors one of five ways) |
 | Reading path | 2026-10-27 | 7 | 3 | active (13 runtime files, ~33 names; `Query` still travels the internal correlate path for one field) |
 | Newcomer test (quarterly) | 2026-10-17 | 2 | 0 | active (21 concepts, 3 imports; a package.json without name/version crashes) |
-| Tests by concept | 2026-10-25 | 7 | 10 | active (six time-budget tests red after one short stall; two tests that don't pin their names) |
+| Tests by concept | 2026-10-29 | 8 | 10 | active (an awaited void `settle()` before a "no reaction ran" check; five tests #2180 left pinning nothing new) |
 | Mutation evidence (monthly, CI) | never | 0 | 0 | retired: setup removed (#1805), see baselines below |
 | Packages earn their place | 2026-10-15 | 4 | 0 | retired 2026-10-15: four runs, no proposal (removal is ruled out; act-tck churn is the snapshot, now P2026-10-15p-1) |
 | Infra | 2026-10-27 | 8 | 2 | active (three report-only conformance steps) |
 | One source of truth | 2026-10-27 | 8 | 8 | active (the scaffold skill's rules section twice, one copy teaching a `throw`) |
 | Examples | 2026-10-27 | 7 | 3 | active (the scaffold seed's fixed three correlate/drain rounds) |
 | Process | 2026-10-27 | 7 | 9 | active (PR template in 0 of 300 PR bodies; 17 shipped RFCs still `draft`) |
-| Feature interactions | 2026-10-25 | 7 | 11 | active (partials sharing an action schema merge silently; #2106's correlate default) |
+| Feature interactions | 2026-10-29 | 8 | 11 | active (#2180's schema check refuses redacted state; reaction commits skip the guard the docs say leases replace) |
 
 ## Interaction register
 
@@ -68,8 +68,13 @@ Where two features meet, and why. The Feature interactions lens reads this first
 | `.requires`, sensitive fields | one actor-gated snapshot feeds `given`, `requires` and `.emit` | shared primitive | probed: both see `[REDACTED]` for another actor |
 | `.requires`, act-http errors | the class map gives 409 `INVARIANT`; only the message names the layer | shared primitive | `rule` is a constructor argument, not a field |
 | empty block/ack skipped (#2117), breaker / lifecycle | a pass that only blocks makes no ack call and emits no `acked`; `breaker.passed()` still runs | harmless | probed |
-| `validateFoldedState`, commit | `action()` commits, then folds through `validating_patch`, so a bad reducer refuses the caller after its event is stored; reactions run on it, no `committed` event fires, and every later `load` of the stream throws | accidental, documented as a refusal | P2026-10-27-1 (probed in the main loop); the field folds before it appends (Emmett `handleCommand`, Axon's Unit of Work) |
-| `start_correlations` limit, `Query.limit` | the poll stores `query.limit \|\| undefined`, so `0` ("no limit" everywhere else) becomes settle's default 100 | accidental | P2026-10-27-2 |
+| `start_correlations` limit, `Query.limit` | the poll stores `query.limit \|\| undefined`, so `0` ("no limit" everywhere else) becomes settle's default 100 | justified, documented | #2173: the user kept the code and documented that a poll's 0 uses the background default |
+| `validateFoldedState`, commit | #2180 folds once before the commit and checks the state schema there; the option is ignored | resolved | #2180 (P2026-10-27-1) |
+| state schema check, sensitive fields / forget | `action()` checks the actor's view, so `[REDACTED]` or `[SHREDDED]` fails a typed field (`z.email()`): another actor's action is refused, and after `forget` every action is | accidental, a regression from #2180 | P2026-10-29-1 (probed in the main loop; passes on 10fa801c9) |
+| reactions, optimistic concurrency | `reactingTo ? expectedVersion : expected` lets a reaction commit on a stale load; the docs say leases serialize these writes, but a lease is per reaction target, not per stream written (wolfdesk's three timers write one ticket under three targets), and never against user actions | accidental; the documented reason no longer holds | P2026-10-29-2 (probed: a stored state breaks `max(2)`, then every action fails) |
+| first commit, optimistic concurrency | `snapshot.version >= 0 ? … : undefined` leaves a new stream unguarded, so two racing creators both pass `.requires` | accidental | P2026-10-29-3 (probed) |
+| state check, payload check | `check_invariants` re-implements `validate` with `safeParse` and drops its wrap of non-Zod throws | accidental | P2026-10-29-4 (probed: raw `Error`, HTTP 500, vs `ValidationError`, 422) |
+| projection folds, `Act` constructor `patch_fn` | the constructor's patch step reaches `load`/`action`; projection folds always get `bare_patch` from the builder | harmless (one value in the repo since #2180) | P2026-10-29s-1 |
 
 ## Mutation baselines
 
@@ -110,6 +115,8 @@ Sound proposals that missed a run's cut. The next run ranks these before looking
 - Workflow and Renovate comments cut to their why: workflow comment lines 164 → 43, `renovate.json` 5.1 → 2.8 KB (ticket-history rule descriptions). Same kind as #2075, outside core. (P2026-10-23p-2)
 
 ## Self-changes
+
+- 2026-10-29: one smell added: a check added to the write path without a pass over every feature that changes what it reads (#2180's schema check read the actor-gated view, so redaction and erasure turned into refusals, and a guardless reaction commit let it pass on a stale load). The Comment noise lens names the stacked-doc check (a JSDoc block closed and another opened right after it: four found, one shipping a published class with no doc). `metrics.sh` counts ticket refs case-insensitively (`act-1103` was missed). The Dead code lens lists `libs/act-pg/scripts/drain-contention.ts`.
 
 - 2026-10-27: two smells added. A server-only import in an entry point browser code imports, dynamic ones included: a bundler builds a literal `import()` into its own chunk, and the browser build fails there (#2154 shipped the variable-path workaround first, then removed the import; the gate's header said dynamic imports were safe). A fake clock jump in a test that stands in for a lease or schedule but not for the real-time timer behind it (#2119's fix flaked again; #2153 re-arms the lane). The Examples lens names a downstream build: the Risk upgrade found the browser build failure, an act-pg major that no longer fits `Store`, and an act-sse patch release that dropped four methods, none visible in this repo's CI.
 
@@ -732,3 +739,42 @@ Lens metrics: files over 300 code lines 9 (act.ts 802, in-memory-store 730, audi
 
 
 Tickets (user: "file them all"): #2157 (P2026-10-27-1), #2158 (-2), #2159 (-3), #2160 (-4), #2161 (-5), #2162 (s-1), #2163 (s-2), #2164 (s-3), #2165 (s-4), #2166 (s-5), #2167 (s-6), #2168 (s-7).
+
+### 2026-10-29 — full run (four specialists: feature interactions + field, tests by concept, DRY across adapters and builders, dead code + comment noise)
+
+| metric | 2026-10-27 | now | why |
+|---|---|---|---|
+| core lines (libs/act/src) | 17699 | 17744 | #2180 (+246/−201: the fold before the commit, preconditions, `PreconditionError`), #2174–#2176 (−12) |
+| comments | 42% | 42% (29% / 14%) | |
+| ticket refs in source | 0 | 1 | the regex now ignores case and finds `Symbol("act-1103/all-lanes")` in `classify.ts` (it was always there) |
+| runtime exports | 51 | 52 | `PreconditionError` (#2180, planned with #2182/#2183; earned) |
+| spec files / test lines | 216 / 59958 | 218 / 60320 | #2180 (`invariants.spec`, `action-fold.spec`), #2185 |
+| CI workflows / lines | 5 / 629 | 5 / 575 | #2177 |
+| docs lines | 9344 | 9385 | #2180 (preconditions across the docs), #2188 |
+| everything else | | unchanged | 8 / 20 / 18 / 11, 9 files touching 5+ features, 9 files over 300 code lines, CLAUDE.md 27 KB |
+
+Audit: 19 PRs since the last run: its twelve tickets (#2170–#2178), #2180 (the assistant's: one fold before the commit, preconditions replace `.given`, the state schema checked before every commit, five deprecations until 2.0), #2185 (two specs wait for outcomes), #2186 (act-diagram popups show schemas, +356), #2188 and #2189 (docs). #2180 is the new hotspot: every defect this run found, but one, sits where its new check or the rule layers meet another feature. Its schema check reads the actor-gated view, a regression for sensitive streams that no spec covers because none combines the two features.
+
+Decisions on P2026-10-27*: all accepted and shipped. -1 → #2157, shipped as the code fix (#2180) rather than the docs the proposal recommended; -2 → #2158 / #2173, the user kept the code and documented 0 as the background default; -3 → #2159 / #2170; -4 + s-4 → #2160, #2165 / #2171; -5 + s-5 → #2161, #2166 / #2172; s-1 → #2162 / #2174; s-2 → #2163 / #2175; s-3 → #2164 / #2176; s-6 → #2167 / #2177; s-7 → #2168 / #2178.
+
+Promises kept: s-1 −5 → −5; s-2 −4 → −4; s-3 −3 → −3; s-4 −36 → −33; s-5 −57 → −55; s-6 −45 → −54; s-7 ~−2.4 KB → −9 lines (5 files).
+
+Verified in the main loop before ranking: the specialist's probe file, re-run from the repo (13 of 13: every red reproduces and every control passes): another actor's action on a stream with a `z.email()` state field fed by a `sensitive` event field is refused with `ValidationError`, the owner passes, a `z.string()` field passes, and after `forget` the owner is refused too; a reaction commit lands on a stale load and stores `n=3` under `max(2)`, after which every action fails, while the same race as a user action gets `ConcurrencyError`; two concurrent `open`s of a new stream both pass "cannot open twice"; a state `.refine` that throws rejects with a raw `Error` while the same throw in a payload schema gives `ValidationError`. Also read: concurrency-model.md's "stream leasing already serializes concurrent reactions on the same stream" against wolfdesk's three timer targets; `errors.ts` ("adapters wrap their driver errors in `StoreError`") against act-sqlite's `store.error.spec.ts:303-320`, which pins the raw driver message; `invariants.spec.ts:52-53` awaiting the void `settle()`; act-test-author.md's `f()` and synchronous `sandbox` against `test/sandbox.ts`.
+
+Proposals (pending), ranked. Defects first (outside the cap):
+- P2026-10-29-1 (i-P1). The state schema check refuses actions on sensitive streams (regression from #2180). `action()` loads through `me.view(raw, actor)` and checks that view, so `[REDACTED]` fails any typed state field another actor's action folds, and after `app.forget` `[SHREDDED]` locks the stream for everyone. (a) Skip the check when `me.pii_aware`, as the cache and `.snap` already do (one line; restores 1.34; those states lose the check). (b) Docs only: a state field fed by a sensitive field must accept any string (leaves the forget lock-out). A contract row and a test either way. The user's call; (a) recommended, since (b) leaves a stream that can't take any action after an erasure.
+- P2026-10-29-2 (i-P3). Reaction commits skip the inferred version guard, so preconditions and the schema check can pass on a stale load and a reaction can store a state the schema rejects. The documented reason (leases serialize them) doesn't hold: a lease is per target, not per stream written. Guard reactions like any action (−15 in `action()`: the branch, the gapped-fold cache handling; −15 doc lines). Simulated: 4 tests fail, 3 pin the guardless path, and wolfdesk's timers now conflict and need `maxRetries` (or reaction dispatch retries on conflict). Emmett guards always, with an optional retry on conflict. Changes what apps observe: the user's call. Docs-only alternative: row 271 and concurrency-model.md say plainly that reaction commits are unguarded.
+- P2026-10-29-3 (i-P2). The first commit to a new stream is unguarded (`snapshot.version >= 0 ? … : undefined`, since the original `event?.version`), so two racing creators both pass `.requires` (wolfdesk's `OpenTicket`). Always pass the loaded version (−2) and add a TCK case for `expectedVersion: -1` on a non-empty stream (+~12); the port doc says what −1 means. Simulated: act, sqlite, http and packages green; act-pg not run.
+- P2026-10-29-4 (dry-D2). `check_invariants` is a copy of `validate` that lost its wrap of non-Zod throws: a throwing state `.refine` surfaces as a raw `Error` (HTTP 500) instead of `ValidationError` (422). Call `validate` and discard the result (−17). Simulated, coverage identical.
+- P2026-10-29-5 (dry-D1). The SQL adapters' recovery writes (`reset`, `unblock`, `prioritize`, `defer`) break the `StoreError` promise: act-sqlite wraps only `defer`, with its own try/catch, and its `_update` hand-rolls a sixth transaction scaffold; act-pg wraps none. One `_update(operation, …)` per adapter through `_tx` (sqlite −6, pg +9, net +3; 3 sqlite assertions move to `StoreError`, one PG fault-injection test). Only operator calls reach these; the breaker is not involved.
+- P2026-10-29-6 (t-D1 + t-D2 + dc-D1). Tests and docs that can't fail or don't match the code: `invariants.spec.ts:52` asserts "no reaction ran" after a void `settle()` (use `autoSettle: false` + `correlate()`/`drain()`); act-test-author.md teaches a `fixture`/`sandbox` API that doesn't exist (copy `sandbox.ts`'s `@example`s); four doc blocks sit above the wrong declaration (act-http `BroadcastChannel` ships with no doc, `projection()`'s overview and example sit on `_projection`, `compile_autoclose_policy`, classify's result doc above `ALL_LANES`, whose symbol carries `act-1103`); `tracing.ts:175` and `tracing.spec.ts:58` describe a validating patch step #2180 deleted. Words and one test (~+3).
+Simplifications:
+- P2026-10-29s-1 (dry-S1 + dc-P1 + i-P4). Drop the internal `patch_fn` plumbing that has had one value since #2180: `make_fold_handler`'s parameter, the builder's import and argument (−9 source, −5 test, after Biome; making every non-`bare_patch` value throw failed 0 of 1,986 tests). The public `Act` constructor's `patch_fn?` and `PatchFn` stay.
+- P2026-10-29s-2 (t-1 + t-2). Tests #2180 left pinning nothing another test pins: `preconditions.spec` "stops at the first … in declaration order" (three loop mutations: every red it shows, "refuses at the first …" shows), `invariants.spec` "leaves a well-behaved app unchanged", three `event-sourcing.spec` cases (empty-events duplicate, empty `requires`, empty `.given`); `action-fold.spec` (one test, row 273) merges into `invariants.spec` (−88 lines, −5 tests, −1 file; coverage identical; row 87 drops one citation).
+- P2026-10-29s-3 (dc-P2). act-http comments cut to their why: 50% comments and 51 ticket refs; `sse/broadcast.ts` alone 441 → 343 lines with no code line changed (fixes its detached class doc), ~−250 comment lines for the package. One PR per package; the other 34 refs outside core (act-diagram 17, act-ops 7) follow the same way.
+
+Findings, not proposed: projection-fold.ts:102 (`fields.length ?` on the PII head load) is covered only by timing elsewhere in the suite: one modified run read 99.94% branches and the rerun 100%, and the narrow specs reach 95% on master too — a coverage-gate flake waiting to happen, worth one direct test; the snapshot and cache keep the `-1` placeholder id a reducer copies into state while a cold replay holds the real id (documented by the decider rule; reducers should read `data` and `version`); the schema-check `ValidationError` says "payload" when it is the state; act-pg's `scripts/drain-contention.ts` has no reference (kept on purpose by #2089/#2093, now on the knip list); act-diagram's printers fall back `preconditions ?? invariants` in four places (deprecated surface, goes in 2.0); openapi hand-lists the error statuses ERROR_MAP holds; 28 sleep-then-absence checks in 14 files are weak (a stall makes them pass), not flaky.
+
+Lens metrics: interactions classified 6 (4 accidental, all defects; 1 resolved; 1 harmless); defects from #2180 4 of 6; ticket refs outside core 85 (78 last run); knip unused files 40 (39 known false positives, 1 now listed); stacked doc blocks 4; tests that pin nothing new 5; awaited void `settle()` before an absence check 1 of 16.
+
+Tickets (user: "file the tickets"; decisions on -1 (a or b) and -2 (guard or docs) left in the tickets): #2190 (P2026-10-29-1), #2191 (-2), #2192 (-3), #2193 (-4), #2194 (-5), #2195 (-6), #2196 (s-1), #2197 (s-2, with the projection-fold.ts:102 coverage test), #2198 (s-3).
