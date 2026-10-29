@@ -240,6 +240,8 @@ if (Object.keys(entriesPatch).length > 0) {
 })
 ```
 
+`.nullable()` goes on the action and event schemas that carry the `null`. In the **state** schema, a field that a patch can clear must be `.optional()` or `.nullish()`: `null` deletes the key, and every action checks the state against its schema before it commits, so a `.nullable()` state field cleared with `null` refuses every later action.
+
 `delta` and `patch` form a closed bidirectional algebra over `Patch<S>`: any event whose payload is a `Patch<S>` over the aggregate's state shape can be produced by the caller via `delta` and applied by the patch handler via `patch`. Naive diffs (`JSON.stringify` comparisons, missed deletions, `Date` reference inequality) are bug-prone — `delta` mirrors `patch`'s replacement rules so the round-trip identity holds: `patch(before, delta(before, after)) ≡ after`.
 
 **Projections that need derived totals** can either compute from event facts (when the event has everything — e.g. `InvoiceCreated.entries`) OR `app.load(state, stream)` to read post-apply totals (when the event only carries a delta — e.g. `InvoiceAdjusted`). Lazy-import `app` from bootstrap to avoid circular deps:
