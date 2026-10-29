@@ -82,6 +82,8 @@ patch(state, eventPayload2);
 
 The asymmetry is what keeps the konsult-style scenario clean: a schema with no `.nullable()` fields produces a `DeepPartial<S>` with no `| null` arms, an action that conforms to that schema can't carry `null`, and `delta` can't put one in the output because there was nothing in `after` to propagate. The type and the runtime agree: no nulls anywhere. As soon as a schema opts into `.nullable()` on a field, the type widens to admit `null`, the action can carry it, and `delta` carries it through. Same code path, both behaviors, driven by the schema.
 
+The `.nullable()` belongs on the action and event schemas, the ones that carry the `null`. The **state** schema describes what is left after the patch, and there the key is gone, not `null`. So declare a state field that can be cleared `.optional()` or `.nullish()`, never `.nullable()`, which requires the key. An Act app checks every action's state against its schema before the commit, so a `.nullable()` state field cleared with `null` refuses every later action on that stream.
+
 ## Common patterns
 
 ### Merging rules

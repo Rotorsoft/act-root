@@ -179,6 +179,16 @@ const Ticket = z
 
 Every action checks the state it leaves against that schema before it commits (step 5), so a state the schema rejects is refused and never stored. The check runs once per action, on the final state, because an invariant must hold between actions, not between the events of one action. It only reads the state: a schema with defaults or transforms never rewrites it. Loads, replays and projection folds don't check, so a stream that already holds a bad event still loads. A reducer reads the event's `data` and `version`; during an action `id` and `created` are placeholders, as the builder chain notes above.
 
+A field a reducer clears with `null` must be `.optional()` or `.nullish()` in the state schema. A `null` in a patch deletes the key, and `.nullable()` requires it, so the cleared state breaks the schema and every later action on the stream is refused:
+
+```typescript no-check
+const Board = z.object({
+  turn: z.number(),
+  // cleared with `{ lastAttack: null }` when a turn starts
+  lastAttack: z.object({ from: z.string(), to: z.string() }).nullish(),
+});
+```
+
 ## Why `.given` and `InvariantError` are deprecated
 
 Act used to call the rules in `.given([...])` invariants, typed `Invariant` and refused with `InvariantError`. That was the wrong word: every one of them guards one action and is false at some point in a normal lifecycle, so each was a precondition. The real invariants of a domain were written nowhere.
@@ -187,6 +197,7 @@ So, since 1.35:
 
 - Business rules are preconditions: write `.given([rule])` as `.requires([rule])`, with `valid: (state, actor) => ...` becoming `holds: (_, state, actor) => ...`, and catch `PreconditionError`. It extends `InvariantError`, so a `catch` on `InvariantError` still catches every refused action.
 - Invariants are the state's schema, checked before every commit. The `validateFoldedState` option is ignored, because the check is always on.
+- A state field cleared with `null` in a patch must be `.optional()` or `.nullish()`. `null` deletes the key, so a `.nullable()` field, which requires the key, now refuses every action after the one that cleared it. Before 1.35 nothing checked, so such a state was stored as is.
 - `.given`, `Invariant`, `InvariantError`, `Errors.InvariantError` and `validateFoldedState` keep working, are marked `@deprecated`, and are removed in 2.0.
 
 ## Snapshots

@@ -112,6 +112,41 @@ describe("invariants", () => {
     expect(Number.isNaN(snap.state.result)).toBe(true);
   });
 
+  it("refuses a .nullable() field cleared with null, because the patch deletes the key", async () => {
+    // `null` in a patch deletes the key, and `.nullable()` requires it.
+    const board = (last: z.ZodType) =>
+      state({ Board: z.object({ turn: z.number(), last }) })
+        .init(() => ({ turn: 0, last: null }))
+        .emits({
+          attacked: z.object({ from: z.string() }),
+          turned: z.object({}),
+        })
+        .patch({
+          attacked: (e) => ({ last: { from: e.data.from } }),
+          turned: (_, s) => ({ turn: s.turn + 1, last: null }),
+        })
+        .on({ attack: z.object({ from: z.string() }) })
+        .emit("attacked")
+        .on({ turn: z.object({}) })
+        .emit(() => ["turned", {}])
+        .build();
+    const Last = z.object({ from: z.string() });
+
+    const nullable = act().withState(board(Last.nullable())).build();
+    await nullable.do("attack", { stream: "n1", actor }, { from: "a" });
+    await expect(
+      nullable.do("turn", { stream: "n1", actor }, {})
+    ).rejects.toBeInstanceOf(ValidationError);
+    const stored = await nullable.query_array({ stream: "n1" });
+    expect(stored.map((e) => e.name)).toEqual(["attacked"]);
+
+    const nullish = act().withState(board(Last.nullish())).build();
+    await nullish.do("attack", { stream: "n2", actor }, { from: "a" });
+    const [snap] = await nullish.do("turn", { stream: "n2", actor }, {});
+    expect(snap.state.turn).toBe(1);
+    expect("last" in snap.state).toBe(false);
+  });
+
   it("leaves a well-behaved app unchanged", async () => {
     const app = act().withState(calc()).build();
     for (let i = 0; i < 25; i++)
