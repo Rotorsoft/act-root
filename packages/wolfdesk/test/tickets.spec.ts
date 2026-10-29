@@ -16,7 +16,8 @@ async function findTicket(stream: string) {
   ).at(0);
 }
 
-describe("tickets", () => {
+// Each test waits for its outcome (up to 20s in settle) on a loaded runner.
+describe("tickets", { timeout: 30_000 }, () => {
   // Per-suite isolated Act built from the shared wolfdesk builder — the
   // scoped store/cache replace the singleton port; the Drizzle projection
   // DB is shared (external) and reset below.
@@ -57,23 +58,31 @@ describe("tickets", () => {
 
   const DAY = 24 * 60 * 60 * 1000;
   const future = () => new Date(Date.now() + DAY);
-  // Correlate+drain until a pass finds nothing left (each pass wakes the
-  // streams whose due-time has passed and runs the next hop of a defer
-  // chain). It stops on the outcome, not after a fixed number of passes:
-  // how many a chain needs depends on the machine. The lease outlives any
-  // pass, so a slow pass never loses its ack.
-  const settle = async () => {
+  // Correlate+drain until the projected row shows the outcome the test
+  // expects and a pass finds nothing left (each pass wakes the streams
+  // whose due-time has passed and runs the next hop of a defer chain). A
+  // quiet pass alone isn't enough: a stream waiting out a backoff leases
+  // nothing, so the chain can look done before it is. The lease outlives
+  // any pass, so a slow pass never loses its ack.
+  const settle = async (
+    stream: string,
+    done: (row: Awaited<ReturnType<typeof findTicket>>) => boolean
+  ) => {
     let last_id = -1;
-    for (let i = 0; i < 20; i++) {
-      const scan = await app.correlate({ limit: 200 });
-      const pass = await app.drain({
-        streamLimit: 100,
-        eventLimit: 100,
-        leaseMillis: 10_000,
-      });
-      if (!pass.leased.length && scan.last_id === last_id) return;
-      last_id = scan.last_id;
-    }
+    await vi.waitFor(
+      async () => {
+        const scan = await app.correlate({ limit: 200 });
+        const pass = await app.drain({
+          streamLimit: 100,
+          eventLimit: 100,
+          leaseMillis: 10_000,
+        });
+        const quiet = !pass.leased.length && scan.last_id === last_id;
+        last_id = scan.last_id;
+        expect(quiet && done(await findTicket(stream))).toBe(true);
+      },
+      { timeout: 20_000, interval: 10 }
+    );
   };
 
   it("projection", async () => {
@@ -97,7 +106,10 @@ describe("tickets", () => {
     await assignTicket(t, chance.guid(), now, now);
     await addMessage(t, "first message");
     await markTicketResolved(t);
-    await settle();
+    await settle(
+      t.stream,
+      (row) => !!row?.closedById && !!row.escalationId && !!row.reassignAfter
+    );
 
     const ticket = await findTicket(t.stream);
     expect(ticket?.id).toBe(t.stream);
@@ -140,7 +152,7 @@ describe("tickets", () => {
       // escalate defer is the first the escalate:<id> target sees and fires now.
       await openTicket(t, "auto escalate", "Hello");
       await assignTicket(t, chance.guid(), now);
-      await settle();
+      await settle(t.stream, (row) => !!row?.escalationId);
 
       const ticket = await findTicket(t.stream);
       expect(ticket?.agentId).toBeDefined();
@@ -166,7 +178,7 @@ describe("tickets", () => {
       const [snap] = await markTicketResolved(t);
       expect(snap.state.resolvedById).toBeDefined();
 
-      await settle();
+      await settle(t.stream, (row) => !!row?.closedById);
 
       const ticket = await findTicket(t.stream);
       expect(ticket?.resolvedById).toBeDefined();
@@ -193,7 +205,10 @@ describe("tickets", () => {
       // Escalation is the precondition for reassignment; the reassign defer
       // reads reassignAfter from state and fires because it's already due.
       await escalateTicket(t);
-      await settle();
+      await settle(
+        t.stream,
+        (row) => !!row?.agentId && row.agentId !== agentId
+      );
 
       const ticket = await findTicket(t.stream);
       expect(ticket?.agentId).toBeDefined();

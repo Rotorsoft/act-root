@@ -1,6 +1,5 @@
 import { z } from "zod";
 import { act, cache, dispose, state, store } from "../src/index.js";
-import { sleep } from "../src/utils.js";
 
 /**
  * Intra-event ack integrity: one event fans out to one payload
@@ -83,19 +82,21 @@ describe("intra-event ack across co-targeted reactions", () => {
     expect((await watermark("co-target-1")).at).toBe(-1);
 
     // Redelivery re-runs the WHOLE group — at-least-once means the
-    // already-succeeded reaction runs again.
-    await sleep(5);
-    await app.drain();
+    // already-succeeded reaction runs again. Drain until the backoff is
+    // due and the group runs; the retry budget caps it at two attempts.
+    await vi.waitFor(async () => {
+      await app.drain();
+      expect(second_attempts).toBe(2);
+    });
     expect(first_calls).toHaveLength(2);
-    expect(second_attempts).toBe(2);
 
     // Retry budget exhausted (maxRetries: 1) — the stream blocks with
     // the watermark still before the event; nothing was silently lost.
-    await sleep(5);
-    await app.drain();
-    const { at, blocked } = await watermark("co-target-1");
-    expect(blocked).toBe(true);
-    expect(at).toBe(-1);
+    await vi.waitFor(async () => {
+      await app.drain();
+      expect((await watermark("co-target-1")).blocked).toBe(true);
+    });
+    expect((await watermark("co-target-1")).at).toBe(-1);
   });
 
   it("acks the group once every reaction on the event succeeds", async () => {
