@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v1.35.1](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.35.0...@rotorsoft/act-v1.35.1) (2026-10-29)
+
+
+### Bug Fixes
+
+* **act:** the state check ignores redacted values and wraps a throwing refinement ([#2200](https://github.com/Rotorsoft/act-root/issues/2200)) ([67006d0](https://github.com/Rotorsoft/act-root/commit/67006d07359cfefae15a74fb48e40098ade4ec36)), closes [#2190](https://github.com/Rotorsoft/act-root/issues/2190) [#2193](https://github.com/Rotorsoft/act-root/issues/2193)
+
 # [@rotorsoft/act-v1.35.0](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.34.4...@rotorsoft/act-v1.35.0) (2026-10-29)
 
 
