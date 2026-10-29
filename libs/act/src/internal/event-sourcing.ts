@@ -4,7 +4,7 @@
  */
 
 import { patch } from "@rotorsoft/act-patch";
-import { prettifyError, type ZodType } from "zod";
+import { prettifyError, ZodError, type ZodType } from "zod";
 import { cache, log, store } from "../ports.js";
 import {
   ConcurrencyError,
@@ -30,7 +30,12 @@ import type {
   State,
   Target,
 } from "../types/index.js";
-import { SNAP_EVENT, TOMBSTONE_EVENT } from "../types/index.js";
+import {
+  REDACTED,
+  SHREDDED,
+  SNAP_EVENT,
+  TOMBSTONE_EVENT,
+} from "../types/index.js";
 import { sleep, validate } from "../utils.js";
 import { compute_backoff_delay } from "./backoff.js";
 import { default_correlator } from "./correlation-id.js";
@@ -39,19 +44,48 @@ import { default_correlator } from "./correlation-id.js";
 export const bare_patch: PatchFn = (_me, state, partial) =>
   patch(state, partial) as typeof state;
 
+const value_at = (value: unknown, path: readonly PropertyKey[]): unknown =>
+  path.reduce<unknown>(
+    (at, key) => (at as Record<PropertyKey, unknown> | undefined)?.[key],
+    value
+  );
+
 /**
  * Checks the state an action leaves against the state's schema (its
  * invariants), without replacing it: a schema with defaults or transforms
- * never rewrites a valid state.
+ * never rewrites a valid state. A throwing refinement refuses like a failed
+ * one, as `validate` does for payloads.
+ *
+ * A sensitive state is folded through the committing actor's view, so a
+ * value it can't read arrives as `[REDACTED]` or `[SHREDDED]`. Those come
+ * only from stored history, which passed this check with the real value,
+ * so their issues are dropped.
  */
 const check_invariants = <TState extends Schema>(
   target: string,
   state: TState,
-  schema: ZodType<TState>
+  schema: ZodType<TState>,
+  pii_aware: boolean
 ): void => {
-  const result = schema.safeParse(state);
-  if (!result.success)
-    throw new ValidationError(target, state, prettifyError(result.error));
+  let result: ReturnType<typeof schema.safeParse>;
+  try {
+    result = schema.safeParse(state);
+  } catch (error) {
+    throw new ValidationError(target, state, error);
+  }
+  if (result.success) return;
+  const issues = pii_aware
+    ? result.error.issues.filter((issue) => {
+        const value = value_at(state, issue.path);
+        return value !== REDACTED && value !== SHREDDED;
+      })
+    : result.error.issues;
+  if (issues.length)
+    throw new ValidationError(
+      target,
+      state,
+      prettifyError(new ZodError(issues))
+    );
 };
 
 const DEFAULT_BATCH = 500;
@@ -528,7 +562,12 @@ export async function action<
       });
       // Once, on the state the action leaves: invariants hold between
       // actions, not between one action's events.
-      check_invariants(`${me.name}.${action as string}`, state, me.state);
+      check_invariants(
+        `${me.name}.${action as string}`,
+        state,
+        me.state,
+        me.pii_aware
+      );
 
       let committed: Committed<TEvents, keyof TEvents>[];
       try {
