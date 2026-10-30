@@ -403,6 +403,21 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         ).rejects.toBeInstanceOf(ConcurrencyError);
       });
 
+      it("treats expectedVersion -1 as an empty stream", async () => {
+        // Two writers that both loaded a new stream: the first one wins.
+        const s = `commit-new-cc-${uid()}`;
+        const [first] = await store.commit<CounterEvents>(
+          s,
+          [inc(1)],
+          make_meta({ stream: s }),
+          -1
+        );
+        expect(first.version).toBe(0);
+        await expect(
+          store.commit<CounterEvents>(s, [inc(1)], make_meta({ stream: s }), -1)
+        ).rejects.toBeInstanceOf(ConcurrencyError);
+      });
+
       it("checks expectedVersion even when committing no events", async () => {
         // An empty commit writes nothing, but a stale expectedVersion is
         // still a conflict the caller must hear about.

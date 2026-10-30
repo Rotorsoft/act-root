@@ -39,22 +39,11 @@ If two callers race on the same stream, only one wins. The loser sees `Concurren
 
 **Resolution** (in `PostgresStore.commit`): catch the SQLSTATE `23505` from INSERT and re-throw as `ConcurrencyError`. After the catch, both failure modes look the same to the caller, and the retry path is consistent. Documented in `commit.error.spec.ts` and exercised by the `same-stream` scenario in the Postgres stress harness.
 
-### Reactions skip optimistic concurrency by design
+### Every action is guarded, reactions and new streams included
 
-Inside `action()`, when `reactingTo` is resolved (i.e., the action was triggered by a reaction handler), the **inferred** guard is not enforced:
+Inside `action()` the commit always carries a version: the one the caller passed as `expectedVersion`, or else the version the action loaded. A new stream loads as `-1`, which the store reads as "expect an empty stream", so two callers creating the same stream can't both commit. An action a reaction dispatches is guarded the same way: a lease belongs to the reaction's target, not to the stream it writes, so two reactions with different targets (wolfdesk's escalate, reassign and close timers) and any user action can race on one stream.
 
-```ts no-check
-// internal/event-sourcing.ts, action()
-reactingTo ? expectedVersion : expected
-```
-
-The reasoning: reactions are inherently asynchronous catch-up. By the time a reaction processes event N, the stream has likely advanced past N. Forcing a version check would convert ordinary catch-up into spurious retries. Stream leasing already serializes concurrent reactions on the same stream, so the version race doesn't matter.
-
-Two boundaries keep that from becoming a licence to write unguarded.
-
-**An `expectedVersion` the caller passed explicitly is still honored.** Only the version *inferred* from the loaded snapshot is skipped — dropping a guard someone asked for by name is silent data loss ([#1543](https://github.com/Rotorsoft/act-root/issues/1543)).
-
-**The reaction context applies while the handler runs, and not after.** `reactingTo` also resolves from the ambient context, so it covers every dispatch a handler makes and not only those routed through the injected `app` ([#1541](https://github.com/Rotorsoft/act-root/issues/1541)). But work a handler merely *starts* — a debounce timer, a memoised connection, an un-awaited `settle()` — keeps that async frame long after the handler returns, and is not a reaction. It does not inherit the triggering event, so it neither carries that causation nor skips the guard. Without the boundary, an ordinary read-modify-write dispatched from a batching flush commits unguarded and silently loses an update ([#1562](https://github.com/Rotorsoft/act-root/issues/1562)).
+The loser gets `ConcurrencyError`, so its preconditions and the state check never pass on a load that went stale. The retries that already exist absorb it: the action's own `maxRetries` reloads and re-checks, and a reaction that still loses fails like any other handler error, through its retry, backoff and block policy. An explicit `expectedVersion` is never retried, because it would conflict again on every attempt.
 
 ## Stream leasing — the reader's exclusivity primitive
 

@@ -26,6 +26,7 @@ describe("tickets", { timeout: 30_000 }, () => {
   let dispose: () => Promise<void>;
   let addMessage: Actions["addMessage"];
   let assignTicket: Actions["assignTicket"];
+  let closeTicket: Actions["closeTicket"];
   let escalateTicket: Actions["escalateTicket"];
   let markTicketResolved: Actions["markTicketResolved"];
   let openTicket: Actions["openTicket"];
@@ -41,6 +42,7 @@ describe("tickets", { timeout: 30_000 }, () => {
     ({
       addMessage,
       assignTicket,
+      closeTicket,
       escalateTicket,
       markTicketResolved,
       openTicket,
@@ -91,9 +93,10 @@ describe("tickets", { timeout: 30_000 }, () => {
     const title = "projecting";
     const message = "opening a new ticket for projection";
 
-    // Due-now deadlines so the deferred escalate/reassign/close automations all
-    // fire and populate every projection column. The manual assign is committed
-    // before the first drain, so its escalate defer is the one that fires now.
+    // Due-now deadlines so the deferred escalate and reassign automations
+    // fire and populate their projection columns. The manual assign is
+    // committed before the first drain, so its escalate defer is the one that
+    // fires now. Only an open ticket escalates, so the close comes after.
     await openTicket(
       t,
       title,
@@ -101,15 +104,14 @@ describe("tickets", { timeout: 30_000 }, () => {
       chance.guid(),
       chance.guid(),
       Priority.Low,
-      now
+      future()
     );
     await assignTicket(t, chance.guid(), now, now);
     await addMessage(t, "first message");
     await markTicketResolved(t);
-    await settle(
-      t.stream,
-      (row) => !!row?.closedById && !!row.escalationId && !!row.reassignAfter
-    );
+    await settle(t.stream, (row) => !!row?.escalationId && !!row.reassignAfter);
+    await closeTicket(t);
+    await settle(t.stream, (row) => !!row?.closedById);
 
     const ticket = await findTicket(t.stream);
     expect(ticket?.id).toBe(t.stream);

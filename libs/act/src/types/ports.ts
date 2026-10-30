@@ -575,7 +575,8 @@ export interface Store extends Disposable, EventSource {
    * @param stream - The stream ID to commit to
    * @param msgs - Array of messages (events) to commit
    * @param meta - Event metadata (correlation, causation)
-   * @param expectedVersion - Expected current version for optimistic concurrency
+   * @param expectedVersion - Expected current version for optimistic concurrency;
+   * `-1` expects an empty stream, `undefined` skips the check
    * @returns Array of committed events with full metadata
    *
    * @throws {ConcurrencyError} If expectedVersion doesn't match current version
@@ -586,7 +587,7 @@ export interface Store extends Disposable, EventSource {
    *   "user-123",
    *   [{ name: "UserCreated", data: { email: "user@example.com" } }],
    *   { correlation: "req-456", causation: { action: {...} } },
-   *   0 // Expect version 0 (new stream)
+   *   -1 // Expect an empty (new) stream
    * );
    * ```
    */

@@ -474,10 +474,8 @@ export async function action<
       if (snapshot.event?.name === TOMBSTONE_EVENT)
         throw new StreamClosedError(stream);
       // `version`, not `event`: on a warm hit `event` is undefined. A new
-      // stream (-1) stays unguarded.
-      const expected =
-        expectedVersion ??
-        (snapshot.version >= 0 ? snapshot.version : undefined);
+      // stream expects -1, so two callers creating it can't both commit.
+      const expected = expectedVersion ?? snapshot.version;
 
       // Deprecated `.given` rules, then preconditions, each in declaration
       // order: the first rule that fails refuses the action.
@@ -571,14 +569,7 @@ export async function action<
 
       let committed: Committed<TEvents, keyof TEvents>[];
       try {
-        committed = await store().commit(
-          stream,
-          emitted,
-          meta,
-          // Reactions skip the inferred version guard (leases already
-          // serialize them); an explicit expectedVersion is still honored.
-          reactingTo ? expectedVersion : expected
-        );
+        committed = await store().commit(stream, emitted, meta, expected);
       } catch (error) {
         // Fire-and-forget, so a cache failure can't replace the ConcurrencyError.
         if (error instanceof ConcurrencyError) void cache_drop(stream);
@@ -601,27 +592,20 @@ export async function action<
       }));
 
       const last = snapshots.at(-1)!;
-      // A guardless (reaction) commit can land past events this fold never
-      // saw; a gapped fold must not become a snapshot or a cache entry.
-      const contiguous = committed[0].version === snapshot.version + 1;
-      const snapped = contiguous && me.snap?.(last);
 
       // Awaited, so the cache holds the post-snap checkpoint for the next caller.
-      const snap_event = snapped ? await snap(last) : undefined;
+      const snap_event = me.snap?.(last) ? await snap(last) : undefined;
 
       // Sensitive states depend on the actor, so they aren't cached.
-      if (!me.pii_aware) {
-        if (contiguous)
-          void cache_put<TState>(stream, {
-            stream,
-            state: last.state,
-            version: snap_event?.version ?? last.event.version,
-            event_id: snap_event?.id ?? last.event.id,
-            patches: snap_event ? 0 : last.patches,
-            snaps: snap_event ? last.snaps + 1 : last.snaps,
-          });
-        else void cache_drop(stream);
-      }
+      if (!me.pii_aware)
+        void cache_put<TState>(stream, {
+          stream,
+          state: last.state,
+          version: snap_event?.version ?? last.event.version,
+          event_id: snap_event?.id ?? last.event.id,
+          patches: snap_event ? 0 : last.patches,
+          snaps: snap_event ? last.snaps + 1 : last.snaps,
+        });
 
       return snapshots;
     } catch (error) {
