@@ -25,13 +25,12 @@
 import type {
   BatchHandler,
   CacheEntry,
-  PatchFn,
   Schema,
   Schemas,
   State,
 } from "../types/index.js";
 import type { FoldConfig } from "./config.js";
-import { load } from "./event-sourcing.js";
+import { bare_patch, load } from "./event-sourcing.js";
 import { pii_strip } from "./pii.js";
 
 /**
@@ -83,7 +82,6 @@ export function make_fold_handler<
   me: State<TState, TEvents, TActions>,
   flush: (rows: ReadonlyArray<CacheEntry<TState>>) => Promise<void>,
   config: FoldConfig,
-  patch_fn: PatchFn,
   sensitive_fields: (event_name: string) => readonly string[]
 ): BatchHandler<TEvents> {
   // First-sight head loads must apply the SAME PII treatment as the warm
@@ -145,7 +143,7 @@ export function make_fold_handler<
       if (evictee.dirty) await flush([row(evictee)]);
       cache.delete(oldest);
     }
-    const snapshot = await load(load_me, { stream }, undefined, patch_fn);
+    const snapshot = await load(load_me, { stream });
     const seated: Fold<TState> = {
       stream,
       state: snapshot.state,
@@ -191,7 +189,7 @@ export function make_fold_handler<
       }
       if (event.id > fold.event_id) {
         const reducer = me.patch[event.name as keyof TEvents];
-        fold.state = patch_fn(
+        fold.state = bare_patch(
           me,
           fold.state,
           reducer(event as never, fold.state),

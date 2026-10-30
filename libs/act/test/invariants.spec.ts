@@ -50,7 +50,7 @@ describe("invariants", () => {
         reacted.push(e.stream);
       })
       .to("divided")
-      .build();
+      .build({ autoSettle: false });
     await app.do("add", { stream: "c0", actor }, { by: 1 });
     await expect(
       app.do("divide", { stream: "c0", actor }, {})
@@ -59,7 +59,8 @@ describe("invariants", () => {
     expect(stored.map((e) => e.name)).toEqual(["added"]);
     const [snap] = await app.do("add", { stream: "c0", actor }, { by: 2 });
     expect(snap.state.result).toBe(3);
-    await app.settle();
+    await app.correlate();
+    await app.drain();
     expect(reacted).toEqual([]);
   });
 

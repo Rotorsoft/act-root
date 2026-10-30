@@ -24,16 +24,12 @@ import type {
 import type { StaticTarget } from "./correlate-cycle.js";
 
 /**
- * Classification result. Returned by {@link classify_registry}; consumed
- * piecewise by Act's constructor.
- */
-/**
  * Sentinel for "any reaction on this event has a dynamic resolver, so
  * the lane is opaque until correlate runs the function — arm every
  * controller." A Symbol rather than a string literal so it can't
  * collide with a user-declared lane named `"all"`.
  */
-export const ALL_LANES: unique symbol = Symbol("act-1103/all-lanes");
+export const ALL_LANES: unique symbol = Symbol("act/all-lanes");
 
 /**
  * Per-event lane fan-in. For events whose every reaction
@@ -44,6 +40,10 @@ export const ALL_LANES: unique symbol = Symbol("act-1103/all-lanes");
  */
 export type EventLaneSet = ReadonlySet<string> | typeof ALL_LANES;
 
+/**
+ * Classification result. Returned by {@link classify_registry}; consumed
+ * piecewise by Act's constructor.
+ */
 export type Classification = {
   readonly static_targets: StaticTarget[];
   readonly event_to_state: ReadonlyMap<string, State<any, any, any>>;

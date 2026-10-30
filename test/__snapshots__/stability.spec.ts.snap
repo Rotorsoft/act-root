@@ -4980,12 +4980,34 @@ export declare const TOMBSTONE_EVENT = "__tombstone__";
 import type { ProjectionBuilder } from "../types/builders.js";
 import type { Schemas } from "../types/index.js";
 /**
- * Creates a new projection builder with a static target stream.
+ * Creates a new projection builder for composing read-model update handlers,
+ * with a static target stream.
  *
- * All handlers inherit the target resolver automatically. Enables \`.batch()\`
- * for bulk event processing in a single transaction.
+ * Projections enable separation of read-model concerns from command handling.
+ * Each \`.on({ Event }).do(handler)\` call registers a handler that updates
+ * a projection (database table, cache, etc.) in response to events. All
+ * handlers inherit the target resolver automatically, and \`.batch()\` is
+ * enabled for bulk event processing in a single transaction. Omit the target
+ * and use per-handler \`.to()\` when handlers route to different streams.
  *
  * @param target - Static target stream for all handlers
+ *
+ * @example Default target (all handlers routed to "tickets")
+ * \`\`\`typescript
+ * const TicketProjection = projection("tickets")
+ *   .on({ TicketOpened })
+ *     .do(async function openTicket({ stream, data }) {
+ *       await db.insert(tickets).values({ id: stream, ...data });
+ *     })
+ *   .on({ TicketClosed })
+ *     .do(async function closeTicket({ stream, data }) {
+ *       await db.update(tickets).set(data).where(eq(tickets.id, stream));
+ *     })
+ *   .build();
+ * \`\`\`
+ *
+ * @see {@link ProjectionBuilder} for builder methods
+ * @see {@link Projection} for the output type
  */
 export declare function projection<TEvents extends Schemas = {}>(target: string): ProjectionBuilder<TEvents, string>;
 /**
@@ -12025,16 +12047,47 @@ export declare function applyPatchMessage<S extends BroadcastState>(msg: PatchMe
 // === broadcast.d.ts ===
 import { StateCache } from "./state-cache.js";
 import { type BroadcastState, type PatchMessage, type Subscriber } from "./types.js";
+/**
+ * Server-side broadcast channel for incremental state sync over SSE.
+ *
+ * Manages per-stream subscriber sets and an LRU state cache. When state
+ * changes, forwards domain patches (from event handlers) to all subscribers
+ * as version-keyed messages.
+ *
+ * ## Usage
+ *
+ * \`\`\`typescript
+ * const broadcast = new BroadcastChannel<MyState>();
+ *
+ * // After every app.do():
+ * const snaps = await app.do(...);
+ * const patches = snaps.map(s => s.patch).filter(Boolean);
+ * const state = deriveState(snaps.at(-1));
+ * broadcast.publish(streamId, state, patches);
+ *
+ * // In SSE subscription:
+ * const cleanup = broadcast.subscribe(streamId, (msg) => {
+ *   pending = msg;
+ *   resolve?.();
+ * });
+ *
+ * // Initial state for reconnects:
+ * const cached = broadcast.state(streamId);
+ * \`\`\`
+ *
+ * ## Version Contract
+ *
+ * The \`_v\` field on state MUST be set from \`snap.event.version\` (the event
+ * store's monotonic stream version) BEFORE calling \`publish()\`. This is the
+ * single source of truth for ordering — no separate version counters.
+ */
 export declare class BroadcastChannel<S extends BroadcastState = BroadcastState> {
     private channels;
     private state_cache;
-    /**
-     * @param options.cacheSize - Max number of stream states kept in the LRU
-     * cache (default 50).
-     */
     private on_subscriber_error;
     private on_overlay_miss;
     constructor(options?: {
+        /** Max number of stream states kept in the LRU cache (default 50). */
         cacheSize?: number;
         /**
          * Called when overlay-contributed state is lost, on either of the two
