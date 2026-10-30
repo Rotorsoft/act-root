@@ -1,3 +1,10 @@
+# [@rotorsoft/act-tck-v1.41.2](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.41.1...@rotorsoft/act-tck-v1.41.2) (2026-10-30)
+
+
+### Bug Fixes
+
+* **act:** guard every commit with the version it loaded, reactions and new streams included ([#2201](https://github.com/Rotorsoft/act-root/issues/2201)) ([781a4bf](https://github.com/Rotorsoft/act-root/commit/781a4bf3bba3680c9a3bbeb8098bce545746e387)), closes [#2191](https://github.com/Rotorsoft/act-root/issues/2191) [#2192](https://github.com/Rotorsoft/act-root/issues/2192)
+
 # [@rotorsoft/act-tck-v1.41.1](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.41.0...@rotorsoft/act-tck-v1.41.1) (2026-10-26)
 
 
