@@ -1,3 +1,10 @@
+# [@rotorsoft/act-http-v1.11.1](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-http-v1.11.0...@rotorsoft/act-http-v1.11.1) (2026-10-30)
+
+
+### Bug Fixes
+
+* **act,act-http:** reattach detached docs, a test that can't fail, and the patch_fn leftover ([#2203](https://github.com/Rotorsoft/act-root/issues/2203)) ([01f9b0f](https://github.com/Rotorsoft/act-root/commit/01f9b0f421ac99a9e1f123def7c0b5bc237c7722)), closes [#2195](https://github.com/Rotorsoft/act-root/issues/2195) [#2196](https://github.com/Rotorsoft/act-root/issues/2196)
+
 # [@rotorsoft/act-http-v1.11.0](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-http-v1.10.24...@rotorsoft/act-http-v1.11.0) (2026-10-29)
 
 
