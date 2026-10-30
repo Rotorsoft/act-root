@@ -121,7 +121,7 @@ export function receiver(options: ReceiverOptions): ReceiverBuilder {
             // `next()` too, and hitting the raw store here double-fires (a
             // stale second `release` can delete a concurrent retry's live
             // claim, breaking exactly-once). The guard collapses both into
-            // one store call (#1293).
+            // one store call.
             await idem.release();
             return c.json(
               {
@@ -133,7 +133,7 @@ export function receiver(options: ReceiverOptions): ReceiverBuilder {
           }
           // Success: promote the tentative claim to a durable record so every
           // later retry of this key dedups — again via the guarded finalizer,
-          // not the raw store (#1293).
+          // not the raw store.
           await idem.commit();
         }
 
@@ -165,7 +165,7 @@ export function receiver(options: ReceiverOptions): ReceiverBuilder {
               // A server that can't bind (EADDRINUSE, EACCES) emits `error`
               // and never `listening`: reject with it instead of hanging, so
               // the caller sees the failure and `close()` isn't left waiting
-              // on a start that never finishes (#1783).
+              // on a start that never finishes.
               await new Promise<void>((resolve, reject) => {
                 launched.once("listening", () => resolve());
                 launched.once("error", reject);

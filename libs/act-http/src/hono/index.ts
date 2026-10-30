@@ -2,7 +2,7 @@
  * @packageDocumentation
  * @module act-http/hono
  *
- * Hono subpath for the auto-generated API epic (#835). Walks the
+ * Hono subpath of the auto-generated API. Walks the
  * registry of a built `Act` once at function call and emits a Hono
  * app with one `POST /actions/<name>` route per registered action,
  * Zod-validated bodies, and the shared error envelope.
@@ -337,8 +337,8 @@ export function hono<TApp extends ActSurface = ActSurface>(
           // json validator only reads a JSON body (no or non-JSON
           // Content-Type validates `{}`), so take the raw value from the same
           // place it did: re-reading the body regardless would throw on an
-          // empty request and hand `app.do` a body the resolvers never saw
-          // (#1777). Hono caches the body, so reading it again is free.
+          // empty request and hand `app.do` a body the resolvers never saw.
+          // Hono caches the body, so reading it again is free.
           const input = c.req.valid("json" as never) as unknown;
           const raw: unknown = is_json(c.req.header("content-type"))
             ? await c.req.json()

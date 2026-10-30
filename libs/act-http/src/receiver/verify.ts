@@ -56,8 +56,8 @@ export type VerifyOptions = {
  * The signed payload is `${timestamp}.${body}`, so `body` must be
  * the **raw request body bytes**. Any pre-parse normalization
  * (whitespace trimming, JSON re-stringification) would change the
- * hash and reject every otherwise-valid request. Framework adapters
- * in #744 will provide the raw body alongside the parsed one.
+ * hash and reject every otherwise-valid request. The receiver
+ * subpaths' adapters pass the raw body alongside the parsed one.
  *
  * Uses Node's `crypto.timingSafeEqual` for the final comparison to
  * avoid signature-equality timing attacks.

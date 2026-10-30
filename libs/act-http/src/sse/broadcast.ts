@@ -8,15 +8,9 @@ import {
 } from "./types.js";
 
 /**
- * Deliver a frame to every subscriber, containing each one individually.
- *
- * SSE subscribers are the least-trusted callbacks in the system — one per
- * connection, driven by network state. The unguarded loop this replaces let
- * the first thrower abort iteration, so every later subscriber lost the
- * frame and the exception escaped into the host's commit path (#1423). Same
- * containment principle the orchestrator applies to lifecycle listeners.
- * Guarding each callback rather than the loop is the point: one guard around
- * the whole loop would still let the first throw suppress the rest.
+ * Deliver a frame to every subscriber, containing each one: a subscriber
+ * that throws must not cost the others the frame or escape into the
+ * publisher. One guard around the loop would let the first throw stop it.
  *
  * @internal
  */
@@ -36,39 +30,24 @@ function fan_out<S extends BroadcastState>(
 }
 
 /**
- * Rewrite `undefined`-valued keys to `null`, recursively.
+ * Rewrite values that don't survive JSON, recursively: Sets become arrays,
+ * and with `nulls`, `undefined` becomes `null`.
  *
- * `@rotorsoft/act-patch` treats `undefined` and `null` as the same delete
- * signal, but `JSON.stringify` drops `undefined`-valued keys entirely — and
- * every SSE transport serializes frames as JSON. A reducer that clears a
- * field the idiomatic way (`{ left: undefined }`) therefore produced a frame
- * with no mention of `left` at all, so a live client kept the stale value
- * while stamping the new version — believing itself caught up, and never
- * refetching (#1471).
- *
- * `null` reaches the same `delete` branch in the patch applicator and
- * survives JSON, so normalizing here makes the two spellings equivalent on
- * the wire as they already are in memory.
- *
- * One walker serves both destinations. The frame and the cached state
- * agree on every encoding except the delete: see `wire_safe` /
- * `cache_safe` below.
+ * `@rotorsoft/act-patch` deletes a key on either `undefined` or `null`, but
+ * `JSON.stringify` drops `undefined` keys, so a cleared field would vanish
+ * from the frame and a live client would keep the stale value. One walker
+ * serves the frame and the cache, which differ only in that delete encoding
+ * (see `wire_safe` / `cache_safe`).
  */
 const normalize = <T>(value: T, nulls: boolean): T => {
   if (value === null || typeof value !== "object") return value;
   if (Array.isArray(value)) return value.map((v) => normalize(v, nulls)) as T;
-  // A Set has exactly one sensible JSON encoding, and `JSON.stringify` gives
-  // it the wrong one: `{}`. The framework's own `PresenceTracker.online()`
-  // returns a Set and the presence recipe feeds it straight to `overlay()`,
-  // so the documented way to broadcast presence shipped an empty object to
-  // every client — and then froze, because a client holding `{}` treats
-  // every later empty patch as a no-op (#1472).
+  // `JSON.stringify` encodes a Set as `{}`; presence (`PresenceTracker.online()`)
+  // is a Set, so it would reach clients empty.
   if (value instanceof Set)
     return [...value].map((v) => normalize(v, nulls)) as T;
-  // Everything else non-plain (Date, Map, class instances) is left to
-  // whatever the host's serializer already does with it. `Date` has a
-  // defined encoding; `Map` does not have an unambiguous one (entries or
-  // object?), so guessing would trade a visible bug for a silent choice.
+  // Other non-plain values (Date, Map, class instances) are left to the
+  // host's serializer: a Map has no single obvious JSON encoding to guess.
   const proto = Object.getPrototypeOf(value);
   if (proto !== Object.prototype && proto !== null) return value;
   const out: Record<string, unknown> = {};
@@ -79,39 +58,28 @@ const normalize = <T>(value: T, nulls: boolean): T => {
 
 /**
  * Frame-bound normalization: Sets become arrays, and `undefined` becomes
- * `null` so a delete survives `JSON.stringify` (#1471).
+ * `null` so a delete survives `JSON.stringify`.
  */
 const wire_safe = <T>(patch: T): T => normalize(patch, true);
 
 /**
- * Cache-bound normalization: Sets become arrays, `undefined` is left alone.
+ * Cache-bound normalization: Sets become arrays, `undefined` is left alone,
+ * because a reconnecting client reseeds from the cache and a cleared key
+ * must stay absent there, not `null`.
  *
- * The cached state is what a reconnecting client reseeds from, and #1471
- * settled that it must keep a cleared key *absent* rather than `null`, so
- * the wire's delete encoding is exactly the part the cache must not adopt.
- * That single difference is why `nulls` is a parameter instead of two
- * separate walkers — a second copy would drift the moment either side grew
- * a case.
- *
- * Non-enumerable properties are invisible to `Object.entries`, so the
- * `OVERLAY_KEYS` marker is neither copied nor clobbered here; callers tag
- * after normalizing.
+ * `Object.entries` skips the non-enumerable `OVERLAY_KEYS` marker, so
+ * callers tag after normalizing.
  */
 const cache_safe = <T>(state: T): T => normalize(state, false);
 
 /**
  * Keys an `overlay()` contributed to a stream's cached state, carried on the
- * cached object itself.
+ * cached object itself, so `publish()` can keep them when it replaces the
+ * entry: a reconnecting client reseeds at the same `_v` and couldn't tell
+ * the overlay data was missing.
  *
- * `publish()` replaces the cache entry with host-derived state, so overlay
- * data — presence, computed fields — vanished from the cache while live
- * clients, which had already applied the overlay frame, kept it. A
- * reconnecting client then reseeded WITHOUT it and had no way to notice: its
- * `_v` matches the server's, so nothing classifies as `behind` (#1473).
- *
- * A symbol keeps this out of `Object.keys`, `JSON.stringify` and therefore
- * off the wire; living on the cached object means it is evicted with the
- * entry rather than needing a parallel structure to prune.
+ * A symbol keeps it off the wire, and living on the entry means it is
+ * evicted with it.
  */
 const OVERLAY_KEYS = Symbol("act.sse.overlay_keys");
 
@@ -236,16 +204,9 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
   }
 
   /**
-   * The LRU dropped an entry. If it carried overlay-contributed keys, that
-   * data existed only in the cache and is now gone: a later `publish()` has
-   * no baseline to carry it from, and the reseed a reconnecting client gets
-   * would silently lack presence a live client is still showing (#1648).
-   *
-   * `overlay()` was hardened for the same loss on its own path (#1423);
-   * catching it here covers `publish()` too, and does it at the moment the
-   * data is lost rather than at a later commit that may never come. Reading
-   * the marker off the entry being evicted is what avoids the parallel
-   * bookkeeping structure the `OVERLAY_KEYS` design explicitly rejected.
+   * The LRU dropped an entry. Overlay-contributed keys lived only in the
+   * cache, so their loss is reported now, when it happens, rather than at a
+   * later commit that may never come.
    */
   private on_cache_evict(streamId: string, dropped: S): void {
     if (!(dropped as S & WithOverlayKeys)[OVERLAY_KEYS]?.size) return;
@@ -254,20 +215,9 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
 
   /**
    * Overlay-contributed state for `streamId` is gone. Recover first, report
-   * second.
-   *
-   * The resync goes out before the host hook runs, and the hook is contained
-   * the way `fan_out` contains subscribers: a bad consumer must not break the
-   * publisher (#1423), and the same applies to a bad observer. Without this,
-   * a throwing `onOverlayMiss` escapes on the eviction path — which runs
-   * inside `publish()`, before that stream's own `fan_out` — so one host bug
-   * costs the evicted stream its recovery frame *and* an unrelated stream the
-   * frame for a version already written to the cache. The evicted stream's
-   * clients never self-heal from that, which is the silent loss #1648 exists
-   * to end.
-   *
-   * Routing the throw to `onSubscriberError` rather than swallowing it keeps
-   * it wherever the host already reads framework delivery failures.
+   * second: the resync goes out before the host hook, and a throwing hook is
+   * routed to `onSubscriberError`. Eviction runs inside `publish()` for
+   * another stream, so an escaping throw would cost that stream its frame.
    */
   private report_overlay_miss(streamId: string): void {
     this.broadcast_resync(streamId);
@@ -291,15 +241,9 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
     state: S,
     patches: Partial<S>[] = []
   ): PatchMessage<S> {
-    // Carry overlay-contributed keys across the commit (#1473). Only keys
-    // an `overlay()` actually owns, and only when the new domain state does
-    // not speak to them — so a publisher that drops or overwrites a key
-    // still wins, and presence survives a commit as the docs imply.
-    // Normalize once, up front: the cache entry and the frame are both
-    // derived from this, so the reseed a reconnecting client gets cannot
-    // disagree with what a live client applied (#1646). `overlay()` already
-    // normalized before its own cache write; `publish()` did not, so a Set
-    // shipped as an array live and as `{}` on reseed — and then froze.
+    // Normalize once, so the reseed and the live frame agree. Then carry the
+    // keys an `overlay()` owns across the commit, unless the new domain state
+    // sets them, so presence survives a commit and the publisher still wins.
     const safe_state = cache_safe(state);
     const prev = this.state_cache.get(streamId) as
       | (S & WithOverlayKeys)
@@ -343,30 +287,15 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
   ): PatchMessage<S> | undefined {
     const prev = this.state_cache.get(streamId);
     if (!prev) {
-      // No baseline to read-modify-write, so nothing is broadcast — and
-      // because no frame is emitted there is nothing for a live client to
-      // classify as `behind`, so it never refetches either. Unlike a domain
-      // commit (which repopulates the cache via `publish`), an overlay-only
-      // stream never recovers. The defaults make this reachable rather than
-      // exotic: `cacheSize` is 50 while a host may hold far more live
-      // subscriptions, and cache promotion happens at connect time, so a
-      // busy-but-not-committing stream ages out while fully subscribed.
-      //
-      // Emit a resync frame so live subscribers refetch instead of silently
-      // missing the update forever (#1423). The host hook still fires so a
-      // host can count these — a steady stream of them means `cacheSize` is
-      // too small for the working set.
+      // No baseline to patch, and a stream that only gets overlays never
+      // refills the cache, so its live clients would miss every update. A
+      // resync makes them refetch. `undefined`: no overlay was broadcast.
       this.report_overlay_miss(streamId);
-      // Still `undefined`: no overlay state was produced, and callers use the
-      // return value as "the patch I broadcast", which a resync is not.
       return undefined;
     }
 
-    // Normalize BEFORE applying to the cache, so a reconnecting client's
-    // reseed and a live client's frame agree (#1472). `apply_patch` treats
-    // `null` and `undefined` as the same delete signal, so normalizing first
-    // does not change the delete semantics — it only fixes the encodings
-    // that would not survive JSON.
+    // Normalize before patching the cache, so the reseed and the live frame
+    // agree; `apply_patch` deletes on `null` as on `undefined`.
     const safe_patch = wire_safe(overlay_patch);
     const state = apply_patch(prev, safe_patch) as S;
     this.state_cache.set(

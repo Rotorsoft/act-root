@@ -19,7 +19,7 @@ export class StateCache<S extends BroadcastState = BroadcastState> {
    * @param maxSize - Max entries before the LRU drops its oldest.
    * @param onEvict - Called with the entry the LRU just dropped. Eviction is
    *   the moment cached-only data is lost, so it is the only place a caller
-   *   can still see what went (#1648).
+   *   can still see what went.
    */
   constructor(
     maxSize = 50,

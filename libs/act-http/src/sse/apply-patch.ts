@@ -41,11 +41,8 @@ export function applyPatchMessage<S extends BroadcastState>(
   msg: PatchMessage<S>,
   cached: S | null | undefined
 ): ApplyResult<S> {
-  // Distinguish an *absent* baseline from a real version-0 baseline (#1346).
-  // Act assigns the first event of any stream `version = 0`, so a fresh client
-  // (no cache) must resume from a pre-baseline watermark of -1 — otherwise the
-  // `?? 0` default collides with a genuine version-0 genesis patch and drops
-  // it as "stale". A present baseline keeps its own `_v`.
+  // A stream's first event is version 0, so a client with no baseline
+  // resumes from -1; defaulting to 0 would drop that first patch as stale.
   const hasBaseline = cached != null;
   const cachedV = cached?._v ?? -1;
   // `overlay` is a non-numeric marker key, not a version — exclude it.
@@ -56,17 +53,13 @@ export function applyPatchMessage<S extends BroadcastState>(
 
   // Server-forced resync: it could not construct a patch (e.g. `overlay()`
   // found the baseline evicted), so the client must refetch. Checked before
-  // anything else — a resync frame carries no versions, and the empty-frame
-  // branch below would otherwise report it as `stale`, which is the one
-  // answer that does NOT refetch (#1423).
+  // anything else: a resync frame carries no versions, and the empty-frame
+  // branch below would report it as `stale`, the one answer that doesn't
+  // refetch.
   if (msg._resync) return { ok: false, reason: "behind" };
 
-  // An empty frame carries nothing to apply. For a client that already has a
-  // baseline that is genuinely `stale` — a no-op, don't refetch. For one with
-  // NO baseline there is nothing to be stale relative to, and `stale` is the
-  // one answer that does not refetch, so it would strand the client (#1474).
-  // Both the doc-comment below and `real-time.md` already say a fresh client
-  // is never stale; this is the branch that made that false.
+  // An empty frame carries nothing to apply: `stale` for a client with a
+  // baseline, `behind` for one without, which must fetch one.
   if (!versions.length)
     return { ok: false, reason: hasBaseline ? "stale" : "behind" };
 
@@ -74,11 +67,9 @@ export function applyPatchMessage<S extends BroadcastState>(
   const maxV = versions[versions.length - 1];
 
   // Overlay frame: a version-neutral update (presence, computed field) at the
-  // current version. Handled EXHAUSTIVELY here — an overlay must never reach
-  // the contiguous fold below, which would apply its payload as if it were
-  // that version's domain patch. At exactly `cachedV + 1` that fold made the
-  // client adopt presence data as version N, stamp itself caught up, and
-  // never refetch — the real update for N lost permanently (#1419).
+  // current version. Handled entirely here: the contiguous fold below would
+  // apply its payload as that version's domain patch, and a client at
+  // `cachedV + 1` would stamp itself caught up and never get the real one.
   if (msg._overlay) {
     // No baseline to merge onto: the client must fetch one.
     if (!cached) return { ok: false, reason: "behind" };

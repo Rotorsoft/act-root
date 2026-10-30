@@ -12,13 +12,13 @@
  * Pair with `IdempotencyStore.claim` from
  * `@rotorsoft/act-ops/idempotency`: extract the key from the inbound
  * request, claim it on the store, return a `deduped` marker when the
- * claim fails. The framework-agnostic middleware that wires these
- * together lands in #744.
+ * claim fails. The receiver subpaths' `webhookMiddleware` wires these
+ * together.
  *
  * Validation beyond "is there a usable key?" (length bounds, format
  * checks, normalization) is intentionally out of scope. Receivers
- * picking a policy can layer it on top — or, when #744 ships, opt
- * into the middleware's opinionated defaults.
+ * picking a policy can layer it on top, or use the middleware's
+ * defaults.
  */
 export function extractIdempotencyKey(
   headers: Record<string, string | string[] | undefined>

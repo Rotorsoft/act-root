@@ -43,7 +43,7 @@ export function track_in_flight(store: IdempotencyStore): InFlightTracker {
   // One tracker per store, shared by every generator and receiver built on
   // it: a duplicate arriving through one generator while the original runs
   // in another must still read as in flight, which separate counts can't
-  // see (#1782).
+  // see.
   let tracker = trackers.get(store);
   if (!tracker) {
     tracker = make_tracker(store);
