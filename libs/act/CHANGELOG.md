@@ -1,3 +1,11 @@
+# [@rotorsoft/act-v1.35.2](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.35.1...@rotorsoft/act-v1.35.2) (2026-10-30)
+
+
+### Bug Fixes
+
+* **act,act-http:** reattach detached docs, a test that can't fail, and the patch_fn leftover ([#2203](https://github.com/Rotorsoft/act-root/issues/2203)) ([01f9b0f](https://github.com/Rotorsoft/act-root/commit/01f9b0f421ac99a9e1f123def7c0b5bc237c7722)), closes [#2195](https://github.com/Rotorsoft/act-root/issues/2195) [#2196](https://github.com/Rotorsoft/act-root/issues/2196)
+* **act:** guard every commit with the version it loaded, reactions and new streams included ([#2201](https://github.com/Rotorsoft/act-root/issues/2201)) ([781a4bf](https://github.com/Rotorsoft/act-root/commit/781a4bf3bba3680c9a3bbeb8098bce545746e387)), closes [#2191](https://github.com/Rotorsoft/act-root/issues/2191) [#2192](https://github.com/Rotorsoft/act-root/issues/2192)
+
 # [@rotorsoft/act-v1.35.1](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.35.0...@rotorsoft/act-v1.35.1) (2026-10-29)
 
 
