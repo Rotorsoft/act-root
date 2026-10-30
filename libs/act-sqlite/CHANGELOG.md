@@ -1,3 +1,10 @@
+# [@rotorsoft/act-sqlite-v1.22.3](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-sqlite-v1.22.2...@rotorsoft/act-sqlite-v1.22.3) (2026-10-30)
+
+
+### Bug Fixes
+
+* **act-pg,act-sqlite:** wrap recovery-write driver errors in StoreError ([#2202](https://github.com/Rotorsoft/act-root/issues/2202)) ([ddf6c69](https://github.com/Rotorsoft/act-root/commit/ddf6c69e7cc3147daf3717108a9ff875734c939d)), closes [#2194](https://github.com/Rotorsoft/act-root/issues/2194)
+
 # [@rotorsoft/act-sqlite-v1.22.2](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-sqlite-v1.22.1...@rotorsoft/act-sqlite-v1.22.2) (2026-10-26)
 
 
