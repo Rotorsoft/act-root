@@ -668,9 +668,11 @@ export class Act<
         payload,
         do_options
       );
-      // A local commit runs its reactions the way a remote one does
-      // (`action()` snapshots always carry their event).
-      this._wake(snapshots.map((s) => (s.event as { name: string }).name));
+      // An action that emits nothing returns the loaded snapshot, which has
+      // no `patch`: nothing committed, so nothing to wake or announce.
+      if (!snapshots[0].patch) return snapshots;
+      // A local commit runs its reactions the way a remote one does.
+      this._wake(snapshots.map((s) => s.event!.name as string));
       this.emit("committed", snapshots);
       return snapshots;
     });

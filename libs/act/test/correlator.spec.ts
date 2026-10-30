@@ -92,6 +92,22 @@ describe("Act integration", () => {
     expect(events[0]?.meta.correlation).toBe("custom:Counter:increment:s2");
   });
 
+  it("keeps the app's correlator when a call passes correlator: undefined", async () => {
+    const app = act()
+      .withState(counter)
+      .build({ correlator: () => "app" });
+    await app.do(
+      "increment",
+      { stream: "s5", actor },
+      {},
+      {
+        correlator: undefined,
+      }
+    );
+    const events = await app.query_array({ stream: "s5" });
+    expect(events[0]?.meta.correlation).toBe("app");
+  });
+
   it("preserves correlation across the reaction chain", async () => {
     let seen: string | undefined;
     const captured = vi.fn().mockImplementation(async (event) => {

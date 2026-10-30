@@ -125,7 +125,7 @@ An action runs only when its **preconditions** hold, and the state it leaves beh
 1. **The payload** against the action's schema (`ValidationError`).
 2. **The state loads.**
 3. **The preconditions** (`.requires`): rules the state, the actor and the payload must meet (`PreconditionError`).
-4. The handler decides the events; each is checked against its schema (`ValidationError`).
+4. The handler decides the events; each is checked against its schema (`ValidationError`). A handler that returns no events ends the action here: it returns the loaded snapshot, and nothing commits, no `committed` event fires and no reaction wakes.
 5. **One fold, before the commit:** the events fold into the new state, and that state is checked once against the state's schema, its invariants (`ValidationError`).
 6. The events commit, with optimistic concurrency on the stream, and the returned snapshots carry the stored rows.
 

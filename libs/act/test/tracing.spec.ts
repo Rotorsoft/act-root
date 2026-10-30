@@ -192,6 +192,21 @@ describe("tracing", () => {
       expect(commitCalls).toHaveLength(0);
     });
 
+    it("withActionTrace skips commit log when nothing emitted on a stream with history", async () => {
+      const { action } = build_es(withLevel("trace"));
+      await action(Counter, "increment", target("s3"), { by: 1 });
+      // Cold, so the loaded snapshot carries the stored event.
+      await cache().clear();
+      traceSpy.mockClear();
+      const [loaded] = await action(Counter, "noop", target("s3"), {});
+      expect(loaded.event?.name).toBe("Incremented");
+      const commitCalls = traceSpy.mock.calls.filter(
+        (c: [unknown, unknown]) =>
+          typeof c[1] === "string" && c[1].includes("s3.Incremented")
+      );
+      expect(commitCalls).toHaveLength(0);
+    });
+
     it("withSnapTrace logs stream and version", async () => {
       const [snapshot] = await es.action(Counter, "increment", target("s3"), {
         by: 1,

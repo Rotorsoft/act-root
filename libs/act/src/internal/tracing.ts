@@ -167,12 +167,8 @@ export function build_es(
   correlator: Correlator = default_correlator,
   patch_fn: PatchFn = es.bare_patch
 ): EsOps {
-  // Bake the orchestrator-level `correlator` into every `action()` call
-  // so EsOps callers don't need to thread it. A per-call
-  // `options.correlator` still wins — the orchestrator default fills in
-  // only when the caller didn't supply one.
-  // The `Act` constructor's patch step is baked into load and action, so
-  // close-cycle callers get it without threading it.
+  // The app's correlator and patch step are baked into load and action, so
+  // callers don't thread them; a per-call correlator wins when it is set.
   const bound_action: EsOps["action"] = (
     me,
     action_name,
@@ -185,7 +181,7 @@ export function build_es(
       action_name,
       target,
       payload,
-      { correlator, ...options },
+      { ...options, correlator: options?.correlator ?? correlator },
       patch_fn
     );
   const bound_load: EsOps["load"] = (me, target, callback) =>
@@ -226,17 +222,16 @@ export function build_es(
     action: traced(
       bound_action,
       (snapshots, _me, _action, target) => {
-        const committed = snapshots.filter((s) => s.event);
-        if (committed.length) {
+        // A loaded snapshot (the action emitted nothing) has no `patch`.
+        if (snapshots[0].patch)
           logger.trace(
-            committed.map((s) => s.event!.data),
+            snapshots.map((s) => s.event!.data),
             es_caption(
               "committed",
               C_ORANGE,
-              `${target.stream}.${committed.map((s) => s.event!.name).join(", ")}`
+              `${target.stream}.${snapshots.map((s) => s.event!.name).join(", ")}`
             )
           );
-        }
       },
       (_me, action, target, payload) => {
         logger.trace(
