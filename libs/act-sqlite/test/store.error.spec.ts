@@ -297,30 +297,35 @@ describe("SqliteStore error paths", () => {
     expect(client._tx.rollback).toHaveBeenCalled();
   });
 
-  it("reset: rolls back and rethrows on UPDATE failure", async () => {
-    const client = mockClientFailOn("UPDATE streams SET at = -1");
-    (db as unknown as { client: unknown }).client = client;
-    await expect(db.reset(["x"])).rejects.toThrow(/UPDATE streams SET at = -1/);
-    expect(client._tx.rollback).toHaveBeenCalled();
-  });
-
-  it("unblock: rolls back and rethrows on UPDATE failure (array form)", async () => {
-    const client = mockClientFailOn("UPDATE streams SET retry = -1");
-    (db as unknown as { client: unknown }).client = client;
-    await expect(db.unblock(["x"])).rejects.toThrow(
-      /UPDATE streams SET retry = -1/
-    );
-    expect(client._tx.rollback).toHaveBeenCalled();
-  });
-
-  it("unblock: rolls back and rethrows on UPDATE failure (filter form)", async () => {
-    const client = mockClientFailOn("UPDATE streams SET retry = -1");
-    (db as unknown as { client: unknown }).client = client;
-    await expect(db.unblock({ stream: "^x-" })).rejects.toThrow(
-      /UPDATE streams SET retry = -1/
-    );
-    expect(client._tx.rollback).toHaveBeenCalled();
-  });
+  it.each([
+    ["reset", "UPDATE streams SET at = -1", (d: SqliteStore) => d.reset(["x"])],
+    [
+      "unblock",
+      "UPDATE streams SET retry = -1",
+      (d: SqliteStore) => d.unblock(["x"]),
+    ],
+    [
+      "unblock",
+      "UPDATE streams SET retry = -1",
+      (d: SqliteStore) => d.unblock({ stream: "^x-" }),
+    ],
+    [
+      "prioritize",
+      "UPDATE streams SET priority",
+      (d: SqliteStore) => d.prioritize({ stream: "^x-" }, 1),
+    ],
+  ])(
+    "%s: rolls back and wraps UPDATE failure in StoreError",
+    async (operation, sql, call) => {
+      const client = mockClientFailOn(sql);
+      (db as unknown as { client: unknown }).client = client;
+      const error = await call(db).catch((e) => e);
+      expect(error).toBeInstanceOf(StoreError);
+      expect(error.operation).toBe(operation);
+      expect(String(error.cause)).toContain(sql);
+      expect(client._tx.rollback).toHaveBeenCalled();
+    }
+  );
 
   it("truncate: rolls back and surfaces a DELETE failure as a StoreError", async () => {
     const client = mockClientFailOn("DELETE FROM events");

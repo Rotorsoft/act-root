@@ -276,6 +276,22 @@ describe("PostgresStore", () => {
     });
   });
 
+  describe("recovery writes", () => {
+    it.each([
+      ["defer", (s: PostgresStore) => s.defer(["s"], Date.now())],
+      ["reset", (s: PostgresStore) => s.reset(["s"])],
+      ["unblock", (s: PostgresStore) => s.unblock({ stream: "^s" })],
+      ["prioritize", (s: PostgresStore) => s.prioritize({ stream: "^s" }, 1)],
+    ])("%s wraps a DB error in StoreError", async (operation, call) => {
+      const cause = new Error(`${operation} error`);
+      vi.spyOn(pg.Pool.prototype, "query").mockRejectedValue(cause);
+      const error = await call(store).catch((e) => e);
+      expect(error).toBeInstanceOf(StoreError);
+      expect(error.operation).toBe(operation);
+      expect(error.cause).toBe(cause);
+    });
+  });
+
   describe("notify", () => {
     // The notify subscription is opt-in via `notify: true` in the
     // store config — without it, `store.notify` is undefined and the

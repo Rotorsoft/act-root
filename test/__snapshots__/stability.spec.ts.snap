@@ -13790,7 +13790,8 @@ export declare class PostgresStore implements Store {
     defer(input: string[] | StreamFilter, deferred_at: number): Promise<number>;
     /**
      * \`UPDATE ... <set>\` on the selected streams. \`set\`/\`where\` use \`$1..$n\`
-     * for \`params\`; the selection's parameters are numbered after them.
+     * for \`params\`; the selection's parameters are numbered after them. A
+     * failure throws a {@link StoreError} naming the operation.
      */
     private _update;
     /** A \`WHERE\` fragment (without the keyword); \`true\` for an empty filter. */
@@ -14087,7 +14088,7 @@ export declare class SqliteStore implements Store {
     defer(input: string[] | StreamFilter, deferred_at: number): Promise<number>;
     /**
      * Runs \`UPDATE streams <set>\` on the streams named by \`input\`, in one
-     * write transaction that rolls back on failure. An explicit list is
+     * write transaction (\`_tx\`) that rolls back on failure. An explicit list is
      * de-duplicated, so a repeated name counts once (matching PG's set-based
      * \`stream = ANY(...)\`), and updated one name per statement, so a long list
      * never meets SQLite's bound-parameter limit. \`set\` and \`where\` bind
