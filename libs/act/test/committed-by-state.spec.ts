@@ -49,9 +49,7 @@ describe("a committed listener scoped to one state", () => {
     expect(every).toHaveBeenCalledTimes(2);
   });
 
-  test("off removes it, and an action that commits nothing announces nothing", async ({
-    app,
-  }) => {
+  test("off removes it, by State and by name", async ({ app }) => {
     const listener = vi.fn();
     app.on("committed", Counter, listener);
     app.off("committed", Counter, listener);
