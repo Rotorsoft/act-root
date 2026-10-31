@@ -1,33 +1,14 @@
 /**
- * Root vitest config. Test imports of the published `@rotorsoft/*` packages
- * resolve to **source** (not each package's built `dist/`) via
- * `resolve.alias` — the vitest-recommended way to wire workspace deps to
- * source (vitest-dev/vitest#5517). New in-tree packages become
- * test-resolvable as soon as they land in the map — no `pnpm build`
- * bootstrap dance.
+ * Root vitest config. Imports of `@rotorsoft/*` resolve to source, not
+ * `dist/`, through `resolve.alias`, derived from the `paths` in
+ * `tsconfig.workspace.json` (which `pnpm paths:sync` generates from each
+ * package's `exports`), so tsc and vitest resolve the same way. An alias
+ * wins over `exports`; native tsconfig paths don't, and would load a
+ * subpath from `dist` beside the bare package from `src`: two copies of
+ * the framework, and "failed to find the current suite".
  *
- * Why `resolve.alias` and not the native `resolve.tsconfigPaths` option:
- * native tsconfig-paths *respects* each package's `exports` map, so subpath
- * imports of an `exports`-bearing package (e.g. `@rotorsoft/act-http/hono`)
- * resolve to `dist` while the bare package resolves to `src` — two copies
- * of the framework load and vitest fails with "failed to find the current
- * suite" (a dual-package hazard, vitest-dev/vitest#7465). `resolve.alias`
- * takes precedence over `exports`, forcing uniform src resolution.
- *
- * The alias map is *derived* from the `paths` in `tsconfig.workspace.json` —
- * the single source of truth, also consumed by `tsc --noEmit` — so the
- * type-checker and the test runner can never drift. Those `paths` are
- * themselves generated from each package's `exports` map by
- * `scripts/derive-tsconfig-paths.mjs` (`pnpm paths:sync`; CI runs
- * `pnpm paths:check`), so a new subpath export propagates here for free. That map also carries
- * the private `@act/*` namespace (the in-repo example apps — calculator /
- * server / client, not a published scope); no test imports those, but they
- * ride along so one map serves both tools.
- *
- * Vitest 4 found this config from a sub-package cwd; vitest 5 does not
- * (#1652), so each package that runs vitest re-exports it from a local
- * `vitest.config.ts`. Without it a package run loses `globals` and these
- * aliases — the latter silently, by testing a stale `dist/`.
+ * Vitest 5 doesn't find this file from a package directory, so each
+ * package that runs vitest re-exports it from its own `vitest.config.ts`.
  */
 
 import { createHash } from "node:crypto";
@@ -37,10 +18,8 @@ import { configDefaults, defineConfig } from "vitest/config";
 
 const root = import.meta.dirname;
 
-// Derive vite aliases from the tsconfig path map. Each key becomes an
-// anchored regex (so `@rotorsoft/act` doesn't prefix-match `@rotorsoft/act/x`)
-// with `*` → a capture group; exact keys are ordered before wildcard keys so
-// the specific mappings win.
+// Each key becomes an anchored regex (so `@rotorsoft/act` doesn't match
+// `@rotorsoft/act/x`), and exact keys come before wildcards so they win.
 const { compilerOptions } = JSON.parse(
   readFileSync(resolve(root, "tsconfig.workspace.json"), "utf8")
 ) as { compilerOptions: { paths?: Record<string, string[]> } };
@@ -64,59 +43,29 @@ export default defineConfig({
   resolve: { alias },
   test: {
     globals: true,
-    // Agent worktrees under .claude/worktrees hold full checkouts of the
-    // repo; without this exclude, a bare `vitest run` discovers their
-    // spec copies too — duplicated suites and contention on shared
-    // resources (the docker postgres) make runs fail spuriously.
-    //
-    // The stability spec reads `dist/`, so it runs after a build through
-    // `pnpm check:stability` (vitest.stability.config.ts), not here.
+    // Agent worktrees under .claude hold full copies of the specs. The
+    // stability spec reads `dist/`, so `pnpm check:stability` runs it.
     exclude: [
       ...configDefaults.exclude,
       "**/.claude/**",
       "test/stability.spec.ts",
     ],
-    // picocolors enables color emission when `CI` is set in env, which
-    // wraps act-diagram CLI output in ANSI escapes and breaks
-    // plain-text `toContain` assertions in format.spec/repl.spec. Force
-    // picocolors off in tests so output is deterministic across local
-    // and CI runs; `colors.spec.ts` mocks picocolors directly and is
-    // unaffected.
+    // picocolors colors output when `CI` is set, which breaks the plain-text
+    // assertions on act-diagram's CLI output.
     env: {
       NO_COLOR: "1",
       FORCE_COLOR: "0",
-      // Namespaces every Postgres schema the adapter suites create, to the
-      // checkout they were run from (#1589).
-      //
-      // The `.claude/**` exclude above stops ONE `vitest run` from also
-      // discovering a worktree's copy of the specs. It cannot help when two
-      // vitest processes run concurrently in different worktrees, which is
-      // the normal shape of parallel agent work: both target the docker
-      // Postgres on 5431, both use the same hardcoded schema names, and both
-      // `drop()`/`seed()` in `beforeAll` — so they delete each other's tables
-      // mid-run. Measured on an unmodified tree: 110 failures against a
-      // sibling, and a full run swinging between 135 and 322 on identical
-      // code. Results that vary with what else is running are not evidence.
-      //
-      // Derived from the config's own directory, so it is stable across runs
-      // of one checkout (schemas are reused, not accumulated per run) and
-      // necessarily different between worktrees. No configuration, nothing to
-      // remember, and CI — one checkout per job — is unaffected.
-      //
-      // Six hex characters, not more: the NOTIFY channel is
-      // `act_commit_<schema>_<table>` and Postgres caps identifiers at 63
-      // bytes, a budget the notify suites already spend most of. A collision
-      // between two worktrees is merely the status quo this fixes, so the
-      // width is chosen against the cap rather than against birthday odds.
+      // Gives each checkout its own Postgres schemas, so two worktrees
+      // testing at once against the docker Postgres don't drop each other's
+      // tables. Six hex characters, because the NOTIFY channel name
+      // `act_commit_<schema>_<table>` must fit Postgres's 63-byte limit.
       ACT_TEST_SCHEMA_SUFFIX: createHash("sha256")
         .update(root)
         .digest("hex")
         .slice(0, 6),
     },
-    // Expose `globalThis.gc` to workers so the retention guarantee in
-    // `disposers.spec.ts` is enforced rather than skipped (#1441). A claim
-    // about releasing memory can only be checked by actually collecting;
-    // without this flag the case silently opts out on every run.
+    // `globalThis.gc`, so `disposers.spec.ts` can check that memory is
+    // released instead of skipping the case.
     execArgv: ["--expose-gc"],
     coverage: {
       provider: "v8",
@@ -137,8 +86,7 @@ export default defineConfig({
         "libs/act-diagram/src/index.ts",
         "libs/act-diagram/src/vite-env.d.ts",
       ],
-      // 100% on every metric is the merge gate (CLAUDE.md); the enforced
-      // thresholds must match the stated policy (#1112).
+      // 100% on every metric is the merge gate.
       thresholds: {
         branches: 100,
         functions: 100,

@@ -2,23 +2,12 @@
 /**
  * Browser-safety check for the entry points client code imports.
  *
- * Some published subpaths are imported from a browser: `@rotorsoft/act-http/sse`
- * carries `applyPatchMessage` and the SSE wire types, and the real-time guide
- * tells readers to import them in client code. That same subpath also exports
- * the server-side `BroadcastChannel`, and a barrel has no way to hand out one
- * half without loading the other.
- *
- * So a single static `import { log } from "@rotorsoft/act"` in the server half
- * is enough to pull the framework — and Node's `AsyncLocalStorage`, which it
- * constructs at module scope — into every browser bundle that touches the
- * subpath. That shipped for ten days before anyone ran the demo client
- * (#1423 added the import; nothing in CI builds a browser bundle).
- *
- * This walks the import graph of each entry below, following `@rotorsoft/*`
- * packages into their own builds, and fails on any `node:` builtin or bare
- * Node module. It follows `import("literal")` too: a bundler builds that as a
- * separate chunk, and the build fails there even though the browser never
- * runs it.
+ * Some published subpaths are imported from a browser (`@rotorsoft/act-http/sse`
+ * for `applyPatchMessage`), and one static import of `@rotorsoft/act` in the
+ * same barrel pulls Node's `AsyncLocalStorage` into every client bundle.
+ * This walks each entry's import graph, `@rotorsoft/*` builds and
+ * `import("literal")` chunks included, and fails on any `node:` builtin or
+ * bare Node module.
  *
  * Runs against `dist/`, so `pnpm build` must come first.
  *

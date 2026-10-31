@@ -1,18 +1,13 @@
 #!/usr/bin/env node
 /**
- * Doc-snippet type-checker (issue #1033).
+ * Doc-snippet type-checker. Copies every fenced ` ```ts ` / ` ```typescript `
+ * block out of `docs/docs/**\/*.{md,mdx}` into the gitignored
+ * `docs/.snippets/` and type-checks them against the live `@rotorsoft/act`
+ * source through `tsconfig.snippets.json`, so shown code can't drift from
+ * the API.
  *
- * Tangles every fenced ` ```ts ` / ` ```typescript ` block out of
- * `docs/docs/**\/*.{md,mdx}` into a gitignored temp dir (`docs/.snippets/`)
- * and type-checks the lot against the live `@rotorsoft/act` source via
- * `tsconfig.snippets.json`. This generalises the single-file
- * `docs/src/snippets/quickstart.ts` check (#966/#1019) to every inline
- * snippet, so shown code can't silently drift from the framework API.
- *
- * Opt-out convention: a block whose info string carries one of the skip
- * markers is copied to the page but NOT extracted for compilation. Use it
- * for intentionally-partial fragments (pseudo-code, `...` elisions,
- * shell-in-ts, deliberately-wrong "don't do this" examples):
+ * A block whose info string carries a skip marker isn't compiled. Use it for
+ * fragments (pseudo-code, `...` elisions, "don't do this" examples):
  *
  *     ```ts no-check
  *     // a partial fragment that isn't meant to compile on its own
@@ -92,10 +87,7 @@ async function main() {
   if (!list_only) {
     await rm(OUT_DIR, { recursive: true, force: true });
     await mkdir(OUT_DIR, { recursive: true });
-    // Mark the temp dir as ESM so `module: nodenext` treats each snippet as
-    // an ES module — mirroring the root `"type": "module"` the rest of the
-    // codebase (and docs/src/snippets/quickstart.ts) compiles under. Without
-    // this, snippets resolve as CommonJS and top-level `await` is rejected.
+    // ESM, as the rest of the repo, so top-level `await` compiles.
     await writeFile(join(OUT_DIR, "package.json"), `{ "type": "module" }\n`);
   }
 
@@ -111,9 +103,8 @@ async function main() {
       const name = `${stem_for(rel)}__${block.index}.ts`;
       plan.push({ rel, index: block.index, name });
       if (!list_only) {
-        // Header maps tsc diagnostics back to the source page; trailing
-        // `export {}` forces module scope so same-named consts in
-        // different snippets can't collide in a shared global namespace.
+        // The header names the source page; `export {}` keeps each snippet's
+        // names in its own module.
         const header = `// source: docs/${rel} (block #${block.index})\n`;
         await writeFile(
           join(OUT_DIR, name),
@@ -176,10 +167,8 @@ function run_tsc() {
 }
 
 /**
- * Negative test: drop a deliberately-broken snippet into the harness and
- * confirm the type-check rejects it. Guards against the harness silently
- * passing everything (wrong tsconfig, swallowed exit code, etc.). Run in
- * CI right after the real gate.
+ * Negative test: a broken snippet must fail, or the harness is passing
+ * everything (a wrong tsconfig, a swallowed exit code).
  */
 async function self_test() {
   await main(); // populate OUT_DIR + package.json the normal way

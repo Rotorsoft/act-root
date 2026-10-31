@@ -1,21 +1,6 @@
-//
-// Per-package vitest config (ACT-1131).
-//
-// Workspace `vitest run --coverage` from the repo root uses the root
-// `vite.config.ts`, which excludes `packages` from coverage scope — the
-// workspace gate tracks `libs/` only.
-//
-// This per-package config exists for the local AC gate. When an operator
-// runs `pnpm -F @rotorsoft/act-inspector test`, coverage is scoped to
-// the inspector's own server code under `src/server/`.
-//
-// We don't `mergeConfig` with the root here — that would inherit the
-// root's `exclude: ["packages/**", …]` and silently zero out coverage
-// on this package. Instead, copy the workspace's path aliases and env
-// (so `@rotorsoft/act` resolves to source, and tests run with the same
-// color-disabled setup as the rest of the suite) and define the
-// coverage block fresh.
-//
+// The root config leaves `packages/` out of coverage, so this one scopes
+// coverage to the inspector's server code. It borrows the root's aliases and
+// env instead of merging it, because a merge would inherit that exclude.
 import base from "../../vite.config.js";
 
 export default {
