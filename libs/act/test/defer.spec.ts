@@ -34,6 +34,7 @@ const counter = state({ Counter: z.object({ count: z.number() }) })
 const actor = { id: "a", name: "a" };
 
 afterEach(async () => {
+  vi.useRealTimers();
   vi.restoreAllMocks();
   await dispose()();
 });
@@ -212,6 +213,8 @@ describe("declarative .defer(when)", () => {
 
 describe("imperative DeferSignal(when)", () => {
   it("{ at: Date } holds until the due-time, then acts", async () => {
+    // Only `Date` is faked, so "before the due-time" holds on a slow runner.
+    vi.useFakeTimers({ toFake: ["Date"] });
     let attempts = 0;
     const until = Date.now() + 120;
     const app = act()
@@ -231,6 +234,7 @@ describe("imperative DeferSignal(when)", () => {
     expect(attempts).toBe(1);
     expect(first.acked.length).toBe(0); // deferred, not acked
 
+    vi.setSystemTime(until + 1);
     await vi.waitFor(() => {
       expect(attempts).toBe(2);
       expect(acked).toContain("at1");
@@ -238,6 +242,7 @@ describe("imperative DeferSignal(when)", () => {
   });
 
   it("{ at: Date } derived from the event in the handler", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
     let attempts = 0;
     const app = act()
       .withState(counter)
@@ -256,6 +261,7 @@ describe("imperative DeferSignal(when)", () => {
     await app.drain();
     expect(attempts).toBe(1);
 
+    vi.setSystemTime(Date.now() + 101);
     await vi.waitFor(() => {
       expect(attempts).toBe(2);
       expect(acked).toContain("atfn1");
@@ -561,6 +567,7 @@ describe("defer outcome (integration)", () => {
   it("re-runs a sibling that shares the deferred reaction's target, but not an isolated one", async () => {
     // Documented in state-management.md § Isolating a defer with `.to`:
     // a group is delivered again when its deferred member comes due.
+    vi.useFakeTimers({ toFake: ["Date"] });
     async function welcomes(isolate: boolean) {
       let welcomed = 0;
       const deferred = act()
@@ -570,7 +577,7 @@ describe("defer outcome (integration)", () => {
           welcomed++;
         })
         .on("ticked")
-        .defer((e) => ({ at: new Date(e.created.getTime() + 60) }))
+        .defer((e) => ({ at: new Date(e.created.getTime() + 60_000) }))
         .do(async function later() {});
       const app = (
         isolate
@@ -578,10 +585,12 @@ describe("defer outcome (integration)", () => {
           : deferred
       ).build({ autoSettle: false });
       await app.do("tick", { stream: isolate ? "iso" : "shared", actor }, {});
-      for (let i = 0; i < 4; i++) {
+      await app.correlate();
+      await app.drain(); // welcome runs, later parks for a minute
+      vi.setSystemTime(Date.now() + 60_001);
+      for (let i = 0; i < 2; i++) {
         await app.correlate();
         await app.drain();
-        await sleep(50);
       }
       await dispose()();
       return welcomed;
@@ -593,6 +602,7 @@ describe("defer outcome (integration)", () => {
   it("groups streams sharing one due-time into a single defer call", async () => {
     // A fixed due-time shared by both streams so the cycle's persist loop
     // groups them under one key (exercises the same-due-time branch).
+    vi.useFakeTimers({ toFake: ["Date"] });
     const until = Date.now() + 120;
     const seen = new Set<string>();
     const deferring = async (_e: unknown, stream: string) => {
@@ -620,6 +630,7 @@ describe("defer outcome (integration)", () => {
     expect(first.acked.length).toBe(0);
 
     // After the due-time the wake redelivers both and they are acked.
+    vi.setSystemTime(until + 1);
     await vi.waitFor(() => {
       expect(acked.has("g1") && acked.has("g2")).toBe(true);
     });
