@@ -61,9 +61,9 @@ One term per thing, the same in the builder, the types, the store, the tools and
 ### `Store` port (breaking for adapters; 2.0)
 
 - `Message` gains `tags?: Readonly<Record<string, string>>`; `Committed` gains `tags`, always present (`{}` when none).
-- `Query` gains `tags?: Readonly<Record<string, string>>`: match events that carry every given tag. It combines with `names`, so a query is "these event names, with all these tags", one DCB query item. Several items (DCB's OR) are an array: `Query.any?: readonly TagQuery[]`. Open question 3.
-- `commit(stream, msgs, meta, expectedVersion?, condition?)` gains `condition?: { query: TagQuery | TagQuery[]; after: number }`. The commit fails with `ConcurrencyError` if any stored event matching `query` has an id greater than `after`. The stream's own `expectedVersion` check is unchanged and runs too. Both checks and the append are one atomic step.
-- Every adapter stores tags and indexes them for this query. The TCK gets a `condition` block: refusal on a match after `after`, no refusal at or before it, AND within an item, OR across items, a conditional append racing another in a second connection (exactly one wins), and tags round-tripping on `query`.
+- `Query` gains `tags?: Readonly<Record<string, string>>`: match events that carry every given tag. It combines with `names`, so a query is "these event names, with all these tags": one DCB query item. Act uses one item per query; a rule that needs two is two views on one action.
+- `commit(stream, msgs, meta, expectedVersion?, condition?)` gains `condition?: { queries: readonly TagQuery[]; after: number }`, one `TagQuery` (`{ names, tags }`) per view on the action. The commit fails with `ConcurrencyError` if any stored event matching `query` has an id greater than `after`. The stream's own `expectedVersion` check is unchanged and runs too. Both checks and the append are one atomic step.
+- Every adapter stores tags and indexes them for this query. The TCK gets a `condition` block: refusal on a match after `after`, no refusal at or before it, every tag of a query must match, any query of a condition refuses, a conditional append racing another in a second connection (exactly one wins), and tags round-tripping on `query`.
 
 ### Builders (additive)
 
@@ -83,8 +83,13 @@ One term per thing, the same in the builder, the types, the store, the tools and
   .emit((p) => ["Enrolled", p])
   ```
   Each view folds the matching events across all streams. Preconditions get the views as a fourth argument and the `.emit` handler gets them on its second argument (`{ state, views }`). The commit carries the views' condition with `after` set to the last event id read. A lost race throws `ConcurrencyError`, which the action's existing `maxRetries` loop retries with fresh views. The action still commits to its own stream.
-- **`.unique(field)`** on `state(...)`: no two streams of this state hold the same value in `field`. It compiles to: a hidden tag on each event whose fold sets the field (a claim of the new value) or moves it off a value (a release of the old one); a view on every action of the state; and a precondition `"<State>.<field> is unique"`.
-- **`.limits(field, max)`** on `state(...)`: at most `max` streams of this state hold the same value in `field`. `max` is a number or `(value) => number`. `.unique(f)` is `.limits(f, 1)` with its own name and message.
+- **`.unique(field, options?)`** on `state(...)`: no two streams of this state hold the same value in `field`. It compiles to: a hidden tag on each event whose fold sets the field (a claim of the new value) or moves it off a value (a release of the old one); a view on every action of the state; and a precondition `"<State>.<field> is unique"`.
+- **`.limits(field, max, options?)`** on `state(...)`: at most `max` streams of this state hold the same value in `field`. `max` is a number or `(value) => number`. `.unique(f)` is `.limits(f, 1)` with its own name and message.
+- **`ClaimOptions`** (both terms): `{ onForget?: "release" | "keep" }`. `forget(stream)` either frees the stream's claimed values (`"release"`, the default) or leaves them claimed, so an erased account's email still can't be reused (`"keep"`, for fraud and audit rules). With `"keep"`, the claim survives as a keyed hash, never as plaintext (open question 1).
+
+### Why a view feeds the preconditions
+
+Every DCB implementation reads the events a query matches, folds them into a small decision model, decides, and appends with the condition. Marten builds that model as a small aggregate from a tag query (`FetchForWritingByTags`) and the handler checks it; Axon Framework 5 hands the handler an entity loaded by tag criteria. In both, the check is code inside the handler. Act's view is the same decision model; the difference is Act's own convention (RFC 2086): a rule that refuses an action is a named precondition, so the CLI, the diagram and the flow player can show it. The handler gets the views too, for code that only needs the data.
 
 ### Lifecycle events, `IAct`
 
@@ -97,7 +102,7 @@ The simplify runs keep finding bugs where two features meet by special case. Eac
 - **The decider rule (one fold before the commit).** Views are folded with the stream's own fold, before the store assigns ids. Claims and releases come from that fold's old and new values of the field, so they never read store-assigned values.
 - **Cache and snapshots.** A view is not cached in the first release; it's re-read for each action. An index makes that a small read, and a bench on act-pg and act-sqlite must show it. A stream's own snapshot is unchanged.
 - **Close-the-books, windowed close and archives.** Claims are derived from state, so any event that stores state carries the state's claim tags: a `.snap()` snapshot, a restart's seed and a close tombstone. A windowed prune or an archive that deletes the claiming event therefore keeps the claim. Closing a stream without `restart` releases its claims.
-- **`forget` and sensitive fields.** `tag(sensitive(...))` and `.unique` on a sensitive field would put the plaintext into a tag index that `forget` can't reach. The first release refuses both at build. They ship with the keyed hash in open question 1.
+- **`forget` and sensitive fields.** `tag(sensitive(...))` and `.unique` on a sensitive field would put the plaintext into a tag index that `forget` can't reach, so the first release refuses both at build. They ship with the keyed hash (open question 1). `forget` releases or keeps the stream's claims as its `onForget` option says.
 - **Reactions, lanes, priority, defer.** Tags don't change routing, leases or lanes. A reaction's `app.do` runs the same check, and a lost race reaches the reaction's retry and backoff as it does today (interaction register: "action retry, reaction retry").
 - **Partial states.** `.unique` and `.limits` declared in any partial survive the merge, as other state policies do (contract row 269). Two partials declaring different limits on one field throw at build.
 - **Scoped Acts and split stores.** A condition is checked inside one store, so uniqueness holds per store. The split-stores recipe says so.
@@ -120,8 +125,12 @@ The simplify runs keep finding bugs where two features meet by special case. Eac
 
 ## Open questions
 
-1. **Sensitive tags.** A keyed hash (HMAC with a key the operator provides, like act-crypto's keys) makes an email unique without storing it. What does `forget` do to the hash: keep it (the value stays claimed), or drop it (the value is free again)?
-2. **Names.** `.limits(field, max)` or `.capacity(field, max)`; `.reads(...)` or `.sees(...)`; `tag(...)` or `tagged(...)`.
-3. **Several query items.** Does a view ever need DCB's OR of items, or is one `where` plus `events` per view enough, with several views on one action?
-4. **Caching views.** Is a view cache worth its invalidation rules once the benches are in?
-5. **Release on close.** Should a stream closed without `restart` keep its claims, so a closed account's email can't be reused?
+1. **The key for sensitive tags.** A keyed hash (HMAC) makes an email unique without storing it. Where does the key come from (an `ActOptions` field, or act-crypto's key provider), and how is it rotated without freeing every claim?
+2. **Caching views.** None in the first release. A view is re-read for each action through an index; a cache would still read the store to catch up with other processes, hold one entry per value, and be a second owner of the same facts. Add a catch-up cache only if #2254's benches show a slow view (a large capacity count is the likely case).
+3. **Release on close.** Should a stream closed without `restart` free its claims or keep them? Proposed: both, as `onClose?: "release" | "keep"` beside `onForget`, defaulting to `"release"`.
+
+## Decided
+
+- `forget` offers both behaviors, per declaration (`onForget`), defaulting to `"release"`.
+- Names: `tag`, `.reads`, `.unique`, `.limits`.
+- One query item per query: a rule that needs two is two views on one action.
