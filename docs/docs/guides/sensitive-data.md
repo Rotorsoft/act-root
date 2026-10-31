@@ -84,6 +84,8 @@ Refinements chained **after** the call are fine too — `sensitive(z.string()).m
 
 The one place the marker is **not** followed is a field nested inside a `z.object` declared within the payload — only the event's own top-level keys are split. If you need PII in a nested object, lift it to a top-level key.
 
+**Declare sensitive fields as strings.** A caller who may not see a sensitive field reads `"[REDACTED]"` or `"[SHREDDED]"` in its place, and so does the state field of the same name. For a `string` field that fits its type. For a `sensitive(z.number())`, a date, an enum or an object it doesn't: the type says `number` and the value is a string. The first `build()` names each such field, event or state, in one warning (`Act has N sensitive field(s) whose type isn't a string: …`). It's advice, not a refusal: the app runs as before. To clear it, store the value as a string (an ISO date, a formatted amount) and parse it where it's read with the plaintext.
+
 ## Reading sensitive events — the auth-aware load
 
 `IAct.load` has two shapes that differ only in how they answer the question "is this caller allowed to see the plaintext?"
