@@ -8,24 +8,24 @@ Least recently run goes next. A lens with no accepted proposal in its last three
 
 | lens | last run | runs | accepted | status |
 |---|---|---|---|---|
-| Public surface | 2026-10-27 | 7 | 2 | active (no new surface; published doc comments still describe an action as needing an event and invariants as holding after it) |
-| Dead code (tool) | 2026-10-29 | 8 | 5 | active (the `patch_fn` plumbing #2180 left with one value; four doc blocks stacked above the wrong declaration) |
+| Public surface | 2026-10-30 | 8 | 2 | active (#2201 left `action()`'s doc and act-http's "undefined skips the check"; `ConcurrencyError`'s example hand-rolls the retry) |
+| Dead code (tool) | 2026-10-29 | 8 | 6 | active (the `patch_fn` plumbing #2180 left with one value; four doc blocks stacked above the wrong declaration) |
 | Hotspots (tool) | 2026-10-20 | 5 | 1 | retired 2026-10-20: two runs with no proposal; every branch in the hot functions (correlate, action, drain) is a separate rule |
-| File budget | 2026-10-27 | 8 | 1 | active (9 over 300 code lines; act.ts still seven concepts) |
-| Comment noise | 2026-10-29 | 8 | 6 | active (act-http 50% comments, 51 ticket refs; 85 ticket refs outside core) |
-| Concepts and options | 2026-10-27 | 8 | 3 | active (`validateFoldedState` refuses after the commit; `start_correlations({ limit: 0 })` reads 100) |
+| File budget | 2026-10-30 | 9 | 1 | active (9 over 300 code lines; event-sourcing.ts 473 → 504 with #2200's check) |
+| Comment noise | 2026-10-29 | 8 | 7 | active (act-http 50% comments, 51 ticket refs; 85 ticket refs outside core) |
+| Concepts and options | 2026-10-30 | 9 | 3 | active (action × reaction retries multiply, (N+1)(M+1); `reactingTo` now only builds meta) |
 | Core or decorator? | 2026-10-15 | 3 | 0 | retired 2026-10-15: three runs, findings only (PII, audit, breaker, lanes stay; priority is a major-version question) |
-| DRY across adapters and builders | 2026-10-29 | 8 | 9 | active (`check_invariants` copies `validate` and drifted; the SQL recovery writes wrap driver errors one of five ways) |
-| Reading path | 2026-10-27 | 7 | 3 | active (13 runtime files, ~33 names; `Query` still travels the internal correlate path for one field) |
+| DRY across adapters and builders | 2026-10-29 | 8 | 11 | active (`check_invariants` copies `validate` and drifted; the SQL recovery writes wrap driver errors one of five ways) |
+| Reading path | 2026-10-30 | 8 | 3 | active (13 files, ~33 names; `app.do` breaks on an action that emits nothing; the correlator default in three places) |
 | Newcomer test (quarterly) | 2026-10-17 | 2 | 0 | active (21 concepts, 3 imports; a package.json without name/version crashes) |
-| Tests by concept | 2026-10-29 | 8 | 10 | active (an awaited void `settle()` before a "no reaction ran" check; five tests #2180 left pinning nothing new) |
+| Tests by concept | 2026-10-29 | 8 | 12 | active (an awaited void `settle()` before a "no reaction ran" check; five tests #2180 left pinning nothing new) |
 | Mutation evidence (monthly, CI) | never | 0 | 0 | retired: setup removed (#1805), see baselines below |
 | Packages earn their place | 2026-10-15 | 4 | 0 | retired 2026-10-15: four runs, no proposal (removal is ruled out; act-tck churn is the snapshot, now P2026-10-15p-1) |
-| Infra | 2026-10-27 | 8 | 2 | active (three report-only conformance steps) |
-| One source of truth | 2026-10-27 | 8 | 8 | active (the scaffold skill's rules section twice, one copy teaching a `throw`) |
-| Examples | 2026-10-27 | 7 | 3 | active (the scaffold seed's fixed three correlate/drain rounds) |
-| Process | 2026-10-27 | 7 | 9 | active (PR template in 0 of 300 PR bodies; 17 shipped RFCs still `draft`) |
-| Feature interactions | 2026-10-29 | 8 | 11 | active (#2180's schema check refuses redacted state; reaction commits skip the guard the docs say leases replace) |
+| Infra | 2026-10-30 | 9 | 2 | active (per-package tsc red where the gate is green; Biome schema drift; 59 private JSDoc blocks in the published .d.ts) |
+| One source of truth | 2026-10-30 | 9 | 8 | active (configuration.md's stale copy of the state-check docs) |
+| Examples | 2026-10-30 | 8 | 3 | active (the close-the-books recipe can't run: `@act/wolfdesk` has no entry point) |
+| Process | 2026-10-30 | 8 | 9 | active (3 of 4 CI-CD reds in a week were the snapshot alone; release-check names a script no package has) |
+| Feature interactions | 2026-10-29 | 8 | 14 | active (#2180's schema check refuses redacted state; reaction commits skip the guard the docs say leases replace) |
 
 ## Interaction register
 
@@ -75,6 +75,10 @@ Where two features meet, and why. The Feature interactions lens reads this first
 | first commit, optimistic concurrency | `snapshot.version >= 0 ? … : undefined` leaves a new stream unguarded, so two racing creators both pass `.requires` | accidental | P2026-10-29-3 (probed) |
 | state check, payload check | `check_invariants` re-implements `validate` with `safeParse` and drops its wrap of non-Zod throws | accidental | P2026-10-29-4 (probed: raw `Error`, HTTP 500, vs `ValidationError`, 422) |
 | projection folds, `Act` constructor `patch_fn` | the constructor's patch step reaches `load`/`action`; projection folds always get `bare_patch` from the builder | harmless (one value in the repo since #2180) | P2026-10-29s-1 |
+| action retry, reaction retry | a reaction's `do()` that loses a race retries in `action()` (its `maxRetries`), then fails the handler into the reaction's retry and backoff | justified | the two decide different things: the action re-decides on fresh state at once, the reaction treats the whole handler as failed (10 s fixed backoff by default); they multiply, (N+1)(M+1) attempts, only on a conflict that never clears (probed 2026-10-30) |
+| `reactingTo`, version guard | resolved by #2201: `reactingTo` only builds correlation and causation | resolved | #2201; the ambient box clearing in `scoped.ts` stays for causation (simulated: one test fails without it) |
+| empty action, `committed` / wake | `Act.do` read `s.event` on every snapshot, including the loaded one an action that emits nothing returns | accidental, a bug | P2026-10-30 r-1 → #2210 / #2213 (probed in the main loop) |
+| per-call correlator, app correlator | `{ correlator, ...options }` let an explicit `undefined` win | accidental, a bug | r-2 → #2211 / #2213 (probed in the main loop) |
 
 ## Mutation baselines
 
@@ -95,8 +99,7 @@ The last trusted Stryker scores, recorded when the setup was removed (#1805) bec
 
 Sound proposals that missed a run's cut. The next run ranks these before looking for new ones.
 
-- history.md has no budget (119 KB; run entries before 2026-10-22 are 69 KB, read by every run and specialist): keep the tables, the backlog, the self-changes and the last three runs, and fold each older run into one line with its tickets and rejections (~−64 KB). A change to the skill's memory: the user's call. (P2026-10-27p-3)
-- The root `format` script is a subset of `lint:fix` and nothing references it (−1). (P2026-10-27p-5)
+- history.md has no budget (140 KB on 2026-10-30, was 119 KB; run entries before 2026-10-22 are 69 KB, read by every run and specialist): keep the tables, the backlog, the self-changes and the last three runs, and fold each older run into one line with its tickets and rejections (~−64 KB). A change to the skill's memory: the user's call. (P2026-10-27p-3)
 
 - `export *` over `ports.ts`, `utils.ts`, `config.ts` publishes anything added there without an RFC. (The `@internal` tags half is P2026-10-23-3.)
 - Design finding for a future major: priority (required `prioritize` port method, a column and two indexes per SQL adapter, a fairness reserve in 3 claims, the lane-rides-priority rule in 3 subscribes, 7 bugs) has no example user in this repo and no counterpart in other ES frameworks, which use separate processors (Act's lanes). Removing it is breaking; it is the user's question. 2026-10-11: Marten (per shard), Axon (per processor/segment), Kurrent (per group) and Emmett (per processor) all answer "a slow reaction must not block a fast one" with separate processors and none orders claims by priority; priority touches 13 source and 26 test files (2026-10-27: ~12 and 19), and dropping it also drops the lane/priority coupling behind #1599 and #1876.
@@ -115,6 +118,8 @@ Sound proposals that missed a run's cut. The next run ranks these before looking
 - Workflow and Renovate comments cut to their why: workflow comment lines 164 → 43, `renovate.json` 5.1 → 2.8 KB (ticket-history rule descriptions). Same kind as #2075, outside core. (P2026-10-23p-2)
 
 ## Self-changes
+
+- 2026-10-30: step 2 now names the doc comments in the files a behavior-changing PR edited: #2201 updated every doc page and left `action()`'s own doc comment saying reactions skip the guard, two runs after learnings.md recorded the same miss (#1864). The Specialists section says `act-doc-writer` has no shell, so the Examples lens, which runs recipes, goes to a general-purpose agent: this run's docs specialist couldn't run them and the main loop found the broken close-the-books recipe.
 
 - 2026-10-29: one smell added: a check added to the write path without a pass over every feature that changes what it reads (#2180's schema check read the actor-gated view, so redaction and erasure turned into refusals, and a guardless reaction commit let it pass on a stale load). The Comment noise lens names the stacked-doc check (a JSDoc block closed and another opened right after it: four found, one shipping a published class with no doc). `metrics.sh` counts ticket refs case-insensitively (`act-1103` was missed). The Dead code lens lists `libs/act-pg/scripts/drain-contention.ts`.
 
@@ -778,3 +783,40 @@ Findings, not proposed: projection-fold.ts:102 (`fields.length ?` on the PII hea
 Lens metrics: interactions classified 6 (4 accidental, all defects; 1 resolved; 1 harmless); defects from #2180 4 of 6; ticket refs outside core 85 (78 last run); knip unused files 40 (39 known false positives, 1 now listed); stacked doc blocks 4; tests that pin nothing new 5; awaited void `settle()` before an absence check 1 of 16.
 
 Tickets (user: "file the tickets"; decisions on -1 (a or b) and -2 (guard or docs) left in the tickets): #2190 (P2026-10-29-1), #2191 (-2), #2192 (-3), #2193 (-4), #2194 (-5), #2195 (-6), #2196 (s-1), #2197 (s-2, with the projection-fold.ts:102 coverage test), #2198 (s-3).
+
+### 2026-10-30 — full run (four specialists: file budget + reading path + public surface, concepts and options + field, source of truth + examples, process + infra)
+
+| metric | 2026-10-29 | now | why |
+|---|---|---|---|
+| core lines (libs/act/src) | 17744 | 17752 | #2200 (+39, the state check's marker filter and refine wrap), #2201 (−16), #2203 (−13 with the docs moves) |
+| ticket refs in source | 1 | 0 | #2203 (`act-1103`) |
+| spec files / test lines | 218 / 60320 | 218 / 60629 | #2200, #2201 (`version-guard.spec`, +195), #2204 (−40, `action-fold.spec` merged) |
+| everything else | | unchanged | 52 exports, 8 / 20 / 18 / 11, 9 files touching 5+ features, 9 files over 300 code lines, 42% (29% / 14%) comments, 5 workflows / 575 lines, CLAUDE.md 27 KB |
+
+Audit: 7 PRs since the last run, all its tickets, all the assistant's: #2199 (the record), #2200, #2201, #2202, #2203, #2204, #2205. #2201 changed a guarantee (every commit guarded) and updated every doc page but left `action()`'s own doc comment and act-http's "undefined skips the check" describing the old guard (#2206). #2202 failed CI once on the stability snapshot alone (a private method's doc). Recipes run in the main loop for #2201: `split-stores/two-contexts.ts` and `prometheus/instrumented-app.ts` run green, the two recipe specs pass, and `close-the-books/ticket-cooldown.ts` fails to start (#2207), unrelated to #2201.
+
+Decisions on P2026-10-29*: all accepted and shipped. -1 + -4 → #2190, #2193 / #2200 (the user reshaped -1 twice: first marked state fields and a check-only union, then "the store isn't storing state, ignore the errors", scoped to states with sensitive events); -2 → #2191 (the user: "guard and reuse the framework retry, no more loops") and -3 → #2192 / #2201; -5 → #2194 / #2202 (no TCK case: the TCK can't fail a driver without new surface); -6 + s-1 → #2195, #2196 / #2203; s-2 → #2197 / #2204; s-3 → #2198 / #2205.
+
+Promises kept: -3 −2 → part of #2201's −16 in event-sourcing.ts; -2 −15 in `action()` → −16; -4 −17 → +39 together with -1 (the marker filter needs the issue list, so `validate` couldn't be reused); s-1 −14 → −13; s-2 −88 → −40 net tests (−75 deleted, +35 for the fold-view coverage test the ticket added); s-3 ~−250 comment lines → −91 (only comments with tickets or history were rewritten; the estimate assumed every comment).
+
+Verified in the main loop before ranking: through `app.do`, an action whose handler returns `[]` throws `TypeError` on a new stream and fires `committed` with the old stored event on a cold one (control: an emitting action fires it once); `do(…, { correlator: undefined })` stores the framework default where the app's correlator stores `"APP"` (control: no options); `tsc -p libs/act-http` 17 errors and `-p libs/act-notify` 8 while `pnpm typecheck` passes; Biome's 2.5.12 schema against the 2.6.3 CLI and the `useMathMinMax` warning; `event-sourcing.ts:440`, `hono/index.ts:91`, `dispatch.ts:71-74`, `server.ts:94/106`, the `ConcurrencyError` example, `autoclose-reaction.ts:44`; `ticket-cooldown.ts` failing with `ERR_MODULE_NOT_FOUND` (`@act/wolfdesk` has no `main` or `exports`).
+
+Proposals, ranked, ticketed as found (user: "create tickets and close teammates as they finish"). Defects first:
+- P2026-10-30-1 (r-1). `app.do` throws or emits a false `committed` for an action that emits nothing → #2210, shipped with -2 in #2213.
+- P2026-10-30-2 (r-2). `{ correlator: undefined }` drops the app's correlator → #2211 / #2213.
+- P2026-10-30-3 (d-D1 + d-D2 + c-1). Docs and comments still describing reaction commits as unguarded and an `undefined` `expectedVersion` as skipping the check; row 56's citation; state-management.md:266; concurrency-model.md:46 doesn't say a lost race costs a reaction its 10 s backoff; `ActionOptions` "command path"; error-handling.md's "(ACT-1208)" → #2206.
+- P2026-10-30-4 (main loop). The close-the-books recipe example can't run → #2207.
+- P2026-10-30-5 (p-1). Per-package tsc red where the gate is green; release-check names a script no package has; a root tsconfig nothing builds → #2214.
+- P2026-10-30-6 (p-2 + p-5). Biome schema drift and a 2.6 warning on every check; the unreferenced `format` script → #2215.
+Simplifications:
+- P2026-10-30s-1 (d-1). configuration.md § Invariants becomes a link to state-management → #2208.
+- P2026-10-30s-2 (d-2 + r-3). `ConcurrencyError`'s example and the scaffold skill teach a hand-rolled retry the action's `maxRetries` does; a broken sentence in autoclose-reaction.ts → #2209.
+- P2026-10-30s-3 (c-2). Delete the reacting-to test #2201 left pinning nothing new (−59) → #2212.
+- P2026-10-30s-4 (p-3). Private-member comments as `//`, out of the published .d.ts and the snapshot (59 blocks) → #2216; a trade-off for the user (in-repo hover).
+- P2026-10-30s-5 (p-4). Infra comments cut to their reason (~−180, 17 refs) and the typecheck hook's header that contradicts its body → #2217.
+
+Findings, not proposed: per-action retry still earns its place beside the reaction retry (the field: Emmett opt-in `onVersionConflict`, Wolverine/Marten one handler-level policy, neither retries by default); `scoped.ts`'s box clearing stays for causation; `cache_drop` on conflict stays (rows 42/43); `IAct.do` has no JSDoc; ActOptions apps set: `autoSettle`, `correlator`, `scoped`, `drain`, `listen`; packages/inspector's coverage thresholds run only from a command nothing calls (the user's call); CodeQL 131 runs, 0 failures (stays); the ci-cd `src` filter runs full CI on README edits under packages/ and recipes/; history.md is 140 KB (backlog P2026-10-27p-3).
+
+Lens metrics: files over 300 code lines 9 (act.ts 795, in-memory-store 730, audit 566, event-sourcing 504, types/builders 464, drain-cycle 457, close-cycle 450, correlate-cycle 418, types/action 325); reading path 13 files, ~33 names; master red since 2026-10-27: 1 (the coverage branch #2204 fixed); flakes 0; snapshot-only CI reds 3 of the last 40 PRs; runnable recipes 3 of 4 green.
+
+Tickets: #2206–#2212, #2214–#2217. Shipped during the run: #2213 (P2026-10-30-1, -2).
