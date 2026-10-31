@@ -72,6 +72,7 @@ import {
   type SseOptions,
   toApiError,
 } from "../api/index.js";
+import { sse_state_names } from "../api/sse-states.js";
 
 /**
  * Hono context variables this subpath contributes. The generic on
@@ -276,9 +277,7 @@ export function hono<TApp extends ActSurface>(
   if (options.sse) {
     const sse_config = resolveSseConfig(options.sse);
     const sse_counter = new SseConnectionCounter(sse_config.maxConnections);
-    const state_names = new Set(
-      Object.values(app.registry.actions).map((a) => a.name)
-    );
+    const state_names = sse_state_names(app, "hono");
     for (const state_name of state_names) {
       api.get(`/sse/${state_name}`, async (c) => {
         const stream_id = c.req.query("stream");

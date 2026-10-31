@@ -5,7 +5,7 @@
  * first, then `patch` per publication), cap enforcement
  * (TOO_MANY_REQUESTS), and clean teardown on abort.
  */
-import { act, state, ZodEmpty } from "@rotorsoft/act";
+import { act, sensitive, state, ZodEmpty } from "@rotorsoft/act";
 import { fixture } from "@rotorsoft/act/test";
 import { initTRPC, TRPCError } from "@trpc/server";
 import { describe, expect } from "vitest";
@@ -401,5 +401,34 @@ describe("trpc(app, { sse }) — an action named subscribe", () => {
     const router = trpc<Ctx, typeof app>(app, no_sse);
     const procs = router._def.procedures;
     expect(Object.keys(procs)).toContain("subscribe");
+  });
+});
+
+describe("trpc sse — a state with sensitive events", () => {
+  const Registered = z.object({ email: sensitive(z.string()) });
+  const User = state({ User: z.object({ email: z.string().optional() }) })
+    .init(() => ({}))
+    .emits({ Registered })
+    .patch({ Registered: ({ data }) => ({ email: data.email }) })
+    .on({ register: Registered })
+    .emit((p) => ["Registered", p])
+    .build();
+  const user_test = fixture(act().withState(User));
+
+  user_test(
+    "is refused, since the broadcast would send one actor's view to everyone",
+    ({ app }) => {
+      expect(() =>
+        trpc<Ctx, typeof app>(app, default_options(new BroadcastChannel()))
+      ).toThrow(
+        /state "User" can't be served over SSE: its events "Registered"/
+      );
+    }
+  );
+
+  user_test("is generated normally when sse is off", ({ app }) => {
+    const { sse: _, ...no_sse } = default_options(new BroadcastChannel());
+    const router = trpc<Ctx, typeof app>(app, no_sse);
+    expect(Object.keys(router._def.procedures)).toContain("register");
   });
 });

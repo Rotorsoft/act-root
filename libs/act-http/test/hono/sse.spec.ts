@@ -5,7 +5,7 @@
  * produce. Run end-to-end through `app.request()` so no live server
  * is needed.
  */
-import { act, state, ZodEmpty } from "@rotorsoft/act";
+import { act, sensitive, state, ZodEmpty } from "@rotorsoft/act";
 import { fixture } from "@rotorsoft/act/test";
 import { testClient } from "hono/testing";
 import { assert, describe, expect, vi } from "vitest";
@@ -281,5 +281,32 @@ describe("hono(app, { sse }) — generated SSE endpoints", () => {
     await res.body?.cancel();
     await vi.advanceTimersByTimeAsync(16_000);
     vi.useRealTimers();
+  });
+});
+
+describe("hono sse — a state with sensitive events", () => {
+  const Registered = z.object({ email: sensitive(z.string()) });
+  const User = state({ User: z.object({ email: z.string().optional() }) })
+    .init(() => ({}))
+    .emits({ Registered })
+    .patch({ Registered: ({ data }) => ({ email: data.email }) })
+    .on({ register: Registered })
+    .emit((p) => ["Registered", p])
+    .build();
+  const user_test = fixture(act().withState(User));
+
+  user_test(
+    "is refused, since the broadcast would send one actor's view to everyone",
+    ({ app }) => {
+      expect(() => hono(app, default_options(new BroadcastChannel()))).toThrow(
+        /state "User" can't be served over SSE: its events "Registered"/
+      );
+    }
+  );
+
+  user_test("is generated normally when sse is off", async ({ app }) => {
+    const { sse: _, ...no_sse } = default_options(new BroadcastChannel());
+    const res = await hono(app, no_sse).request("/sse/User?stream=u1");
+    expect(res.status).toBe(404);
   });
 });
