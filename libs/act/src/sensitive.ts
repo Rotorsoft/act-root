@@ -21,7 +21,7 @@ export const _registry = z.registry<{ sensitive: true }>();
 /**
  * Marker key stamped onto a schema's own `def`. Zod clones a schema on every
  * refinement (`.min()`, `.email()`, `.trim()`, `.describe()`, `.refine()`,
- * `.transform()`, …) via `{...def}`, which copies own symbol keys — so a
+ * …) via `{...def}`, which copies own symbol keys — so a
  * marker on the def survives the whole chain, while the `_registry` WeakMap
  * (keyed on the *instance*) does not.
  *
@@ -48,7 +48,8 @@ export function _mark_sensitive(schema: z.ZodType): void {
  * True when the given schema was marked via `sensitive(...)`.
  *
  * Walks through Zod wrapper layers (`.optional()`, `.nullable()`,
- * `.default()`, `.readonly()`) by following `_def.innerType` until it reaches
+ * `.default()`, `.readonly()`, and the pipe `.transform()` and `.pipe()`
+ * build) by following `_def.innerType` or `_def.in` until it reaches
  * a non-wrapper schema, then checks the registry. Wrappers create new schema
  * instances; the marker lives on the *inner* schema the user wrapped, so we
  * test that one.
@@ -65,7 +66,11 @@ function is_pii(schema: z.ZodType): boolean {
       }
     )._zod?.def;
     if (def?.[_SENSITIVE] === true) return true;
-    const inner = (cur as { _def?: { innerType?: z.ZodType } })._def?.innerType;
+    const d = (cur as { _def?: { innerType?: z.ZodType; in?: z.ZodType } })
+      ._def;
+    // `.transform()` and `.pipe()` wrap the schema in a pipe that keeps it
+    // under `in`, not `innerType`.
+    const inner = d?.innerType ?? d?.in;
     if (!inner || inner === cur) return false;
     cur = inner;
   }

@@ -80,7 +80,7 @@ None of this is a policy choice about how much PII may be persisted — it is st
 
 `sensitive(...)` marks a schema wherever it appears in an event's top-level shape, including behind `.optional()`, `.nullable()`, `.default()`, `.readonly()`, and `.catch()`, and including inside a `z.union` / `z.discriminatedUnion` variant (a key sensitive in *any* variant is split, since the stored payload could be that variant).
 
-Refinements chained **after** the call are fine too — `sensitive(z.string()).min(1)` and `sensitive(z.string().min(1))` behave identically. They did not before [#1417](https://github.com/Rotorsoft/act-root/issues/1417): the marker was tracked per schema *instance*, and Zod creates a new instance for every refinement, so the first form silently lost its marker and wrote plaintext into `events.data`.
+Refinements chained **after** the call are fine too, `.transform()` and `.pipe()` included: `sensitive(z.string()).min(1)` and `sensitive(z.string().min(1))` behave identically, and so do `sensitive(z.string()).transform(fn)` and `sensitive(z.string().transform(fn))`.
 
 The one place the marker is **not** followed is a field nested inside a `z.object` declared within the payload — only the event's own top-level keys are split. If you need PII in a nested object, lift it to a top-level key.
 

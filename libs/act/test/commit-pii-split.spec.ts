@@ -187,6 +187,17 @@ describe("sensitive() marker survival", () => {
     }
   });
 
+  it("survives .transform() and .pipe() chained after sensitive()", async () => {
+    for (const email of [
+      sensitive(z.string()).transform((v) => v.trim()),
+      sensitive(z.string()).pipe(z.string().min(1)),
+    ]) {
+      const row = await split_for(email as z.ZodType<string>);
+      expect(row?.pii).toEqual({ email: "alice@example.com" });
+      expect(row?.data).toEqual({ plan: "pro" });
+    }
+  });
+
   it("still works in the documented order", async () => {
     const row = await split_for(sensitive(z.string().min(1)));
     expect(row?.pii).toEqual({ email: "alice@example.com" });
