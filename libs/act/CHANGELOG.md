@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v1.37.2](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.37.1...@rotorsoft/act-v1.37.2) (2026-10-31)
+
+
+### Bug Fixes
+
+* **act-http:** let every field of a sensitive state read as a marker in OpenAPI ([#2246](https://github.com/Rotorsoft/act-root/issues/2246)) ([eeafae1](https://github.com/Rotorsoft/act-root/commit/eeafae1e3e7457ccb630d5f741d539e2740a2894)), closes [#2233](https://github.com/Rotorsoft/act-root/issues/2233)
+
 # [@rotorsoft/act-v1.37.1](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.37.0...@rotorsoft/act-v1.37.1) (2026-10-31)
 
 
