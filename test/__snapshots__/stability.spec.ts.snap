@@ -77,6 +77,8 @@ export declare class Act<TSchemaReg extends SchemaRegister<TActions>, TEvents ex
      * returns "had listeners" to preserve the \`EventEmitter.emit\` contract.
      */
     emit<E extends keyof ActLifecycleEvents<TSchemaReg, TEvents, TActions>>(event: E, args: ActLifecycleEvents<TSchemaReg, TEvents, TActions>[E]): boolean;
+    private _notify;
+    private _committed_key;
     /**
      * The one place a store failure is logged and emitted (the breaker's
      * \`on_error\`). The emit is guarded: an unhandled \`"error"\` emission
@@ -86,12 +88,28 @@ export declare class Act<TSchemaReg extends SchemaRegister<TActions>, TEvents ex
     /**
      * Register a listener for a lifecycle event. The listener receives the
      * event-specific payload.
+     *
+     * \`committed\` also takes a state, as a \`State\` or its name: the listener
+     * then hears only commits by that state's actions, with its snapshots
+     * typed from that state.
+     *
+     * @example
+     * \`\`\`typescript
+     * app.on("committed", Counter, (snapshots) => {
+     *   console.log(snapshots.at(-1)?.state.count); // typed: number
+     * });
+     * \`\`\`
      */
     on<E extends keyof ActLifecycleEvents<TSchemaReg, TEvents, TActions>>(event: E, listener: (args: ActLifecycleEvents<TSchemaReg, TEvents, TActions>[E]) => void): this;
+    on<TNewState extends Schema, TNewEvents extends Schemas, TNewActions extends Schemas>(event: "committed", state: State<TNewState, TNewEvents, TNewActions>, listener: (snapshots: Snapshot<TNewState, TNewEvents>[]) => void): this;
+    on<TKey extends keyof TStateMap & string>(event: "committed", state: TKey, listener: (snapshots: Snapshot<TStateMap[TKey], TEvents>[]) => void): this;
     /**
-     * Remove a previously registered lifecycle listener.
+     * Remove a previously registered lifecycle listener, with the state it
+     * was registered for when it has one.
      */
     off<E extends keyof ActLifecycleEvents<TSchemaReg, TEvents, TActions>>(event: E, listener: (args: ActLifecycleEvents<TSchemaReg, TEvents, TActions>[E]) => void): this;
+    off<TNewState extends Schema, TNewEvents extends Schemas, TNewActions extends Schemas>(event: "committed", state: State<TNewState, TNewEvents, TNewActions>, listener: (snapshots: Snapshot<TNewState, TNewEvents>[]) => void): this;
+    off<TKey extends keyof TStateMap & string>(event: "committed", state: TKey, listener: (snapshots: Snapshot<TStateMap[TKey], TEvents>[]) => void): this;
     private readonly _batch_handlers;
     private readonly _es;
     private readonly _cd;
@@ -12080,6 +12098,7 @@ export type ApplyResult<S extends BroadcastState = BroadcastState> = {
 export declare function applyPatchMessage<S extends BroadcastState>(msg: PatchMessage<S>, cached: S | null | undefined): ApplyResult<S>;
 //# sourceMappingURL=apply-patch.d.ts.map
 // === broadcast.d.ts ===
+import { type Patch } from "@rotorsoft/act-patch";
 import { StateCache } from "./state-cache.js";
 import { type BroadcastState, type PatchMessage, type Subscriber } from "./types.js";
 /**
@@ -12178,9 +12197,10 @@ export declare class BroadcastChannel<S extends BroadcastState = BroadcastState>
      *
      * @param streamId - The event store stream ID
      * @param state - Full state with \`_v\` set from \`snap.event.version\`
-     * @param patches - Array of domain patches, one per emitted event
+     * @param patches - Array of domain patches, one per emitted event, as the
+     *   snapshots carry them (\`null\` deletes a key)
      */
-    publish(streamId: string, state: S, patches?: Partial<S>[]): PatchMessage<S>;
+    publish(streamId: string, state: S, patches?: Readonly<Patch<S>>[]): PatchMessage<S>;
     /**
      * Publish a state update that doesn't change the event version
      * (e.g. presence overlay, computed field refresh).

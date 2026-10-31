@@ -1,4 +1,4 @@
-import { patch as apply_patch } from "@rotorsoft/act-patch";
+import { patch as apply_patch, type Patch } from "@rotorsoft/act-patch";
 import { StateCache } from "./state-cache.js";
 import {
   type BroadcastState,
@@ -234,12 +234,13 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
    *
    * @param streamId - The event store stream ID
    * @param state - Full state with `_v` set from `snap.event.version`
-   * @param patches - Array of domain patches, one per emitted event
+   * @param patches - Array of domain patches, one per emitted event, as the
+   *   snapshots carry them (`null` deletes a key)
    */
   publish(
     streamId: string,
     state: S,
-    patches: Partial<S>[] = []
+    patches: Readonly<Patch<S>>[] = []
   ): PatchMessage<S> {
     // Normalize once, so the reseed and the live frame agree. Then carry the
     // keys an `overlay()` owns across the commit, unless the new domain state
@@ -267,7 +268,7 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
     const baseV = state._v - patches.length;
     const msg: PatchMessage<S> = {};
     patches.forEach((p, i) => {
-      msg[baseV + i + 1] = wire_safe(p);
+      msg[baseV + i + 1] = wire_safe(p) as PatchMessage<S>[number];
     });
 
     fan_out(this.channels.get(streamId), msg, (error) =>

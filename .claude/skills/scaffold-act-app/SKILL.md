@@ -214,7 +214,7 @@ For production deployment (PostgresStore, background processing, automated jobs)
 - [ ] All packages use `"type": "module"` and TypeScript strict mode
 - [ ] Domain mutations generated with `trpc(app, ...)`, never hand-written; the rest decomposed into route files with typed middleware
 - [ ] `broadcast.ts` sets up `BroadcastChannel` + `PresenceTracker` from `@rotorsoft/act-http/sse`
-- [ ] `broadcastState()` runs from one `app.on("committed")` listener — sets `_v` from `snap.event.version`
+- [ ] Broadcasting runs from one `app.on("committed", State, ...)` listener per broadcast state — sets `_v` from `snap.event.version`
 - [ ] SSE `onStateChange` subscription uses `broadcast.subscribe()` for incremental state push
 - [ ] SSE `onEvent` subscription wired with `app.on("settled")` for event replay
 - [ ] No `app.settle()` in mutations (each commit settles on its own and emits "settled" after reactions)
