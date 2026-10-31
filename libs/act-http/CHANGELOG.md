@@ -1,3 +1,10 @@
+# [@rotorsoft/act-http-v1.11.3](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-http-v1.11.2...@rotorsoft/act-http-v1.11.3) (2026-10-31)
+
+
+### Bug Fixes
+
+* **act-http:** type the generated trpc and hono APIs from the app ([#2225](https://github.com/Rotorsoft/act-root/issues/2225)) ([27575fb](https://github.com/Rotorsoft/act-root/commit/27575fb49390f9d5ee1c071c199da3f68879d91e)), closes [#2224](https://github.com/Rotorsoft/act-root/issues/2224) [#2224](https://github.com/Rotorsoft/act-root/issues/2224)
+
 # [@rotorsoft/act-http-v1.11.2](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-http-v1.11.1...@rotorsoft/act-http-v1.11.2) (2026-10-30)
 
 # [@rotorsoft/act-http-v1.11.1](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-http-v1.11.0...@rotorsoft/act-http-v1.11.1) (2026-10-30)

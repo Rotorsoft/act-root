@@ -186,15 +186,28 @@ export class Act<
     event: E,
     args: ActLifecycleEvents<TSchemaReg, TEvents, TActions>[E]
   ): boolean {
-    const listeners = this._emitter.rawListeners(event as string);
+    return this._notify(event as string, args);
+  }
+
+  // Run each listener of `key` on its own, logging any that throws.
+  private _notify(key: string, args: unknown): boolean {
+    const listeners = this._emitter.rawListeners(key);
     for (const listener of listeners) {
       try {
         listener(args);
       } catch (error) {
-        this._logger.error(error, `${String(event)} listener threw`);
+        this._logger.error(error, `${key} listener threw`);
       }
     }
     return listeners.length > 0;
+  }
+
+  // The emitter key of one state's `committed` listeners.
+  private _committed_key(state: State<any, any, any> | string): string {
+    const name = typeof state === "string" ? state : state.name;
+    if (!this._states.has(name))
+      throw new Error(`committed: "${name}" is not a state of this app`);
+    return `committed:${name}`;
   }
 
   // The one place a store failure is logged and emitted (the breaker's
@@ -209,27 +222,87 @@ export class Act<
   /**
    * Register a listener for a lifecycle event. The listener receives the
    * event-specific payload.
+   *
+   * `committed` also takes a state, as a `State` or its name: the listener
+   * then hears only commits by that state's actions, with its snapshots
+   * typed from that state.
+   *
+   * @example
+   * ```typescript
+   * app.on("committed", Counter, (snapshots) => {
+   *   console.log(snapshots.at(-1)?.state.count); // typed: number
+   * });
+   * ```
    */
   on<E extends keyof ActLifecycleEvents<TSchemaReg, TEvents, TActions>>(
     event: E,
     listener: (
       args: ActLifecycleEvents<TSchemaReg, TEvents, TActions>[E]
     ) => void
+  ): this;
+  on<
+    TNewState extends Schema,
+    TNewEvents extends Schemas,
+    TNewActions extends Schemas,
+  >(
+    event: "committed",
+    state: State<TNewState, TNewEvents, TNewActions>,
+    listener: (snapshots: Snapshot<TNewState, TNewEvents>[]) => void
+  ): this;
+  on<TKey extends keyof TStateMap & string>(
+    event: "committed",
+    state: TKey,
+    listener: (snapshots: Snapshot<TStateMap[TKey], TEvents>[]) => void
+  ): this;
+  on(
+    event: string,
+    state_or_listener: State<any, any, any> | string | ((args: any) => void),
+    listener?: (args: any) => void
   ): this {
-    this._emitter.on(event, listener);
+    if (listener)
+      this._emitter.on(
+        this._committed_key(state_or_listener as State<any, any, any>),
+        listener
+      );
+    else this._emitter.on(event, state_or_listener as (args: any) => void);
     return this;
   }
 
   /**
-   * Remove a previously registered lifecycle listener.
+   * Remove a previously registered lifecycle listener, with the state it
+   * was registered for when it has one.
    */
   off<E extends keyof ActLifecycleEvents<TSchemaReg, TEvents, TActions>>(
     event: E,
     listener: (
       args: ActLifecycleEvents<TSchemaReg, TEvents, TActions>[E]
     ) => void
+  ): this;
+  off<
+    TNewState extends Schema,
+    TNewEvents extends Schemas,
+    TNewActions extends Schemas,
+  >(
+    event: "committed",
+    state: State<TNewState, TNewEvents, TNewActions>,
+    listener: (snapshots: Snapshot<TNewState, TNewEvents>[]) => void
+  ): this;
+  off<TKey extends keyof TStateMap & string>(
+    event: "committed",
+    state: TKey,
+    listener: (snapshots: Snapshot<TStateMap[TKey], TEvents>[]) => void
+  ): this;
+  off(
+    event: string,
+    state_or_listener: State<any, any, any> | string | ((args: any) => void),
+    listener?: (args: any) => void
   ): this {
-    this._emitter.off(event, listener);
+    if (listener)
+      this._emitter.off(
+        this._committed_key(state_or_listener as State<any, any, any>),
+        listener
+      );
+    else this._emitter.off(event, state_or_listener as (args: any) => void);
     return this;
   }
 
@@ -668,6 +741,10 @@ export class Act<
       // A local commit runs its reactions the way a remote one does.
       this._wake(snapshots.map((s) => s.event!.name as string));
       this.emit("committed", snapshots);
+      this._notify(
+        `committed:${this.registry.actions[action].name}`,
+        snapshots
+      );
       return snapshots;
     });
   }
