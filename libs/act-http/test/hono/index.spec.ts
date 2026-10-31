@@ -198,7 +198,7 @@ describe("hono(app, options) — generated REST surface", () => {
       );
     });
 
-    test("undefined resolver result skips the check on the target", async ({
+    test("undefined resolver result leaves expectedVersion off the target", async ({
       app,
     }) => {
       const do_spy = vi.spyOn(app, "do").mockResolvedValueOnce([]);

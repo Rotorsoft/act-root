@@ -41,8 +41,8 @@ const AUTOCLOSE_TARGET_PREFIX = "__autoclose__:";
 /**
  * Inject one synthesized autoclose reaction per `.autocloses(...)` state
  * into the registry's event registers. The handler resolves ports at call
- * time (`store()`), so the reaction is orchestrator-agnostic; the resolved
- * The reactions are synthesized once into the shared registry, so nothing
+ * time (`store()`), so the reaction is orchestrator-agnostic. The reactions
+ * are synthesized once into the shared registry, so nothing
  * per-Act is captured here — the off-hours window is read from the running
  * Act at resolution time via the injected `read_window`.
  */

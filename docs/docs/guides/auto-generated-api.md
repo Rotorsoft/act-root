@@ -294,7 +294,7 @@ This is the right pattern when you want a Hono/tRPC instance with a mix of gener
 
 ## Optimistic concurrency
 
-Every generator accepts an optional `expectedVersion(action, input, ctx) => number | undefined`. When the callback returns a number, the generator threads it into `Target.expectedVersion` for that call — `app.do` enforces the optimistic-concurrency check and throws `ConcurrencyError` on a stale write. Returning `undefined` skips the check for that call.
+Every generator accepts an optional `expectedVersion(action, input, ctx) => number | undefined`. When the callback returns a number, the generator threads it into `Target.expectedVersion` for that call — `app.do` enforces the optimistic-concurrency check and throws `ConcurrencyError` on a stale write. Returning `undefined` leaves the call to the version the action loads; a number pins it, and a pinned conflict is never retried.
 
 The conventional wiring is the `If-Match` header on REST or a last-known-version field on a tRPC input — either way the host owns where the expected version comes from. Document it for both transports in one shot via the OpenAPI emitter's `expectedVersion: true` option, which adds the `If-Match` parameter to every operation.
 

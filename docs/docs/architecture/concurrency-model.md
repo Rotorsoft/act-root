@@ -43,7 +43,7 @@ If two callers race on the same stream, only one wins. The loser sees `Concurren
 
 Inside `action()` the commit always carries a version: the one the caller passed as `expectedVersion`, or else the version the action loaded. A new stream loads as `-1`, which the store reads as "expect an empty stream", so two callers creating the same stream can't both commit. An action a reaction dispatches is guarded the same way: a lease belongs to the reaction's target, not to the stream it writes, so two reactions with different targets (wolfdesk's escalate, reassign and close timers) and any user action can race on one stream.
 
-The loser gets `ConcurrencyError`, so its preconditions and the state check never pass on a load that went stale. The retries that already exist absorb it: the action's own `maxRetries` reloads and re-checks, and a reaction that still loses fails like any other handler error, through its retry, backoff and block policy. An explicit `expectedVersion` is never retried, because it would conflict again on every attempt.
+The loser gets `ConcurrencyError`, so its preconditions and the state check never pass on a load that went stale. The retries that already exist absorb it: the action's own `maxRetries` reloads and re-checks, and a reaction that still loses fails like any other handler error, through its retry, backoff and block policy. A reaction that declares no `backoff` waits the default ten seconds before that retry, so give the action a `maxRetries` when reactions often write to the same stream. An explicit `expectedVersion` is never retried, because it would conflict again on every attempt.
 
 ## Stream leasing — the reader's exclusivity primitive
 

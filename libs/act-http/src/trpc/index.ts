@@ -90,9 +90,9 @@ import {
  *   `target.expectedVersion` so `app.do` refuses to commit if the
  *   stream has moved. Hosts typically read it from an `If-Match`
  *   header on the underlying HTTP request, or pull it from the
- *   client's last-known snapshot. Returning `undefined` skips the
- *   check for that call — handy when only some actions are
- *   concurrency-sensitive.
+ *   client's last-known snapshot. Returning `undefined` leaves the
+ *   call to the version the action loads; a number pins it, and a
+ *   pinned conflict is never retried.
  * - `idempotency` (optional) — when set, the procedure honors
  *   `Idempotency-Key` via the shared
  *   {@link withIdempotency} helper. The host supplies the
