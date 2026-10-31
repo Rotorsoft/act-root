@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { act, log, sleep, state, store, ZodEmpty } from "../src/index.js";
 import { DEFAULT_BACKOFF } from "../src/internal/config.js";
+import { sandbox } from "../src/test/index.js";
 
 describe("act", () => {
   const counter = state({ Counter: z.object({ count: z.number() }) })
@@ -61,6 +62,62 @@ describe("act", () => {
     app.on("committed", listener);
     await app.do("increment", { stream: "s", actor }, {});
     expect(listener).toHaveBeenCalled();
+  });
+
+  describe("an action that emits nothing", () => {
+    // `noop` emits nothing.
+    const quiet = state({ Quiet: z.object({ n: z.number() }) })
+      .init(() => ({ n: 0 }))
+      .emits({ bumped: ZodEmpty })
+      .patch({ bumped: (_, s) => ({ n: s.n + 1 }) })
+      .on({ bump: ZodEmpty })
+      .emit(() => ["bumped", {}])
+      .on({ noop: ZodEmpty })
+      .emit(() => [])
+      .build();
+
+    const build = async () => {
+      const committed: unknown[] = [];
+      const ctx = await sandbox(act().withState(quiet), {
+        actOptions: { autoSettle: false },
+      });
+      ctx.app.on("committed", (s) => committed.push(s));
+      return {
+        quiet_app: ctx.app,
+        store: ctx.store,
+        dispose: ctx.dispose,
+        committed,
+      };
+    };
+
+    it("commits nothing and emits no committed, on a new, warm or cold stream", async () => {
+      const { quiet_app, store: scoped, dispose, committed } = await build();
+      // new stream
+      const [fresh] = await quiet_app.do("noop", { stream: "q1", actor }, {});
+      expect(fresh.event).toBeUndefined();
+      // warm stream (cached after its own commit)
+      await quiet_app.do("bump", { stream: "q2", actor }, {});
+      committed.length = 0;
+      await quiet_app.do("noop", { stream: "q2", actor }, {});
+      // cold stream (history written straight to the store)
+      await scoped.commit("q3", [{ name: "bumped", data: {} }], {
+        correlation: "q3",
+        causation: {},
+      });
+      const [cold] = await quiet_app.do("noop", { stream: "q3", actor }, {});
+      expect(cold.state.n).toBe(1);
+      expect(committed).toEqual([]);
+      const q3 = await quiet_app.query_array({ stream: "q3" });
+      expect(q3).toHaveLength(1);
+      await dispose();
+    });
+
+    it("control: an action that emits announces its commit", async () => {
+      const { quiet_app, dispose, committed } = await build();
+      await quiet_app.do("bump", { stream: "q4", actor }, {});
+      expect(committed).toHaveLength(1);
+      await dispose();
+    });
   });
 
   it("should not call removed event listener", async () => {

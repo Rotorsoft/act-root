@@ -125,6 +125,8 @@ they run on InMemory, Postgres and SQLite at once.
 | A failed finalize leaves the drain armed, so the defer is persisted on the retry | [Close cycle](close-cycle.md#defer-not-poll) | `defer.spec.ts` → "keeps the drain armed while finalization is unhealed" |
 | A malformed literal `.defer(...)` throws `ZodError` at build | [State management](../concepts/state-management.md#deferred-reactions) | `defer.spec.ts` → "rejects a bad literal schedule at build time" |
 | `throw new DeferSignal(when)` holds the stream until due, then redelivers | [State management](../concepts/state-management.md#the-defersignal-escape-hatch) | `defer.spec.ts` → "\{ at: Date \} holds until the due-time, then acts", "\{ after \} is measured from the event's created time (parks, not acked)" |
+| An action whose handler returns no events commits nothing and emits no `committed`, on a new, warm or cold stream, and the trace logs no commit | [State management](../concepts/state-management.md#what-an-action-checks-in-order) | `act.spec.ts` → "commits nothing and emits no committed, on a new, warm or cold stream", "control: an action that emits announces its commit"; `tracing.spec.ts` → "withActionTrace skips commit log when nothing emitted on a stream with history" |
+| A per-call `correlator` set to `undefined` falls back to the app's correlator | [Event sourcing](../concepts/event-sourcing.md) | `correlator.spec.ts` → "keeps the app's correlator when a call passes correlator: undefined" |
 
 ## Store contract
 
