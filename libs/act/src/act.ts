@@ -146,7 +146,7 @@ export class Act<
   private readonly _breaker: CircuitBreaker;
   private readonly _drain: boolean;
   private readonly _auto_settle: boolean;
-  /** Whether any event has a reaction; nothing arms without one. */
+  // Whether any event has a reaction; nothing arms without one.
   private readonly _reactive: boolean;
   private readonly _drain_controllers: Map<
     string,
@@ -155,12 +155,10 @@ export class Act<
   private readonly _correlate: CorrelateCycle<TSchemaReg, TEvents, TActions>;
   private readonly _settle: SettleLoop<TEvents>;
   private _poll: ReturnType<typeof setInterval> | undefined;
-  /** The poll's correlate `limit`, used by every settle pass while it runs. */
+  // The poll's correlate `limit`, used by every settle pass while it runs.
   private _poll_limit: number | undefined;
-  /**
-   * Wired at construction against the store current then, so a store
-   * injected after `build()` is never notified.
-   */
+  // Wired at construction against the store current then, so a store
+  // injected after `build()` is never notified.
   private readonly _notify_disposer: Promise<
     (() => void | Promise<void>) | undefined
   >;
@@ -199,11 +197,9 @@ export class Act<
     return listeners.length > 0;
   }
 
-  /**
-   * The one place a store failure is logged and emitted (the breaker's
-   * `on_error`). The emit is guarded: an unhandled `"error"` emission
-   * would crash the process.
-   */
+  // The one place a store failure is logged and emitted (the breaker's
+  // `on_error`). The emit is guarded: an unhandled `"error"` emission
+  // would crash the process.
   private _emit_error(error: unknown, circuit: CircuitState): void {
     this._logger.error(error);
     if (this._emitter.listenerCount("error") > 0)
@@ -240,22 +236,22 @@ export class Act<
   private readonly _batch_handlers: Map<string, BatchHandler<TEvents>>;
   private readonly _es: EsOps;
   private readonly _cd: DrainOps<TEvents>;
-  /** Unambiguous: merge rejects an event name declared by two states. */
+  // Unambiguous: merge rejects an event name declared by two states.
   private readonly _event_to_state: ReadonlyMap<string, State<any, any, any>>;
-  /** Lanes to arm per event; `"all"` when a dynamic resolver hides the lane. */
+  // Lanes to arm per event; `"all"` when a dynamic resolver hides the lane.
   private readonly _event_to_lanes: ReadonlyMap<string, EventLaneSet>;
   private readonly _audit_deps: AuditDeps;
   private readonly _logger: Logger = log();
-  /** This Act's ports: its own bag, or the singleton adapters. */
+  // This Act's ports: its own bag, or the singleton adapters.
   private readonly _ports: Scoped;
-  /** Runs a body so internal `store()`/`cache()` calls resolve to `_ports`. */
+  // Runs a body so internal `store()`/`cache()` calls resolve to `_ports`.
   private readonly _scoped: <T>(fn: () => Promise<T>) => Promise<T>;
 
   private readonly _correlator: Correlator;
   private readonly _lanes: ReadonlyArray<LaneConfig>;
 
   private readonly _close_lock = new CloseLock();
-  /** Every lane a controller can exist for: `"default"` plus each declared one. */
+  // Every lane a controller can exist for: `"default"` plus each declared one.
   private readonly _declared_lanes: ReadonlyArray<string>;
 
   /** Drain lanes declared via `.withLane(...)`. Implicit default not included. */
@@ -343,7 +339,7 @@ export class Act<
     register_weak_disposer(new WeakRef(this), (self) => self.shutdown());
   }
 
-  /** Shared by drain, settle and autoclose; bad knobs throw at build. */
+  // Shared by drain, settle and autoclose; bad knobs throw at build.
   private _build_breaker(options: ActOptions): CircuitBreaker {
     return new CircuitBreaker(
       resolveCircuitBreakerConfig(options.circuitBreaker),
@@ -356,7 +352,7 @@ export class Act<
     );
   }
 
-  /** Apps that declare no lanes pass no lane filter to `claim`. */
+  // Apps that declare no lanes pass no lane filter to `claim`.
   private _build_drain_controllers(
     options: ActOptions,
     lanes: ReadonlyArray<LaneConfig>,
@@ -419,7 +415,7 @@ export class Act<
     return controllers;
   }
 
-  /** One process can't see the cluster, so it reports its own lane gaps. */
+  // One process can't see the cluster, so it reports its own lane gaps.
   private _advise_orphaned_lanes(): void {
     const active = new Set(this._drain_controllers.keys());
     const orphaned = this._declared_lanes.filter((name) => !active.has(name));
@@ -435,7 +431,7 @@ export class Act<
     );
   }
 
-  /** Audit deps, built after the controllers so the lane set is final. */
+  // Audit deps, built after the controllers so the lane set is final.
   private _build_audit_deps(): AuditDeps {
     return {
       store,
@@ -475,7 +471,7 @@ export class Act<
     });
   }
 
-  /** Cold start: an idle deferred stream still fires on time after a restart. */
+  // Cold start: an idle deferred stream still fires on time after a restart.
   private async _seed_persisted_defers(): Promise<void> {
     const now = Date.now();
     await walk_streams(store(), (pos) => {
@@ -541,10 +537,8 @@ export class Act<
     return this._shutdown_promise;
   }
 
-  /**
-   * The largest `leaseMillis` among lanes with a cycle in flight (the
-   * default for none or 0, and for a running settle), capped.
-   */
+  // The largest `leaseMillis` among lanes with a cycle in flight (the
+  // default for none or 0, and for a running settle), capped.
   private _derive_grace_ms(
     running: { readonly lease_millis: number | undefined }[],
     settling: boolean
@@ -583,7 +577,7 @@ export class Act<
     }
   }
 
-  /** Failures are logged, never thrown: `notify` is a hint. */
+  // Failures are logged, never thrown: `notify` is a hint.
   private async _wire_notify(
     s: Store,
     listen: boolean
@@ -908,7 +902,7 @@ export class Act<
     return this._scoped(() => this._drain_all(options));
   }
 
-  /** Arms correlate and every lane; false on an app with no reactions. */
+  // Arms correlate and every lane; false on an app with no reactions.
   private _arm_all(): boolean {
     if (!this._reactive) return false;
     // A commit may also give the next correlate scan something to find.
@@ -917,23 +911,21 @@ export class Act<
     return true;
   }
 
-  /**
-   * Wakes what a change freed (a commit, a reset, an unblock, a restore,
-   * a notification from another process): arms the lanes these events
-   * react on, or every lane without names, and settles them unless the app
-   * walks the pipeline itself (`autoSettle: false`).
-   */
+  // Wakes what a change freed (a commit, a reset, an unblock, a restore,
+  // a notification from another process): arms the lanes these events
+  // react on, or every lane without names, and settles them unless the app
+  // walks the pipeline itself (`autoSettle: false`).
   private _wake(names?: Iterable<string>): void {
     const armed = names ? this._arm_for_event_names(names) : this._arm_all();
     if (armed && this._auto_settle) this._schedule();
   }
 
-  /** Schedules a settle pass; writer-only instances (`drain: false`) skip it. */
+  // Schedules a settle pass; writer-only instances (`drain: false`) skip it.
   private _schedule(options?: SettleOptions): void {
     if (this._drain) this._settle.schedule(options);
   }
 
-  /** Arms only the lanes these events react on; true when any was armed. */
+  // Arms only the lanes these events react on; true when any was armed.
   private _arm_for_event_names(names: Iterable<string>): boolean {
     const to_arm = new Set<string>();
     for (const name of names) {
@@ -951,7 +943,7 @@ export class Act<
     return true;
   }
 
-  /** In parallel, so a slow lane never holds up a fast one. */
+  // In parallel, so a slow lane never holds up a fast one.
   private async _drain_all(options: DrainOptions): Promise<Drain<TEvents>> {
     const merged = merge_drains(
       await Promise.all(
@@ -999,7 +991,7 @@ export class Act<
     };
   }
 
-  /** One correlate pass; arms every lane when it found work. */
+  // One correlate pass; arms every lane when it found work.
   private async _correlate_pass(
     limit: number,
     /** Honour the correlation lease — settle and the poller only. */
@@ -1333,7 +1325,7 @@ export class Act<
     return this._scoped(() => store().prioritize(filter, priority));
   }
 
-  /** Shared by `close()` and reaction-requested closes. */
+  // Shared by `close()` and reaction-requested closes.
   private async _run_close(targets: CloseTarget[]): Promise<CloseResult> {
     const close_actor = { id: "$close", name: "close" };
     const result = await run_close_cycle(targets, {

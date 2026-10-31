@@ -30,6 +30,8 @@ Anything reachable from a package's `src/index.ts` (or subpath `index.ts` for `a
 - Internal type fields (types not re-exported through any `src/index.ts`): `Classification.static_targets`, `HandleResult.next_attempt_at`, `AuditPass.on_event`, `SettleDeps.on_settled`.
 - Grouping prefixes/postfixes when several related identifiers share a structural role: `pii_*`, `make_*`, `is_*`, `compute_*`, `*_by_stream`.
 
+**Private members are commented with `//`, never `/** */`.** `tsc` copies a JSDoc block on a `private` member into the published `.d.ts`, so editing it changes the stability snapshot and fails CI for a comment; a `//` comment stays in the source only. Public members keep their JSDoc.
+
 **Parameter properties are banned** by `erasableSyntaxOnly`: declare each field explicitly above the constructor and assign in the body. Constructor parameter names stay camelCase (matches the external call site); rename to `_snake_case` only on the assignment to the field.
 
 **The boundary is enforced mechanically** by `runStabilityTck` from `@rotorsoft/act-tck`. One spec, `test/stability.spec.ts` (at the repo root, so a snapshot change never releases a package), discovers every `@rotorsoft/*` package under `libs/` and snapshots the published declarations (`dist/@types`) of each entry point declared in its `exports`, following its relative re-exports. Any rename / removal / signature change on the public surface shows up as a snapshot diff in the PR; an implementation change doesn't. New packages and subpaths are picked up automatically. It reads `dist/`, so it runs after `pnpm build` as `pnpm check:stability` (`-u` to regenerate), not in `pnpm test`.

@@ -98,12 +98,10 @@ export class CircuitBreaker {
     this._clear_wake();
   }
 
-  /**
-   * Schedule the `on_retry` wake `cooldownMs` out so the breaker re-trials
-   * the store on its own. No-op when no `on_retry` hook is wired (e.g. unit
-   * tests of the pure state machine). The timer is `unref`'d so it never
-   * keeps the process alive.
-   */
+  // Schedule the `on_retry` wake `cooldownMs` out so the breaker re-trials
+  // the store on its own. No-op when no `on_retry` hook is wired (e.g. unit
+  // tests of the pure state machine). The timer is `unref`'d so it never
+  // keeps the process alive.
   private _schedule_wake(): void {
     if (!this._hooks.on_retry) return;
     this._clear_wake();
@@ -121,7 +119,7 @@ export class CircuitBreaker {
     }
   }
 
-  /** Pure state transition for a failure — no side effects. */
+  // Pure state transition for a failure — no side effects.
   private _advance(now: number): CircuitState {
     // Already tripped: this can only be reached from a half-open trial
     // (open skips attempts), so the trial failed — re-open and restart.

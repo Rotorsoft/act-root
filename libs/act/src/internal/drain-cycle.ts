@@ -420,21 +420,17 @@ export class DrainController<
   TActions extends Schemas,
   TSchemaReg extends SchemaRegister<TActions>,
 > {
-  /**
-   * Armed while `_raised` is ahead of `_lowered` (the raise count the last
-   * empty claim saw), so a claim never lowers over a raise that landed
-   * during it.
-   */
+  // Armed while `_raised` is ahead of `_lowered` (the raise count the last
+  // empty claim saw), so a claim never lowers over a raise that landed
+  // during it.
   private _raised = 0;
   private _lowered = 0;
   private _ratio = 0.5;
-  /**
-   * Local wake at the earliest parked (backoff or defer) visit, or at the
-   * lease expiry after a failed pass (the {@link RETRY} key); the schedule
-   * itself is persisted. On an idle app nothing else would drain it. It
-   * drains until a pass leases nothing or the controller stops, and an entry
-   * stays until handled or until a later pass claims nothing.
-   */
+  // Local wake at the earliest parked (backoff or defer) visit, or at the
+  // lease expiry after a failed pass (the {@link RETRY} key); the schedule
+  // itself is persisted. On an idle app nothing else would drain it. It
+  // drains until a pass leases nothing or the controller stops, and an entry
+  // stays until handled or until a later pass claims nothing.
   private readonly _defer = new DeferTimer(() => {
     this.arm();
     void this._deps.run_scoped(async () => {
@@ -444,7 +440,7 @@ export class DrainController<
   private _worker: ReturnType<typeof setTimeout> | undefined;
   private readonly _misrouted = new Set<string>();
   private _stopped = false;
-  /** The pass in flight. Never rejects; graceful shutdown waits on it. */
+  // The pass in flight. Never rejects; graceful shutdown waits on it.
   private _inflight: Promise<Drain<TEvents>> | undefined;
 
   private readonly _deps: DrainControllerDeps<TEvents, TActions, TSchemaReg>;
@@ -535,7 +531,7 @@ export class DrainController<
     return pass;
   }
 
-  /** One claim → fetch → handle → ack pass. Never throws. */
+  // One claim → fetch → handle → ack pass. Never throws.
   private async _pass(
     streamLimit: number,
     eventLimit: number,

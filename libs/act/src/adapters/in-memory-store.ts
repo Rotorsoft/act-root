@@ -141,7 +141,7 @@ class InMemoryStream {
     this._retry = -1;
   }
 
-  /** The lease this row hands back, at the given watermark. */
+  // The lease this row hands back, at the given watermark.
   private _lease(lease: Lease, at: number) {
     return {
       stream: this.stream,
@@ -193,7 +193,7 @@ class InMemoryStream {
     }
   }
 
-  /** Clears the block, the lease and the schedule; retry back to -1. */
+  // Clears the block, the lease and the schedule; retry back to -1.
   private _release() {
     this._retry = -1;
     this._blocked = false;
@@ -267,9 +267,9 @@ export class InMemoryStore implements Store {
   // Never reused. Deletions punch holes, so ids are not array indexes.
   private _next_id = 0;
   private _streams: Map<string, InMemoryStream> = new Map();
-  /** Correlate checkpoint: how far the log has been READ. */
+  // Correlate checkpoint: how far the log has been READ.
   private _correlated_at = -1;
-  /** Per-correlator checkpoint and lease; keyless callers use `_correlated_at`. */
+  // Per-correlator checkpoint and lease; keyless callers use `_correlated_at`.
   private _correlators = new Map<
     string,
     { at: number; by: string; until: number }
@@ -355,7 +355,7 @@ export class InMemoryStore implements Store {
     };
   }
 
-  /** Index of the stream's latest snapshot, or -1; an explicit `after` wins. */
+  // Index of the stream's latest snapshot, or -1; an explicit `after` wins.
   private _snap_floor(query: Query | undefined): number {
     if (
       !query?.with_snaps ||
@@ -591,7 +591,7 @@ export class InMemoryStore implements Store {
     return selected.length;
   }
 
-  /** De-duplicated like the SQL `stream = ANY(...)`; unknown names skipped. */
+  // De-duplicated like the SQL `stream = ANY(...)`; unknown names skipped.
   private _select(input: string[] | StreamFilter): InMemoryStream[] {
     if (Array.isArray(input))
       return [...new Set(input)]
