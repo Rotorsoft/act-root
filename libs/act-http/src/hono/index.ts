@@ -52,7 +52,15 @@ import type { IdempotencyStore } from "@rotorsoft/act-ops/idempotency";
 import type { Context, MiddlewareHandler } from "hono";
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
-import { type ActSurface, make_dispatch } from "../api/dispatch.js";
+import type { MergePath, TypedResponse } from "hono/types";
+import type { JSONParsed } from "hono/utils/types";
+import {
+  type ActionResult,
+  type ActSurface,
+  type AppActions,
+  type AppStateNames,
+  make_dispatch,
+} from "../api/dispatch.js";
 import {
   type ActorExtractor,
   type ApiError,
@@ -104,7 +112,7 @@ export type ActMiddlewareVariables = {
  *   routes mount under.
  */
 export type HonoOptions = {
-  readonly actor: ActorExtractor;
+  readonly actor: ActorExtractor<Context>;
   readonly stream: (
     action_name: string,
     input: unknown,
@@ -158,11 +166,18 @@ export type HonoOptions = {
  * ```
  *
  * Errors thrown by the extractor surface as `401 Unauthorized` with
- * the shared {@link ApiError} envelope.
+ * the shared {@link ApiError} envelope. Mounted on a route
+ * (`api.get("/me", authenticated(extract), handler)`), the `401` is in
+ * the route's type, so `hc` and `testClient` see it.
  */
 export function authenticated(
-  extractor: ActorExtractor
-): MiddlewareHandler<{ Variables: ActMiddlewareVariables }> {
+  extractor: ActorExtractor<Context>
+): MiddlewareHandler<
+  { Variables: ActMiddlewareVariables },
+  string,
+  {},
+  Response & TypedResponse<JSONParsed<ApiError>, 401, "json">
+> {
   return async (c, next) => {
     try {
       const actor = await extractor(c);
@@ -214,10 +229,35 @@ const default_key_from = (c: Context): string | undefined =>
  * @returns A Hono app covering every registered action under
  *   `<basePath>/actions/<name>`.
  */
-export function hono<TApp extends ActSurface = ActSurface>(
+export function hono<
+  TApp extends ActSurface = ActSurface,
+  TBase extends string = "/api",
+>(
+  app: TApp,
+  options: HonoOptions & {
+    readonly basePath?: TBase;
+    readonly sse: NonNullable<HonoOptions["sse"]>;
+  }
+): Hono<
+  { Variables: ActMiddlewareVariables },
+  ActionRoutes<TApp, TBase> & SseRoutes<TApp, TBase>,
+  TBase
+>;
+export function hono<
+  TApp extends ActSurface = ActSurface,
+  TBase extends string = "/api",
+>(
+  app: TApp,
+  options: HonoOptions & { readonly basePath?: TBase }
+): Hono<
+  { Variables: ActMiddlewareVariables },
+  ActionRoutes<TApp, TBase>,
+  TBase
+>;
+export function hono<TApp extends ActSurface>(
   app: TApp,
   options: HonoOptions
-): Hono<{ Variables: ActMiddlewareVariables }> {
+): unknown {
   const base_path = options.basePath ?? "/api";
   const api = new Hono<{ Variables: ActMiddlewareVariables }>().basePath(
     base_path
@@ -387,8 +427,58 @@ export function hono<TApp extends ActSurface = ActSurface>(
     );
   }
 
+  // Built in a loop over the registry, so its type is the overloads'.
   return api;
 }
+
+/**
+ * One `GET <basePath>/sse/<state>?stream=<id>` per state of `TApp`, with
+ * `sse`: an event stream on `200`, {@link ApiError} on an error status.
+ */
+type SseRoutes<TApp, TBase extends string> = {
+  [N in AppStateNames<TApp> as MergePath<TBase, `/sse/${N}`>]: {
+    $get:
+      | {
+          input: { query: { stream: string } };
+          output: {};
+          outputFormat: "body";
+          status: 200;
+        }
+      | {
+          input: { query: { stream: string } };
+          output: ApiError;
+          outputFormat: "json";
+          status: 400 | 401 | 503;
+        };
+  };
+};
+
+/** Every status a generated action route answers with the error envelope. */
+type ErrorStatus = 400 | 401 | 409 | 410 | 412 | 422 | 500 | 503;
+
+/**
+ * The routes {@link hono} builds, one `POST <basePath>/actions/<name>` per
+ * action of `TApp`: the action's payload as the JSON body, the snapshots
+ * `app.do` returns (as JSON) on `200`, and {@link ApiError} on an error
+ * status. `hc<typeof api>` and `testClient(api)` read it.
+ */
+type ActionRoutes<TApp, TBase extends string> = {
+  [K in keyof AppActions<TApp> & string as MergePath<TBase, `/actions/${K}`>]: {
+    $post:
+      | {
+          input: { json: AppActions<TApp>[K] };
+          output: JSONParsed<ActionResult<TApp, K>>;
+          outputFormat: "json";
+          status: 200;
+        }
+      | {
+          input: { json: AppActions<TApp>[K] };
+          output: ApiError;
+          outputFormat: "json";
+          status: ErrorStatus;
+        };
+  };
+};
 
 /**
  * Hono's json validator reads the body only for a JSON Content-Type

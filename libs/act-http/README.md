@@ -168,10 +168,7 @@ import { trpc } from "@rotorsoft/act-http/trpc";
 type Ctx = { user: { id: string; name: string }; tenant: string };
 
 const router = trpc<Ctx, typeof app>(app, {
-  actor: (ctx) => {
-    const { user } = ctx as Ctx; // the extractor receives `unknown`
-    return { id: user.id, name: user.name };
-  },
+  actor: (ctx) => ({ id: ctx.user.id, name: ctx.user.name }),
   stream: (action, input, ctx) => `tenant-${ctx.tenant}`,
 });
 
@@ -185,7 +182,7 @@ api.get("/openapi.json", (c) =>
 );
 ```
 
-Framework errors share one envelope (`{ error, detail?, code? }`) and [one status table](https://rotorsoft.github.io/act-root/docs/guides/auto-generated-api#apierror-envelope--error_map--toapierror). Optimistic concurrency (`expectedVersion`), `Idempotency-Key` handling, SSE subscriptions (`sse: { channel }`), auth composition and deployment recipes are in the [auto-generated API guide](https://rotorsoft.github.io/act-root/docs/guides/auto-generated-api).
+Both are typed from the app: a tRPC client and Hono's `hc<typeof api>` see each action's payload and the snapshots it returns, with no casts. Framework errors share one envelope (`{ error, detail?, code? }`) and [one status table](https://rotorsoft.github.io/act-root/docs/guides/auto-generated-api#apierror-envelope--error_map--toapierror). Optimistic concurrency (`expectedVersion`), `Idempotency-Key` handling, SSE subscriptions (`sse: { channel }`), auth composition and deployment recipes are in the [auto-generated API guide](https://rotorsoft.github.io/act-root/docs/guides/auto-generated-api).
 
 ### `sse` — live state broadcast
 

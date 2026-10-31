@@ -7,9 +7,10 @@
  */
 import { act, state, ZodEmpty } from "@rotorsoft/act";
 import { fixture } from "@rotorsoft/act/test";
-import { describe, expect, vi } from "vitest";
+import { testClient } from "hono/testing";
+import { assert, describe, expect, vi } from "vitest";
 import { z } from "zod";
-import { type HonoOptions, hono } from "../../src/hono/index.js";
+import { hono } from "../../src/hono/index.js";
 import { BroadcastChannel } from "../../src/sse/index.js";
 
 const Calculator = state({
@@ -44,7 +45,7 @@ const builder = act().withState(Calculator).withState(Ticket);
 const test = fixture(builder);
 
 // `any`: tests intentionally use a wide channel shape so the helper composes with empty and typed states alike
-const default_options = (channel: BroadcastChannel<any>): HonoOptions => ({
+const default_options = (channel: BroadcastChannel<any>) => ({
   actor: () => ({ id: "u-1", name: "alice" }),
   stream: () => "calc-1",
   sse: { channel },
@@ -108,9 +109,7 @@ async function read_sse_frames(
 describe("hono(app, { sse }) — generated SSE endpoints", () => {
   test("emits one GET /sse/<stateName> per unique state name", ({ app }) => {
     const channel = new BroadcastChannel();
-    const api = hono(app as never, default_options(channel)) as unknown as {
-      routes: Array<{ method: string; path: string }>;
-    };
+    const api = hono(app, default_options(channel));
     const sse_paths = Array.from(
       new Set(
         api.routes
@@ -122,10 +121,10 @@ describe("hono(app, { sse }) — generated SSE endpoints", () => {
   });
 
   test("no /sse/* routes when sse option is absent", ({ app }) => {
-    const api = hono(app as never, {
+    const api = hono(app, {
       actor: () => ({ id: "u-1", name: "alice" }),
       stream: () => "calc-1",
-    }) as unknown as { routes: Array<{ method: string; path: string }> };
+    });
     const sse_paths = api.routes.filter(
       (r) => r.method === "GET" && r.path.startsWith("/api/sse/")
     );
@@ -134,9 +133,11 @@ describe("hono(app, { sse }) — generated SSE endpoints", () => {
 
   test("missing ?stream query returns 400 / BAD_REQUEST", async ({ app }) => {
     const channel = new BroadcastChannel();
-    const api = hono(app as never, default_options(channel));
-    const res = await api.request("/api/sse/Calculator");
-    expect(res.status).toBe(400);
+    const api = hono(app, default_options(channel));
+    const res = await testClient(api).api.sse.Calculator.$get({
+      query: { stream: "" },
+    });
+    assert(res.status === 400);
     const body = await res.json();
     expect(body.code).toBe("BAD_REQUEST");
   });
@@ -147,7 +148,7 @@ describe("hono(app, { sse }) — generated SSE endpoints", () => {
     const channel = new BroadcastChannel<{ _v: number; display: string }>();
     channel.publish("calc-1", { _v: 1, display: "1" }, [{ display: "1" }]);
 
-    const api = hono(_app as never, default_options(channel));
+    const api = hono(_app, default_options(channel));
     const res = await api.request("/api/sse/Calculator?stream=calc-1");
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toContain("text/event-stream");
@@ -170,7 +171,7 @@ describe("hono(app, { sse }) — generated SSE endpoints", () => {
     app: _app,
   }) => {
     const channel = new BroadcastChannel<{ _v: number; display: string }>();
-    const api = hono(_app as never, default_options(channel));
+    const api = hono(_app, default_options(channel));
     const res = await api.request("/api/sse/Calculator?stream=calc-1");
 
     setTimeout(() => {
@@ -185,7 +186,7 @@ describe("hono(app, { sse }) — generated SSE endpoints", () => {
     app: _app,
   }) => {
     const channel = new BroadcastChannel<{ _v: number; display: string }>();
-    const api = hono(_app as never, {
+    const api = hono(_app, {
       actor: () => ({ id: "u-1", name: "alice" }),
       stream: () => "calc-1",
       sse: { channel, maxConnections: 1 },
@@ -194,8 +195,10 @@ describe("hono(app, { sse }) — generated SSE endpoints", () => {
     const first = await api.request("/api/sse/Calculator?stream=calc-1");
     expect(first.status).toBe(200);
 
-    const blocked = await api.request("/api/sse/Calculator?stream=calc-1");
-    expect(blocked.status).toBe(503);
+    const blocked = await testClient(api).api.sse.Calculator.$get({
+      query: { stream: "calc-1" },
+    });
+    assert(blocked.status === 503);
     expect(blocked.headers.get("Retry-After")).toBe("1");
     const body = await blocked.json();
     expect(body.code).toBe("SSE_BUSY");
@@ -207,7 +210,7 @@ describe("hono(app, { sse }) — generated SSE endpoints", () => {
     app: _app,
   }) => {
     const channel = new BroadcastChannel<{ _v: number; display: string }>();
-    const api = hono(_app as never, {
+    const api = hono(_app, {
       actor: () => ({ id: "u-1", name: "alice" }),
       stream: () => "calc-1",
       sse: { channel, maxConnections: 1 },
@@ -228,7 +231,7 @@ describe("hono(app, { sse }) — generated SSE endpoints", () => {
 
   test("401 when the actor extractor throws", async ({ app: _app }) => {
     const channel = new BroadcastChannel();
-    const api = hono(_app as never, {
+    const api = hono(_app, {
       actor: () => {
         throw new Error("nope");
       },
@@ -244,7 +247,7 @@ describe("hono(app, { sse }) — generated SSE endpoints", () => {
   }) => {
     vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
     const channel = new BroadcastChannel<{ _v: number; display: string }>();
-    const api = hono(_app as never, {
+    const api = hono(_app, {
       actor: () => ({ id: "u-1", name: "alice" }),
       stream: () => "calc-1",
       sse: { channel, heartbeatMs: 15_000 },
@@ -263,7 +266,7 @@ describe("hono(app, { sse }) — generated SSE endpoints", () => {
   }) => {
     vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
     const channel = new BroadcastChannel<{ _v: number; display: string }>();
-    const api = hono(_app as never, {
+    const api = hono(_app, {
       actor: () => ({ id: "u-1", name: "alice" }),
       stream: () => "calc-1",
       sse: { channel, heartbeatMs: 15_000 },

@@ -11,7 +11,8 @@ import { act, state, ZodEmpty } from "@rotorsoft/act";
 import { fixture } from "@rotorsoft/act/test";
 import { InMemoryIdempotencyStore } from "@rotorsoft/act-ops/idempotency";
 import { Hono } from "hono";
-import { describe, expect, vi } from "vitest";
+import { testClient } from "hono/testing";
+import { assert, describe, expect, vi } from "vitest";
 import { z } from "zod";
 import { authenticated, type HonoOptions, hono } from "../../src/hono/index.js";
 
@@ -49,15 +50,10 @@ const builder = act().withState(Calculator).withState(Ticket);
 const test = fixture(builder);
 
 const default_options = (): HonoOptions => ({
-  actor: (request) => {
-    const c = request as {
-      req: { header: (name: string) => string | undefined };
-    };
-    return {
-      id: c.req.header("x-user-id") ?? "u-1",
-      name: c.req.header("x-user-name") ?? "alice",
-    };
-  },
+  actor: (c) => ({
+    id: c.req.header("x-user-id") ?? "u-1",
+    name: c.req.header("x-user-name") ?? "alice",
+  }),
   stream: (_action, _input, c) =>
     `tenant-${c.req.header("x-tenant") ?? "acme"}`,
 });
@@ -74,19 +70,11 @@ const make_headers = (
 
 describe("hono(app, options) — generated REST surface", () => {
   test("emits one POST /actions/<name> per registered action", ({ app }) => {
-    // Cast through `unknown` to reach Hono's `routes` array (the
-    // structural surface the assertion below introspects).
-    const api = hono(app as never, default_options()) as unknown as {
-      routes: Array<{ method: string; path: string }>;
-    };
+    const api = hono(app, default_options());
     // Hono registers each route entry once per `app.post(...)` call;
     // dedupe so the assertion is order/duplicate-insensitive.
     const paths = Array.from(
-      new Set(
-        api.routes
-          .filter((r: { method: string }) => r.method === "POST")
-          .map((r: { path: string }) => r.path)
-      )
+      new Set(api.routes.filter((r) => r.method === "POST").map((r) => r.path))
     ).sort();
     expect(paths).toEqual([
       "/api/actions/Clear",
@@ -99,16 +87,15 @@ describe("hono(app, options) — generated REST surface", () => {
     app,
   }) => {
     const do_spy = vi.spyOn(app, "do");
-    const api = hono(app as never, default_options());
+    const api = hono(app, default_options());
 
-    const res = await api.request("/api/actions/PressKey", {
-      method: "POST",
-      headers: make_headers(),
-      body: JSON.stringify({ key: "5" }),
-    });
-    expect(res.status).toBe(200);
+    const res = await testClient(api).api.actions.PressKey.$post(
+      { json: { key: "5" } },
+      { headers: make_headers() }
+    );
+    assert(res.status === 200);
     const snapshots = await res.json();
-    expect(snapshots[0].event.name).toBe("KeyPressed");
+    expect(snapshots[0].event?.name).toBe("KeyPressed");
     expect(do_spy).toHaveBeenCalledWith(
       "PressKey",
       {
@@ -120,34 +107,28 @@ describe("hono(app, options) — generated REST surface", () => {
   });
 
   test("mounts under a custom basePath", async ({ app }) => {
-    const api = hono(app as never, { ...default_options(), basePath: "/v1" });
-    const res = await api.request("/v1/actions/PressKey", {
-      method: "POST",
-      headers: make_headers(),
-      body: JSON.stringify({ key: "5" }),
-    });
+    const api = hono(app, { ...default_options(), basePath: "/v1" });
+    const res = await testClient(api).v1.actions.PressKey.$post(
+      { json: { key: "5" } },
+      { headers: make_headers() }
+    );
     expect(res.status).toBe(200);
   });
 
   test("body that fails Zod validation returns 422 with the ApiError envelope (matches the in-do ValidationError path)", async ({
     app,
   }) => {
-    const api = hono(app as never, default_options());
+    const api = hono(app, default_options());
     // Empty key violates `.min(1)`. The custom zValidator hook funnels
     // the failure through the shared ApiError envelope at 422 — the same
     // status/shape an in-do ValidationError maps to (ERROR_MAP.ValidationError
     // = 422), so a client parsing ApiError sees one shape for both.
-    const res = await api.request("/api/actions/PressKey", {
-      method: "POST",
-      headers: make_headers(),
-      body: JSON.stringify({ key: "" }),
-    });
-    expect(res.status).toBe(422);
-    const body = (await res.json()) as {
-      error: string;
-      detail?: string;
-      code?: string;
-    };
+    const res = await testClient(api).api.actions.PressKey.$post(
+      { json: { key: "" } },
+      { headers: make_headers() }
+    );
+    assert(res.status === 422);
+    const body = await res.json();
     expect(body.error).toBe("ValidationError");
     expect(body.code).toBe("VALIDATION");
     expect(typeof body.detail).toBe("string");
@@ -156,15 +137,15 @@ describe("hono(app, options) — generated REST surface", () => {
   test("a JSON body that doesn't parse gets the same 422 ApiError envelope", async ({
     app,
   }) => {
-    const api = hono(app as never, default_options());
+    const api = hono(app, default_options());
     const res = await api.request("/api/actions/PressKey", {
       method: "POST",
       headers: make_headers(),
       body: "{bad",
     });
-    expect(res.status).toBe(422);
-    const body = (await res.json()) as { error: string; code?: string };
-    expect(body).toMatchObject({
+    assert(res.status === 422);
+    // A body that isn't JSON can't go through the typed client.
+    expect(await res.json()).toMatchObject({
       error: "ValidationError",
       code: "VALIDATION",
     });
@@ -175,18 +156,17 @@ describe("hono(app, options) — generated REST surface", () => {
       app,
     }) => {
       const do_spy = vi.spyOn(app, "do").mockResolvedValueOnce([]);
-      const api = hono(app as never, {
+      const api = hono(app, {
         ...default_options(),
         expectedVersion: (_action, _input, c) => {
           const v = c.req.header("if-match");
           return v === undefined ? undefined : Number.parseInt(v, 10);
         },
       });
-      await api.request("/api/actions/PressKey", {
-        method: "POST",
-        headers: make_headers({ "if-match": "7" }),
-        body: JSON.stringify({ key: "5" }),
-      });
+      await testClient(api).api.actions.PressKey.$post(
+        { json: { key: "5" } },
+        { headers: make_headers({ "if-match": "7" }) }
+      );
       expect(do_spy).toHaveBeenCalledWith(
         "PressKey",
         {
@@ -202,15 +182,14 @@ describe("hono(app, options) — generated REST surface", () => {
       app,
     }) => {
       const do_spy = vi.spyOn(app, "do").mockResolvedValueOnce([]);
-      const api = hono(app as never, {
+      const api = hono(app, {
         ...default_options(),
         expectedVersion: () => undefined,
       });
-      await api.request("/api/actions/PressKey", {
-        method: "POST",
-        headers: make_headers(),
-        body: JSON.stringify({ key: "5" }),
-      });
+      await testClient(api).api.actions.PressKey.$post(
+        { json: { key: "5" } },
+        { headers: make_headers() }
+      );
       expect(do_spy).toHaveBeenCalledWith(
         "PressKey",
         { stream: "tenant-acme", actor: { id: "u-1", name: "alice" } },
@@ -238,14 +217,14 @@ describe("hono(app, options) — generated REST surface", () => {
 
     for (const { label, throws, status, code } of cases) {
       test(label, async ({ app }) => {
-        const api = hono(app as never, default_options());
+        const api = hono(app, default_options());
         vi.spyOn(app, "do").mockRejectedValueOnce(throws());
-        const res = await api.request("/api/actions/PressKey", {
-          method: "POST",
-          headers: make_headers(),
-          body: JSON.stringify({ key: "5" }),
-        });
+        const res = await testClient(api).api.actions.PressKey.$post(
+          { json: { key: "5" } },
+          { headers: make_headers() }
+        );
         expect(res.status).toBe(status);
+        assert(res.status !== 200);
         const body = await res.json();
         expect(body.code).toBe(code);
       });
@@ -254,14 +233,13 @@ describe("hono(app, options) — generated REST surface", () => {
     test("non-Error throws still return 500 with no detail leak", async ({
       app,
     }) => {
-      const api = hono(app as never, default_options());
+      const api = hono(app, default_options());
       vi.spyOn(app, "do").mockRejectedValueOnce("not-an-error-instance");
-      const res = await api.request("/api/actions/PressKey", {
-        method: "POST",
-        headers: make_headers(),
-        body: JSON.stringify({ key: "5" }),
-      });
-      expect(res.status).toBe(500);
+      const res = await testClient(api).api.actions.PressKey.$post(
+        { json: { key: "5" } },
+        { headers: make_headers() }
+      );
+      assert(res.status === 500);
       const body = await res.json();
       expect(body.code).toBe("INTERNAL");
       expect(body.detail).toBeUndefined();
@@ -270,31 +248,29 @@ describe("hono(app, options) — generated REST surface", () => {
 
   describe("idempotency", () => {
     test("fresh key dispatches and returns the snapshots", async ({ app }) => {
-      const api = hono(app as never, {
+      const api = hono(app, {
         ...default_options(),
         idempotency: { store: new InMemoryIdempotencyStore() },
       });
-      const res = await api.request("/api/actions/PressKey", {
-        method: "POST",
-        headers: make_headers({ "idempotency-key": "fresh-1" }),
-        body: JSON.stringify({ key: "7" }),
-      });
-      expect(res.status).toBe(200);
+      const res = await testClient(api).api.actions.PressKey.$post(
+        { json: { key: "7" } },
+        { headers: make_headers({ "idempotency-key": "fresh-1" }) }
+      );
+      assert(res.status === 200);
       const snapshots = await res.json();
-      expect(snapshots[0].event.name).toBe("KeyPressed");
+      expect(snapshots[0].event?.name).toBe("KeyPressed");
     });
 
     test("missing Idempotency-Key returns 400", async ({ app }) => {
-      const api = hono(app as never, {
+      const api = hono(app, {
         ...default_options(),
         idempotency: { store: new InMemoryIdempotencyStore() },
       });
-      const res = await api.request("/api/actions/PressKey", {
-        method: "POST",
-        headers: make_headers(),
-        body: JSON.stringify({ key: "8" }),
-      });
-      expect(res.status).toBe(400);
+      const res = await testClient(api).api.actions.PressKey.$post(
+        { json: { key: "8" } },
+        { headers: make_headers() }
+      );
+      assert(res.status === 400);
       const body = await res.json();
       expect(body.code).toBe("BAD_REQUEST");
     });
@@ -302,39 +278,36 @@ describe("hono(app, options) — generated REST surface", () => {
     test("custom keyFrom overrides the default header lookup", async ({
       app,
     }) => {
-      const api = hono(app as never, {
+      const api = hono(app, {
         ...default_options(),
         idempotency: {
           store: new InMemoryIdempotencyStore(),
           keyFrom: (c) => c.req.header("x-trace-id"),
         },
       });
-      const res = await api.request("/api/actions/PressKey", {
-        method: "POST",
-        headers: make_headers({ "x-trace-id": "trace-abc" }),
-        body: JSON.stringify({ key: "9" }),
-      });
+      const res = await testClient(api).api.actions.PressKey.$post(
+        { json: { key: "9" } },
+        { headers: make_headers({ "x-trace-id": "trace-abc" }) }
+      );
       expect(res.status).toBe(200);
     });
 
     test("duplicate claim returns 409", async ({ app }) => {
       const store = new InMemoryIdempotencyStore();
-      const api = hono(app as never, {
+      const api = hono(app, {
         ...default_options(),
         idempotency: { store },
       });
       const headers = make_headers({ "idempotency-key": "dup-1" });
-      await api.request("/api/actions/PressKey", {
-        method: "POST",
-        headers,
-        body: JSON.stringify({ key: "1" }),
-      });
-      const res = await api.request("/api/actions/PressKey", {
-        method: "POST",
-        headers,
-        body: JSON.stringify({ key: "1" }),
-      });
-      expect(res.status).toBe(409);
+      await testClient(api).api.actions.PressKey.$post(
+        { json: { key: "1" } },
+        { headers: headers }
+      );
+      const res = await testClient(api).api.actions.PressKey.$post(
+        { json: { key: "1" } },
+        { headers: headers }
+      );
+      assert(res.status === 409);
       const body = await res.json();
       expect(body.code).toBe("CONFLICT");
     });
@@ -348,20 +321,19 @@ describe("hono(app, options) — generated REST surface", () => {
       });
       vi.spyOn(app, "do").mockImplementationOnce(() => parked);
       const store = new InMemoryIdempotencyStore();
-      const a = hono(app as never, {
+      const a = hono(app, {
         ...default_options(),
         idempotency: { store },
       });
-      const b = hono(app as never, {
+      const b = hono(app, {
         ...default_options(),
         idempotency: { store },
       });
       const send = (api: typeof a) =>
-        api.request("/api/actions/PressKey", {
-          method: "POST",
-          headers: make_headers({ "idempotency-key": "shared-1" }),
-          body: JSON.stringify({ key: "5" }),
-        });
+        testClient(api).api.actions.PressKey.$post(
+          { json: { key: "5" } },
+          { headers: make_headers({ "idempotency-key": "shared-1" }) }
+        );
       const original = send(a);
       expect((await send(b)).status).toBe(503);
       finish();
@@ -378,20 +350,19 @@ describe("hono(app, options) — generated REST surface", () => {
         fail = () => reject(new Error("downstream down"));
       });
       const do_spy = vi.spyOn(app, "do").mockImplementationOnce(() => parked);
-      const api = hono(app as never, {
+      const api = hono(app, {
         ...default_options(),
         idempotency: { store: new InMemoryIdempotencyStore() },
       });
       const send = () =>
-        api.request("/api/actions/PressKey", {
-          method: "POST",
-          headers: make_headers({ "idempotency-key": "slow-1" }),
-          body: JSON.stringify({ key: "5" }),
-        });
+        testClient(api).api.actions.PressKey.$post(
+          { json: { key: "5" } },
+          { headers: make_headers({ "idempotency-key": "slow-1" }) }
+        );
 
       const original = send();
       const duplicate = await send();
-      expect(duplicate.status).toBe(503);
+      assert(duplicate.status === 503);
       expect(duplicate.headers.get("retry-after")).toBe("1");
       expect((await duplicate.json()).code).toBe("IN_FLIGHT");
 
@@ -414,51 +385,43 @@ describe("hono(app, options) — generated REST surface", () => {
       }>();
       api.use(
         "*",
-        authenticated((request) => ({
-          id: (
-            request as { req: { header: (n: string) => string | undefined } }
-          ).req.header("x-uid")!,
-          name: "user",
-        }))
+        authenticated((c) => ({ id: c.req.header("x-uid")!, name: "user" }))
       );
       api.get("/me", (c) => c.json(c.get("actor")));
 
       const res = await api.request("/me", { headers: { "x-uid": "alice" } });
-      expect(res.status).toBe(200);
+      assert(res.status === 200);
       expect(await res.json()).toEqual({ id: "alice", name: "user" });
     });
 
     test("extractor errors surface as 401 with ApiError envelope", async () => {
-      const api = new Hono<{
-        Variables: { actor: { id: string; name: string } };
-      }>();
-      api.use(
-        "*",
+      // Mounted on the route, so the typed client sees the 401.
+      const api = new Hono().get(
+        "/me",
         authenticated(() => {
           throw new Error("no token");
-        })
+        }),
+        (c) => c.json(c.get("actor"), 200)
       );
-      api.get("/me", (c) => c.json(c.get("actor")));
 
-      const res = await api.request("/me");
-      expect(res.status).toBe(401);
+      const res = await testClient(api).me.$get();
+      assert(res.status === 401);
       const body = await res.json();
       expect(body.code).toBe("UNAUTHORIZED");
       expect(body.detail).toBe("no token");
     });
 
     test("non-Error extractor throws still return 401 (no detail leak)", async () => {
-      const api = new Hono();
-      api.use(
-        "*",
+      const api = new Hono().get(
+        "/me",
         authenticated(() => {
           throw "raw-string-throw";
-        })
+        }),
+        (c) => c.text("ok", 200)
       );
-      api.get("/me", (c) => c.text("ok"));
 
-      const res = await api.request("/me");
-      expect(res.status).toBe(401);
+      const res = await testClient(api).me.$get();
+      assert(res.status === 401);
       const body = await res.json();
       expect(body.code).toBe("UNAUTHORIZED");
       expect(body.detail).toBeUndefined();
@@ -491,19 +454,18 @@ describe("action input is parsed once", () => {
     async ({ app }) => {
       parses = 0;
       const seen: unknown[] = [];
-      const api = hono(app as never, {
+      const api = hono(app, {
         ...default_options(),
         stream: (_action, input) => {
           seen.push(input);
           return "shout-1";
         },
       });
-      const res = await api.request("/api/actions/Shout", {
-        method: "POST",
-        headers: make_headers(),
-        body: JSON.stringify({ text: "a" }),
-      });
-      expect(res.status).toBe(200);
+      const res = await testClient(api).api.actions.Shout.$post(
+        { json: { text: "a" } },
+        { headers: make_headers() }
+      );
+      assert(res.status === 200);
       const body = (await res.json()) as Array<{ state: { text: string } }>;
       expect(body[0].state.text).toBe("a!");
       expect(seen).toEqual([{ text: "a!" }]);
@@ -516,15 +478,14 @@ describe("action input is parsed once", () => {
     "runs a transforming schema once on the idempotent path",
     async ({ app }) => {
       parses = 0;
-      const api = hono(app as never, {
+      const api = hono(app, {
         ...default_options(),
         idempotency: { store: new InMemoryIdempotencyStore() },
       });
-      const res = await api.request("/api/actions/Shout", {
-        method: "POST",
-        headers: make_headers({ "idempotency-key": "shout-k" }),
-        body: JSON.stringify({ text: "a" }),
-      });
+      const res = await testClient(api).api.actions.Shout.$post(
+        { json: { text: "a" } },
+        { headers: make_headers({ "idempotency-key": "shout-k" }) }
+      );
       const body = (await res.json()) as Array<{ state: { text: string } }>;
       expect(body[0].state.text).toBe("a!");
     }
@@ -552,13 +513,10 @@ describe("the action body follows the request's Content-Type", () => {
   note_test(
     "an empty request with no Content-Type is accepted",
     async ({ app }) => {
-      const res = await hono(app as never, opts()).request(
-        "/api/actions/Clear",
-        {
-          method: "POST",
-          headers: { "x-user-id": "u-1", "x-user-name": "alice" },
-        }
-      );
+      const res = await hono(app, opts()).request("/api/actions/Clear", {
+        method: "POST",
+        headers: { "x-user-id": "u-1", "x-user-name": "alice" },
+      });
       expect(res.status).toBe(200);
     }
   );
@@ -567,7 +525,7 @@ describe("the action body follows the request's Content-Type", () => {
     "a non-JSON body is ignored by the resolvers and app.do alike",
     async ({ app }) => {
       seen.length = 0;
-      const res = await hono(app as never, opts()).request("/api/actions/jot", {
+      const res = await hono(app, opts()).request("/api/actions/jot", {
         method: "POST",
         headers: { "content-type": "text/plain", "x-user-id": "u-1" },
         body: JSON.stringify({ note: "hello" }),
@@ -580,7 +538,7 @@ describe("the action body follows the request's Content-Type", () => {
 
   note_test("a JSON body with parameters reaches both", async ({ app }) => {
     seen.length = 0;
-    const res = await hono(app as never, opts()).request("/api/actions/jot", {
+    const res = await hono(app, opts()).request("/api/actions/jot", {
       method: "POST",
       headers: {
         "content-type": "application/json; charset=utf-8",

@@ -33,7 +33,7 @@ export type SseOptions = {
    * one for you because the channel's `<S>` shape is app-specific and
    * passing it in keeps the type chain typed end-to-end at the host.
    */
-  // `any`: the channel's BroadcastState shape is opaque to the generator — narrowing it would force every state into one structural bound that doesn't fit real apps
+  // `any`: one channel carries every state; the generated subscriptions type each state's frames from the app
   readonly channel: BroadcastChannel<any>;
   /**
    * Hard cap on concurrent open subscriptions per generator
@@ -235,7 +235,10 @@ export function fireAndForget<T>(op: () => Promise<T>): Promise<T | undefined> {
  */
 export type SseSubscriptionFrame<S> =
   | { readonly kind: "state"; readonly data: S }
-  | { readonly kind: "patch"; readonly data: unknown };
+  | {
+      readonly kind: "patch";
+      readonly data: S extends BroadcastState ? PatchMessage<S> : unknown;
+    };
 
 /**
  * Subscription accounting hook. Implementations have a chance to
@@ -306,10 +309,10 @@ export async function* runSseSubscription<S extends { _v: number } = any>(
   }
   const max_pending =
     options?.maxPending ?? DEFAULT_SSE_MAX_PENDING_PER_CONNECTION;
-  const pending: unknown[] = [];
+  const pending: PatchMessage<S>[] = [];
   let resolve_wait: (() => void) | null = null;
   const unsubscribe = channel.subscribe(stream_id, (msg) => {
-    enqueue(msg as PatchMessage<never>);
+    enqueue(msg);
     resolve_wait?.();
   });
   /**
@@ -325,14 +328,12 @@ export async function* runSseSubscription<S extends { _v: number } = any>(
    * there is one, and only if the whole backlog is version-neutral collapse
    * it into the single frame that says "you missed something".
    */
-  const enqueue = (msg: PatchMessage<never>) => {
+  const enqueue = (msg: PatchMessage<S>) => {
     if (pending.length < max_pending) {
       pending.push(msg);
       return;
     }
-    const versioned = pending.findIndex(
-      (m) => !is_version_neutral(m as PatchMessage<never>)
-    );
+    const versioned = pending.findIndex((m) => !is_version_neutral(m));
     if (versioned >= 0) {
       pending.splice(versioned, 1);
       pending.push(msg);
@@ -341,7 +342,7 @@ export async function* runSseSubscription<S extends { _v: number } = any>(
     // Every pending frame is version-neutral. Collapsing them into one
     // resync loses no signal — a resync supersedes anything it replaces,
     // including `msg` when the cap leaves no room for it.
-    pending.splice(0, pending.length, resync_frame());
+    pending.splice(0, pending.length, resync_frame<S>());
     if (pending.length < max_pending) pending.push(msg);
   };
 
@@ -359,8 +360,9 @@ export async function* runSseSubscription<S extends { _v: number } = any>(
         });
         if (signal?.aborted) break;
       }
-      const msg = pending.shift();
-      yield { kind: "patch", data: msg };
+      const msg = pending.shift() as PatchMessage<S>;
+      // The frame type resolves `PatchMessage<S>` only once `S` is known.
+      yield { kind: "patch", data: msg as never };
     }
   } finally {
     signal?.removeEventListener("abort", on_abort);

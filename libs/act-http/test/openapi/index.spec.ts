@@ -49,7 +49,7 @@ const base_options = (): OpenAPIOptions => ({
 
 describe("openapi(app, options) — doc emitter", () => {
   test("emits a valid OpenAPI 3.1 envelope", ({ app }) => {
-    const doc = openapi(app as never, base_options());
+    const doc = openapi(app, base_options());
     expect(doc.openapi).toBe("3.1.0");
     expect(doc.info).toEqual({ title: "Test API", version: "1.0.0" });
     expect(doc.components.schemas.ApiError).toBeDefined();
@@ -60,7 +60,7 @@ describe("openapi(app, options) — doc emitter", () => {
   test("emits one POST operation per registered action under basePath", ({
     app,
   }) => {
-    const doc = openapi(app as never, base_options());
+    const doc = openapi(app, base_options());
     const paths = Object.keys(doc.paths).sort();
     expect(paths).toEqual([
       "/api/actions/Clear",
@@ -76,7 +76,7 @@ describe("openapi(app, options) — doc emitter", () => {
   });
 
   test("custom basePath flows through to every path", ({ app }) => {
-    const doc = openapi(app as never, { ...base_options(), basePath: "/v2" });
+    const doc = openapi(app, { ...base_options(), basePath: "/v2" });
     expect(Object.keys(doc.paths).sort()).toEqual([
       "/v2/actions/Clear",
       "/v2/actions/OpenTicket",
@@ -87,7 +87,7 @@ describe("openapi(app, options) — doc emitter", () => {
   test("derives request-body schemas from each action's Zod definition", ({
     app,
   }) => {
-    const doc = openapi(app as never, base_options());
+    const doc = openapi(app, base_options());
     const body = doc.paths["/api/actions/PressKey"]?.post?.requestBody?.content[
       "application/json"
     ]?.schema as {
@@ -102,7 +102,7 @@ describe("openapi(app, options) — doc emitter", () => {
   test("every error response points at the shared ApiError envelope", ({
     app,
   }) => {
-    const doc = openapi(app as never, base_options());
+    const doc = openapi(app, base_options());
     const responses = doc.paths["/api/actions/PressKey"]?.post?.responses;
     for (const code of ["400", "409", "410", "412", "422", "500"]) {
       const ref = responses?.[code] as { $ref?: string };
@@ -120,13 +120,13 @@ describe("openapi(app, options) — doc emitter", () => {
   test("omits parameters block when no cross-cutting headers are toggled", ({
     app,
   }) => {
-    const doc = openapi(app as never, base_options());
+    const doc = openapi(app, base_options());
     const op = doc.paths["/api/actions/PressKey"]?.post;
     expect(op?.parameters).toBeUndefined();
   });
 
   test("documents Idempotency-Key when idempotency is enabled", ({ app }) => {
-    const doc = openapi(app as never, {
+    const doc = openapi(app, {
       ...base_options(),
       idempotency: true,
     });
@@ -141,7 +141,7 @@ describe("openapi(app, options) — doc emitter", () => {
   });
 
   test("documents If-Match when expectedVersion is enabled", ({ app }) => {
-    const doc = openapi(app as never, {
+    const doc = openapi(app, {
       ...base_options(),
       expectedVersion: true,
     });
@@ -153,7 +153,7 @@ describe("openapi(app, options) — doc emitter", () => {
   });
 
   test("documents both headers when both toggles are enabled", ({ app }) => {
-    const doc = openapi(app as never, {
+    const doc = openapi(app, {
       ...base_options(),
       idempotency: true,
       expectedVersion: true,
@@ -166,7 +166,7 @@ describe("openapi(app, options) — doc emitter", () => {
   });
 
   test("threads servers array through", ({ app }) => {
-    const doc = openapi(app as never, {
+    const doc = openapi(app, {
       ...base_options(),
       servers: [
         { url: "https://api.example.com", description: "prod" },
@@ -181,12 +181,12 @@ describe("openapi(app, options) — doc emitter", () => {
   });
 
   test("omits servers when not provided", ({ app }) => {
-    const doc = openapi(app as never, base_options());
+    const doc = openapi(app, base_options());
     expect(doc.servers).toBeUndefined();
   });
 
   test("strips $schema metadata from inline body schemas", ({ app }) => {
-    const doc = openapi(app as never, base_options());
+    const doc = openapi(app, base_options());
     const body = doc.paths["/api/actions/PressKey"]?.post?.requestBody?.content[
       "application/json"
     ]?.schema as Record<string, unknown>;
@@ -196,15 +196,15 @@ describe("openapi(app, options) — doc emitter", () => {
   test("deterministic — two emits with the same inputs are equal", ({
     app,
   }) => {
-    const a = openapi(app as never, base_options());
-    const b = openapi(app as never, base_options());
+    const a = openapi(app, base_options());
+    const b = openapi(app, base_options());
     expect(JSON.stringify(a)).toBe(JSON.stringify(b));
   });
 
   describe("options validation", () => {
     test("throws on missing info.title", ({ app }) => {
       expect(() =>
-        openapi(app as never, {
+        openapi(app, {
           info: { title: "", version: "1.0.0" },
         })
       ).toThrow(/title is required/);
@@ -212,7 +212,7 @@ describe("openapi(app, options) — doc emitter", () => {
 
     test("throws on whitespace-only info.title", ({ app }) => {
       expect(() =>
-        openapi(app as never, {
+        openapi(app, {
           info: { title: "   ", version: "1.0.0" },
         })
       ).toThrow(/title is required/);
@@ -220,7 +220,7 @@ describe("openapi(app, options) — doc emitter", () => {
 
     test("throws on missing info.version", ({ app }) => {
       expect(() =>
-        openapi(app as never, {
+        openapi(app, {
           info: { title: "API", version: "" },
         })
       ).toThrow(/version is required/);
@@ -228,7 +228,7 @@ describe("openapi(app, options) — doc emitter", () => {
 
     test("throws on whitespace-only info.version", ({ app }) => {
       expect(() =>
-        openapi(app as never, {
+        openapi(app, {
           info: { title: "API", version: "   " },
         })
       ).toThrow(/version is required/);
@@ -236,7 +236,7 @@ describe("openapi(app, options) — doc emitter", () => {
 
     test("throws on invalid server url", ({ app }) => {
       expect(() =>
-        openapi(app as never, {
+        openapi(app, {
           ...base_options(),
           servers: [{ url: "not a url" }],
         })
@@ -245,7 +245,7 @@ describe("openapi(app, options) — doc emitter", () => {
 
     test("accepts server urls with {variable} template syntax", ({ app }) => {
       expect(() =>
-        openapi(app as never, {
+        openapi(app, {
           ...base_options(),
           servers: [{ url: "https://{tenant}.api.example.com" }],
         })
@@ -261,7 +261,7 @@ describe("openapi(app, options) — doc emitter", () => {
       // input.
       const start = Date.now();
       try {
-        openapi(app as never, {
+        openapi(app, {
           ...base_options(),
           servers: [{ url: `https://${"{".repeat(2000)}.example.com` }],
         });
@@ -275,13 +275,13 @@ describe("openapi(app, options) — doc emitter", () => {
 
     test("throws on missing info entirely", ({ app }) => {
       expect(() =>
-        openapi(app as never, { info: undefined } as unknown as OpenAPIOptions)
+        openapi(app, { info: undefined } as unknown as OpenAPIOptions)
       ).toThrow(/title is required/);
     });
   });
 
   test("stable surface (snapshot)", ({ app }) => {
-    const doc = openapi(app as never, {
+    const doc = openapi(app, {
       info: { title: "Calculator API", version: "1.0.0" },
       servers: [{ url: "https://api.example.com" }],
       idempotency: true,
@@ -317,7 +317,7 @@ describe("openapi — sensitive() request-field marking", () => {
   sensitive_test(
     "annotates sensitive input fields writeOnly:true + format:password",
     ({ app }) => {
-      const doc = openapi(app as never, base_options());
+      const doc = openapi(app, base_options());
       const schema = doc.paths["/api/actions/Register"]?.post?.requestBody
         ?.content["application/json"]?.schema as {
         properties: Record<string, Record<string, unknown>>;
@@ -348,7 +348,7 @@ describe("openapi — unrepresentable Zod types", () => {
   scheduler_test(
     "emits an open schema for a z.date() field instead of aborting the doc",
     ({ app }) => {
-      const doc = openapi(app as never, base_options());
+      const doc = openapi(app, base_options());
       const schema = doc.paths["/api/actions/Schedule"]?.post?.requestBody
         ?.content["application/json"]?.schema as {
         type: string;
@@ -379,7 +379,7 @@ describe("openapi — request bodies describe what a client sends", () => {
   order_test(
     "uses the schema's input side, not its parsed output",
     ({ app }) => {
-      const doc = openapi(app as never, base_options());
+      const doc = openapi(app, base_options());
       const schema = doc.paths["/api/actions/Place"]?.post?.requestBody
         ?.content["application/json"]?.schema as {
         required?: string[];
