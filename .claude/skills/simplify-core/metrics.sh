@@ -8,7 +8,7 @@ files() { find "$SRC" -name '*.ts'; }
 lines=$(files | xargs cat | wc -l | tr -d ' ')
 comments=$(files | xargs cat | grep -cE '^\s*(//|\*|/\*)' || true)
 code=$((lines - comments))
-tickets=$(files | xargs cat | { grep -oiE '#[0-9]{3,4}|act-[0-9]{3,}' || true; } | wc -l | tr -d ' ')
+tickets=$(files | xargs cat | { grep -oiE '#[0-9]{3,4}|act-[0-9]{3,}|RFC[ -]?[0-9]{3,4}' || true; } | wc -l | tr -d ' ')
 # Orthogonality: core files whose code mentions 5+ feature vocabularies.
 features='\blane|\bpriority|lagging|correlating|correlated_at|deferred_at|DeferSignal|backoff|maxRetries|breaker|tombstone|autoclose|notify|\bpii|\bsnap|\bbatch|\bblocked'
 coupled=$(for f in $(files); do n=$(grep -vE '^\s*(//|\*|/\*)' "$f" | grep -oE "$features" | sort -u | wc -l | tr -d ' '); if [ "$n" -ge 5 ]; then echo; fi; done | wc -l | tr -d ' ')
@@ -26,7 +26,7 @@ echo "| core lines (libs/act/src) | $lines |"
 echo "| code lines / comment lines | $code / $comments ($((comments * 100 / lines))% comments) |"
 pct() { local l c; l=$(find "$SRC/$1" -name '*.ts' -exec cat {} + | wc -l | tr -d ' '); c=$(find "$SRC/$1" -name '*.ts' -exec cat {} + | grep -cE '^\s*(//|\*|/\*)' || true); echo "$((c * 100 / l))%"; }
 echo "| comments in internal/ / adapters/ (bar: under 30%) | $(pct internal) / $(pct adapters) |"
-ticket_tests=$(git ls-files '*.spec.ts' | xargs grep -hE '(it|describe|test)\(.*(#[0-9]{3,4}|ACT-[0-9]+)' | wc -l | tr -d ' ' || true)
+ticket_tests=$(git ls-files '*.spec.ts' | xargs grep -hE '(it|describe|test)\(.*(#[0-9]{3,4}|ACT-[0-9]+|RFC[ -]?[0-9]{3,4})' | wc -l | tr -d ' ' || true)
 echo "| ticket refs in source / in test names | $tickets / $ticket_tests |"
 echo "| core files touching 5+ features | $coupled |"
 echo "| files over 300 lines / over 300 code lines | $over300 / $over300code |"
