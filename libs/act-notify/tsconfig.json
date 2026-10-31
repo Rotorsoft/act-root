@@ -8,6 +8,12 @@
       "path": "../act"
     },
     {
+      "path": "../act-crypto/tsconfig.build.json"
+    },
+    {
+      "path": "../act-pg/tsconfig.build.json"
+    },
+    {
       "path": "../act-tck/tsconfig.build.json"
     }
   ],
