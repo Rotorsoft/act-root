@@ -4,8 +4,9 @@ import { act, dispose, log, sensitive, state } from "../src/index.js";
 
 /**
  * A sensitive field reads as "[REDACTED]" or "[SHREDDED]" to a caller who
- * may not see it, and so does the state field of the same name. The first
- * build names each such field whose type isn't a string, once.
+ * may not see it, and so does any state field a reducer copies it into. The
+ * first build names each such event field, and each state field of the same
+ * name, whose type isn't a string, once.
  */
 
 const advisories = () => {
@@ -66,7 +67,7 @@ describe("the sensitive-type advisory", () => {
             age: sensitive(z.string().pipe(z.coerce.number())),
             email: sensitive(z.string()),
           },
-          { points: z.number(), email: z.number() }
+          { points: z.number(), email: z.number(), score: z.number() }
         )
       )
       .build();
@@ -81,6 +82,8 @@ describe("the sensitive-type advisory", () => {
     ])
       expect(message).toContain(field);
     expect(message).not.toContain("Joined.email");
+    // Matched by name: a reducer copying `points` into `score` isn't found.
+    expect(message).not.toContain("Member.score");
   });
 
   it("logs once per builder, however many apps it builds", () => {

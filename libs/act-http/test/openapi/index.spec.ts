@@ -403,15 +403,15 @@ describe("openapi — request bodies describe what a client sends", () => {
 // A successful action returns its state's snapshots; the doc describes them
 // from the state's own schemas, so generated clients get typed state.
 const Member = state({
-  Member: z.object({ email: z.string(), points: z.number() }),
+  Member: z.object({ contact: z.string(), points: z.number() }),
 })
-  .init(() => ({ email: "", points: 0 }))
+  .init(() => ({ contact: "", points: 0 }))
   .emits({
     Joined: z.object({ email: sensitive(z.string()) }),
     Scored: z.object({ points: z.number() }),
   })
   .patch({
-    Joined: ({ data }) => ({ email: data.email }),
+    Joined: ({ data }) => ({ contact: data.email }),
     Scored: ({ data }, s) => ({ points: s.points + data.points }),
   })
   .on({ Join: z.object({ email: z.string() }) })
@@ -459,8 +459,7 @@ describe("openapi — typed action responses", () => {
       const schema = doc.components?.schemas
         ?.MemberSnapshots as unknown as SnapshotsSchema;
       expect(schema.type).toBe("array");
-      const { state, event } = schema.items.properties;
-      expect(state.properties.points).toEqual({ type: "number" });
+      const { event } = schema.items.properties;
       expect(event.oneOf.map((e) => e.properties.name.const)).toEqual([
         "Joined",
         "Scored",
@@ -478,28 +477,35 @@ describe("openapi — typed action responses", () => {
         }
       ).patch;
       expect(patch.required).toBeUndefined();
-      expect(patch.properties.points).toEqual({
-        anyOf: [{ type: "number" }, { type: "null" }],
+      expect(patch.properties.points).toMatchObject({
+        anyOf: [{}, { type: "null" }],
       });
     }
   );
 
   member_test(
-    "lets a sensitive field, and the state field of its name, read as a marker",
+    "lets a sensitive field, and every field of its state, read as a marker",
     ({ app }) => {
       const doc = openapi(app, base_options());
       const schema = doc.components?.schemas
         ?.MemberSnapshots as unknown as SnapshotsSchema;
       const markers = { type: "string", enum: ["[REDACTED]", "[SHREDDED]"] };
       const { state, event } = schema.items.properties;
-      expect(state.properties.email).toEqual({
-        anyOf: [{ type: "string" }, markers],
-      });
       expect(event.oneOf[0].properties.data.properties.email).toEqual({
         anyOf: [{ type: "string" }, markers],
       });
-      // Fields that aren't sensitive stay as their schema says.
-      expect(state.properties.points).toEqual({ type: "number" });
+      // The reducer copies the email into `contact`, so a state field of
+      // any name may read as a marker, and so may every other field.
+      expect(state.properties.contact).toEqual({
+        anyOf: [{ type: "string" }, markers],
+      });
+      expect(state.properties.points).toEqual({
+        anyOf: [{ type: "number" }, markers],
+      });
+      // Event fields that aren't sensitive stay as their schema says.
+      expect(event.oneOf[1].properties.data.properties.points).toEqual({
+        type: "number",
+      });
     }
   );
 
