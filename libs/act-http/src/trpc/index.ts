@@ -231,9 +231,8 @@ function status_to_trpc_code(status: number): TRPCError["code"] {
       // keep 410); see auto-generated-api.md.
       return "NOT_FOUND";
     case 412:
-      // ConcurrencyError is HTTP 412 Precondition Failed. Map by error
-      // identity, not by round-tripping the status: PRECONDITION_FAILED
-      // serializes back to 412, matching Hono/OpenAPI.
+      // ConcurrencyError is HTTP 412 Precondition Failed, and
+      // PRECONDITION_FAILED serializes back to 412, matching Hono/OpenAPI.
       return "PRECONDITION_FAILED";
     case 422:
       return "UNPROCESSABLE_CONTENT";
@@ -339,20 +338,13 @@ export function trpc<Ctx extends object, TApp extends ActSurface>(
   const t = initTRPC.context<Ctx>().create();
   const dispatch = make_dispatch<Ctx>(app, options, options.idempotency?.store);
 
-  // Resolve the actor inline per mutation instead of via
-  // `t.procedure.use(authenticated(...))`. The middleware path threads
-  // tRPC's internal `Unwrap` type into each procedure's inferred shape,
-  // which the d.ts emitter can't name portably (`unstable-core-do-not-
-  // import` has a hashed file name that varies per build). Inlining
-  // sidesteps the issue entirely — the standalone `authenticated`
-  // export still works for hosts who want middleware composition.
-  /**
-   * Run the actor extractor for a generated procedure, mapping a
-   * "throw to deny" onto `UNAUTHORIZED` rather than a framework 500.
-   *
-   * Shared by mutations and subscriptions, so a denied caller gets
-   * neither a mutation nor a live subscription.
-   */
+  // Run the actor extractor for a generated procedure, mapping a "throw to
+  // deny" onto `UNAUTHORIZED` rather than a framework 500. Shared by
+  // mutations and subscriptions, so a denied caller gets neither. It runs
+  // inline rather than as `t.procedure.use(authenticated(...))`: the
+  // middleware threads tRPC's internal `Unwrap` type into each procedure,
+  // which the d.ts emitter can't name portably (its file name is hashed
+  // per build). The standalone `authenticated` export still composes.
   const resolve_actor = async (host_ctx: Ctx): Promise<Actor> => {
     try {
       return await options.actor(host_ctx);
