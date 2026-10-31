@@ -171,14 +171,7 @@ A single-node deployment rarely needs to tune this; raise the threshold for flak
 
 ### Invariants
 
-An invariant is what must hold of a state after every action ("every territory keeps at least one army"). Declare it in the state's Zod schema, with refinements where a type can't say it ([state-management § Invariants](./state-management.md#invariants)). There is nothing to configure: every action folds its events before it commits them ([one fold, before the commit](./state-management.md#what-an-action-checks-in-order)) and checks the final state against the schema once.
-
-- A state the schema rejects refuses the action with a `ValidationError` whose `target` names the state and the action (`"<state>.<action>"`). Nothing is stored and no reaction runs. This also catches a reducer bug, such as a division by zero folding `NaN` into a `z.number()` field.
-- The check reads the state and never replaces it, so a schema with defaults or transforms doesn't rewrite a valid state.
-- Loads, replays and projection folds don't check. A stream that already holds an event that breaks the schema (written before 1.35, or by another app) still loads.
-- It costs one schema parse per action.
-
-`ActOptions.validateFoldedState`, which used to turn a check on for every folded event, is deprecated and ignored, and is removed in 2.0.
+There is nothing to configure: every action checks the state it leaves against the state's Zod schema before it commits. What the check covers and what it ignores is in [state-management § Invariants](./state-management.md#invariants). `ActOptions.validateFoldedState` is deprecated and ignored, and is removed in 2.0.
 
 ### Deployment shapes via `listen` / `drain`
 

@@ -3098,34 +3098,19 @@ export declare class PreconditionError<TState extends Schema, TEvents extends Sc
  * modified by another process since it was last loaded. The version number
  * doesn't match expectations, indicating a concurrent modification.
  *
- * This is a normal occurrence in distributed systems and should be handled
- * by reloading the current state and retrying the action.
+ * This is a normal occurrence in distributed systems. Declare a retry
+ * budget on the action and the orchestrator reloads the state and runs it
+ * again; a conflict on a caller-pinned \`expectedVersion\` is never retried.
  *
- * @example Handling concurrency conflicts with retry
+ * @example Declaring the retry on the action
  * \`\`\`typescript
- * import { ConcurrencyError } from "@rotorsoft/act";
- *
- * async function transferWithRetry(from, to, amount, maxRetries = 3) {
- *   for (let attempt = 0; attempt < maxRetries; attempt++) {
- *     try {
- *       await app.do("transfer",
- *         { stream: from, actor: currentUser },
- *         { to, amount }
- *       );
- *       return { success: true };
- *     } catch (error) {
- *       if (error instanceof ConcurrencyError) {
- *         if (attempt < maxRetries - 1) {
- *           console.log(\`Concurrent modification detected, retrying... (\${attempt + 1}/\${maxRetries})\`);
- *           await sleep(100 * Math.pow(2, attempt)); // Exponential backoff
- *           continue;
- *         }
- *       }
- *       throw error;
- *     }
- *   }
- *   return { success: false, reason: "Too many concurrent modifications" };
- * }
+ * const Account = state({ Account: schema })
+ *   // ...
+ *   .on({ transfer: TransferSchema }, {
+ *     maxRetries: 3,
+ *     backoff: { strategy: "exponential", baseMs: 100 },
+ *   })
+ *   .emit("TransferSent");
  * \`\`\`
  *
  * @see {@link Store.commit} for version checking details
@@ -8406,34 +8391,19 @@ export declare class PreconditionError<TState extends Schema, TEvents extends Sc
  * modified by another process since it was last loaded. The version number
  * doesn't match expectations, indicating a concurrent modification.
  *
- * This is a normal occurrence in distributed systems and should be handled
- * by reloading the current state and retrying the action.
+ * This is a normal occurrence in distributed systems. Declare a retry
+ * budget on the action and the orchestrator reloads the state and runs it
+ * again; a conflict on a caller-pinned \`expectedVersion\` is never retried.
  *
- * @example Handling concurrency conflicts with retry
+ * @example Declaring the retry on the action
  * \`\`\`typescript
- * import { ConcurrencyError } from "@rotorsoft/act";
- *
- * async function transferWithRetry(from, to, amount, maxRetries = 3) {
- *   for (let attempt = 0; attempt < maxRetries; attempt++) {
- *     try {
- *       await app.do("transfer",
- *         { stream: from, actor: currentUser },
- *         { to, amount }
- *       );
- *       return { success: true };
- *     } catch (error) {
- *       if (error instanceof ConcurrencyError) {
- *         if (attempt < maxRetries - 1) {
- *           console.log(\`Concurrent modification detected, retrying... (\${attempt + 1}/\${maxRetries})\`);
- *           await sleep(100 * Math.pow(2, attempt)); // Exponential backoff
- *           continue;
- *         }
- *       }
- *       throw error;
- *     }
- *   }
- *   return { success: false, reason: "Too many concurrent modifications" };
- * }
+ * const Account = state({ Account: schema })
+ *   // ...
+ *   .on({ transfer: TransferSchema }, {
+ *     maxRetries: 3,
+ *     backoff: { strategy: "exponential", baseMs: 100 },
+ *   })
+ *   .emit("TransferSent");
  * \`\`\`
  *
  * @see {@link Store.commit} for version checking details
