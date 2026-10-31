@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
 # PostToolUse hook fired after Edit/Write.
 #
-# Goal: catch TypeScript errors at the moment they're introduced, not at
-# the next `pnpm typecheck` an hour later. We use a per-package incremental
-# tsc rather than the full monorepo build — the workspace-wide typecheck
-# is too slow (~30s) to gate every edit.
+# Catches a TypeScript error when an edit introduces it: an incremental tsc
+# on the `tsconfig.workspace.json` project, reporting only the errors in the
+# edited file's package.
 #
 # Scope: only fire when a tracked TS source file changed under libs/ or
 # packages/. Other paths (.md, .json, generated files) are silent passes.
@@ -37,10 +36,7 @@ esac
 
 # Repo root holds tsconfig.workspace.json, whose `paths` map @rotorsoft/*
 # and @act/* to source. Type-checking against it resolves cross-package
-# imports to `src`, so a freshly edited file checks without any dependency
-# being built first — the per-package config used composite `references`,
-# which forced resolution through built `dist` and blocked every edit in a
-# not-yet-built tree (the recurring TS6305 papercut).
+# imports to `src`, so an edit checks without building any dependency.
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 [[ -f "$root/tsconfig.workspace.json" ]] || exit 0
 

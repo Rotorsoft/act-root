@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Section-presence check for `libs/(any)/README.md` (ticket #751).
+ * Section-presence check for `libs/(any)/README.md`.
  *
  * Every lib README must follow the canonical structure: title + tagline,
  * "Why this package", Installation, Quick start, Related packages,
@@ -11,8 +11,6 @@
  * Deprecated packages can opt out by including either an HTML-comment
  * marker (with the body `canonical-check: deprecated`) or a GFM warning
  * banner mentioning "deprecat" in the first 30 lines.
- *
- * Exits non-zero on any violation. Wire into CI alongside lint/test.
  */
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";

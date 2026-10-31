@@ -1,33 +1,11 @@
 #!/usr/bin/env node
 /**
- * Derive the `@rotorsoft/*` `paths` entries in `tsconfig.workspace.json`
- * from each lib package's `exports` map (ticket #1059, finishing #1036).
- *
- * The workspace path map is the single source of truth for both the
- * type-checker (`tsc --noEmit --project tsconfig.workspace.json`) and the
- * vitest alias map (`vite.config.ts` derives its aliases from these very
- * paths). Every published subpath export must have a matching `paths` entry
- * pointing at the package's `src` so both tools resolve workspace deps to
- * source instead of built `dist`. The catch-all `@rotorsoft/*` can only
- * express the bare specifier — TypeScript allows a single `*` per pattern,
- * so subpaths (`@rotorsoft/act-http/sse`, `@rotorsoft/act/test`) have to be
- * enumerated one by one. Hand-maintaining that enumeration is exactly what
- * let it drift (#1036); this generator owns it instead.
- *
- * Discovery mirrors `test/stability.spec.ts`: walk
- * every `libs/<pkg>/package.json` whose name is under `@rotorsoft/`, and map
- * each `exports` subpath whose `import` target ends in `.js` to its `src`
- * entry (`./dist/api/index.js` -> `src/api/index.ts`). UI packages
- * (`act-diagram`) are skipped for the same reason the stability gate skips
- * them — their public surface is React components, and the `@rotorsoft/*`
- * catch-all still resolves the bare import to source.
- *
- * Two preserved, non-derivable wildcards bracket the generated block:
- *   - `@act/*` -> the in-repo example apps under `packages/*`, which declare
- *     no `exports` map at all, so there is nothing to enumerate and no
- *     subpaths to miss; the wildcard is correct and cannot rot.
- *   - `@rotorsoft/*` -> bare-specifier fallback for any lib (including the
- *     skipped UI package) not otherwise enumerated.
+ * Writes the `@rotorsoft/*` `paths` in `tsconfig.workspace.json` from each
+ * lib's `exports`, so tsc and vitest (which derives its aliases from them)
+ * resolve every published subpath to source. A pattern takes one `*`, so
+ * subpaths such as `@rotorsoft/act-http/sse` must be listed one by one.
+ * act-diagram is skipped (its surface is React components); the bare
+ * `@rotorsoft/*` and the example apps' `@act/*` stay wildcards.
  *
  * Usage:
  *   node scripts/derive-tsconfig-paths.mjs            # sync (rewrite paths)
@@ -42,12 +20,9 @@ const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const LIBS_DIR = join(ROOT, "libs");
 const TSCONFIG = join(ROOT, "tsconfig.workspace.json");
 
-// Same exclusion as the workspace stability gate: act-diagram's public
-// surface is React components, not a library entry point. Its bare import
-// still resolves through the `@rotorsoft/*` catch-all below.
 const UI_PACKAGES = new Set(["@rotorsoft/act-diagram"]);
 
-// Non-derivable wildcards, preserved verbatim around the generated entries.
+// Wildcards kept around the generated entries.
 const ACT_WILDCARD = ["./packages/*/src/index.ts"];
 const ROTORSOFT_WILDCARD = ["./libs/*/src/index.ts"];
 
