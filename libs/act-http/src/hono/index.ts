@@ -60,6 +60,7 @@ import {
   type AppActions,
   type AppStateNames,
   make_dispatch,
+  type ResolverArgs,
 } from "../api/dispatch.js";
 import {
   type ActorExtractor,
@@ -111,17 +112,13 @@ export type ActMiddlewareVariables = {
  * - `basePath` (optional, default `"/api"`) — Hono basePath the
  *   routes mount under.
  */
-export type HonoOptions = {
+export type HonoOptions<TApp = ActSurface> = {
   readonly actor: ActorExtractor<Context>;
   readonly stream: (
-    action_name: string,
-    input: unknown,
-    c: Context
+    ...args: ResolverArgs<TApp, Context>
   ) => string | Promise<string>;
   readonly expectedVersion?: (
-    action_name: string,
-    input: unknown,
-    c: Context
+    ...args: ResolverArgs<TApp, Context>
   ) => number | undefined | Promise<number | undefined>;
   readonly idempotency?: {
     readonly store: IdempotencyStore;
@@ -234,7 +231,7 @@ export function hono<
   TBase extends string = "/api",
 >(
   app: TApp,
-  options: HonoOptions & {
+  options: HonoOptions<TApp> & {
     readonly basePath?: TBase;
     readonly sse: NonNullable<HonoOptions["sse"]>;
   }
@@ -248,7 +245,7 @@ export function hono<
   TBase extends string = "/api",
 >(
   app: TApp,
-  options: HonoOptions & { readonly basePath?: TBase }
+  options: HonoOptions<TApp> & { readonly basePath?: TBase }
 ): Hono<
   { Variables: ActMiddlewareVariables },
   ActionRoutes<TApp, TBase>,
@@ -435,7 +432,7 @@ export function hono<TApp extends ActSurface>(
  * One `GET <basePath>/sse/<state>?stream=<id>` per state of `TApp`, with
  * `sse`: an event stream on `200`, {@link ApiError} on an error status.
  */
-type SseRoutes<TApp, TBase extends string> = {
+export type SseRoutes<TApp, TBase extends string> = {
   [N in AppStateNames<TApp> as MergePath<TBase, `/sse/${N}`>]: {
     $get:
       | {
@@ -462,7 +459,7 @@ type ErrorStatus = 400 | 401 | 409 | 410 | 412 | 422 | 500 | 503;
  * `app.do` returns (as JSON) on `200`, and {@link ApiError} on an error
  * status. `hc<typeof api>` and `testClient(api)` read it.
  */
-type ActionRoutes<TApp, TBase extends string> = {
+export type ActionRoutes<TApp, TBase extends string> = {
   [K in keyof AppActions<TApp> & string as MergePath<TBase, `/actions/${K}`>]: {
     $post:
       | {

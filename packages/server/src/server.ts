@@ -1,11 +1,11 @@
 import {
   calculatorApp,
+  calculatorRest,
   calculatorRouter,
   type Operators,
 } from "@act/calculator";
 import { serve } from "@hono/node-server";
 import { dispose } from "@rotorsoft/act";
-import { hono as honoTransport } from "@rotorsoft/act-http/hono";
 import { openapi } from "@rotorsoft/act-http/openapi";
 import { BroadcastChannel } from "@rotorsoft/act-http/sse";
 import { instrument } from "@rotorsoft/act-otel";
@@ -21,8 +21,8 @@ import { resolveDemoActor } from "./demo-actor.js";
  * makes it the integration test that the transports agree.
  * Every transport walks the same `calculatorApp` registry; the
  * OpenAPI doc describes the REST routes the Hono adapter actually
- * serves; tRPC consumers use `typeof calculatorRouter` for their
- * typed client (no codegen).
+ * serves. Both the tRPC router and the REST routes are generated in
+ * `@act/calculator`, and the client types itself from them (no codegen).
  *
  *   POST /trpc/PressKey, /trpc/Clear   ← tRPC procedures
  *   POST /api/actions/PressKey, ...    ← REST routes
@@ -78,7 +78,7 @@ calculatorApp.on("committed", (snapshots) => {
   );
 });
 
-const restApi = honoTransport(calculatorApp, {
+const restApi = calculatorRest({
   // DEMO ONLY — no auth; production hosts MUST resolve a verified actor.
   // Every generated mutation trusts whatever this returns. In a real
   // service, resolve the actor from a verified JWT / session / mTLS
@@ -90,7 +90,6 @@ const restApi = honoTransport(calculatorApp, {
   // `resolveDemoActor()` logs a one-time warning if it ever runs outside
   // the demo, so the mistake surfaces in the logs.
   actor: () => resolveDemoActor(),
-  stream: () => "calculator",
   sse: { channel: broadcast },
 });
 

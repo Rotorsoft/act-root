@@ -99,7 +99,7 @@ const [snap] = await client.OpenTicket.mutate({ title: "support" });
 snap.state.title; // string
 ```
 
-The router is typed from the app. Each mutation takes its action's payload and returns the snapshots `app.do` returns, as they arrive over JSON (dates are strings). With `sse`, each `subscribe.<state>` yields that state's frames. A wrong field or an unknown action fails to compile, in `createTRPCClient` and `createTRPCReact` alike. Pass `typeof app` whenever you pass `Ctx`: given one type argument, TypeScript doesn't infer the other, and an app it can't see has no types to give.
+The router is typed from the app. Each mutation takes its action's payload and returns the snapshots `app.do` returns, as they arrive over JSON (dates are strings). With `sse`, each `subscribe.<state>` yields that state's frames. A wrong field or an unknown action fails to compile, in `createTRPCClient` and `createTRPCReact` alike. The `stream` and `expectedVersion` resolvers get the action's name and its payload together, on both generators, so checking `action` narrows `input`; declare all three parameters (`(action, input, ctx)`) for TypeScript to narrow. Pass `typeof app` whenever you pass `Ctx`: given one type argument, TypeScript doesn't infer the other, and an app it can't see has no types to give.
 
 The router is **flat by design**. State-name grouping (e.g. `client.Tickets.OpenTicket`) was considered and dropped — action names are unique across a registry (the framework enforces no duplicates at build), and the extra nesting was overhead that bought nothing.
 
@@ -452,7 +452,7 @@ The generator emits a vanilla Hono app — nothing in `hono(app, ...)` ties it t
 
 ### tRPC inside Next.js or a Vite SPA
 
-A typed React client needs only the router's type. Export `typeof router` from a shared workspace package; the server mounts the runtime router (under Next.js's `api/trpc/[trpc]` route or a Vite or Express server), and the client imports only the type and feeds it to `createTRPCReact<typeof router>()`. The generated router and a hand-written one work the same way here. `packages/calculator` and `packages/client` in this repo show it with a hand-written router; the multi-transport `packages/server` mounts that router beside the generated Hono REST and OpenAPI.
+A typed React client needs only the router's type. Export `typeof router` from a shared workspace package; the server mounts the runtime router (under Next.js's `api/trpc/[trpc]` route or a Vite or Express server), and the client imports only the type and feeds it to `createTRPCReact<typeof router>()`. `packages/calculator` exports its generated router as `CalculatorRouter`, `packages/client` feeds it to `createTRPCReact`, and the multi-transport `packages/server` mounts it beside the generated Hono REST and OpenAPI.
 
 ## Event versioning surfaces in the API
 
@@ -492,7 +492,7 @@ export const router = trpc<Ctx, typeof app>(app, {
 });
 ```
 
-The client keeps its types: `createTRPCReact<typeof router>()` sees the same procedures, inputs and outputs the hand-written router declared. `packages/calculator` still ships a hand-written router beside the generated Hono and OpenAPI surfaces; both shapes work.
+The client keeps its types: `createTRPCReact<typeof router>()` sees the same procedures, inputs and outputs the hand-written router declared. `packages/calculator` generates both its tRPC router and its REST routes this way, and `packages/client` types itself from them.
 
 ## Pointers
 
@@ -500,6 +500,6 @@ The client keeps its types: `createTRPCReact<typeof router>()` sees the same pro
 - `libs/act-http/src/api/` — `ActorExtractor`, `ApiError`, `ERROR_MAP`, `toApiError`, `withIdempotency`
 - `libs/act-http/README.md` — full API reference for every option
 - `packages/server/src/server.ts` — multi-transport demo wiring all three generators against the same Act
-- `packages/calculator/src/router.ts` — hand-written tRPC router for the typed client side
+- `packages/calculator/src/router.ts` — the calculator's generated tRPC router and REST routes, exported with their types for the client
 - [External integration patterns](./external-integration.md) — the inbound-webhook side of the same `IdempotencyStore` contract
 - [Event schema evolution](../architecture/event-schema-evolution.md) — what stays stable across `_v<n>` bumps

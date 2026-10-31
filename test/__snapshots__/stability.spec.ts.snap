@@ -11197,7 +11197,7 @@ import type { Context, MiddlewareHandler } from "hono";
 import { Hono } from "hono";
 import type { MergePath, TypedResponse } from "hono/types";
 import type { JSONParsed } from "hono/utils/types";
-import { type ActionResult, type ActSurface, type AppActions, type AppStateNames } from "../api/dispatch.js";
+import { type ActionResult, type ActSurface, type AppActions, type AppStateNames, type ResolverArgs } from "../api/dispatch.js";
 import { type ActorExtractor, type ApiError, type SseOptions } from "../api/index.js";
 /**
  * Hono context variables this subpath contributes. The generic on
@@ -11237,10 +11237,10 @@ export type ActMiddlewareVariables = {
  * - \`basePath\` (optional, default \`"/api"\`) — Hono basePath the
  *   routes mount under.
  */
-export type HonoOptions = {
+export type HonoOptions<TApp = ActSurface> = {
     readonly actor: ActorExtractor<Context>;
-    readonly stream: (action_name: string, input: unknown, c: Context) => string | Promise<string>;
-    readonly expectedVersion?: (action_name: string, input: unknown, c: Context) => number | undefined | Promise<number | undefined>;
+    readonly stream: (...args: ResolverArgs<TApp, Context>) => string | Promise<string>;
+    readonly expectedVersion?: (...args: ResolverArgs<TApp, Context>) => number | undefined | Promise<number | undefined>;
     readonly idempotency?: {
         readonly store: IdempotencyStore;
         readonly keyFrom?: (c: Context) => string | undefined;
@@ -11322,13 +11322,13 @@ export declare function authenticated(extractor: ActorExtractor<Context>): Middl
  * @returns A Hono app covering every registered action under
  *   \`<basePath>/actions/<name>\`.
  */
-export declare function hono<TApp extends ActSurface = ActSurface, TBase extends string = "/api">(app: TApp, options: HonoOptions & {
+export declare function hono<TApp extends ActSurface = ActSurface, TBase extends string = "/api">(app: TApp, options: HonoOptions<TApp> & {
     readonly basePath?: TBase;
     readonly sse: NonNullable<HonoOptions["sse"]>;
 }): Hono<{
     Variables: ActMiddlewareVariables;
 }, ActionRoutes<TApp, TBase> & SseRoutes<TApp, TBase>, TBase>;
-export declare function hono<TApp extends ActSurface = ActSurface, TBase extends string = "/api">(app: TApp, options: HonoOptions & {
+export declare function hono<TApp extends ActSurface = ActSurface, TBase extends string = "/api">(app: TApp, options: HonoOptions<TApp> & {
     readonly basePath?: TBase;
 }): Hono<{
     Variables: ActMiddlewareVariables;
@@ -11337,7 +11337,7 @@ export declare function hono<TApp extends ActSurface = ActSurface, TBase extends
  * One \`GET <basePath>/sse/<state>?stream=<id>\` per state of \`TApp\`, with
  * \`sse\`: an event stream on \`200\`, {@link ApiError} on an error status.
  */
-type SseRoutes<TApp, TBase extends string> = {
+export type SseRoutes<TApp, TBase extends string> = {
     [N in AppStateNames<TApp> as MergePath<TBase, \`/sse/\${N}\`>]: {
         $get: {
             input: {
@@ -11368,7 +11368,7 @@ type ErrorStatus = 400 | 401 | 409 | 410 | 412 | 422 | 500 | 503;
  * \`app.do\` returns (as JSON) on \`200\`, and {@link ApiError} on an error
  * status. \`hc<typeof api>\` and \`testClient(api)\` read it.
  */
-type ActionRoutes<TApp, TBase extends string> = {
+export type ActionRoutes<TApp, TBase extends string> = {
     [K in keyof AppActions<TApp> & string as MergePath<TBase, \`/actions/\${K}\`>]: {
         $post: {
             input: {
@@ -12444,7 +12444,7 @@ exports[`@rotorsoft/act-http — public API stability > stable public surface fo
 import { type Actor } from "@rotorsoft/act";
 import type { IdempotencyStore } from "@rotorsoft/act-ops/idempotency";
 import { type TRPCBuiltRouter, type TRPCDefaultErrorShape, type TRPCMiddlewareFunction, type TRPCMutationProcedure, type TRPCSubscriptionProcedure } from "@trpc/server";
-import { type ActionResult, type ActSurface, type AppActions, type AppState, type AppStateNames } from "../api/dispatch.js";
+import { type ActionResult, type ActSurface, type AppActions, type AppState, type AppStateNames, type ResolverArgs } from "../api/dispatch.js";
 import { type ActorExtractor, type SseOptions, type SseSubscriptionFrame } from "../api/index.js";
 /**
  * Per-call options for {@link trpc}. The host supplies the three
@@ -12482,10 +12482,10 @@ import { type ActorExtractor, type SseOptions, type SseSubscriptionFrame } from 
  *   procedures see this exact context type (plus \`actor\`) at
  *   runtime.
  */
-export type TrpcOptions<Ctx> = {
+export type TrpcOptions<Ctx, TApp = ActSurface> = {
     readonly actor: ActorExtractor<Ctx>;
-    readonly stream: (action_name: string, input: unknown, ctx: Ctx) => string | Promise<string>;
-    readonly expectedVersion?: (action_name: string, input: unknown, ctx: Ctx) => number | undefined | Promise<number | undefined>;
+    readonly stream: (...args: ResolverArgs<TApp, NoInfer<Ctx>>) => string | Promise<string>;
+    readonly expectedVersion?: (...args: ResolverArgs<TApp, NoInfer<Ctx>>) => number | undefined | Promise<number | undefined>;
     readonly idempotency?: {
         readonly store: IdempotencyStore;
         readonly keyFrom: (ctx: Ctx) => string | undefined;
@@ -12574,7 +12574,7 @@ type SubscribeRouter<TApp> = {
     };
 };
 /** The router {@link trpc} builds: the actions, and the subscriptions with \`sse\`. */
-type GeneratedRouter<Ctx extends object, TApp, TRecord> = TRPCBuiltRouter<GeneratedRoot<Ctx>, ActionProcedures<TApp> & TRecord>;
+export type GeneratedRouter<Ctx extends object, TApp, TRecord> = TRPCBuiltRouter<GeneratedRoot<Ctx>, ActionProcedures<TApp> & TRecord>;
 /**
  * Build a typed tRPC router from a built \`Act\` instance.
  *
@@ -12611,10 +12611,10 @@ type GeneratedRouter<Ctx extends object, TApp, TRecord> = TRPCBuiltRouter<Genera
  * @param options Auth, stream, and (optional) idempotency seams.
  * @returns A tRPC router with one mutation per registered action.
  */
-export declare function trpc<Ctx extends object = object, TApp extends ActSurface = ActSurface>(app: TApp, options: TrpcOptions<Ctx> & {
+export declare function trpc<Ctx extends object = object, TApp extends ActSurface = ActSurface>(app: TApp, options: TrpcOptions<Ctx, TApp> & {
     readonly sse: SseOptions;
 }): GeneratedRouter<Ctx, TApp, SubscribeRouter<TApp>>;
-export declare function trpc<Ctx extends object = object, TApp extends ActSurface = ActSurface>(app: TApp, options: TrpcOptions<Ctx>): GeneratedRouter<Ctx, TApp, unknown>;
+export declare function trpc<Ctx extends object = object, TApp extends ActSurface = ActSurface>(app: TApp, options: TrpcOptions<Ctx, TApp>): GeneratedRouter<Ctx, TApp, unknown>;
 export {};
 //# sourceMappingURL=index.d.ts.map"
 `;

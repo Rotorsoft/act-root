@@ -8,10 +8,10 @@ A minimal React + Vite client for the calculator example. Demonstrates how to ca
 
 - Renders a 4×5 calculator keypad with a **transport toggle** (tRPC ↔ REST) and a link to the live `/openapi.json`
 - In tRPC mode: calls `PressKey` / `Clear` mutations on the server-hosted `calculatorRouter`
-- In REST mode: `POST`s to `/api/actions/PressKey` / `/api/actions/Clear` against the same server
+- In REST mode: calls `/api/actions/PressKey` / `/api/actions/Clear` on the same server through Hono's typed `hc<CalculatorRest>` client
 - Displays the latest snapshot returned from each mutation (`{ left, operator, right }`)
 - Shows a **live SSE panel** under the keypad: `src/useSse.ts` opens an `EventSource` on the server's generated `GET /api/sse/Calculator?stream=calculator` endpoint and applies incremental patches with `applyPatchMessage` from `@rotorsoft/act-http/sse` — state updates on every commit without refetching, from either transport or another tab
-- Reuses **types from the calculator package** (`Digits`, `Operators`, `CalculatorRouter`) — no duplicated schemas, no codegen
+- Reuses **types from the calculator package** (`Digits`, `Operators`, `CalculatorRouter`, `CalculatorRest`) — no duplicated schemas, no codegen, no casts
 
 ## Quickstart
 
@@ -39,6 +39,7 @@ packages/client/
 │   ├── Calculator.tsx     # Keypad UI + useMutation hooks + SSE live panel
 │   ├── useSse.ts          # EventSource hook (state/patch frames + applyPatchMessage)
 │   ├── trpc.ts            # createTRPCReact<CalculatorRouter>() + httpLink
+│   ├── restClient.ts      # hc<CalculatorRest>() for the REST routes
 │   ├── App.css, index.css # Styles
 │   └── assets/            # Static assets
 └── public/                # Public assets (favicon, etc.)
@@ -47,9 +48,9 @@ packages/client/
 ## How the type chain works
 
 1. **Calculator state** (`@act/calculator/src/calculator.ts`) defines actions and events using Zod schemas
-2. **Router** (`@act/calculator/src/router.ts`) wraps those Zod schemas as tRPC procedures and exports `CalculatorRouter`
-3. **Server** (`@act/server`) hosts that router on `http://localhost:4000`
-4. **Client** imports `CalculatorRouter` as a type and feeds it to `createTRPCReact<CalculatorRouter>()`:
+2. **APIs** (`@act/calculator/src/router.ts`) are generated from the app with `trpc(...)` and `hono(...)`, and exported with their types `CalculatorRouter` and `CalculatorRest`
+3. **Server** (`@act/server`) hosts both on `http://localhost:4000`
+4. **Client** imports the types: `createTRPCReact<CalculatorRouter>()` in `src/trpc.ts`, and `hc<CalculatorRest>()` in `src/restClient.ts`:
 
 ```ts
 // src/trpc.ts
@@ -78,6 +79,8 @@ const pressKey = trpc.PressKey.useMutation({
 const clear = trpc.Clear.useMutation({
   onSuccess: () => setDisplay("0"),
 });
+// Clear takes the empty payload its action declares:
+clear.mutate({});
 
 // inside the keypad map:
 pressKey.mutate({ key: key as Digits | Operators });

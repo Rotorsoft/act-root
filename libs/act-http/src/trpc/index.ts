@@ -69,6 +69,7 @@ import {
   type AppState,
   type AppStateNames,
   make_dispatch,
+  type ResolverArgs,
 } from "../api/dispatch.js";
 import {
   type ActorExtractor,
@@ -116,17 +117,13 @@ import {
  *   procedures see this exact context type (plus `actor`) at
  *   runtime.
  */
-export type TrpcOptions<Ctx> = {
+export type TrpcOptions<Ctx, TApp = ActSurface> = {
   readonly actor: ActorExtractor<Ctx>;
   readonly stream: (
-    action_name: string,
-    input: unknown,
-    ctx: Ctx
+    ...args: ResolverArgs<TApp, NoInfer<Ctx>>
   ) => string | Promise<string>;
   readonly expectedVersion?: (
-    action_name: string,
-    input: unknown,
-    ctx: Ctx
+    ...args: ResolverArgs<TApp, NoInfer<Ctx>>
   ) => number | undefined | Promise<number | undefined>;
   readonly idempotency?: {
     readonly store: IdempotencyStore;
@@ -279,10 +276,11 @@ type SubscribeRouter<TApp> = {
 };
 
 /** The router {@link trpc} builds: the actions, and the subscriptions with `sse`. */
-type GeneratedRouter<Ctx extends object, TApp, TRecord> = TRPCBuiltRouter<
-  GeneratedRoot<Ctx>,
-  ActionProcedures<TApp> & TRecord
->;
+export type GeneratedRouter<
+  Ctx extends object,
+  TApp,
+  TRecord,
+> = TRPCBuiltRouter<GeneratedRoot<Ctx>, ActionProcedures<TApp> & TRecord>;
 
 /**
  * Build a typed tRPC router from a built `Act` instance.
@@ -325,12 +323,15 @@ export function trpc<
   TApp extends ActSurface = ActSurface,
 >(
   app: TApp,
-  options: TrpcOptions<Ctx> & { readonly sse: SseOptions }
+  options: TrpcOptions<Ctx, TApp> & { readonly sse: SseOptions }
 ): GeneratedRouter<Ctx, TApp, SubscribeRouter<TApp>>;
 export function trpc<
   Ctx extends object = object,
   TApp extends ActSurface = ActSurface,
->(app: TApp, options: TrpcOptions<Ctx>): GeneratedRouter<Ctx, TApp, unknown>;
+>(
+  app: TApp,
+  options: TrpcOptions<Ctx, TApp>
+): GeneratedRouter<Ctx, TApp, unknown>;
 export function trpc<Ctx extends object, TApp extends ActSurface>(
   app: TApp,
   options: TrpcOptions<Ctx>

@@ -1,6 +1,10 @@
 import type { Digits, Operators } from "@act/calculator";
 import { useState } from "react";
-import { callRestAction, type Snapshot } from "./restClient.js";
+import {
+  type CalculatorState,
+  restClear,
+  restPressKey,
+} from "./restClient.js";
 import { SERVER_BASE, trpc } from "./trpc.js";
 import { useSse } from "./useSse.js";
 
@@ -8,12 +12,7 @@ type Transport = "trpc" | "rest";
 
 /** The broadcast view served by `GET /api/sse/Calculator` — the
  * calculator state plus the `_v` stream-version contract. */
-type LiveState = {
-  _v: number;
-  left?: string;
-  right?: string;
-  operator?: string;
-};
+type LiveState = CalculatorState & { _v: number };
 
 function formatState(s: LiveState): string {
   if (s.left === undefined && s.operator === undefined) return "0";
@@ -40,7 +39,7 @@ export default function Calculator() {
     onError: console.error,
   });
 
-  function applyState(snap: Snapshot) {
+  function applyState(snap: { state: CalculatorState }) {
     if (snap.state.left === undefined && snap.state.operator === undefined) {
       setDisplay("0");
       return;
@@ -55,14 +54,12 @@ export default function Calculator() {
   const handleKey = (key: string) => {
     if (!key) return;
     if (transport === "trpc") {
-      if (key === "C") trpcClear.mutate();
+      if (key === "C") trpcClear.mutate({});
       else trpcPressKey.mutate({ key: key as Digits | Operators });
       return;
     }
-    // REST: hit the generated Hono routes mirroring the same actions.
-    const action = key === "C" ? "Clear" : "PressKey";
-    const body = key === "C" ? {} : { key };
-    callRestAction(action, body)
+    // REST: the generated Hono routes for the same actions.
+    (key === "C" ? restClear() : restPressKey(key as Digits | Operators))
       .then(([snap]) => applyState(snap))
       .catch(console.error);
   };

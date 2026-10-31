@@ -2,11 +2,11 @@
 
 tRPC router in `packages/app/src/api/`, decomposed into focused route modules.
 
-> **When to skip this layer and use the generator instead.** If the app's HTTP surface is purely mechanical — one mutation per registered action, target stream resolved from headers or context, no special-cased queries beyond `app.load` / `app.query` — `@rotorsoft/act-http`'s [`/trpc`, `/hono`, and `/openapi` generators](https://rotorsoft.github.io/act-root/docs/guides/auto-generated-api) walk the registry and emit each transport for you. As of #846 the generators also handle **real-time SSE subscriptions**: pass `sse: { channel }` and the generator emits one typed subscription per registered state name, replacing the hand-written `onStateChange` route in this layout entirely. The hand-written shape below is the right pick when the API needs admin-only routes, custom auth flavors that don't fit a single `actor(ctx)` extractor, or the global-event-log `onEvent` replay surface (which the generator doesn't cover). The two patterns compose: generate the mutation + state-subscription surface, hand-write the `onEvent` / `auth` / `admin` routes alongside.
+> **Domain mutations are generated, never hand-written.** `trpc(app, { actor, stream })` from `@rotorsoft/act-http/trpc` emits one mutation per registered action, typed from the app: each takes its action's Zod payload and returns the snapshots `app.do` returns, so the client's `createTRPCReact<AppRouter>()` is typed end to end with no casts. With `sse: { channel }` it also emits one typed `subscribe.<State>` per state. Hand-write only what the generator doesn't cover: auth, admin routes, projection queries, the global `onEvent` replay, and a state subscription that needs presence. Merge them with `t.mergeRouters` (see `index.ts`).
 
 **Why decompose into many small files instead of one router?** Each file has a single responsibility and a clear dependency graph. `trpc.ts` knows nothing about auth; `context.ts` knows nothing about routes; route files know nothing about each other. This prevents circular dependencies and makes it easy to find where a specific endpoint lives. When the spec adds a new domain aggregate, you add handlers to `domain.routes.ts` without touching auth or SSE logic.
 
-**The mutation sequence is always: `app.do()` → `broadcastState()` → return.** Every mutation follows this exact order. If you skip `broadcastState()`, SSE clients won't see the change. Reactions and projections run on their own after the commit. If you read from a projection instead of the snapshot in the response, you'll return stale data because projections are async. Always return data from the snapshot, never from a projection query in the same request.
+**Broadcast once, on `committed`.** `app.on("committed", ...)` in `broadcast.ts` publishes every commit, whichever path made it: a generated mutation, a reaction, a timer. No mutation calls `broadcastState()` itself, so none can forget to. Reactions and projections run on their own after the commit. A generated mutation returns the snapshots of its own commit; never answer a request from a projection, which may lag.
 
 **Choosing the right procedure type:** Use `publicProcedure` for unauthenticated reads (list views, SSE subscriptions). Use `authedProcedure` for any mutation that modifies state — the middleware guarantees `ctx.actor` is non-null and typed. Use `adminProcedure` for administrative operations (role assignment, user management). Never use `publicProcedure` for mutations unless the spec explicitly allows anonymous writes.
 
@@ -22,13 +22,14 @@ tRPC router in `packages/app/src/api/`, decomposed into focused route modules.
 | `helpers.ts` | Event serialization | `serializeEvents()` for SSE payloads |
 | `broadcast.ts` | Real-time state broadcast | `BroadcastChannel` + `PresenceTracker` from `@rotorsoft/act-http/sse` |
 | `auth.routes.ts` | Auth endpoints | login, signup, me, assignRole, listUsers |
-| `domain.routes.ts` | Domain mutations + queries | `app.do()` + `broadcastState()` per mutation; query projections |
+| `domain.routes.ts` | Domain mutations + queries | `trpc(app, ...)` for every action; hand-written projection queries |
 | `events.routes.ts` | SSE subscriptions | `onStateChange` (incremental patches) + `onEvent` (replay) |
 | `index.ts` | Router composition | `t.mergeRouters()` + export `AppRouter` type |
 
 **Key rules:**
 - Don't call `app.settle()` in mutations — each commit settles its reactions on its own
-- Call `broadcastState(streamId, snap)` after every `app.do()` — pushes incremental patches via `@rotorsoft/act-http/sse`
+- Generate the domain mutations with `trpc(app, ...)`; never hand-write a procedure that only calls `app.do()`
+- `broadcastState()` runs from one `app.on("committed")` listener — pushes incremental patches via `@rotorsoft/act-http/sse`
 - Use `authedProcedure` / `adminProcedure` for authorization (middleware narrows `ctx.actor`)
 - `onStateChange` SSE uses `broadcast.subscribe()` from `@rotorsoft/act-http/sse` for real-time state push
 - `onEvent` SSE uses `app.on("settled", ...)` which fires only after `correlate()` + `drain()` complete
@@ -152,6 +153,7 @@ export function serializeEvents(events: Array<{ id: number; name: unknown; data:
 App-specific broadcast setup using `@rotorsoft/act-http/sse`. Customize `deriveState()` and `applyPresence()` for your domain.
 
 ```typescript
+import { app } from "@my-app/domain";
 import { BroadcastChannel, PresenceTracker } from "@rotorsoft/act-http/sse";
 import type { BroadcastState } from "@rotorsoft/act-http/sse";
 
@@ -169,7 +171,12 @@ type Snap = {
   event?: { version: number; created: Date };
 };
 
-/** Broadcast state after every app.do() — single entry point. */
+/** Broadcast every commit: generated mutations, reactions and timers alike. */
+app.on("committed", (snaps) => {
+  const stream = snaps.at(-1)?.event?.stream;
+  if (stream) broadcastState(stream, snaps);
+});
+
 export function broadcastState(streamId: string, snaps: Snap[]) {
   const last = snaps.at(-1);
   const state = last?.state;
@@ -209,25 +216,39 @@ Always use the short names (`overlay`, `state`, `online`, `isOnline`) — the sn
 
 ## packages/app/src/api/domain.routes.ts (domain commands + queries)
 
+The mutations come from the generator, typed from the app; only the projection queries are hand-written.
+
 ```typescript
 import { app, getItems } from "@my-app/domain";
+import { TRPCError } from "@trpc/server";
+import { trpc } from "@rotorsoft/act-http/trpc";
 import { z } from "zod";
-import { t, authedProcedure, adminProcedure, publicProcedure } from "./trpc.js";
-import { broadcastState } from "./broadcast.js";
+import { broadcast } from "./broadcast.js";
+import type { Context } from "./context.js";
+import { t, publicProcedure } from "./trpc.js";
 
-export const domainRouter = t.router({
-  CreateItem: authedProcedure
-    .input(z.object({ name: z.string() }))
-    .mutation(async ({ input, ctx }) => {
-      const stream = crypto.randomUUID();
-      const snaps = await app.do("CreateItem", { stream, actor: ctx.actor }, input);
-      broadcastState(stream, snaps); // incremental patches to SSE subscribers
-      return { success: true, id: stream };
-    }),
+/** One typed mutation per action: payload in, snapshots out. */
+export const domainRouter = trpc<Context, typeof app>(app, {
+  // Throwing denies the call with UNAUTHORIZED.
+  actor: (ctx) => {
+    if (!ctx.actor) throw new TRPCError({ code: "UNAUTHORIZED" });
+    return ctx.actor;
+  },
+  // Checking `action` narrows `input` (declare all three parameters).
+  stream: (action, input, _ctx) =>
+    action === "CreateItem" ? crypto.randomUUID() : input.itemId,
+});
 
+export const queriesRouter = t.router({
   getItems: publicProcedure.query(() => getItems()),
+  /** The live state `useStateStream` seeds and patches; null before the first commit. */
+  getState: publicProcedure
+    .input(z.object({ streamId: z.string() }))
+    .query(({ input }) => broadcast.state(input.streamId) ?? null),
 });
 ```
+
+The client reads the new item's id from the returned snapshot: `(await client.CreateItem.mutate({ name })).at(-1)?.event?.stream`. Role checks that depend on the action (admin-only actions) go in the action's `.requires([...])` preconditions, where every transport enforces them, not in the router.
 
 ## packages/app/src/api/events.routes.ts (SSE subscriptions)
 
@@ -239,7 +260,12 @@ import { tracked } from "@trpc/server";
 import { z } from "zod";
 import { serializeEvents } from "./helpers.js";
 import { t, publicProcedure } from "./trpc.js";
-import { broadcast, presence, broadcastPresenceChange } from "./broadcast.js";
+import {
+  type AppState,
+  broadcast,
+  presence,
+  broadcastPresenceChange,
+} from "./broadcast.js";
 import type { PatchMessage } from "@rotorsoft/act-http/sse";
 
 export const eventsRouter = t.router({
@@ -255,7 +281,7 @@ export const eventsRouter = t.router({
 
       const identityId = input?.identityId;
       let resolve: (() => void) | null = null;
-      let pending: PatchMessage | null = null;
+      let pending: PatchMessage<AppState> | null = null;
 
       const cleanup = broadcast.subscribe(streamId, (msg) => {
         pending = msg;
@@ -385,12 +411,17 @@ export const authRouter = t.router({
 
 ```typescript
 import { authRouter } from "./auth.routes.js";
-import { domainRouter } from "./domain.routes.js";
+import { domainRouter, queriesRouter } from "./domain.routes.js";
 import { eventsRouter } from "./events.routes.js";
 import { t } from "./trpc.js";
 
 export { createContext, type Context } from "./context.js";
 
-export const router = t.mergeRouters(authRouter, domainRouter, eventsRouter);
+export const router = t.mergeRouters(
+  authRouter,
+  domainRouter,
+  queriesRouter,
+  eventsRouter
+);
 export type AppRouter = typeof router;
 ```

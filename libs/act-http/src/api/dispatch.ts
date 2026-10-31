@@ -68,6 +68,19 @@ export type ActionResult<TApp, K> = Snapshot<
   AppRegistry<TApp>["events"]
 >[];
 
+/**
+ * What a `stream` or `expectedVersion` resolver receives: the action's
+ * name, its parsed payload and the transport's context, as one tuple per
+ * action, so checking the name narrows the payload.
+ */
+export type ResolverArgs<TApp, C> = {
+  [K in keyof AppActions<TApp> & string]: [
+    action_name: K,
+    input: AppActions<TApp>[K],
+    ctx: C,
+  ];
+}[keyof AppActions<TApp> & string];
+
 /** The target resolvers a generated transport takes, over its own context. */
 type TargetResolvers<C> = {
   readonly stream: (

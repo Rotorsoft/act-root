@@ -57,6 +57,19 @@ describe("trpc(app) types", () => {
     >().toEqualTypeOf<string>();
   });
 
+  it("narrows a resolver's payload by the action name", () => {
+    trpc(app, {
+      actor: (ctx: Ctx) => ({ id: ctx.user, name: ctx.user }),
+      stream: (action, input, ctx) =>
+        action === "add"
+          ? `${ctx.user}-${input.by.toFixed()}`
+          : `${ctx.user}-${input.text.trim()}`,
+      // TypeScript narrows by the name when all three parameters are declared.
+      expectedVersion: (action, input, _ctx) =>
+        action === "add" ? input.by : input.text.length,
+    });
+  });
+
   it("subscribes per state, with that state's frames", () => {
     const sse_router = trpc(app, {
       actor: () => ({ id: "a", name: "a" }),
@@ -94,6 +107,16 @@ describe("hono(app) types", () => {
     type Err = Awaited<ReturnType<Exclude<Res, { status: 200 }>["json"]>>;
     expectTypeOf<Ok[number]["state"]>().toEqualTypeOf<{ n: number }>();
     expectTypeOf<Err>().toEqualTypeOf<ApiError>();
+  });
+
+  it("narrows a resolver's payload by the action name", () => {
+    hono(app, {
+      actor: (c) => ({ id: c.req.header("x-user") ?? "", name: "" }),
+      stream: (action, input, c) =>
+        action === "add"
+          ? `${c.req.path}-${input.by.toFixed()}`
+          : `${c.req.path}-${input.text.trim()}`,
+    });
   });
 
   it("mounts under the basePath it's given", () => {
