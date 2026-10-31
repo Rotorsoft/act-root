@@ -33,6 +33,184 @@ exports[`openapi(app, options) — doc emitter > stable surface (snapshot) 1`] =
         ],
         "type": "object",
       },
+      "CalculatorSnapshots": {
+        "items": {
+          "properties": {
+            "cache_hit": {
+              "type": "boolean",
+            },
+            "event": {
+              "oneOf": [
+                {
+                  "properties": {
+                    "created": {
+                      "format": "date-time",
+                      "type": "string",
+                    },
+                    "data": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "key": {
+                          "type": "string",
+                        },
+                      },
+                      "required": [
+                        "key",
+                      ],
+                      "type": "object",
+                    },
+                    "id": {
+                      "type": "integer",
+                    },
+                    "meta": {
+                      "properties": {
+                        "causation": {
+                          "type": "object",
+                        },
+                        "correlation": {
+                          "type": "string",
+                        },
+                      },
+                      "required": [
+                        "correlation",
+                        "causation",
+                      ],
+                      "type": "object",
+                    },
+                    "name": {
+                      "const": "KeyPressed",
+                    },
+                    "stream": {
+                      "type": "string",
+                    },
+                    "version": {
+                      "type": "integer",
+                    },
+                  },
+                  "required": [
+                    "id",
+                    "stream",
+                    "version",
+                    "created",
+                    "name",
+                    "data",
+                    "meta",
+                  ],
+                  "type": "object",
+                },
+                {
+                  "properties": {
+                    "created": {
+                      "format": "date-time",
+                      "type": "string",
+                    },
+                    "data": {
+                      "additionalProperties": {
+                        "not": {},
+                      },
+                      "propertyNames": {
+                        "type": "string",
+                      },
+                      "type": "object",
+                    },
+                    "id": {
+                      "type": "integer",
+                    },
+                    "meta": {
+                      "properties": {
+                        "causation": {
+                          "type": "object",
+                        },
+                        "correlation": {
+                          "type": "string",
+                        },
+                      },
+                      "required": [
+                        "correlation",
+                        "causation",
+                      ],
+                      "type": "object",
+                    },
+                    "name": {
+                      "const": "Cleared",
+                    },
+                    "stream": {
+                      "type": "string",
+                    },
+                    "version": {
+                      "type": "integer",
+                    },
+                  },
+                  "required": [
+                    "id",
+                    "stream",
+                    "version",
+                    "created",
+                    "name",
+                    "data",
+                    "meta",
+                  ],
+                  "type": "object",
+                },
+              ],
+            },
+            "id": {
+              "type": "integer",
+            },
+            "patch": {
+              "additionalProperties": false,
+              "properties": {
+                "display": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                    },
+                    {
+                      "type": "null",
+                    },
+                  ],
+                },
+              },
+              "type": "object",
+            },
+            "patches": {
+              "type": "integer",
+            },
+            "replayed": {
+              "type": "integer",
+            },
+            "snaps": {
+              "type": "integer",
+            },
+            "state": {
+              "additionalProperties": false,
+              "properties": {
+                "display": {
+                  "type": "string",
+                },
+              },
+              "required": [
+                "display",
+              ],
+              "type": "object",
+            },
+            "version": {
+              "type": "integer",
+            },
+          },
+          "required": [
+            "state",
+            "id",
+            "version",
+            "patches",
+            "snaps",
+            "cache_hit",
+            "replayed",
+          ],
+          "type": "object",
+        },
+        "type": "array",
+      },
       "SnapshotArray": {
         "items": {
           "properties": {
@@ -40,6 +218,12 @@ exports[`openapi(app, options) — doc emitter > stable surface (snapshot) 1`] =
               "type": "boolean",
             },
             "event": {
+              "type": "object",
+            },
+            "id": {
+              "type": "integer",
+            },
+            "patch": {
               "type": "object",
             },
             "patches": {
@@ -60,6 +244,145 @@ exports[`openapi(app, options) — doc emitter > stable surface (snapshot) 1`] =
           },
           "required": [
             "state",
+            "id",
+            "version",
+            "patches",
+            "snaps",
+            "cache_hit",
+            "replayed",
+          ],
+          "type": "object",
+        },
+        "type": "array",
+      },
+      "TicketSnapshots": {
+        "items": {
+          "properties": {
+            "cache_hit": {
+              "type": "boolean",
+            },
+            "event": {
+              "oneOf": [
+                {
+                  "properties": {
+                    "created": {
+                      "format": "date-time",
+                      "type": "string",
+                    },
+                    "data": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "title": {
+                          "type": "string",
+                        },
+                      },
+                      "required": [
+                        "title",
+                      ],
+                      "type": "object",
+                    },
+                    "id": {
+                      "type": "integer",
+                    },
+                    "meta": {
+                      "properties": {
+                        "causation": {
+                          "type": "object",
+                        },
+                        "correlation": {
+                          "type": "string",
+                        },
+                      },
+                      "required": [
+                        "correlation",
+                        "causation",
+                      ],
+                      "type": "object",
+                    },
+                    "name": {
+                      "const": "TicketOpened",
+                    },
+                    "stream": {
+                      "type": "string",
+                    },
+                    "version": {
+                      "type": "integer",
+                    },
+                  },
+                  "required": [
+                    "id",
+                    "stream",
+                    "version",
+                    "created",
+                    "name",
+                    "data",
+                    "meta",
+                  ],
+                  "type": "object",
+                },
+              ],
+            },
+            "id": {
+              "type": "integer",
+            },
+            "patch": {
+              "additionalProperties": false,
+              "properties": {
+                "open": {
+                  "anyOf": [
+                    {
+                      "type": "boolean",
+                    },
+                    {
+                      "type": "null",
+                    },
+                  ],
+                },
+                "title": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                    },
+                    {
+                      "type": "null",
+                    },
+                  ],
+                },
+              },
+              "type": "object",
+            },
+            "patches": {
+              "type": "integer",
+            },
+            "replayed": {
+              "type": "integer",
+            },
+            "snaps": {
+              "type": "integer",
+            },
+            "state": {
+              "additionalProperties": false,
+              "properties": {
+                "open": {
+                  "type": "boolean",
+                },
+                "title": {
+                  "type": "string",
+                },
+              },
+              "required": [
+                "title",
+                "open",
+              ],
+              "type": "object",
+            },
+            "version": {
+              "type": "integer",
+            },
+          },
+          "required": [
+            "state",
+            "id",
             "version",
             "patches",
             "snaps",
@@ -122,7 +445,7 @@ exports[`openapi(app, options) — doc emitter > stable surface (snapshot) 1`] =
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SnapshotArray",
+                  "$ref": "#/components/schemas/CalculatorSnapshots",
                 },
               },
             },
@@ -202,7 +525,7 @@ exports[`openapi(app, options) — doc emitter > stable surface (snapshot) 1`] =
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SnapshotArray",
+                  "$ref": "#/components/schemas/TicketSnapshots",
                 },
               },
             },
@@ -283,7 +606,7 @@ exports[`openapi(app, options) — doc emitter > stable surface (snapshot) 1`] =
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SnapshotArray",
+                  "$ref": "#/components/schemas/CalculatorSnapshots",
                 },
               },
             },

@@ -7,9 +7,6 @@
   "references": [
     {
       "path": "../../libs/act"
-    },
-    {
-      "path": "../../libs/act-http/tsconfig.build.json"
     }
   ],
   "include": ["src"],

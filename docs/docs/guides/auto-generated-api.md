@@ -164,7 +164,9 @@ api.get("/openapi.json", (c) => c.json(doc));
 
 Zod 4's native `z.toJSONSchema` does the schema conversion — OpenAPI 3.1 uses JSON Schema 2020-12 as its dialect, so there's no lossy translation layer. The output is deterministic given the same registry (entries land in `Object.entries(app.registry.actions)` iteration order), so CI can snapshot the result and catch unintended API-surface changes in the same PR that introduced them.
 
-**Sensitive input fields are marked.** `z.toJSONSchema` has no knowledge of the `sensitive()` registry — the marker lives out-of-band in a `WeakMap`. So the emitter walks each action's sensitive fields (via `pii_fields` from `@rotorsoft/act`) and annotates every matching request-body property `writeOnly: true` + `format: password`. A field declared `email: sensitive(z.string())` surfaces in the doc as a write-only secret, so codegen tools and Swagger UI's "Try It" panel treat it as a password rather than echoing it in cleartext. Response schemas carry no PII (the success shape is a fixed generic `SnapshotArray`), so the marking is request-side only.
+**Sensitive input fields are marked.** `z.toJSONSchema` has no knowledge of the `sensitive()` registry — the marker lives out-of-band in a `WeakMap`. So the emitter walks each action's sensitive fields (via `pii_fields` from `@rotorsoft/act`) and annotates every matching request-body property `writeOnly: true` + `format: password`. A field declared `email: sensitive(z.string())` surfaces in the doc as a write-only secret, so codegen tools and Swagger UI's "Try It" panel treat it as a password rather than echoing it in cleartext. In responses, a sensitive field may read as `[REDACTED]` or `[SHREDDED]` for a caller who may not see it, so its schema there is the field's own or one of those two strings.
+
+**Responses are typed per state.** Each action's `200` points at `<State>Snapshots`, built from the state's Zod schema and its events': `state` as the state schema, `event` as one shape per event the state emits (told apart by `name`, with its `data` schema), and `patch` as the state schema with every field optional or `null`. A client generated from the document (`openapi-typescript` with `openapi-fetch`, or any language's generator) gets typed snapshots, as a tRPC or `hc` client does. `SnapshotArray`, the open shape, stays for an app surface that carries no state schemas.
 
 A clean way to serve the doc plus an interactive explorer in one shot — Scalar reads the live document from the same server:
 
@@ -452,7 +454,7 @@ The generator emits a vanilla Hono app — nothing in `hono(app, ...)` ties it t
 
 ### tRPC inside Next.js or a Vite SPA
 
-A typed React client needs only the router's type. Export `typeof router` from a shared workspace package; the server mounts the runtime router (under Next.js's `api/trpc/[trpc]` route or a Vite or Express server), and the client imports only the type and feeds it to `createTRPCReact<typeof router>()`. `packages/calculator` exports its generated router as `CalculatorRouter`, `packages/client` feeds it to `createTRPCReact`, and the multi-transport `packages/server` mounts it beside the generated Hono REST and OpenAPI.
+A typed React client needs only the router's type. Export `typeof router` from a shared workspace package; the server mounts the runtime router (under Next.js's `api/trpc/[trpc]` route or a Vite or Express server), and the client imports only the type and feeds it to `createTRPCReact<typeof router>()`. In this repo `packages/server` generates the router and the Hono app, exports their types (`AppRouter`, `Api`), and mounts both beside the OpenAPI document; `packages/client` imports those types only.
 
 ## Event versioning surfaces in the API
 
@@ -492,7 +494,7 @@ export const router = trpc<Ctx, typeof app>(app, {
 });
 ```
 
-The client keeps its types: `createTRPCReact<typeof router>()` sees the same procedures, inputs and outputs the hand-written router declared. `packages/calculator` generates both its tRPC router and its REST routes this way, and `packages/client` types itself from them.
+The client keeps its types: `createTRPCReact<typeof router>()` sees the same procedures, inputs and outputs the hand-written router declared. `packages/server` generates its tRPC router and REST routes this way, and `packages/client` types itself from them.
 
 ## Pointers
 
@@ -500,6 +502,6 @@ The client keeps its types: `createTRPCReact<typeof router>()` sees the same pro
 - `libs/act-http/src/api/` — `ActorExtractor`, `ApiError`, `ERROR_MAP`, `toApiError`, `withIdempotency`
 - `libs/act-http/README.md` — full API reference for every option
 - `packages/server/src/server.ts` — multi-transport demo wiring all three generators against the same Act
-- `packages/calculator/src/router.ts` — the calculator's generated tRPC router and REST routes, exported with their types for the client
+- `packages/server/src/api.ts` — the calculator's generated tRPC router and REST routes, exported as types for the client
 - [External integration patterns](./external-integration.md) — the inbound-webhook side of the same `IdempotencyStore` contract
 - [Event schema evolution](../architecture/event-schema-evolution.md) — what stays stable across `_v<n>` bumps

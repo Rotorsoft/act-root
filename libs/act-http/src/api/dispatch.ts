@@ -8,6 +8,7 @@ import type {
   Target,
 } from "@rotorsoft/act";
 import type { IdempotencyStore } from "@rotorsoft/act-ops/idempotency";
+import type { ZodType } from "zod";
 import { withIdempotency } from "./idempotency.js";
 import { track_in_flight } from "./in-flight.js";
 
@@ -24,6 +25,9 @@ export type ActSurface = {
       {
         readonly name: string;
         readonly actions: Record<string, unknown>;
+        /** The state's schema and its events', which the OpenAPI doc describes responses with. */
+        readonly state?: ZodType;
+        readonly events?: Readonly<Record<string, ZodType>>;
       }
     >;
   };

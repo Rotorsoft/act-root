@@ -1,20 +1,25 @@
-import type { Digits, Operators } from "@act/calculator";
-import { useState } from "react";
-import {
-  type CalculatorState,
-  restClear,
-  restPressKey,
-} from "./restClient.js";
-import { SERVER_BASE, trpc } from "./trpc.js";
-import { useSse } from "./useSse.js";
+import type { LiveState } from "@act/server";
+import type { Keys } from "@act/calculator";
+import { applyPatchMessage } from "@rotorsoft/act-http/sse";
+import { useRef, useState } from "react";
+import { rest } from "./restClient.js";
+import { trpc } from "./trpc.js";
 
 type Transport = "trpc" | "rest";
+type Key = Keys | "C" | "";
 
-/** The broadcast view served by `GET /api/sse/Calculator` — the
- * calculator state plus the `_v` stream-version contract. */
-type LiveState = CalculatorState & { _v: number };
+const BUTTONS: readonly Key[] = [
+  "C", "", "", "/",
+  "7", "8", "9", "*",
+  "4", "5", "6", "-",
+  "1", "2", "3", "+",
+  "", "0", ".", "=",
+];
 
-function formatState(s: LiveState): string {
+/** What the display shows, from a snapshot's state or the live state. */
+type Display = Pick<LiveState, "left" | "operator" | "right">;
+
+function format(s: Display): string {
   if (s.left === undefined && s.operator === undefined) return "0";
   return `${s.left ?? "0"} ${s.operator ?? ""} ${s.right ?? ""}`;
 }
@@ -22,46 +27,55 @@ function formatState(s: LiveState): string {
 export default function Calculator() {
   const [display, setDisplay] = useState("");
   const [transport, setTransport] = useState<Transport>("trpc");
+  const [live, setLive] = useState<LiveState>();
+  const cached = useRef<LiveState | undefined>(undefined);
 
-  // Live state over SSE — updates on every commit (from either
-  // transport, or another browser tab) without refetching.
-  const live = useSse<LiveState>(
-    `${SERVER_BASE}/api/sse/Calculator?stream=calculator`
+  // Live state from the generated `subscribe.Calculator`: the cached state
+  // on open, then a patch per commit (from either transport, or another
+  // tab). A patch that finds versions missing resubscribes for a fresh state.
+  const subscription = trpc.subscribe.Calculator.useSubscription(
+    { stream: "calculator" },
+    {
+      onData: (frame) => {
+        if (frame.kind === "state") cached.current = frame.data;
+        else {
+          const result = applyPatchMessage(frame.data, cached.current);
+          // "stale": already ahead (a mutation's response can land first).
+          if (!result.ok) {
+            if (result.reason === "behind") subscription.reset();
+            return;
+          }
+          cached.current = result.state;
+        }
+        setLive(cached.current);
+      },
+    }
   );
 
-  // tRPC side — same shape as before, used when transport === "trpc".
+  const show = ([snap]: { state: Display }[]) =>
+    setDisplay(format(snap.state));
   const trpcPressKey = trpc.PressKey.useMutation({
-    onSuccess: ([snap]) => applyState(snap),
+    onSuccess: show,
     onError: console.error,
   });
   const trpcClear = trpc.Clear.useMutation({
-    onSuccess: ([snap]) => applyState(snap),
+    onSuccess: show,
     onError: console.error,
   });
 
-  function applyState(snap: { state: CalculatorState }) {
-    if (snap.state.left === undefined && snap.state.operator === undefined) {
-      setDisplay("0");
-      return;
-    }
-    setDisplay(
-      `${snap.state.left ?? "0"} ${snap.state.operator ?? ""} ${
-        snap.state.right ?? ""
-      }`
-    );
-  }
-
-  const handleKey = (key: string) => {
+  const handleKey = async (key: Key) => {
     if (!key) return;
     if (transport === "trpc") {
       if (key === "C") trpcClear.mutate({});
-      else trpcPressKey.mutate({ key: key as Digits | Operators });
+      else trpcPressKey.mutate({ key });
       return;
     }
     // REST: the generated Hono routes for the same actions.
-    (key === "C" ? restClear() : restPressKey(key as Digits | Operators))
-      .then(([snap]) => applyState(snap))
-      .catch(console.error);
+    const res = await (key === "C"
+      ? rest.api.actions.Clear.$post({ json: {} })
+      : rest.api.actions.PressKey.$post({ json: { key } }));
+    if (res.ok) show(await res.json());
+    else console.error((await res.json()).detail);
   };
 
   return (
@@ -98,28 +112,7 @@ export default function Calculator() {
       </div>
       <div className="display">{display || "0"}</div>
       <div className="buttons">
-        {[
-          "C",
-          "",
-          "",
-          "/",
-          "7",
-          "8",
-          "9",
-          "*",
-          "4",
-          "5",
-          "6",
-          "-",
-          "1",
-          "2",
-          "3",
-          "+",
-          "",
-          "0",
-          ".",
-          "=",
-        ].map((key, index) => (
+        {BUTTONS.map((key, index) => (
           <button key={index} onClick={() => handleKey(key)}>
             {key}
           </button>
@@ -130,7 +123,7 @@ export default function Calculator() {
           SSE live {live ? `(v${live._v})` : "— waiting for first commit"}
         </div>
         <div className="display sse-display">
-          {live ? formatState(live) : "–"}
+          {live ? format(live) : "–"}
         </div>
       </div>
     </div>

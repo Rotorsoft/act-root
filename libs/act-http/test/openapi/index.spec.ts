@@ -6,9 +6,13 @@
  */
 import { act, sensitive, state, ZodEmpty } from "@rotorsoft/act";
 import { fixture } from "@rotorsoft/act/test";
-import { describe, expect } from "vitest";
+import { assert, describe, expect } from "vitest";
 import { z } from "zod";
-import { type OpenAPIOptions, openapi } from "../../src/openapi/index.js";
+import {
+  type OpenAPIDocument,
+  type OpenAPIOptions,
+  openapi,
+} from "../../src/openapi/index.js";
 
 const Calculator = state({
   Calculator: z.object({ display: z.string() }),
@@ -113,7 +117,7 @@ describe("openapi(app, options) — doc emitter", () => {
       content: { "application/json": { schema: { $ref: string } } };
     };
     expect(success.content["application/json"].schema.$ref).toBe(
-      "#/components/schemas/SnapshotArray"
+      "#/components/schemas/CalculatorSnapshots"
     );
   });
 
@@ -394,4 +398,120 @@ describe("openapi — request bodies describe what a client sends", () => {
       expect(schema.additionalProperties).not.toBe(false);
     }
   );
+});
+
+// A successful action returns its state's snapshots; the doc describes them
+// from the state's own schemas, so generated clients get typed state.
+const Member = state({
+  Member: z.object({ email: z.string(), points: z.number() }),
+})
+  .init(() => ({ email: "", points: 0 }))
+  .emits({
+    Joined: z.object({ email: sensitive(z.string()) }),
+    Scored: z.object({ points: z.number() }),
+  })
+  .patch({
+    Joined: ({ data }) => ({ email: data.email }),
+    Scored: ({ data }, s) => ({ points: s.points + data.points }),
+  })
+  .on({ Join: z.object({ email: z.string() }) })
+  .emit((a) => ["Joined", a])
+  .on({ Score: z.object({ points: z.number() }) })
+  .emit((a) => ["Scored", a])
+  .build();
+
+const member_test = fixture(act().withState(Member));
+
+/** The schema an action's `200` response points at. */
+function ok_ref(doc: OpenAPIDocument, action: string): unknown {
+  const ok = doc.paths[`/api/actions/${action}`]?.post?.responses["200"];
+  assert(ok && "content" in ok);
+  return ok.content?.["application/json"]?.schema.$ref;
+}
+
+type SnapshotsSchema = {
+  type: string;
+  items: {
+    properties: {
+      state: { properties: Record<string, Record<string, unknown>> };
+      event: {
+        oneOf: Array<{
+          properties: {
+            name: { const: string };
+            data: { properties: Record<string, Record<string, unknown>> };
+          };
+        }>;
+      };
+    };
+  };
+};
+
+describe("openapi — typed action responses", () => {
+  member_test(
+    "describes each state's snapshots once, from its state and event schemas",
+    ({ app }) => {
+      const doc = openapi(app, base_options());
+      for (const action of ["Join", "Score"]) {
+        expect(ok_ref(doc, action)).toBe(
+          "#/components/schemas/MemberSnapshots"
+        );
+      }
+      const schema = doc.components?.schemas
+        ?.MemberSnapshots as unknown as SnapshotsSchema;
+      expect(schema.type).toBe("array");
+      const { state, event } = schema.items.properties;
+      expect(state.properties.points).toEqual({ type: "number" });
+      expect(event.oneOf.map((e) => e.properties.name.const)).toEqual([
+        "Joined",
+        "Scored",
+      ]);
+      expect(event.oneOf[1].properties.data.properties.points).toEqual({
+        type: "number",
+      });
+      // The patch: each field optional, null to delete it.
+      const patch = (
+        schema.items.properties as unknown as {
+          patch: {
+            required?: string[];
+            properties: Record<string, unknown>;
+          };
+        }
+      ).patch;
+      expect(patch.required).toBeUndefined();
+      expect(patch.properties.points).toEqual({
+        anyOf: [{ type: "number" }, { type: "null" }],
+      });
+    }
+  );
+
+  member_test(
+    "lets a sensitive field, and the state field of its name, read as a marker",
+    ({ app }) => {
+      const doc = openapi(app, base_options());
+      const schema = doc.components?.schemas
+        ?.MemberSnapshots as unknown as SnapshotsSchema;
+      const markers = { type: "string", enum: ["[REDACTED]", "[SHREDDED]"] };
+      const { state, event } = schema.items.properties;
+      expect(state.properties.email).toEqual({
+        anyOf: [{ type: "string" }, markers],
+      });
+      expect(event.oneOf[0].properties.data.properties.email).toEqual({
+        anyOf: [{ type: "string" }, markers],
+      });
+      // Fields that aren't sensitive stay as their schema says.
+      expect(state.properties.points).toEqual({ type: "number" });
+    }
+  );
+
+  test("leaves the response open for a surface without state schemas", () => {
+    const doc = openapi(
+      {
+        registry: {
+          actions: { Ping: { name: "Pinger", actions: { Ping: ZodEmpty } } },
+        },
+      },
+      base_options()
+    );
+    expect(ok_ref(doc, "Ping")).toBe("#/components/schemas/SnapshotArray");
+  });
 });

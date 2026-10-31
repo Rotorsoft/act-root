@@ -57,7 +57,7 @@
  * mount points on the same Act instance; the OpenAPI doc covers
  * the REST half only.
  */
-import { pii_fields } from "@rotorsoft/act";
+import { pii_fields, REDACTED, SHREDDED } from "@rotorsoft/act";
 import { z } from "zod";
 import type { ActSurface } from "../api/dispatch.js";
 
@@ -199,30 +199,71 @@ const API_ERROR_SCHEMA: Record<string, unknown> = {
   required: ["error"],
 };
 
-/**
- * The generic snapshot-array response schema returned on a
- * successful mutation. Each action commits one or more events; the
- * shape here is `Snapshot[]` with the per-action state and event
- * data left as open `object` (deeper per-action typing would need
- * to walk `state.events[*]` and emit a discriminated union — a
- * future refinement once the doc consumers ask for it).
- */
-const SNAPSHOT_ARRAY_SCHEMA: Record<string, unknown> = {
-  type: "array",
-  items: {
-    type: "object",
-    properties: {
-      state: { type: "object" },
-      event: { type: "object" },
-      version: { type: "integer" },
-      patches: { type: "integer" },
-      snaps: { type: "integer" },
-      cache_hit: { type: "boolean" },
-      replayed: { type: "integer" },
+/** The `Snapshot[]` an action returns, around a state and event schema. */
+function snapshot_array(
+  state: Record<string, unknown>,
+  event: Record<string, unknown>
+): Record<string, unknown> {
+  return {
+    type: "array",
+    items: {
+      type: "object",
+      properties: {
+        state,
+        event,
+        patch: patch_of(state),
+        id: { type: "integer" },
+        version: { type: "integer" },
+        patches: { type: "integer" },
+        snaps: { type: "integer" },
+        cache_hit: { type: "boolean" },
+        replayed: { type: "integer" },
+      },
+      required: [
+        "state",
+        "id",
+        "version",
+        "patches",
+        "snaps",
+        "cache_hit",
+        "replayed",
+      ],
     },
-    required: ["state", "version", "patches", "snaps", "cache_hit", "replayed"],
-  },
-};
+  };
+}
+
+/**
+ * The response of an action whose state the registry doesn't describe
+ * (an app surface without schemas): state and event left open.
+ */
+const SNAPSHOT_ARRAY_SCHEMA = snapshot_array(
+  { type: "object" },
+  { type: "object" }
+);
+
+/**
+ * The patch an event applied to a state: every key optional, `null` to
+ * delete it, and a nested object a patch itself.
+ */
+function patch_of(schema: Record<string, unknown>): Record<string, unknown> {
+  const properties = schema.properties as
+    | Record<string, Record<string, unknown>>
+    | undefined;
+  if (!properties) return schema;
+  const { required: _, ...rest } = schema;
+  return {
+    ...rest,
+    properties: Object.fromEntries(
+      Object.entries(properties).map(([key, value]) => [
+        key,
+        { anyOf: [patch_of(value), { type: "null" }] },
+      ])
+    ),
+  };
+}
+
+/** What a sensitive field reads as when the caller may not see it. */
+const PII_MARKERS = { type: "string", enum: [REDACTED, SHREDDED] };
 
 /**
  * The error-response shape every operation references via
@@ -350,9 +391,82 @@ function mark_sensitive_fields(
   return { ...body_schema, properties: next_properties };
 }
 
+/** Emit a Zod schema as JSON Schema: what the API sends (`output`) or takes (`input`). */
+function json_schema(
+  schema: z.ZodType,
+  io: "input" | "output"
+): Record<string, unknown> {
+  // `unrepresentable: "any"` emits an open (`{}`) schema for a Zod type with
+  // no JSON-Schema form (z.date/z.bigint/z.map/z.set/...) instead of Zod 4's
+  // default `"throw"`, which would abort the whole document over one field.
+  return strip_json_schema_meta(
+    z.toJSONSchema(schema, { unrepresentable: "any", io }) as Record<
+      string,
+      unknown
+    >
+  );
+}
+
+/** Let each named property also read as a redaction marker. */
+function allow_markers(
+  schema: Record<string, unknown>,
+  fields: readonly string[]
+): Record<string, unknown> {
+  const properties = schema.properties as
+    | Record<string, Record<string, unknown>>
+    | undefined;
+  const present = fields.filter((f) => properties?.[f]);
+  if (!properties || present.length === 0) return schema;
+  const next = { ...properties };
+  for (const f of present) next[f] = { anyOf: [properties[f], PII_MARKERS] };
+  return { ...schema, properties: next };
+}
+
+/**
+ * The typed `Snapshot[]` of one state: its state schema, and the event as
+ * one shape per event the state emits, told apart by `name`. A sensitive
+ * field, in the event's data or the state field of the same name, may read
+ * as `[REDACTED]` or `[SHREDDED]` for a caller who may not see it.
+ */
+function state_snapshots(
+  state: z.ZodType,
+  events: Readonly<Record<string, z.ZodType>>
+): Record<string, unknown> {
+  const sensitive = new Set<string>();
+  const variants = Object.entries(events).map(([name, data]) => {
+    const fields = pii_fields(data);
+    for (const f of fields) sensitive.add(f);
+    return {
+      type: "object",
+      properties: {
+        id: { type: "integer" },
+        stream: { type: "string" },
+        version: { type: "integer" },
+        created: { type: "string", format: "date-time" },
+        name: { const: name },
+        data: allow_markers(json_schema(data, "output"), fields),
+        meta: {
+          type: "object",
+          properties: {
+            correlation: { type: "string" },
+            causation: { type: "object" },
+          },
+          required: ["correlation", "causation"],
+        },
+      },
+      required: ["id", "stream", "version", "created", "name", "data", "meta"],
+    };
+  });
+  return snapshot_array(
+    allow_markers(json_schema(state, "output"), [...sensitive]),
+    { oneOf: variants }
+  );
+}
+
 function build_operation(
   action_name: string,
   body_schema: Record<string, unknown>,
+  response_ref: string,
   options: OpenAPIOptions
 ): OpenAPIOperation {
   const parameters: OpenAPIParameter[] = [];
@@ -396,7 +510,7 @@ function build_operation(
         description: "Action committed; returns the snapshot array.",
         content: {
           "application/json": {
-            schema: { $ref: "#/components/schemas/SnapshotArray" },
+            schema: { $ref: response_ref },
           },
         },
       },
@@ -445,28 +559,25 @@ export function openapi<TApp extends Pick<ActSurface, "registry">>(
   validate_options(options);
   const base_path = options.basePath ?? DEFAULT_BASE_PATH;
   const paths: Record<string, OpenAPIPathItem> = {};
+  const state_schemas: Record<string, Record<string, unknown>> = {};
 
   for (const [action_name, state] of Object.entries(app.registry.actions)) {
     const zod_schema = state.actions[action_name] as z.ZodType;
+    // `io: "input"` describes what a client must SEND: a `.default()` field
+    // is optional, extra keys are not rejected (Zod strips them), and a
+    // `.pipe()`/`.transform()` documents its input type.
     const body_schema = mark_sensitive_fields(
-      strip_json_schema_meta(
-        // `unrepresentable: "any"` emits an open (`{}`) schema for a Zod type
-        // with no JSON-Schema form (z.date/z.bigint/z.map/z.set/...) instead of
-        // Zod 4's default `"throw"`, which would abort the WHOLE document over
-        // one such field, while hono() serves the same action fine.
-        // `io: "input"` describes what a client must SEND: a `.default()`
-        // field is optional, extra keys are not rejected (Zod strips them),
-        // and a `.pipe()`/`.transform()` documents its input type. Zod's
-        // default, `"output"`, describes the parsed result instead.
-        z.toJSONSchema(zod_schema, {
-          unrepresentable: "any",
-          io: "input",
-        }) as Record<string, unknown>
-      ),
+      json_schema(zod_schema, "input"),
       zod_schema
     );
+    const snapshots = `${state.name}Snapshots`;
+    if (state.state && state.events && !state_schemas[snapshots])
+      state_schemas[snapshots] = state_snapshots(state.state, state.events);
+    const response_ref = state_schemas[snapshots]
+      ? `#/components/schemas/${snapshots}`
+      : "#/components/schemas/SnapshotArray";
     paths[`${base_path}/actions/${action_name}`] = {
-      post: build_operation(action_name, body_schema, options),
+      post: build_operation(action_name, body_schema, response_ref, options),
     };
   }
 
@@ -479,6 +590,7 @@ export function openapi<TApp extends Pick<ActSurface, "registry">>(
       schemas: {
         ApiError: API_ERROR_SCHEMA,
         SnapshotArray: SNAPSHOT_ARRAY_SCHEMA,
+        ...state_schemas,
       },
       responses: {
         ApiError: API_ERROR_RESPONSE,

@@ -106,24 +106,9 @@ const app = act()
 - The `OperatorPressed` reaction uses a **dynamic** target — Act re-correlates on each scan to discover new `Calculator{stream}` targets.
 - `reactingTo` is injected automatically inside a reaction, so it can be omitted (`main.ts` passes it explicitly; `hello.ts` doesn't).
 
-## Generated APIs (`src/router.ts`)
+## The app (`src/router.ts`)
 
-Both transports are generated from the app, on a single shared `calculator` stream, and used by `packages/server` and `packages/client`:
-
-```ts
-export const calculatorRouter = trpc(calculatorApp, {
-  actor: () => ({ id: "1", name: "Calculator" }),
-  stream: () => "calculator",
-});
-export type CalculatorRouter = typeof calculatorRouter;
-
-// The host supplies the actor and the SSE channel.
-export const calculatorRest = (options) =>
-  hono(calculatorApp, { stream: () => "calculator", ...options });
-export type CalculatorRest = ReturnType<typeof calculatorRest>;
-```
-
-Each procedure and route takes its action's Zod payload and returns the snapshots `app.do` returns, typed end to end: the client feeds `CalculatorRouter` to `createTRPCReact` and `CalculatorRest` to Hono's `hc`, with no codegen and no casts.
+`calculatorApp` is the built Act behind every transport. The package holds only the domain; `packages/server` generates the tRPC router, REST routes and OpenAPI document from it and exports their types for `packages/client`.
 
 ## Standalone demos
 
@@ -193,6 +178,6 @@ await store().seed();
 ## Related
 
 - [`@rotorsoft/act`](../../libs/act) — core framework
-- [`@act/server`](../server) — tRPC HTTP server that hosts `calculatorRouter`
+- [`@act/server`](../server) — the multi-transport server generated from `calculatorApp`
 - [`@act/client`](../client) — React UI that calls `PressKey` / `Clear`
 - [`@act/wolfdesk`](../wolfdesk) — larger example with multiple slices and a SQLite read model
