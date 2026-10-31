@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v1.37.1](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.37.0...@rotorsoft/act-v1.37.1) (2026-10-31)
+
+
+### Bug Fixes
+
+* **act:** keep the sensitive marker behind .transform() and .pipe() ([#2244](https://github.com/Rotorsoft/act-root/issues/2244)) ([9304135](https://github.com/Rotorsoft/act-root/commit/930413567debb88b7e958860eefbea0384b4d132)), closes [#2231](https://github.com/Rotorsoft/act-root/issues/2231)
+
 # [@rotorsoft/act-v1.37.0](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.36.0...@rotorsoft/act-v1.37.0) (2026-10-31)
 
 
