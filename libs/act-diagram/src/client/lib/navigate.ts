@@ -16,7 +16,7 @@ function position_at(
   const before = content.slice(0, index);
   const line = before.split("\n").length;
   const last_nl = before.lastIndexOf("\n");
-  const col = index - (last_nl >= 0 ? last_nl : 0);
+  const col = index - Math.max(last_nl, 0);
   return { line, col };
 }
 

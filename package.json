@@ -41,7 +41,6 @@
     "bench:scenarios": "vitest run --config vitest.bench.config.ts",
     "lint": "biome check .",
     "lint:fix": "biome check . --write",
-    "format": "biome format . --write",
     "check:browser-safe": "node scripts/check-browser-safe.mjs",
     "check:readmes": "node scripts/check-lib-readmes.mjs",
     "check:contracts": "node scripts/check-contracts.mjs",
