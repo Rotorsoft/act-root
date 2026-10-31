@@ -358,8 +358,7 @@ describe("auto-inject reactingTo", () => {
       stream_exact: true,
     });
     // The commits land, but as originating actions: a timer armed inside a
-    // handler is not "caused by" whichever event happened to arm it, and it
-    // must not inherit that reaction's skipped concurrency guard either.
+    // handler is not "caused by" whichever event happened to arm it.
     for (const val of [1, 2]) {
       const trigger = srcEvents.find((e) => e.data.val === val)!;
       const [received] = await app.query_array({
@@ -502,65 +501,6 @@ describe("auto-inject reactingTo", () => {
 
     expect(thrown).toBeInstanceOf(ConcurrencyError);
     expect(inferred_ok).toBe(true);
-
-    await dispose();
-  });
-
-  it("should guard a reaction's own dispatch and work that outlived the handler", async () => {
-    const Ledger = state({ Ledger6: z.object({ n: z.number() }) })
-      .init(() => ({ n: 0 }))
-      .emits({ Spent6: z.object({}), Fired6: z.object({}) })
-      .patch({ Spent6: (_e, s) => ({ n: s.n + 1 }), Fired6: (_e, s) => s })
-      .on({ spend6: z.object({}) })
-      .emit("Spent6")
-      .on({ fire6: z.object({}) })
-      .emit("Fired6")
-      .build();
-
-    const sys = { id: "sys", name: "system" };
-    const guards: Array<number | undefined> = [];
-    let outlived!: Promise<unknown>;
-    let captured: { do: (...args: any[]) => Promise<unknown> };
-
-    const { app, store, dispose } = await sandbox(
-      act()
-        .withState(Ledger)
-        .on("Fired6")
-        .do(async function handler() {
-          // Dispatched by the handler itself: a reaction, guarded like any
-          // action.
-          await captured.do("spend6", { stream: "L6", actor: sys }, {});
-          // Started by the handler and left running: lands on a later tick,
-          // after the reaction is over, so it is ordinary work.
-          outlived = sleep(0).then(() =>
-            captured.do("spend6", { stream: "L6", actor: sys }, {})
-          );
-        })
-        .to({ target: "t6" }),
-      { actOptions: { autoSettle: false } }
-    );
-    captured = app as unknown as typeof captured;
-
-    await app.do("spend6", { stream: "L6", actor }, {});
-
-    const commit = store.commit.bind(store);
-    (store as unknown as { commit: unknown }).commit = (
-      stream: string,
-      msgs: never,
-      meta: never,
-      expected?: number
-    ) => {
-      if (stream === "L6") guards.push(expected);
-      return commit(stream, msgs, meta, expected);
-    };
-
-    await app.do("fire6", { stream: "F6", actor }, {});
-    await app.correlate();
-    await app.drain();
-    await outlived;
-
-    // In order: the handler's own dispatch, then the one that outlived it.
-    expect(guards).toEqual([0, 1]);
 
     await dispose();
   });

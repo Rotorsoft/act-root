@@ -1305,7 +1305,7 @@ export type BackoffOptions = {
 };
 /**
  * Per-action retry policy, declared on \`state.on(entry, options)\`. The
- * orchestrator owns the loop on the command path: on
+ * orchestrator owns the loop for every call, a reaction's included: on
  * {@link ConcurrencyError} the cache is invalidated, an optional
  * \`backoff\` delay is applied, and the action re-runs from \`load\`. Any
  * other error rethrows immediately and does not consume the budget.
@@ -1314,7 +1314,7 @@ export type BackoffOptions = {
  * not block streams.
  *
  * @property maxRetries - Additional attempts after the initial call.
- *   Default \`0\` (single attempt, current behavior). Total invocations
+ *   Default \`0\` (a single attempt). Total invocations
  *   equal \`1 + maxRetries\`.
  * @property backoff - Optional retry pacing. When omitted, retries run
  *   immediately — fine at low contention. Set to \`{ strategy:
@@ -6739,7 +6739,7 @@ export type BackoffOptions = {
 };
 /**
  * Per-action retry policy, declared on \`state.on(entry, options)\`. The
- * orchestrator owns the loop on the command path: on
+ * orchestrator owns the loop for every call, a reaction's included: on
  * {@link ConcurrencyError} the cache is invalidated, an optional
  * \`backoff\` delay is applied, and the action re-runs from \`load\`. Any
  * other error rethrows immediately and does not consume the budget.
@@ -6748,7 +6748,7 @@ export type BackoffOptions = {
  * not block streams.
  *
  * @property maxRetries - Additional attempts after the initial call.
- *   Default \`0\` (single attempt, current behavior). Total invocations
+ *   Default \`0\` (a single attempt). Total invocations
  *   equal \`1 + maxRetries\`.
  * @property backoff - Optional retry pacing. When omitted, retries run
  *   immediately — fine at low contention. Set to \`{ strategy:
@@ -11252,8 +11252,8 @@ export type ActMiddlewareVariables = {
  * - \`expectedVersion\` (optional) — optimistic-concurrency resolver.
  *   Hosts typically read it from an \`If-Match\` header on the
  *   request, or from the client's last-known snapshot. Returning
- *   \`undefined\` skips the check for that call — handy when only
- *   some actions are concurrency-sensitive.
+ *   \`undefined\` leaves the call to the version the action loads; a
+ *   number pins it, and a pinned conflict is never retried.
  * - \`idempotency\` (optional) — when set, the route honors
  *   \`Idempotency-Key\` via {@link withIdempotency}. The host
  *   supplies the \`IdempotencyStore\`; \`keyFrom\` defaults to reading
@@ -12374,9 +12374,9 @@ import { type ActorExtractor, type SseOptions } from "../api/index.js";
  *   \`target.expectedVersion\` so \`app.do\` refuses to commit if the
  *   stream has moved. Hosts typically read it from an \`If-Match\`
  *   header on the underlying HTTP request, or pull it from the
- *   client's last-known snapshot. Returning \`undefined\` skips the
- *   check for that call — handy when only some actions are
- *   concurrency-sensitive.
+ *   client's last-known snapshot. Returning \`undefined\` leaves the
+ *   call to the version the action loads; a number pins it, and a
+ *   pinned conflict is never retried.
  * - \`idempotency\` (optional) — when set, the procedure honors
  *   \`Idempotency-Key\` via the shared
  *   {@link withIdempotency} helper. The host supplies the

@@ -579,7 +579,7 @@ export type BackoffOptions = {
 
 /**
  * Per-action retry policy, declared on `state.on(entry, options)`. The
- * orchestrator owns the loop on the command path: on
+ * orchestrator owns the loop for every call, a reaction's included: on
  * {@link ConcurrencyError} the cache is invalidated, an optional
  * `backoff` delay is applied, and the action re-runs from `load`. Any
  * other error rethrows immediately and does not consume the budget.
@@ -588,7 +588,7 @@ export type BackoffOptions = {
  * not block streams.
  *
  * @property maxRetries - Additional attempts after the initial call.
- *   Default `0` (single attempt, current behavior). Total invocations
+ *   Default `0` (a single attempt). Total invocations
  *   equal `1 + maxRetries`.
  * @property backoff - Optional retry pacing. When omitted, retries run
  *   immediately — fine at low contention. Set to `{ strategy:

@@ -437,7 +437,7 @@ export async function load<
 /**
  * Validates, checks preconditions, folds, checks the invariants and commits. On {@link ConcurrencyError}
  * it re-runs from `load` within the action's `maxRetries`; any other error
- * rethrows. Reactions commit without the inferred version guard.
+ * rethrows.
  */
 export async function action<
   TState extends Schema,

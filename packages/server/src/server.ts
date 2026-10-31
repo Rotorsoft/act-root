@@ -91,7 +91,6 @@ const restApi = honoTransport(calculatorApp, {
   // the demo, so the mistake surfaces in the logs.
   actor: () => resolveDemoActor(),
   stream: () => "calculator",
-  expectedVersion: () => undefined,
   sse: { channel: broadcast },
 });
 
@@ -103,7 +102,6 @@ const apiDoc = openapi(calculatorApp, {
       "Multi-transport demo for @rotorsoft/act-http — same Act registry behind tRPC, Hono REST, and this OpenAPI document.",
   },
   servers: [{ url: "http://localhost:4000" }],
-  expectedVersion: true,
 });
 
 const app = new Hono();
@@ -115,7 +113,7 @@ app.use(
   "*",
   cors({
     origin: CORS_ORIGIN,
-    allowHeaders: ["content-type", "idempotency-key", "if-match"],
+    allowHeaders: ["content-type", "idempotency-key"],
     allowMethods: ["GET", "POST", "OPTIONS"],
   })
 );

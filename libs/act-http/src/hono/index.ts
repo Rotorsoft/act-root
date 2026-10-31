@@ -88,8 +88,8 @@ export type ActMiddlewareVariables = {
  * - `expectedVersion` (optional) — optimistic-concurrency resolver.
  *   Hosts typically read it from an `If-Match` header on the
  *   request, or from the client's last-known snapshot. Returning
- *   `undefined` skips the check for that call — handy when only
- *   some actions are concurrency-sensitive.
+ *   `undefined` leaves the call to the version the action loads; a
+ *   number pins it, and a pinned conflict is never retried.
  * - `idempotency` (optional) — when set, the route honors
  *   `Idempotency-Key` via {@link withIdempotency}. The host
  *   supplies the `IdempotencyStore`; `keyFrom` defaults to reading

@@ -206,7 +206,7 @@ describe("trpc(app, options) — generated router", () => {
       );
     });
 
-    test("undefined return value skips the check (no expectedVersion on target)", async ({
+    test("undefined return value leaves expectedVersion off the target", async ({
       app,
     }) => {
       const do_spy = vi.spyOn(app, "do").mockResolvedValueOnce([]);
