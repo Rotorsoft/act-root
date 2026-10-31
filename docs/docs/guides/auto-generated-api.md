@@ -41,42 +41,82 @@ Five of those six rows are identical across transports. The remaining row — re
 
 That's all the generators do. There's no codegen step, no schema generator, no second source file to keep in sync. The Zod schemas you already wrote against your actions and events drive the wire format directly.
 
-## Quick start — one Act, three transports
+## Quick start — one Act, a server and a typed client
 
-The shape that lands in the multi-transport demo (`packages/server` in this repo):
+The shape of the calculator demo in this repo (`packages/calculator`, `packages/server`, `packages/client`), cut to its minimum. The server generates every transport from the app and exports their types; the client imports those types and nothing else, the way a tRPC client imports `typeof appRouter`. No codegen, and no type written by hand on either side.
+
+**The app** — your domain, untouched by transport concerns:
 
 ```ts no-check
+// calculator/src/index.ts
 import { act } from "@rotorsoft/act";
-import { hono } from "@rotorsoft/act-http/hono";
-import { openapi } from "@rotorsoft/act-http/openapi";
-import { trpc } from "@rotorsoft/act-http/trpc";
 import { Calculator } from "./calculator.js";
 
-// 1. Build the Act registry. This is your application, untouched by transport concerns.
-const app = act().withState(Calculator).build();
-
-// 2. Generate a tRPC router. Use `typeof tRouter` for a typed client.
-//    Name your context type, and `typeof app` so the router keeps its actions.
-type Ctx = { tenant: string };
-const tRouter = trpc<Ctx, typeof app>(app, {
-  actor: (ctx) => resolveActorFromJwt(ctx), // ctx arrives as `unknown`
-  stream: (action, input, ctx) => `tenant-${ctx.tenant}`,
-});
-
-// 3. Generate a Hono REST surface. POST /api/actions/<action> per registered action.
-const restApi = hono(app, {
-  actor: (c) => resolveActorFromJwt(c),
-  stream: (action, input, c) => `tenant-${c.req.header("x-tenant")}`,
-});
-
-// 4. Emit an OpenAPI 3.1 document describing the REST surface.
-const doc = openapi(app, {
-  info: { title: "Calculator API", version: "1.0.0" },
-  servers: [{ url: "https://api.example.com" }],
-});
+export const calculatorApp = act().withState(Calculator).build();
 ```
 
-That's it — three transports against one registry. Add an action to the Calculator and all three pick it up on next build.
+**The server** — generate, export the types, mount:
+
+```ts no-check
+// server/src/api.ts
+import { calculatorApp } from "@act/calculator";
+import { hono } from "@rotorsoft/act-http/hono";
+import { openapi } from "@rotorsoft/act-http/openapi";
+import { BroadcastChannel } from "@rotorsoft/act-http/sse";
+import { trpc } from "@rotorsoft/act-http/trpc";
+
+const actor = (ctx: unknown) => resolveActorFromJwt(ctx); // throw to deny
+const stream = () => "calculator";
+const sse = { channel: new BroadcastChannel() }; // publish commits to it
+
+export const router = trpc(calculatorApp, { actor, stream, sse }); // tRPC
+export const api = hono(calculatorApp, { actor, stream, sse }); // REST + SSE
+export const doc = openapi(calculatorApp, {
+  info: { title: "Calculator API", version: "1.0.0" },
+});
+
+export type AppRouter = typeof router;
+export type Api = typeof api;
+
+// server/src/server.ts
+const app = new Hono();
+app.route("/", api); // POST /api/actions/<action>, GET /api/sse/<state>
+app.all("/trpc/*", (c) =>
+  fetchRequestHandler({ endpoint: "/trpc", req: c.req.raw, router })
+);
+app.get("/openapi.json", (c) => c.json(doc));
+serve({ fetch: app.fetch, port: 4000 });
+```
+
+**The client** — import the types only:
+
+```tsx no-check
+import type { Api, AppRouter } from "@act/server";
+import { createTRPCReact } from "@trpc/react-query";
+import { hc } from "hono/client";
+
+export const trpc = createTRPCReact<AppRouter>();
+export const rest = hc<Api>("http://localhost:4000");
+
+// tRPC: payload checked, snapshots typed
+const pressKey = trpc.PressKey.useMutation({
+  onSuccess: ([snap]) => show(snap.state.result), // number
+});
+pressKey.mutate({ key: "7" });
+
+// REST: the same, through Hono's client
+const res = await rest.api.actions.PressKey.$post({ json: { key: "7" } });
+if (res.ok) show((await res.json())[0].state.result);
+else console.error((await res.json()).detail); // ApiError
+
+// Live state: one typed subscription per state
+trpc.subscribe.Calculator.useSubscription(
+  { stream: "calculator" },
+  { onData: (frame) => (frame.kind === "state" ? seed(frame.data) : patch(frame.data)) }
+);
+```
+
+Add an action to the Calculator and every transport picks it up on the next build. A client that calls it wrong, or reads a field the state doesn't have, stops compiling. Non-TypeScript clients generate from `/openapi.json`, whose responses are typed per state as well. The full, runnable version is `pnpm dev:http`; `packages/client/src/Calculator.tsx` shows the live panel's patch handling with `applyPatchMessage`.
 
 ## The three subpaths
 
