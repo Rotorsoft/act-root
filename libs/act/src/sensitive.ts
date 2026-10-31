@@ -21,7 +21,7 @@ export const _registry = z.registry<{ sensitive: true }>();
 /**
  * Marker key stamped onto a schema's own `def`. Zod clones a schema on every
  * refinement (`.min()`, `.email()`, `.trim()`, `.describe()`, `.refine()`,
- * `.transform()`, …) via `{...def}`, which copies own symbol keys — so a
+ * …) via `{...def}`, which copies own symbol keys — so a
  * marker on the def survives the whole chain, while the `_registry` WeakMap
  * (keyed on the *instance*) does not.
  *
