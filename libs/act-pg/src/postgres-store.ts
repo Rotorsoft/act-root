@@ -325,31 +325,31 @@ export class PostgresStore implements Store {
   readonly config: Config;
   private _fqt: string;
   private _fqs: string;
-  /** Correlate checkpoint table — one row, id 0. */
+  // Correlate checkpoint table — one row, id 0.
   private _fqc: string;
-  /** Rides every NOTIFY payload so this store's own commits never echo back. */
+  // Rides every NOTIFY payload so this store's own commits never echo back.
   private readonly _by: string = randomUUID();
-  /** Per `(schema, table)`, so stores sharing a database stay isolated. */
+  // Per `(schema, table)`, so stores sharing a database stay isolated.
   private readonly _channel: string;
-  /** Active LISTEN client (one per `notify()` subscription). */
+  // Active LISTEN client (one per `notify()` subscription).
   private _listen_client: pg.PoolClient | undefined;
-  /** Detached before destroy, or a reused connection re-fires a stale handler. */
+  // Detached before destroy, or a reused connection re-fires a stale handler.
   private _listen_handler: ((msg: pg.Notification) => void) | undefined;
-  /** A checked-out client with no `error` listener crashes the process on a blip. */
+  // A checked-out client with no `error` listener crashes the process on a blip.
   private _listen_error_handler: ((err: Error) => void) | undefined;
-  /** Kept for reconnects; clearing it is what cancels a pending one. */
+  // Kept for reconnects; clearing it is what cancels a pending one.
   private _notify_handler:
     | ((notification: StoreNotification) => void)
     | undefined;
   private _reconnect_timer: ReturnType<typeof setTimeout> | undefined;
-  /** Consecutive reconnect attempts; grows the backoff. */
+  // Consecutive reconnect attempts; grows the backoff.
   private _reconnect_attempts = 0;
   /** Present only when `config.notify` is set. See {@link Config.notify}. */
   notify?: (
     handler: (notification: StoreNotification) => void
   ) => Promise<NotifyDisposer>;
 
-  /** Caches the key on first use; rotating it takes a restart. */
+  // Caches the key on first use; rotating it takes a restart.
   private readonly _resolve_pii_key: (() => Promise<Buffer>) | undefined;
 
   constructor(config: Partial<Config> = {}) {
@@ -375,11 +375,9 @@ export class PostgresStore implements Store {
       : undefined;
   }
 
-  /**
-   * The `pii` column's text for a write: encrypted when `pii_encryption` is
-   * set, JSON either way (an encrypted value casts to a jsonb string), and
-   * `null` kept so `forget_pii` semantics hold.
-   */
+  // The `pii` column's text for a write: encrypted when `pii_encryption` is
+  // set, JSON either way (an encrypted value casts to a jsonb string), and
+  // `null` kept so `forget_pii` semantics hold.
   private async _encode_pii(
     pii: Readonly<Record<string, unknown>> | null | undefined
   ): Promise<string | null> {
@@ -389,17 +387,15 @@ export class PostgresStore implements Store {
     );
   }
 
-  /**
-   * Decrypts a row's `pii` in place when it was stored encrypted (a jsonb
-   * string). Plaintext rows, including ones written before encryption was
-   * enabled, pass through, so mixed-data rollouts read cleanly.
-   */
+  // Decrypts a row's `pii` in place when it was stored encrypted (a jsonb
+  // string). Plaintext rows, including ones written before encryption was
+  // enabled, pass through, so mixed-data rollouts read cleanly.
   private async _decode_pii(row: { pii?: unknown }): Promise<void> {
     if (this._resolve_pii_key && typeof row.pii === "string")
       row.pii = await decrypt(row.pii, this._resolve_pii_key);
   }
 
-  /** A saturated pool fails here as a {@link StoreError} naming the operation. */
+  // A saturated pool fails here as a {@link StoreError} naming the operation.
   private async _client(operation: string): Promise<pg.PoolClient> {
     try {
       return await this._pool.connect();
@@ -408,7 +404,7 @@ export class PostgresStore implements Store {
     }
   }
 
-  /** One transaction: any failure rolls back and throws a {@link StoreError} naming the operation. */
+  // One transaction: any failure rolls back and throws a {@link StoreError} naming the operation.
   private async _tx<T>(
     operation: string,
     work: (client: pg.PoolClient) => Promise<T>
@@ -432,12 +428,10 @@ export class PostgresStore implements Store {
     await this._pool.end();
   }
 
-  /**
-   * Cancels any reconnect, forgets the handler, UNLISTENs and destroys the
-   * client (never returned to the pool). Clearing the handler makes a
-   * scheduled `_reconnect` bail; an open already in flight is caught at
-   * the end of `_open_listen` instead.
-   */
+  // Cancels any reconnect, forgets the handler, UNLISTENs and destroys the
+  // client (never returned to the pool). Clearing the handler makes a
+  // scheduled `_reconnect` bail; an open already in flight is caught at
+  // the end of `_open_listen` instead.
   private async _teardown_listen() {
     if (this._reconnect_timer) {
       clearTimeout(this._reconnect_timer);
@@ -1474,11 +1468,9 @@ export class PostgresStore implements Store {
     );
   }
 
-  /**
-   * `UPDATE ... <set>` on the selected streams. `set`/`where` use `$1..$n`
-   * for `params`; the selection's parameters are numbered after them. A
-   * failure throws a {@link StoreError} naming the operation.
-   */
+  // `UPDATE ... <set>` on the selected streams. `set`/`where` use `$1..$n`
+  // for `params`; the selection's parameters are numbered after them. A
+  // failure throws a {@link StoreError} naming the operation.
   private async _update(
     operation: string,
     input: string[] | StreamFilter,
@@ -1501,7 +1493,7 @@ export class PostgresStore implements Store {
     }
   }
 
-  /** A `WHERE` fragment (without the keyword); `true` for an empty filter. */
+  // A `WHERE` fragment (without the keyword); `true` for an empty filter.
   private _filter_clause(
     filter: StreamFilter,
     start: number
@@ -1730,10 +1722,8 @@ export class PostgresStore implements Store {
         );
   }
 
-  /**
-   * Index-only `DISTINCT ON` over `(stream, version)`: one row per stream,
-   * not per event. Version order equals id order within a stream.
-   */
+  // Index-only `DISTINCT ON` over `(stream, version)`: one row per stream,
+  // not per event. Version order equals id order within a stream.
   private async _query_stats_heads_only<E extends Schemas>(
     from_clause: string,
     where_clause: string,
@@ -1780,7 +1770,7 @@ export class PostgresStore implements Store {
     return out;
   }
 
-  /** One CTE scan gives counts, the name map, heads and tails together. */
+  // One CTE scan gives counts, the name map, heads and tails together.
   private async _query_stats_full_scan<E extends Schemas>(
     from_clause: string,
     where_clause: string,
@@ -1865,12 +1855,10 @@ export class PostgresStore implements Store {
     return out;
   }
 
-  /**
-   * `Store.notify`, bound only when `config.notify` is set. One dedicated
-   * LISTEN client per store (a new call replaces the old); this store's own
-   * commits are skipped by `_by`. Self-heals after a client `error` with
-   * capped backoff, polling in between.
-   */
+  // `Store.notify`, bound only when `config.notify` is set. One dedicated
+  // LISTEN client per store (a new call replaces the old); this store's own
+  // commits are skipped by `_by`. Self-heals after a client `error` with
+  // capped backoff, polling in between.
   private async _subscribe_notifications(
     handler: (notification: StoreNotification) => void
   ): Promise<NotifyDisposer> {
@@ -1898,7 +1886,7 @@ export class PostgresStore implements Store {
     };
   }
 
-  /** Shared by subscribe and reconnect; a failure destroys the client so nothing leaks. */
+  // Shared by subscribe and reconnect; a failure destroys the client so nothing leaks.
   private async _open_listen(
     handler: (notification: StoreNotification) => void
   ): Promise<void> {
@@ -2007,7 +1995,7 @@ export class PostgresStore implements Store {
     this._reconnect_attempts = 0;
   }
 
-  /** Bails once disposed (`_notify_handler` cleared), so nothing fires after teardown. */
+  // Bails once disposed (`_notify_handler` cleared), so nothing fires after teardown.
   private _reconnect(): void {
     const handler = this._notify_handler;
     // Disposed (or torn down by a re-subscribe) while the error fired —

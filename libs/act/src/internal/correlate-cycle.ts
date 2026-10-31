@@ -176,23 +176,19 @@ export class CorrelateCycle<
   TActions extends Schemas,
 > {
   private _checkpoint = -1;
-  /** Lease holder id; per instance, so a restart never inherits a stale claim. */
+  // Lease holder id; per instance, so a restart never inherits a stale claim.
   private readonly _by = randomUUID();
   private readonly _key: string;
-  /** Local expiry of the held lease (0 = none); stale only costs a duplicate scan. */
+  // Local expiry of the held lease (0 = none); stale only costs a duplicate scan.
   private _lease_until = 0;
-  /**
-   * Armed while `_raised` (bumped by a commit or notification) is ahead of
-   * `_lowered` (the raise count the last short page saw). Starts armed.
-   */
+  // Armed while `_raised` (bumped by a commit or notification) is ahead of
+  // `_lowered` (the raise count the last short page saw). Starts armed.
   private _raised = 1;
   private _lowered = 0;
-  /**
-   * Bumped by a release (shutdown), so a scan or lease reply that was out
-   * across one writes nothing.
-   */
+  // Bumped by a release (shutdown), so a scan or lease reply that was out
+  // across one writes nothing.
   private _epoch = 0;
-  /** Passes in flight: a restore waits for them, and refuses new ones. */
+  // Passes in flight: a restore waits for them, and refuses new ones.
   private readonly _passes = new Set<Promise<CorrelatePass>>();
   private _restoring = false;
   private _init_promise: Promise<void> | undefined;
@@ -206,7 +202,7 @@ export class CorrelateCycle<
   private readonly _cd: DrainOps<TEvents>;
   private readonly _on_init: (() => Promise<void>) | undefined;
   private readonly _declared_lanes: ReadonlySet<string>;
-  /** Report-once keys; per instance because `internal/` holds no module state. */
+  // Report-once keys; per instance because `internal/` holds no module state.
   private readonly _reported = new Set<string>();
 
   constructor({
@@ -288,7 +284,7 @@ export class CorrelateCycle<
     for (const stream of streams) this._dynamic_subscriptions.delete(stream);
   }
 
-  /** Would the target's own `fetch` (filtered by `source`) return this event? */
+  // Would the target's own `fetch` (filtered by `source`) return this event?
   private _in_fetch_window(
     source: string | undefined,
     stream: string
@@ -503,11 +499,9 @@ export class CorrelateCycle<
     return { kind: "scanned", last_id, subscribed: 0, marked: 0, read };
   }
 
-  /**
-   * Read the row of each target this scan had no record of (new or evicted),
-   * so a resolution that doesn't beat its priority keeps the row's lane.
-   * Only called with more than one lane declared.
-   */
+  // Read the row of each target this scan had no record of (new or evicted),
+  // so a resolution that doesn't beat its priority keeps the row's lane.
+  // Only called with more than one lane declared.
   private async _recall(correlated: Map<string, Correlated>): Promise<void> {
     const missed = [...correlated].filter(([, entry]) => entry.missed);
     await Promise.all(

@@ -48,18 +48,12 @@ export declare class Act<TSchemaReg extends SchemaRegister<TActions>, TEvents ex
     private readonly _breaker;
     private readonly _drain;
     private readonly _auto_settle;
-    /** Whether any event has a reaction; nothing arms without one. */
     private readonly _reactive;
     private readonly _drain_controllers;
     private readonly _correlate;
     private readonly _settle;
     private _poll;
-    /** The poll's correlate \`limit\`, used by every settle pass while it runs. */
     private _poll_limit;
-    /**
-     * Wired at construction against the store current then, so a store
-     * injected after \`build()\` is never notified.
-     */
     private readonly _notify_disposer;
     /** Public registry — kept as-is per the no-prefix-on-public convention. */
     readonly registry: Registry<TSchemaReg, TEvents, TActions, keyof TStateMap & string>;
@@ -79,11 +73,6 @@ export declare class Act<TSchemaReg extends SchemaRegister<TActions>, TEvents ex
     emit<E extends keyof ActLifecycleEvents<TSchemaReg, TEvents, TActions>>(event: E, args: ActLifecycleEvents<TSchemaReg, TEvents, TActions>[E]): boolean;
     private _notify;
     private _committed_key;
-    /**
-     * The one place a store failure is logged and emitted (the breaker's
-     * \`on_error\`). The emit is guarded: an unhandled \`"error"\` emission
-     * would crash the process.
-     */
     private _emit_error;
     /**
      * Register a listener for a lifecycle event. The listener receives the
@@ -113,35 +102,25 @@ export declare class Act<TSchemaReg extends SchemaRegister<TActions>, TEvents ex
     private readonly _batch_handlers;
     private readonly _es;
     private readonly _cd;
-    /** Unambiguous: merge rejects an event name declared by two states. */
     private readonly _event_to_state;
-    /** Lanes to arm per event; \`"all"\` when a dynamic resolver hides the lane. */
     private readonly _event_to_lanes;
     private readonly _audit_deps;
     private readonly _logger;
-    /** This Act's ports: its own bag, or the singleton adapters. */
     private readonly _ports;
-    /** Runs a body so internal \`store()\`/\`cache()\` calls resolve to \`_ports\`. */
     private readonly _scoped;
     private readonly _correlator;
     private readonly _lanes;
     private readonly _close_lock;
-    /** Every lane a controller can exist for: \`"default"\` plus each declared one. */
     private readonly _declared_lanes;
     /** Drain lanes declared via \`.withLane(...)\`. Implicit default not included. */
     get lanes(): ReadonlyArray<LaneConfig>;
     /** Use the {@link act} builder rather than constructing directly. */
     constructor(registry: Registry<TSchemaReg, TEvents, TActions, keyof TStateMap & string>, states?: Map<string, State<any, any, any>>, batch_handlers?: Map<string, BatchHandler<any>>, options?: ActOptions, lanes?: ReadonlyArray<LaneConfig>, patch_fn?: PatchFn);
-    /** Shared by drain, settle and autoclose; bad knobs throw at build. */
     private _build_breaker;
-    /** Apps that declare no lanes pass no lane filter to \`claim\`. */
     private _build_drain_controllers;
-    /** One process can't see the cluster, so it reports its own lane gaps. */
     private _advise_orphaned_lanes;
-    /** Audit deps, built after the controllers so the lane set is final. */
     private _build_audit_deps;
     private _build_correlate;
-    /** Cold start: an idle deferred stream still fires on time after a restart. */
     private _seed_persisted_defers;
     private _build_settle;
     private _shutdown_promise;
@@ -160,13 +139,8 @@ export declare class Act<TSchemaReg extends SchemaRegister<TActions>, TEvents ex
      *   to the largest lane \`leaseMillis\` (capped at 30s).
      */
     shutdown(options?: ShutdownOptions): Promise<void>;
-    /**
-     * The largest \`leaseMillis\` among lanes with a cycle in flight (the
-     * default for none or 0, and for a running settle), capped.
-     */
     private _derive_grace_ms;
     private _await_inflight;
-    /** Failures are logged, never thrown: \`notify\` is a hint. */
     private _wire_notify;
     /**
      * Executes an action: validates the payload, loads the state, checks its
@@ -329,20 +303,10 @@ export declare class Act<TSchemaReg extends SchemaRegister<TActions>, TEvents ex
      * @see {@link correlate} for dynamic stream discovery
      */
     drain(options?: DrainOptions): Promise<Drain<TEvents>>;
-    /** Arms correlate and every lane; false on an app with no reactions. */
     private _arm_all;
-    /**
-     * Wakes what a change freed (a commit, a reset, an unblock, a restore,
-     * a notification from another process): arms the lanes these events
-     * react on, or every lane without names, and settles them unless the app
-     * walks the pipeline itself (\`autoSettle: false\`).
-     */
     private _wake;
-    /** Schedules a settle pass; writer-only instances (\`drain: false\`) skip it. */
     private _schedule;
-    /** Arms only the lanes these events react on; true when any was armed. */
     private _arm_for_event_names;
-    /** In parallel, so a slow lane never holds up a fast one. */
     private _drain_all;
     /**
      * Scans committed events from the correlation checkpoint, subscribes the
@@ -366,7 +330,6 @@ export declare class Act<TSchemaReg extends SchemaRegister<TActions>, TEvents ex
         subscribed: number;
         last_id: number;
     }>;
-    /** One correlate pass; arms every lane when it found work. */
     private _correlate_pass;
     /**
      * Starts a background poll that settles on a timer: each tick looks for
@@ -567,7 +530,6 @@ export declare class Act<TSchemaReg extends SchemaRegister<TActions>, TEvents ex
      * @see {@link Store.prioritize} for the underlying primitive
      */
     prioritize(filter: StreamFilter, priority: number): Promise<number>;
-    /** Shared by \`close()\` and reaction-requested closes. */
     private _run_close;
     /**
      * Close the books: guard, archive, truncate, and optionally restart
@@ -3354,9 +3316,7 @@ export declare class InMemoryStore implements Store {
     private _events;
     private _next_id;
     private _streams;
-    /** Correlate checkpoint: how far the log has been READ. */
     private _correlated_at;
-    /** Per-correlator checkpoint and lease; keyless callers use \`_correlated_at\`. */
     private _correlators;
     private _stream_versions;
     private _pii;
@@ -3368,7 +3328,6 @@ export declare class InMemoryStore implements Store {
     seed(): Promise<void>;
     drop(): Promise<void>;
     private _in_query;
-    /** Index of the stream's latest snapshot, or -1; an explicit \`after\` wins. */
     private _snap_floor;
     query<E extends Schemas>(callback: (event: Committed<E, keyof E>) => void, query?: Query): Promise<number>;
     commit<E extends Schemas>(stream: string, msgs: Message<E, keyof E>[], meta: EventMeta, expectedVersion?: number): Promise<Committed<E, keyof E>[]>;
@@ -3403,7 +3362,6 @@ export declare class InMemoryStore implements Store {
         error: string;
     }[]>;
     defer(input: string[] | StreamFilter, deferred_at: number): Promise<number>;
-    /** De-duplicated like the SQL \`stream = ANY(...)\`; unknown names skipped. */
     private _select;
     private _filter_predicate;
     reset(input: string[] | StreamFilter): Promise<number>;
@@ -12173,23 +12131,8 @@ export declare class BroadcastChannel<S extends BroadcastState = BroadcastState>
          */
         cache_size?: number;
     });
-    /**
-     * Fan a resync out to a stream's live subscribers. \`applyPatchMessage\`
-     * always reports \`behind\` for it, so they refetch.
-     */
     private broadcast_resync;
-    /**
-     * The LRU dropped an entry. Overlay-contributed keys lived only in the
-     * cache, so their loss is reported now, when it happens, rather than at a
-     * later commit that may never come.
-     */
     private on_cache_evict;
-    /**
-     * Overlay-contributed state for \`streamId\` is gone. Recover first, report
-     * second: the resync goes out before the host hook, and a throwing hook is
-     * routed to \`onSubscriberError\`. Eviction runs inside \`publish()\` for
-     * another stream, so an escaping throw would cost that stream its frame.
-     */
     private report_overlay_miss;
     /**
      * Publish domain patches from a commit.
@@ -13888,51 +13831,24 @@ export declare class PostgresStore implements Store {
     readonly config: Config;
     private _fqt;
     private _fqs;
-    /** Correlate checkpoint table — one row, id 0. */
     private _fqc;
-    /** Rides every NOTIFY payload so this store's own commits never echo back. */
     private readonly _by;
-    /** Per \`(schema, table)\`, so stores sharing a database stay isolated. */
     private readonly _channel;
-    /** Active LISTEN client (one per \`notify()\` subscription). */
     private _listen_client;
-    /** Detached before destroy, or a reused connection re-fires a stale handler. */
     private _listen_handler;
-    /** A checked-out client with no \`error\` listener crashes the process on a blip. */
     private _listen_error_handler;
-    /** Kept for reconnects; clearing it is what cancels a pending one. */
     private _notify_handler;
     private _reconnect_timer;
-    /** Consecutive reconnect attempts; grows the backoff. */
     private _reconnect_attempts;
     /** Present only when \`config.notify\` is set. See {@link Config.notify}. */
     notify?: (handler: (notification: StoreNotification) => void) => Promise<NotifyDisposer>;
-    /** Caches the key on first use; rotating it takes a restart. */
     private readonly _resolve_pii_key;
     constructor(config?: Partial<Config>);
-    /**
-     * The \`pii\` column's text for a write: encrypted when \`pii_encryption\` is
-     * set, JSON either way (an encrypted value casts to a jsonb string), and
-     * \`null\` kept so \`forget_pii\` semantics hold.
-     */
     private _encode_pii;
-    /**
-     * Decrypts a row's \`pii\` in place when it was stored encrypted (a jsonb
-     * string). Plaintext rows, including ones written before encryption was
-     * enabled, pass through, so mixed-data rollouts read cleanly.
-     */
     private _decode_pii;
-    /** A saturated pool fails here as a {@link StoreError} naming the operation. */
     private _client;
-    /** One transaction: any failure rolls back and throws a {@link StoreError} naming the operation. */
     private _tx;
     dispose(): Promise<void>;
-    /**
-     * Cancels any reconnect, forgets the handler, UNLISTENs and destroys the
-     * client (never returned to the pool). Clearing the handler makes a
-     * scheduled \`_reconnect\` bail; an open already in flight is caught at
-     * the end of \`_open_listen\` instead.
-     */
     private _teardown_listen;
     seed(): Promise<void>;
     drop(): Promise<void>;
@@ -13949,13 +13865,7 @@ export declare class PostgresStore implements Store {
     block(leases: BlockedLease[]): Promise<BlockedLease[]>;
     /** \`claim\` compares \`deferred_at\` with the worker's clock, the one its defer timer uses. */
     defer(input: string[] | StreamFilter, deferred_at: number): Promise<number>;
-    /**
-     * \`UPDATE ... <set>\` on the selected streams. \`set\`/\`where\` use \`$1..$n\`
-     * for \`params\`; the selection's parameters are numbered after them. A
-     * failure throws a {@link StoreError} naming the operation.
-     */
     private _update;
-    /** A \`WHERE\` fragment (without the keyword); \`true\` for an empty filter. */
     private _filter_clause;
     reset(input: string[] | StreamFilter): Promise<number>;
     /** \`retry = -1\`, so the first claim after unblock reports attempt 0. */
@@ -13964,23 +13874,10 @@ export declare class PostgresStore implements Store {
     query_streams(callback: (position: StreamPosition) => void, query?: QueryStreams): Promise<QueryStreamsResult>;
     /** Heads only when no \`count\`/\`names\` is asked for; otherwise one full scan. */
     query_stats<E extends Schemas>(input: string[] | Pick<StreamFilter, "stream" | "stream_exact">, options?: QueryStatsOptions<E>): Promise<Map<string, StreamStats<E>>>;
-    /**
-     * Index-only \`DISTINCT ON\` over \`(stream, version)\`: one row per stream,
-     * not per event. Version order equals id order within a stream.
-     */
     private _query_stats_heads_only;
-    /** One CTE scan gives counts, the name map, heads and tails together. */
     private _query_stats_full_scan;
-    /**
-     * \`Store.notify\`, bound only when \`config.notify\` is set. One dedicated
-     * LISTEN client per store (a new call replaces the old); this store's own
-     * commits are skipped by \`_by\`. Self-heals after a client \`error\` with
-     * capped backoff, polling in between.
-     */
     private _subscribe_notifications;
-    /** Shared by subscribe and reconnect; a failure destroys the client so nothing leaks. */
     private _open_listen;
-    /** Bails once disposed (\`_notify_handler\` cleared), so nothing fires after teardown. */
     private _reconnect;
     truncate(targets: Array<{
         stream: string;
@@ -14203,37 +14100,12 @@ export declare function streamPatternToGlob(input: string): string;
  */
 export declare class SqliteStore implements Store {
     private client;
-    /**
-     * Memoized key resolver for the optional \`pii_encryption\` envelope.
-     * Initialized in the constructor when encryption is configured;
-     * \`undefined\` otherwise. The resolver caches the operator's key on
-     * first use — rotation means restarting the store with a fresh
-     * provider.
-     */
     private readonly _resolve_pii_key;
     constructor(config: SqliteConfig);
-    /**
-     * Write-side pii encoder: encrypts when \`pii_encryption\` is configured,
-     * stringifies for the TEXT column either way. \`null\` passes through so
-     * \`forget_pii\` semantics survive intact (the row format skips the
-     * column entirely on a \`NULL\` write).
-     *
-     * @internal
-     */
     private _stringify_pii_for_write;
-    /**
-     * Read-side pii decoder: parses the TEXT column, and when
-     * \`pii_encryption\` is configured, transparently decrypts any value
-     * that came back as a JSON string. Plaintext writes deserialize to
-     * objects and pass through — which is what makes mixed-data
-     * rollouts (some pre-encryption rows, some post-) read cleanly.
-     *
-     * @internal
-     */
     private _parse_pii_from_read;
     seed(): Promise<void>;
     drop(): Promise<void>;
-    /** One write transaction: any failure rolls back and throws a {@link StoreError} naming the operation. */
     private _tx;
     dispose(): Promise<void>;
     commit<E extends Schemas>(stream: string, msgs: Message<E, keyof E>[], meta: EventMeta, expectedVersion?: number): Promise<Committed<E, keyof E>[]>;
@@ -14247,23 +14119,7 @@ export declare class SqliteStore implements Store {
     ack(leases: Lease[]): Promise<Lease[]>;
     block(leases: BlockedLease[]): Promise<BlockedLease[]>;
     defer(input: string[] | StreamFilter, deferred_at: number): Promise<number>;
-    /**
-     * Runs \`UPDATE streams <set>\` on the streams named by \`input\`, in one
-     * write transaction (\`_tx\`) that rolls back on failure. An explicit list is
-     * de-duplicated, so a repeated name counts once (matching PG's set-based
-     * \`stream = ANY(...)\`), and updated one name per statement, so a long list
-     * never meets SQLite's bound-parameter limit. \`set\` and \`where\` bind
-     * \`params\` in order; libSQL \`?\` placeholders are positional and can't be
-     * reused, so a value used twice is passed twice.
-     *
-     * @returns Count of rows updated.
-     */
     private _update;
-    /**
-     * Translate a {@link StreamFilter} to a SQLite \`WHERE\` clause fragment
-     * plus positional args. Returns \`"1"\` (always true) when empty so
-     * callers can compose it unconditionally.
-     */
     private _filter_clause;
     reset(input: string[] | StreamFilter): Promise<number>;
     unblock(input: string[] | StreamFilter): Promise<number>;
@@ -14293,16 +14149,7 @@ export declare class SqliteStore implements Store {
      *   since SQLite has no native array type.
      */
     query_stats<E extends Schemas>(input: string[] | Pick<StreamFilter, "stream" | "stream_exact">, options?: QueryStatsOptions<E>): Promise<Map<string, StreamStats<E>>>;
-    /**
-     * Cheap path — head (and optional tail) via ROW_NUMBER() over the
-     * \`(stream, version)\` unique index. Parallel queries when tail set.
-     */
     private _query_stats_heads_only;
-    /**
-     * Full-scan path — one CTE-based query with per-stream \`COUNT(*)\` and
-     * \`json_group_object(name, n)\`. Heads (and optional tails) ride free
-     * on the same scan.
-     */
     private _query_stats_full_scan;
     prioritize(filter: StreamFilter, priority: number): Promise<number>;
     truncate(targets: Array<{

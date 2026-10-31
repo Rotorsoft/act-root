@@ -39,21 +39,19 @@ export type SettleDeps<TEvents extends Schemas> = {
  */
 export class SettleLoop<TEvents extends Schemas> {
   private _timer: ReturnType<typeof setTimeout> | undefined = undefined;
-  /**
-   * The cycle in flight, set while one runs. Shutdown waits for it
-   * (`stop()` cancels scheduling only). Never rejects.
-   */
+  // The cycle in flight, set while one runs. Shutdown waits for it
+  // (`stop()` cancels scheduling only). Never rejects.
   private _inflight: Promise<void> | undefined;
-  /** A wake-up arrived while a cycle ran: run one more pass after it. */
+  // A wake-up arrived while a cycle ran: run one more pass after it.
   private _pending = false;
-  /** The last caller's options, used by the next pass. */
+  // The last caller's options, used by the next pass.
   private _next: SettleOptions | undefined = undefined;
-  /** When the scheduled pass fires (epoch ms). */
+  // When the scheduled pass fires (epoch ms).
   private _due = 0;
-  /** Set at shutdown: nothing schedules again. */
+  // Set at shutdown: nothing schedules again.
   private _stopped = false;
   private readonly _deps: SettleDeps<TEvents>;
-  /** Debounce window applied when the caller doesn't override via `SettleOptions.debounceMs`. */
+  // Debounce window applied when the caller doesn't override via `SettleOptions.debounceMs`.
   private readonly _default_debounce_ms: number;
 
   constructor(deps: SettleDeps<TEvents>, default_debounce_ms: number) {

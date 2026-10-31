@@ -193,32 +193,26 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
       options?.onSubscriberError ?? default_subscriber_error;
   }
 
-  /**
-   * Fan a resync out to a stream's live subscribers. `applyPatchMessage`
-   * always reports `behind` for it, so they refetch.
-   */
+  // Fan a resync out to a stream's live subscribers. `applyPatchMessage`
+  // always reports `behind` for it, so they refetch.
   private broadcast_resync(streamId: string): void {
     fan_out(this.channels.get(streamId), resync_frame<S>(), (error) =>
       this.on_subscriber_error(error, streamId)
     );
   }
 
-  /**
-   * The LRU dropped an entry. Overlay-contributed keys lived only in the
-   * cache, so their loss is reported now, when it happens, rather than at a
-   * later commit that may never come.
-   */
+  // The LRU dropped an entry. Overlay-contributed keys lived only in the
+  // cache, so their loss is reported now, when it happens, rather than at a
+  // later commit that may never come.
   private on_cache_evict(streamId: string, dropped: S): void {
     if (!(dropped as S & WithOverlayKeys)[OVERLAY_KEYS]?.size) return;
     this.report_overlay_miss(streamId);
   }
 
-  /**
-   * Overlay-contributed state for `streamId` is gone. Recover first, report
-   * second: the resync goes out before the host hook, and a throwing hook is
-   * routed to `onSubscriberError`. Eviction runs inside `publish()` for
-   * another stream, so an escaping throw would cost that stream its frame.
-   */
+  // Overlay-contributed state for `streamId` is gone. Recover first, report
+  // second: the resync goes out before the host hook, and a throwing hook is
+  // routed to `onSubscriberError`. Eviction runs inside `publish()` for
+  // another stream, so an escaping throw would cost that stream its frame.
   private report_overlay_miss(streamId: string): void {
     this.broadcast_resync(streamId);
     try {

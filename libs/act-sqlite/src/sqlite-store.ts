@@ -300,13 +300,11 @@ export function streamPatternToGlob(input: string): string {
  */
 export class SqliteStore implements Store {
   private client: Client;
-  /**
-   * Memoized key resolver for the optional `pii_encryption` envelope.
-   * Initialized in the constructor when encryption is configured;
-   * `undefined` otherwise. The resolver caches the operator's key on
-   * first use — rotation means restarting the store with a fresh
-   * provider.
-   */
+  // Memoized key resolver for the optional `pii_encryption` envelope.
+  // Initialized in the constructor when encryption is configured;
+  // `undefined` otherwise. The resolver caches the operator's key on
+  // first use — rotation means restarting the store with a fresh
+  // provider.
   private readonly _resolve_pii_key: (() => Promise<Buffer>) | undefined;
 
   constructor(config: SqliteConfig) {
@@ -319,14 +317,10 @@ export class SqliteStore implements Store {
       : undefined;
   }
 
-  /**
-   * Write-side pii encoder: encrypts when `pii_encryption` is configured,
-   * stringifies for the TEXT column either way. `null` passes through so
-   * `forget_pii` semantics survive intact (the row format skips the
-   * column entirely on a `NULL` write).
-   *
-   * @internal
-   */
+  // Write-side pii encoder: encrypts when `pii_encryption` is configured,
+  // stringifies for the TEXT column either way. `null` passes through so
+  // `forget_pii` semantics survive intact (the row format skips the
+  // column entirely on a `NULL` write).
   private async _stringify_pii_for_write(
     pii: Readonly<Record<string, unknown>> | null | undefined
   ): Promise<string | null> {
@@ -337,15 +331,11 @@ export class SqliteStore implements Store {
     return JSON.stringify(pii);
   }
 
-  /**
-   * Read-side pii decoder: parses the TEXT column, and when
-   * `pii_encryption` is configured, transparently decrypts any value
-   * that came back as a JSON string. Plaintext writes deserialize to
-   * objects and pass through — which is what makes mixed-data
-   * rollouts (some pre-encryption rows, some post-) read cleanly.
-   *
-   * @internal
-   */
+  // Read-side pii decoder: parses the TEXT column, and when
+  // `pii_encryption` is configured, transparently decrypts any value
+  // that came back as a JSON string. Plaintext writes deserialize to
+  // objects and pass through — which is what makes mixed-data
+  // rollouts (some pre-encryption rows, some post-) read cleanly.
   private async _parse_pii_from_read(
     raw: unknown
   ): Promise<Record<string, unknown> | null> {
@@ -554,7 +544,7 @@ export class SqliteStore implements Store {
     await this.client.execute("DROP TABLE IF EXISTS correlated");
   }
 
-  /** One write transaction: any failure rolls back and throws a {@link StoreError} naming the operation. */
+  // One write transaction: any failure rolls back and throws a {@link StoreError} naming the operation.
   private async _tx<T>(
     operation: string,
     work: (tx: Transaction) => Promise<T>
@@ -1116,17 +1106,15 @@ export class SqliteStore implements Store {
     ]);
   }
 
-  /**
-   * Runs `UPDATE streams <set>` on the streams named by `input`, in one
-   * write transaction (`_tx`) that rolls back on failure. An explicit list is
-   * de-duplicated, so a repeated name counts once (matching PG's set-based
-   * `stream = ANY(...)`), and updated one name per statement, so a long list
-   * never meets SQLite's bound-parameter limit. `set` and `where` bind
-   * `params` in order; libSQL `?` placeholders are positional and can't be
-   * reused, so a value used twice is passed twice.
-   *
-   * @returns Count of rows updated.
-   */
+  // Runs `UPDATE streams <set>` on the streams named by `input`, in one
+  // write transaction (`_tx`) that rolls back on failure. An explicit list is
+  // de-duplicated, so a repeated name counts once (matching PG's set-based
+  // `stream = ANY(...)`), and updated one name per statement, so a long list
+  // never meets SQLite's bound-parameter limit. `set` and `where` bind
+  // `params` in order; libSQL `?` placeholders are positional and can't be
+  // reused, so a value used twice is passed twice.
+  //
+  // @returns Count of rows updated.
   private _update(
     operation: string,
     input: string[] | StreamFilter,
@@ -1153,11 +1141,9 @@ export class SqliteStore implements Store {
     });
   }
 
-  /**
-   * Translate a {@link StreamFilter} to a SQLite `WHERE` clause fragment
-   * plus positional args. Returns `"1"` (always true) when empty so
-   * callers can compose it unconditionally.
-   */
+  // Translate a {@link StreamFilter} to a SQLite `WHERE` clause fragment
+  // plus positional args. Returns `"1"` (always true) when empty so
+  // callers can compose it unconditionally.
   private _filter_clause(filter: StreamFilter): {
     clause: string;
     args: unknown[];
@@ -1372,10 +1358,8 @@ export class SqliteStore implements Store {
         );
   }
 
-  /**
-   * Cheap path — head (and optional tail) via ROW_NUMBER() over the
-   * `(stream, version)` unique index. Parallel queries when tail set.
-   */
+  // Cheap path — head (and optional tail) via ROW_NUMBER() over the
+  // `(stream, version)` unique index. Parallel queries when tail set.
   private async _query_stats_heads_only<E extends Schemas>(
     from_clause: string,
     where_clause: string,
@@ -1446,11 +1430,9 @@ export class SqliteStore implements Store {
     return out;
   }
 
-  /**
-   * Full-scan path — one CTE-based query with per-stream `COUNT(*)` and
-   * `json_group_object(name, n)`. Heads (and optional tails) ride free
-   * on the same scan.
-   */
+  // Full-scan path — one CTE-based query with per-stream `COUNT(*)` and
+  // `json_group_object(name, n)`. Heads (and optional tails) ride free
+  // on the same scan.
   private async _query_stats_full_scan<E extends Schemas>(
     from_clause: string,
     where_clause: string,
