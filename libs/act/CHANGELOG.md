@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v1.37.0](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.36.0...@rotorsoft/act-v1.37.0) (2026-10-31)
+
+
+### Features
+
+* **act:** warn at build about sensitive fields whose type isn't a string ([#2230](https://github.com/Rotorsoft/act-root/issues/2230)) ([d5e1e06](https://github.com/Rotorsoft/act-root/commit/d5e1e06f1bdf2d7be0a5540f1d6a9ea8a7d0a4e4)), closes [#2227](https://github.com/Rotorsoft/act-root/issues/2227) [#2227](https://github.com/Rotorsoft/act-root/issues/2227)
+
 # [@rotorsoft/act-v1.36.0](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.35.3...@rotorsoft/act-v1.36.0) (2026-10-31)
 
 
