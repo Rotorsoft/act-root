@@ -1,3 +1,10 @@
+# [@rotorsoft/act-http-v1.12.0](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-http-v1.11.3...@rotorsoft/act-http-v1.12.0) (2026-10-31)
+
+
+### Features
+
+* **act:** a committed listener scoped to one state, with typed snapshots ([#2228](https://github.com/Rotorsoft/act-root/issues/2228)) ([5f94e78](https://github.com/Rotorsoft/act-root/commit/5f94e78de78d563d77f3dba0d7c6c24b20eb20d2)), closes [#2226](https://github.com/Rotorsoft/act-root/issues/2226)
+
 # [@rotorsoft/act-http-v1.11.3](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-http-v1.11.2...@rotorsoft/act-http-v1.11.3) (2026-10-31)
 
 
