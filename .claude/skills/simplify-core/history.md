@@ -9,23 +9,23 @@ Least recently run goes next. A lens with no accepted proposal in its last three
 | lens | last run | runs | accepted | status |
 |---|---|---|---|---|
 | Public surface | 2026-10-30 | 8 | 2 | active (#2201 left `action()`'s doc and act-http's "undefined skips the check"; `ConcurrencyError`'s example hand-rolls the retry) |
-| Dead code (tool) | 2026-10-29 | 8 | 6 | active (the `patch_fn` plumbing #2180 left with one value; four doc blocks stacked above the wrong declaration) |
+| Dead code (tool) | 2026-10-31 | 9 | 8 | active (two `sensitive()` markers where one covers every case; act-diagram's CLI defines four helpers twice; knip clean in core) |
 | Hotspots (tool) | 2026-10-20 | 5 | 1 | retired 2026-10-20: two runs with no proposal; every branch in the hot functions (correlate, action, drain) is a separate rule |
 | File budget | 2026-10-30 | 9 | 1 | active (9 over 300 code lines; event-sourcing.ts 473 → 504 with #2200's check) |
-| Comment noise | 2026-10-29 | 8 | 7 | active (act-http 50% comments, 51 ticket refs; 85 ticket refs outside core) |
+| Comment noise | 2026-10-31 | 9 | 9 | active (29 ticket refs outside core; act-ops' published doc names shipped tickets in future tense; the stacked-doc awk missed one-line blocks) |
 | Concepts and options | 2026-10-30 | 9 | 3 | active (action × reaction retries multiply, (N+1)(M+1); `reactingTo` now only builds meta) |
 | Core or decorator? | 2026-10-15 | 3 | 0 | retired 2026-10-15: three runs, findings only (PII, audit, breaker, lanes stay; priority is a major-version question) |
-| DRY across adapters and builders | 2026-10-29 | 8 | 11 | active (`check_invariants` copies `validate` and drifted; the SQL recovery writes wrap driver errors one of five ways) |
+| DRY across adapters and builders | 2026-10-31 | 9 | 13 | active (#2230's warning re-walks the event schemas `build_events` walks; Zod definitions read three ways, and `is_pii`'s missed `.transform`/`.pipe`) |
 | Reading path | 2026-10-30 | 8 | 3 | active (13 files, ~33 names; `app.do` breaks on an action that emits nothing; the correlator default in three places) |
 | Newcomer test (quarterly) | 2026-10-17 | 2 | 0 | active (21 concepts, 3 imports; a package.json without name/version crashes) |
-| Tests by concept | 2026-10-29 | 8 | 12 | active (an awaited void `settle()` before a "no reaction ran" check; five tests #2180 left pinning nothing new) |
+| Tests by concept | 2026-10-31 | 9 | 15 | active (row 261's test never blocks; the partial options merge survives a mutation; four defer tests in real-clock windows) |
 | Mutation evidence (monthly, CI) | never | 0 | 0 | retired: setup removed (#1805), see baselines below |
 | Packages earn their place | 2026-10-15 | 4 | 0 | retired 2026-10-15: four runs, no proposal (removal is ruled out; act-tck churn is the snapshot, now P2026-10-15p-1) |
 | Infra | 2026-10-30 | 9 | 2 | active (per-package tsc red where the gate is green; Biome schema drift; 59 private JSDoc blocks in the published .d.ts) |
 | One source of truth | 2026-10-30 | 9 | 8 | active (configuration.md's stale copy of the state-check docs) |
 | Examples | 2026-10-30 | 8 | 3 | active (the close-the-books recipe can't run: `@act/wolfdesk` has no entry point) |
 | Process | 2026-10-30 | 8 | 9 | active (3 of 4 CI-CD reds in a week were the snapshot alone; release-check names a script no package has) |
-| Feature interactions | 2026-10-29 | 8 | 14 | active (#2180's schema check refuses redacted state; reaction commits skip the guard the docs say leases replace) |
+| Feature interactions | 2026-10-31 | 9 | 17 | active (SSE broadcasts the committer's view; three owners decide which state fields can read as a marker; the actor-gated fold meets every new reader) |
 
 ## Interaction register
 
@@ -79,6 +79,10 @@ Where two features meet, and why. The Feature interactions lens reads this first
 | `reactingTo`, version guard | resolved by #2201: `reactingTo` only builds correlation and causation | resolved | #2201; the ambient box clearing in `scoped.ts` stays for causation (simulated: one test fails without it) |
 | empty action, `committed` / wake | `Act.do` read `s.event` on every snapshot, including the loaded one an action that emits nothing returns | accidental, a bug | P2026-10-30 r-1 → #2210 / #2213 (probed in the main loop) |
 | per-call correlator, app correlator | `{ correlator, ...options }` let an explicit `undefined` win | accidental, a bug | r-2 → #2211 / #2213 (probed in the main loop) |
+| SSE broadcast, sensitive states | the cached state is the committer's view, served to every subscriber; another actor's commit overwrites it with markers | accidental, a bug | P2026-10-31 i-1 → #2232 (probed in the main loop) |
+| marker-capable state fields: state check, sensitive-type warning, OpenAPI | the check filters by value; the warning and `<State>Snapshots` match by name and miss renamed copies | accidental (three owners) | i-2, i-3 → #2233 |
+| state-scoped `committed`, generic `committed` | one call site in `Act.do`, after #2213's patch check | shared primitive | the empty-action check covers both (probed) |
+| state-scoped `committed`, remote commits | neither fires for another process's commit; hosts use `notified` | justified | same as the generic listener |
 
 ## Mutation baselines
 
@@ -118,6 +122,8 @@ Sound proposals that missed a run's cut. The next run ranks these before looking
 - Workflow and Renovate comments cut to their why: workflow comment lines 164 → 43, `renovate.json` 5.1 → 2.8 KB (ticket-history rule descriptions). Same kind as #2075, outside core. (P2026-10-23p-2)
 
 ## Self-changes
+
+- 2026-10-31: step 6 now tickets every verified finding when the report is done and closes each specialist as it reports; the specialists run as named teammates. The user gave the same instruction two runs in a row ("create tickets and close teammates as they finish") and asked not to repeat it. The Comment noise awk now checks the open before the close (it missed a one-line `/** */` above another) and uses `[ \t]` (macOS awk ignores `\s`); `metrics.sh` counts `RFC nnnn` refs. Evidence: act-diagram's `list_by_kind` doc and "RFC 1274" in a test name, both missed.
 
 - 2026-10-30: step 2 now names the doc comments in the files a behavior-changing PR edited: #2201 updated every doc page and left `action()`'s own doc comment saying reactions skip the guard, two runs after learnings.md recorded the same miss (#1864). The Specialists section says `act-doc-writer` has no shell, so the Examples lens, which runs recipes, goes to a general-purpose agent: this run's docs specialist couldn't run them and the main loop found the broken close-the-books recipe.
 
@@ -820,3 +826,40 @@ Findings, not proposed: per-action retry still earns its place beside the reacti
 Lens metrics: files over 300 code lines 9 (act.ts 795, in-memory-store 730, audit 566, event-sourcing 504, types/builders 464, drain-cycle 457, close-cycle 450, correlate-cycle 418, types/action 325); reading path 13 files, ~33 names; master red since 2026-10-27: 1 (the coverage branch #2204 fixed); flakes 0; snapshot-only CI reds 3 of the last 40 PRs; runnable recipes 3 of 4 green.
 
 Tickets: #2206–#2212, #2214–#2217. Shipped during the run: #2213 (P2026-10-30-1, -2).
+
+### 2026-10-31 — full run (four specialists: dead code + comment noise, DRY across adapters and builders, tests by concept, feature interactions + field)
+
+| metric | 2026-10-30 | now | why |
+|---|---|---|---|
+| core lines (libs/act/src) | 17752 | 17834 | #2228 (state-scoped `on`/`off`, +~90 in act.ts), #2230 (the sensitive-type warning, +45 in act-builder.ts), #2213 |
+| surface guard: Act methods | 20 | 24 | #2228's four overloads (RFC 2226, the user's request: typed snapshots without casts) |
+| files over 300 code lines | 9 | 10 | act-builder.ts 327 (#2230's warning; P2026-10-31 dry-1 brings it to 292) |
+| spec files / test lines | 218 / 60629 | 221 / 60968 | #2228, #2230, #2213, #2225's typed act-http specs |
+| everything else | | unchanged | 52 exports, 8 / 18 / 11, 0 / 0 ticket refs in core, 42% (28% / 14%) comments, 9 files touching 5+ features, 5 workflows / 575 lines, CLAUDE.md 27 KB |
+
+Audit: 11 PRs since the last run, all the assistant's: #2213, #2218 (the record), #2219–#2223, #2225, #2228–#2230. Every ticket from 2026-10-30 shipped except #2207, closed as not a bug: the recipe runs as its header says, from `recipes/`; the last run started it from the repo root. New surface: #2228 (RFC'd, earned: the last hand-written types in an app), #2230 (an advisory the user agreed to instead of typing markers into published read types; it re-walked the event schemas and missed renamed fields). #2225 typed the act-http APIs and #2213 changed a guarantee (an action that emits nothing commits and announces nothing); the three committed-listener guards it made unreachable stayed in the examples (i-4).
+
+Decisions on P2026-10-30*: all accepted and shipped (#2213, #2219–#2223, #2229) except -4 (#2207, a false finding).
+
+Verified in the main loop before ranking: `sensitive(z.string()).transform(…)` stores `"ann@x.io"` in `data` on master (control: `sensitive(z.string())`); the SSE probe in the interactions clone, 3 red with green controls (a subscriber with no identity reads the owner's plaintext; another actor's commit overwrites it with the marker).
+
+Proposals, ticketed when the report was done (user: "create tickets and close teammates as they finish"). Defects first:
+- dry-D1. `.transform()`/`.pipe()` after `sensitive()` stores the field in plain text → #2231.
+- i-1. SSE broadcasts the committer's view of a sensitive state; refuse at build or docs, the user's call → #2232.
+- i-2 + i-3. OpenAPI and the warning match marker-capable state fields by name and miss renamed copies → #2233.
+- t-1 + t-3 + t-4. Row 261's reset-unblock test never blocks; the partial options merge survives `{ ...state.options }`; an SSE test with no `expect`; a test name promising an empty action → #2234.
+- t-2. Four defer tests check the first pass in 60–120 ms real-clock windows → #2235.
+- d-D1–D3. act-ops' published doc names shipped tickets in future tense; `list_by_kind` ships undocumented; a tRPC comment says the opposite of its switch → #2236.
+Simplifications:
+- dry-1. The warning runs in `build_events`' one walk and Zod definitions are read through one `def_of` (−16; act-builder 327 → 292) → #2237.
+- d-1. Drop the WeakMap registry behind `sensitive()` (~−20, one marker) → #2238.
+- d-2. act-diagram's four duplicated CLI helpers (−76) → #2239.
+- t-s1 + t-s2. Three SSE tests repeating the helper's spec (−55); one spec for sensitive build checks (−54, −1 file) → #2240.
+- d-3. 29 ticket refs outside core and "RFC 1274" in a test name → #2241.
+- i-4. Committed-listener guards that can't trigger since #2213 (−3) → #2242.
+
+Findings, not proposed: the actor-gated fold has met every new reader of state (#2180, #2200, #2225, #2230, and #2232, #2233 today). Axon (https://docs.axoniq.io/axon-framework-reference/5.1/data-protection/annotations/) and Marten 7.31 (https://martendb.io/events/protection) never fold decision state through a reader's view; they gate what is returned. RFC 1405's reason (derived state can't be redacted after the fact) still holds; the cost is the user's question. Also: `on`/`off` repeat their overload bodies (~4 lines, overloads can't share without changing the .d.ts); trpc and hono repeat three idempotency messages (−3 net, backlog); portable notify behaviors are tested in act-pg and act-notify, not the TCK (different edges); `sensitive-data.md:73` had no contract row (in #2240).
+
+Lens metrics: knip 40 unused files, all known false positives; ticket refs outside core 29 (+2 RFC refs in a test); time-budget tests verified 3 (+1 same shape); tests that can't fail for their name 3 + 1 title; adapter suites repeating the TCK 0 new; fix commits in lib sources over 4 months 213, the active cluster the actor-gated fold × readers of state; the lanes/lease/defer cluster has had no fix since #2117.
+
+Tickets: #2231–#2242.
