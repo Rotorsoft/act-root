@@ -680,10 +680,30 @@ describe("partial-state — policies declared on a later partial", () => {
     const b = base()
       .emit(() => ["Resolved", {}])
       .build();
-    const { app, dispose } = await sandbox(act().withState(a).withState(b));
-    // Both actions resolve through their own options entry.
-    await app.do("open", { stream: "t2", actor }, {});
-    await app.do("resolve", { stream: "t2", actor }, {});
+    const { app, store, dispose } = await sandbox(
+      act().withState(a).withState(b)
+    );
+    // One lost race per action: each resolves only through its own
+    // partial's `maxRetries`, so dropping either partial's options rejects.
+    const original = store.commit.bind(store);
+    const raced = new Set<string>();
+    store.commit = (async (...args: Parameters<Store["commit"]>) => {
+      const name = args[1][0]?.name as string;
+      if (!raced.has(name)) {
+        raced.add(name);
+        throw new ConcurrencyError(args[0] as string, 0, [], 0);
+      }
+      return original(...args);
+    }) as Store["commit"];
+
+    await expect(
+      app.do("open", { stream: "t2", actor }, {})
+    ).resolves.toBeDefined();
+    await expect(
+      app.do("resolve", { stream: "t2", actor }, {})
+    ).resolves.toBeDefined();
+
+    store.commit = original;
     await dispose();
   });
 

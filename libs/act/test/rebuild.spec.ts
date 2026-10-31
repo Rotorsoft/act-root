@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { act, dispose, projection, state, store } from "../src/index.js";
+import { DEFAULT_BACKOFF } from "../src/internal/config.js";
 
 describe("Store.reset", () => {
   beforeEach(async () => {
@@ -104,11 +105,15 @@ describe("Store.reset", () => {
     await app.do("increment", { stream, actor }, { by: 1 });
     await app.correlate();
 
-    // Drain until blocked (max retries = 3)
+    // Drain until blocked. Each retry waits the default backoff; jump the
+    // clock past it.
+    vi.useFakeTimers({ toFake: ["Date"] });
     for (let i = 0; i < 5; i++) {
       await app.drain({ eventLimit: 100 });
-      await new Promise((r) => setTimeout(r, 5));
+      vi.setSystemTime(Date.now() + DEFAULT_BACKOFF.baseMs + 1);
     }
+    vi.useRealTimers();
+    expect(await app.blocked_streams()).toHaveLength(1);
 
     // Fix the handler and reset — app.reset() raises the drain flag.
     shouldFail = false;
@@ -118,6 +123,7 @@ describe("Store.reset", () => {
 
     expect(handler).toHaveBeenCalled();
     expect(result.acked.length).toBeGreaterThan(0);
+    expect(await app.blocked_streams()).toHaveLength(0);
     // Shut the app down so it hands back its correlation lease.
     // Several tests here share a registry, so an abandoned Act would hold
     // the lease and the next test's correlate would skip its scan.
