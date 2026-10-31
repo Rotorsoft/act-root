@@ -30,11 +30,13 @@ type FakeResponse = { status: number; body?: string };
 /** Minimal mock fetch that records call shape and yields a programmed response. */
 function makeFetch(response: FakeResponse | (() => Promise<Response>)) {
   const calls: Array<{ url: string; init: RequestInit }> = [];
-  const impl = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
-    calls.push({ url: String(url), init: init ?? {} });
-    if (typeof response === "function") return response();
-    return new Response(response.body ?? null, { status: response.status });
-  }) as unknown as typeof fetch;
+  const impl = vi.fn(
+    async (url: string | URL | Request, init?: RequestInit) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      if (typeof response === "function") return response();
+      return new Response(response.body ?? null, { status: response.status });
+    }
+  ) as unknown as typeof fetch;
   return { fetch: impl, calls };
 }
 
@@ -150,7 +152,7 @@ describe("webhook", () => {
 
     it("aborts and throws WebhookError on timeout", async () => {
       const fetch = vi.fn(
-        (_url: RequestInfo | URL, init?: RequestInit): Promise<Response> =>
+        (_url: string | URL | Request, init?: RequestInit): Promise<Response> =>
           new Promise<Response>((_resolve, reject) => {
             init?.signal?.addEventListener("abort", () => {
               reject(new DOMException("aborted", "AbortError"));
@@ -186,7 +188,7 @@ describe("webhook", () => {
     const headers_then_endless_body = (status: number) =>
       vi.fn(
         async (
-          _url: RequestInfo | URL,
+          _url: string | URL | Request,
           init?: RequestInit
         ): Promise<Response> => {
           const body = new ReadableStream<Uint8Array>({

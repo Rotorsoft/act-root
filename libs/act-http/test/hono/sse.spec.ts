@@ -137,7 +137,7 @@ describe("hono(app, { sse }) — generated SSE endpoints", () => {
     const api = hono(app as never, default_options(channel));
     const res = await api.request("/api/sse/Calculator");
     expect(res.status).toBe(400);
-    const body = await res.json();
+    const body = (await res.json()) as { code: string; detail?: string };
     expect(body.code).toBe("BAD_REQUEST");
   });
 
@@ -197,7 +197,7 @@ describe("hono(app, { sse }) — generated SSE endpoints", () => {
     const blocked = await api.request("/api/sse/Calculator?stream=calc-1");
     expect(blocked.status).toBe(503);
     expect(blocked.headers.get("Retry-After")).toBe("1");
-    const body = await blocked.json();
+    const body = (await blocked.json()) as { code: string; detail?: string };
     expect(body.code).toBe("SSE_BUSY");
 
     await first.body?.cancel();

@@ -44,4 +44,4 @@ A breaking change needs a `BREAKING CHANGE:` footer, a migration note, and a `fe
 
 ## Conventions
 
-- Don't run the full test suite locally to stand in for CI. To debug one failure, run the relevant package's targeted command (`npx vitest run libs/<pkg>`, `pnpm -F <pkg> typecheck`). Don't drill unprompted.
+- Don't run the full test suite locally to stand in for CI. To debug one failure, run the relevant package's targeted command (`npx vitest run libs/<pkg>`, `pnpm typecheck`). Don't drill unprompted.
