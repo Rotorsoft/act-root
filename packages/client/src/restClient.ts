@@ -1,37 +1,13 @@
+import type { Api } from "@act/server";
+import { hc } from "hono/client";
 import { SERVER_BASE } from "./trpc.js";
 
 /**
- * Minimal REST client for the Hono adapter routes (`POST
- * /api/actions/<name>`). Matches the shape of the tRPC mutations the
- * Calculator UI consumes so the transport toggle can swap one for
- * the other behind the same `pressKey`/`clear` callback surface.
+ * The generated REST routes (`POST /api/actions/<name>`), typed from the
+ * server's `Api`: each action's body and the snapshots it returns are
+ * checked at compile time, as on the tRPC side.
  *
- * The server's CORS middleware permits this origin (Vite at :5173)
- * by default — see `packages/server/src/server.ts`.
+ * The server's CORS middleware permits this origin by default — see
+ * `packages/server/src/server.ts`.
  */
-export type Snapshot = {
-  state: {
-    left?: string;
-    operator?: string;
-    right?: string;
-  };
-};
-
-export async function callRestAction(
-  action: string,
-  body: unknown
-): Promise<Snapshot[]> {
-  const res = await fetch(`${SERVER_BASE}/api/actions/${action}`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    const detail = (await res.json().catch(() => ({}))) as {
-      error?: string;
-      detail?: string;
-    };
-    throw new Error(detail.detail ?? detail.error ?? res.statusText);
-  }
-  return (await res.json()) as Snapshot[];
-}
+export const rest = hc<Api>(SERVER_BASE);

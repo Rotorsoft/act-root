@@ -16,10 +16,7 @@
  * type Ctx = { user: { id: string; name: string }; tenant: string };
  *
  * const router = trpc<Ctx, typeof app>(app, {
- *   actor: (ctx) => {
- *     const { user } = ctx as Ctx; // the extractor receives `unknown`
- *     return { id: user.id, name: user.name };
- *   },
+ *   actor: (ctx) => ({ id: ctx.user.id, name: ctx.user.name }),
  *   stream: (action, input, ctx) => `tenant-${ctx.tenant}`,
  * });
  *
@@ -56,21 +53,31 @@
 import { type Actor, validate } from "@rotorsoft/act";
 import type { IdempotencyStore } from "@rotorsoft/act-ops/idempotency";
 import {
-  type AnyTRPCMiddlewareFunction,
-  type AnyTRPCMutationProcedure,
-  type AnyTRPCRootTypes,
   initTRPC,
   type TRPCBuiltRouter,
+  type TRPCDefaultErrorShape,
   TRPCError,
+  type TRPCMiddlewareFunction,
+  type TRPCMutationProcedure,
+  type TRPCSubscriptionProcedure,
 } from "@trpc/server";
 import { z } from "zod";
-import { type ActSurface, make_dispatch } from "../api/dispatch.js";
+import {
+  type ActionResult,
+  type ActSurface,
+  type AppActions,
+  type AppState,
+  type AppStateNames,
+  make_dispatch,
+  type ResolverArgs,
+} from "../api/dispatch.js";
 import {
   type ActorExtractor,
   resolveSseConfig,
   runSseSubscription,
   SseConnectionCounter,
   type SseOptions,
+  type SseSubscriptionFrame,
   toApiError,
 } from "../api/index.js";
 
@@ -110,17 +117,13 @@ import {
  *   procedures see this exact context type (plus `actor`) at
  *   runtime.
  */
-export type TrpcOptions<Ctx> = {
-  readonly actor: ActorExtractor;
+export type TrpcOptions<Ctx, TApp = ActSurface> = {
+  readonly actor: ActorExtractor<Ctx>;
   readonly stream: (
-    action_name: string,
-    input: unknown,
-    ctx: Ctx
+    ...args: ResolverArgs<TApp, NoInfer<Ctx>>
   ) => string | Promise<string>;
   readonly expectedVersion?: (
-    action_name: string,
-    input: unknown,
-    ctx: Ctx
+    ...args: ResolverArgs<TApp, NoInfer<Ctx>>
   ) => number | undefined | Promise<number | undefined>;
   readonly idempotency?: {
     readonly store: IdempotencyStore;
@@ -175,27 +178,15 @@ export type TrpcOptions<Ctx> = {
  * (typically wrap them as `TRPCError({ code: "UNAUTHORIZED" })`
  * in the extractor body).
  */
-export function authenticated(
-  extractor: ActorExtractor
-): AnyTRPCMiddlewareFunction {
-  // tRPC's middleware function type lives behind
-  // `unstable-core-do-not-import`; we satisfy it structurally with the
-  // shape `procedure.use(...)` actually requires (an `{ ctx, next }`
-  // bag whose `next` callback is invoked once with the augmented ctx)
-  // and cast the structurally-typed result up to the named export. The
-  // type cast carries no `any`; both sides are structurally compatible
-  // at the call site.
-  const middleware = async function actor_middleware({
-    ctx,
-    next,
-  }: {
-    ctx: object;
-    next: (opts: { ctx: object }) => Promise<unknown>;
-  }) {
-    const actor = await extractor(ctx);
+export function authenticated<Ctx extends object = object>(
+  extractor: ActorExtractor<Ctx>
+): TRPCMiddlewareFunction<Ctx, object, object, { actor: Actor }, unknown> {
+  return async ({ ctx, next }) => {
+    // tRPC hands over `Ctx` as `Simplify<Overwrite<Ctx, …>>`, which TypeScript
+    // can't prove is `Ctx` while `Ctx` is generic.
+    const actor = await extractor(ctx as unknown as Ctx);
     return next({ ctx: { ...ctx, actor } });
   };
-  return middleware as unknown as AnyTRPCMiddlewareFunction;
 }
 
 /**
@@ -251,23 +242,45 @@ function status_to_trpc_code(status: number): TRPCError["code"] {
   }
 }
 
+/** The root types of the router {@link trpc} builds over `Ctx`. */
+type GeneratedRoot<Ctx extends object> = {
+  ctx: Ctx;
+  meta: object;
+  errorShape: TRPCDefaultErrorShape;
+  transformer: false;
+};
+
 /**
- * Generated router type — one mutation procedure per action name in
- * `TApp`'s registry. Mapped over the concrete action keys so
- * `createTRPCReact<typeof router>()` sees specific procedure names
- * (`PressKey`, `Clear`, …) instead of a wide `Record<string, ...>`
- * index signature — which is what trips tRPC React's
- * "useContext / Provider / useUtils collides" check on widely-typed
- * routers.
- *
- * @internal
+ * One mutation per action of `TApp`: the action's payload in, the
+ * snapshots `app.do` returns out. Mapped over the concrete action names,
+ * so `createTRPCReact<typeof router>()` sees `PressKey`, `Clear`, …
+ * instead of an index signature, which trips tRPC React's collision check.
  */
-type GeneratedRouter<TApp> = TRPCBuiltRouter<
-  AnyTRPCRootTypes,
-  TApp extends { registry: { actions: infer TActions } }
-    ? { [K in keyof TActions]: AnyTRPCMutationProcedure }
-    : Record<string, AnyTRPCMutationProcedure>
->;
+type ActionProcedures<TApp> = {
+  [K in keyof AppActions<TApp> & string]: TRPCMutationProcedure<{
+    input: AppActions<TApp>[K];
+    output: ActionResult<TApp, K>;
+    meta: object;
+  }>;
+};
+
+/** One subscription per state of `TApp`, yielding that state's frames. */
+type SubscribeRouter<TApp> = {
+  subscribe: {
+    [N in AppStateNames<TApp>]: TRPCSubscriptionProcedure<{
+      input: { stream: string };
+      output: AsyncIterable<SseSubscriptionFrame<AppState<TApp, N>>, void, any>;
+      meta: object;
+    }>;
+  };
+};
+
+/** The router {@link trpc} builds: the actions, and the subscriptions with `sse`. */
+export type GeneratedRouter<
+  Ctx extends object,
+  TApp,
+  TRecord,
+> = TRPCBuiltRouter<GeneratedRoot<Ctx>, ActionProcedures<TApp> & TRecord>;
 
 /**
  * Build a typed tRPC router from a built `Act` instance.
@@ -289,12 +302,11 @@ type GeneratedRouter<TApp> = TRPCBuiltRouter<
  * 5. Maps any thrown framework error onto a `TRPCError` via
  *    {@link toApiError}.
  *
- * The returned router's procedure inputs come straight from each
- * action's Zod schema; outputs are the framework's
- * `Snapshot<TState, TEvents>[]` shape. Strong typing flows
- * end-to-end via tRPC's normal inference path — the client sees
- * `appRouter.Calculator.PressKey.mutate({ key: "5" })` as a typed
- * call without any codegen.
+ * The router is typed from `TApp`: each mutation takes its action's
+ * payload and returns the `Snapshot[]` `app.do` returns, and with `sse`
+ * each `subscribe.<state>` yields that state's frames, so a client sees
+ * `client.PressKey.mutate({ key: "5" })` as a typed call without
+ * codegen. Pass `TApp` whenever you pass `Ctx`.
  *
  * @template Ctx The tRPC context shape the host's runtime feeds in.
  *   Flows through `actor`, `stream`, and `idempotency.keyFrom` so
@@ -304,13 +316,26 @@ type GeneratedRouter<TApp> = TRPCBuiltRouter<
  *
  * @param app A built `Act` orchestrator.
  * @param options Auth, stream, and (optional) idempotency seams.
- * @returns A tRPC router covering every registered action, grouped
- *   by owning state.
+ * @returns A tRPC router with one mutation per registered action.
  */
 export function trpc<
   Ctx extends object = object,
   TApp extends ActSurface = ActSurface,
->(app: TApp, options: TrpcOptions<Ctx>): GeneratedRouter<TApp> {
+>(
+  app: TApp,
+  options: TrpcOptions<Ctx, TApp> & { readonly sse: SseOptions }
+): GeneratedRouter<Ctx, TApp, SubscribeRouter<TApp>>;
+export function trpc<
+  Ctx extends object = object,
+  TApp extends ActSurface = ActSurface,
+>(
+  app: TApp,
+  options: TrpcOptions<Ctx, TApp>
+): GeneratedRouter<Ctx, TApp, unknown>;
+export function trpc<Ctx extends object, TApp extends ActSurface>(
+  app: TApp,
+  options: TrpcOptions<Ctx>
+): unknown {
   const t = initTRPC.context<Ctx>().create();
   const dispatch = make_dispatch<Ctx>(app, options, options.idempotency?.store);
 
@@ -450,11 +475,6 @@ export function trpc<
     handlers.subscribe = t.router(sse_handlers as never) as never;
   }
 
-  // The runtime router IS structurally compatible with
-  // `GeneratedRouter<TApp>` (one mutation per action key), but tRPC's
-  // `BuiltRouter` carries an internal `Unwrap<Ctx>` that the d.ts
-  // emitter can't name portably. Bridging through `unknown` keeps the
-  // caller-visible type clean (specific procedure names, no
-  // index-signature widening that trips React tRPC's collision check).
-  return t.router(handlers) as unknown as GeneratedRouter<TApp>;
+  // Built in a loop over the registry, so its type is the overloads'.
+  return t.router(handlers);
 }

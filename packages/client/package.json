@@ -14,10 +14,12 @@
     "@tanstack/react-query": "^5.104.5",
     "@trpc/client": "11.19.0",
     "@trpc/react-query": "11.19.0",
+    "hono": "^4.13.13",
     "react": "^19.3.1",
     "react-dom": "^19.3.1"
   },
   "devDependencies": {
+    "@act/server": "workspace:^",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.2",

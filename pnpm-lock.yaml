@@ -578,9 +578,6 @@ importers:
       '@rotorsoft/act':
         specifier: '>=1.33.14'
         version: link:../../libs/act
-      '@trpc/server':
-        specifier: 11.19.0
-        version: 11.19.0(typescript@7.0.2)
       zod:
         specifier: ^4.6.7
         version: 4.6.7
@@ -612,6 +609,9 @@ importers:
       '@trpc/react-query':
         specifier: 11.19.0
         version: 11.19.0(@tanstack/react-query@5.104.5(@types/react@19.3.0)(react@19.3.1))(@trpc/client@11.19.0(@trpc/server@11.19.0(typescript@7.0.2))(typescript@7.0.2))(@trpc/server@11.19.0(typescript@7.0.2))(react@19.3.1)(typescript@7.0.2)
+      hono:
+        specifier: ^4.13.13
+        version: 4.13.13
       react:
         specifier: ^19.3.1
         version: 19.3.1
@@ -619,6 +619,9 @@ importers:
         specifier: ^19.3.1
         version: 19.3.1(react@19.3.1)
     devDependencies:
+      '@act/server':
+        specifier: workspace:^
+        version: link:../server
       '@types/react':
         specifier: ^19.3.0
         version: 19.3.0

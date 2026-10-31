@@ -1,19 +1,13 @@
-import {
-  calculatorApp,
-  calculatorRouter,
-  type Operators,
-} from "@act/calculator";
+import { calculatorApp } from "@act/calculator";
 import { serve } from "@hono/node-server";
 import { dispose } from "@rotorsoft/act";
-import { hono as honoTransport } from "@rotorsoft/act-http/hono";
 import { openapi } from "@rotorsoft/act-http/openapi";
-import { BroadcastChannel } from "@rotorsoft/act-http/sse";
 import { instrument } from "@rotorsoft/act-otel";
 import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { register } from "prom-client";
-import { resolveDemoActor } from "./demo-actor.js";
+import { api, router } from "./api.js";
 
 /**
  * Multi-transport demo. One Act instance, four transports (tRPC, Hono
@@ -21,8 +15,8 @@ import { resolveDemoActor } from "./demo-actor.js";
  * makes it the integration test that the transports agree.
  * Every transport walks the same `calculatorApp` registry; the
  * OpenAPI doc describes the REST routes the Hono adapter actually
- * serves; tRPC consumers use `typeof calculatorRouter` for their
- * typed client (no codegen).
+ * serves. The tRPC router and the REST routes are generated in `api.ts`,
+ * and the client imports their types from this package (no codegen).
  *
  *   POST /trpc/PressKey, /trpc/Clear   ← tRPC procedures
  *   POST /api/actions/PressKey, ...    ← REST routes
@@ -36,63 +30,6 @@ import { resolveDemoActor } from "./demo-actor.js";
  */
 
 const CORS_ORIGIN = process.env.CORS_ORIGIN || "http://localhost:5173";
-
-/**
- * The broadcast view of the calculator: the domain state plus the
- * `_v` version contract (`_v` is always `snap.event.version` — the
- * event store's stream version is the single source of truth).
- */
-type CalculatorLiveState = {
-  _v: number;
-  left?: string;
-  right?: string;
-  operator?: Operators;
-  result: number;
-};
-
-// SSE broadcast. One in-memory channel shared with the
-// generated Hono surface below, which mounts one streaming
-// `GET /api/sse/<stateName>?stream=<streamId>` per registered state.
-// Publication is host-owned: every local commit — tRPC bridge and
-// REST alike, both funnel through `calculatorApp.do` — lands here
-// via the `committed` lifecycle event and fans out to subscribers
-// as version-keyed domain patches.
-const broadcast = new BroadcastChannel<CalculatorLiveState>();
-calculatorApp.on("committed", (snapshots) => {
-  // The lifecycle payload is loosely typed by design — commits from any
-  // registered state land here. This app registers a single state, so
-  // narrow to its shape once.
-  const snaps = snapshots as unknown as {
-    state: Omit<CalculatorLiveState, "_v">;
-    event?: { stream: string; version: number };
-    patch?: Partial<CalculatorLiveState>;
-  }[];
-  const last = snaps.at(-1);
-  if (!last?.event) return;
-  broadcast.publish(
-    last.event.stream,
-    { ...last.state, _v: last.event.version },
-    snaps
-      .map((s) => s.patch)
-      .filter((p): p is Partial<CalculatorLiveState> => p !== undefined)
-  );
-});
-
-const restApi = honoTransport(calculatorApp, {
-  // DEMO ONLY — no auth; production hosts MUST resolve a verified actor.
-  // Every generated mutation trusts whatever this returns. In a real
-  // service, resolve the actor from a verified JWT / session / mTLS
-  // identity off the request context — e.g.
-  //   actor: (c) => resolveActorFromJwt(c)
-  // (see `authenticated(...)` in `@rotorsoft/act-http/hono`). Copying the
-  // hardcoded resolver below into production is a privilege-escalation
-  // footgun: it grants every caller the same identity with no auth.
-  // `resolveDemoActor()` logs a one-time warning if it ever runs outside
-  // the demo, so the mistake surfaces in the logs.
-  actor: () => resolveDemoActor(),
-  stream: () => "calculator",
-  sse: { channel: broadcast },
-});
 
 const apiDoc = openapi(calculatorApp, {
   info: {
@@ -119,7 +56,7 @@ app.use(
 );
 
 // Mount the generated REST routes.
-app.route("/", restApi);
+app.route("/", api);
 
 // Serve the OpenAPI document.
 app.get("/openapi.json", (c) => c.json(apiDoc));
@@ -138,7 +75,7 @@ app.all("/trpc/*", (c) =>
   fetchRequestHandler({
     endpoint: "/trpc",
     req: c.req.raw,
-    router: calculatorRouter,
+    router,
   })
 );
 

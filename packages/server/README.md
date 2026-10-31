@@ -10,8 +10,8 @@ One Act instance, four transports mounted side-by-side on a single Hono root app
 
 | URL                                    | Source                                       | Use                                          |
 | -------------------------------------- | -------------------------------------------- | -------------------------------------------- |
-| `POST /trpc/PressKey`, `/trpc/Clear`   | Hand-written `t.router({...})` in `@act/calculator` | Typed tRPC React client at :3000             |
-| `POST /api/actions/PressKey`, `/Clear` | `hono(calculatorApp, ...)` from `@rotorsoft/act-http/hono` | Plain-fetch REST clients, Vite toggle's REST mode |
+| `POST /trpc/PressKey`, `/trpc/Clear`   | `trpc(calculatorApp, ...)` in `src/api.ts` | Typed tRPC React client at :3000             |
+| `POST /api/actions/PressKey`, `/Clear` | `hono(calculatorApp, ...)` in `src/api.ts` | Typed `hc` client, Vite toggle's REST mode |
 | `GET  /api/sse/Calculator?stream=<id>` | `hono(calculatorApp, { sse })` + `BroadcastChannel` from `@rotorsoft/act-http/sse` | `EventSource` live-state panel in the client |
 | `GET  /openapi.json`                   | `openapi(calculatorApp, ...)` from `@rotorsoft/act-http/openapi` | Swagger / RapiDoc / Redoc                    |
 | `GET  /`                               | Hand-rolled landing page                     | Operator orientation                         |
@@ -40,13 +40,13 @@ pnpm -F server dev
 
 The root `pnpm dev:http` script sets `CORS_ORIGIN=http://localhost:3000` for you (matching the Vite client in `packages/client/vite.config.ts`). When running `pnpm -F server dev` standalone against a client on a different origin, set `CORS_ORIGIN` accordingly.
 
-## Why hand-written tRPC router
+## Generated, typed transports
 
-The Hono and OpenAPI generators are used as designed (`hono(calculatorApp, ...)` / `openapi(calculatorApp, ...)`). The tRPC sibling at `@rotorsoft/act-http/trpc` is *not* used here, on purpose: tRPC v11's `BuiltRouter` transitively references the internal `Unwrap` symbol from `@trpc/server/dist/unstable-core-do-not-import`, which the d.ts emitter can't name portably for the generator's `<TApp>` return — and the same shape downstream trips `createTRPCReact<typeof router>()`'s collision check. For two static actions and a fixed actor the hand-written router is shorter than every workaround, and is preserved in `@act/calculator` so the client can use `typeof calculatorRouter` for end-to-end type safety. The generator stays available for server-only mounts via `createHTTPHandler`.
+Every transport is generated from `calculatorApp` in `src/api.ts`: `trpc(...)` and `hono(...)`, with `openapi(...)` in `src/server.ts`. The package exports their types from `src/index.ts` (`AppRouter`, `Api`, `LiveState`), the way a tRPC server exports `typeof appRouter`, and the client imports them as types only. A change to the calculator's actions or state shows up as a compile error in the client.
 
 ## Switching to PostgreSQL
 
-The router (in `@act/calculator/src/router.ts`) builds its `act()` app with the default `InMemoryStore`. For a persistent server, inject a `PostgresStore` before importing the router, e.g. in a small bootstrap module:
+`@act/calculator/src/router.ts` builds its `act()` app with the default `InMemoryStore`. For a persistent server, inject a `PostgresStore` before importing the app, e.g. in a small bootstrap module:
 
 ```ts
 import { store } from "@rotorsoft/act";
@@ -55,13 +55,13 @@ import { PostgresStore } from "@rotorsoft/act-pg";
 store(new PostgresStore({ schema: "act", table: "calculator" }));
 
 // then…
-import { calculatorRouter, calculatorApp } from "@act/calculator";
+import { calculatorApp } from "@act/calculator";
 ```
 
-`store()` is a singleton accessor — set it once at startup and both the router and the `calculatorApp` (which `hono(...)` / `openapi(...)` walk) pick it up.
+`store()` is a singleton accessor — set it once at startup and `calculatorApp`, which every generated transport walks, picks it up.
 
 ## Related
 
-- [`@act/calculator`](../calculator) — defines `calculatorApp`, `calculatorRouter`, and the underlying state machine
+- [`@act/calculator`](../calculator) — defines `calculatorApp` and the underlying state machine
 - [`@act/client`](../client) — React + tRPC client with REST-toggle and OpenAPI link
 - [`@rotorsoft/act-http`](../../libs/act-http) — the trpc / hono / openapi subpaths

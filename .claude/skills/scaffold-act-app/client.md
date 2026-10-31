@@ -136,14 +136,14 @@ export function useStateStream(streamId: string | null, identityId?: string) {
         if (!streamId) return;
         if (env.kind === "snap") {
           // Full state on connect/reconnect — seed the cache directly
-          utils.getState.setData({ streamId }, env.state as any);
+          utils.getState.setData({ streamId }, env.state);
           return;
         }
-        const cached = utils.getState.getData({ streamId }) as any;
-        const result = applyPatchMessage(env.msg as any, cached);
+        const cached = utils.getState.getData({ streamId });
+        const result = applyPatchMessage(env.msg, cached);
 
         if (result.ok) {
-          utils.getState.setData({ streamId }, result.state as any);
+          utils.getState.setData({ streamId }, result.state);
         } else if (result.reason === "behind") {
           utils.getState.invalidate({ streamId }); // missed versions — refetch
         }

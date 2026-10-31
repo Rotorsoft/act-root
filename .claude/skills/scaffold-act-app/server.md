@@ -438,7 +438,12 @@ const broadcast = new BroadcastChannel<MyAppState>({
 });
 const presence = new PresenceTracker();
 
-// After every app.do() — the single broadcast entry point
+// The single broadcast entry point, run on every commit
+app.on("committed", (snaps) => {
+  const stream = snaps.at(-1)?.event?.stream;
+  if (stream) broadcastState(stream, snaps);
+});
+
 function broadcastState(streamId: string, snaps: Snap[]) {
   const last = snaps[snaps.length - 1];
   const state = deriveFullState(last);           // app-specific state derivation
@@ -694,9 +699,9 @@ The snapshot from `app.do()` has all event patches applied — it is the authori
 The `BroadcastChannel` from `@rotorsoft/act-http/sse` maintains an LRU cache seeded from aggregate snapshots. Projections should maintain their own cache to avoid double-apply bugs.
 
 ```typescript
-// Hot path: broadcast from aggregate snapshot (uses @rotorsoft/act-http/sse internally)
+// Hot path: the `committed` listener broadcasts the aggregate snapshot
+// (uses @rotorsoft/act-http/sse internally); nothing here calls it.
 const snap = await doAction("Update", target, payload);
-broadcastState(streamId, snap);
 
 // Projection: writes DB + its own cache only
 async function writeProjection(streamId: string, state: State) {
@@ -731,12 +736,7 @@ async function upsertProjection(streamId, mutator) {
 
 ### Single Broadcast Function
 
-All code paths that call `app.do()` — API handlers, background workers, timers — should funnel through one broadcast function that calls `broadcast.publish()`. This guarantees consistent cache seeding, subscriber push, and side effects (e.g., scheduling timers).
-
-```typescript
-const snap = await doAction("SomeAction", target, payload);
-broadcastState(streamId, snap); // single function, every path
-```
+Every code path that commits — generated mutations, background workers, timers, reactions — reaches subscribers through the one `app.on("committed")` listener that calls `broadcast.publish()`. No path calls it itself, so none can skip it, and cache seeding, subscriber push and side effects (e.g., scheduling timers) stay consistent.
 
 ### Drizzle Migrations
 
@@ -796,7 +796,6 @@ After `app.do()`, `settle()` fires projections in the background. In request han
 ```typescript
 // RIGHT — snapshot is immediate and authoritative
 const snap = await doAction("Update", target, payload);
-broadcastState(streamId, snap);
 return { state: snap.state };
 
 // WRONG — projection may not have processed this event yet

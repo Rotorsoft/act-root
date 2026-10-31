@@ -7,11 +7,11 @@ A minimal React + Vite client for the calculator example. Demonstrates how to ca
 ## What it does
 
 - Renders a 4×5 calculator keypad with a **transport toggle** (tRPC ↔ REST) and a link to the live `/openapi.json`
-- In tRPC mode: calls `PressKey` / `Clear` mutations on the server-hosted `calculatorRouter`
-- In REST mode: `POST`s to `/api/actions/PressKey` / `/api/actions/Clear` against the same server
+- In tRPC mode: calls the generated `PressKey` / `Clear` mutations on the server
+- In REST mode: calls `/api/actions/PressKey` / `/api/actions/Clear` on the same server through Hono's typed `hc<Api>` client
 - Displays the latest snapshot returned from each mutation (`{ left, operator, right }`)
-- Shows a **live SSE panel** under the keypad: `src/useSse.ts` opens an `EventSource` on the server's generated `GET /api/sse/Calculator?stream=calculator` endpoint and applies incremental patches with `applyPatchMessage` from `@rotorsoft/act-http/sse` — state updates on every commit without refetching, from either transport or another tab
-- Reuses **types from the calculator package** (`Digits`, `Operators`, `CalculatorRouter`) — no duplicated schemas, no codegen
+- Shows a **live SSE panel** under the keypad, fed by the generated `subscribe.Calculator` tRPC subscription: the cached state on open, then each patch applied with `applyPatchMessage` from `@rotorsoft/act-http/sse` — state updates on every commit without refetching, from either transport or another tab
+- Imports **types only** from the server (`AppRouter`, `Api`, `LiveState`) and the calculator (`Keys`) — no duplicated schemas, no codegen, no casts
 
 ## Quickstart
 
@@ -37,8 +37,8 @@ packages/client/
 │   ├── main.tsx           # Mounts <App />
 │   ├── App.tsx            # Wraps Calculator in trpc.Provider + QueryClientProvider
 │   ├── Calculator.tsx     # Keypad UI + useMutation hooks + SSE live panel
-│   ├── useSse.ts          # EventSource hook (state/patch frames + applyPatchMessage)
-│   ├── trpc.ts            # createTRPCReact<CalculatorRouter>() + httpLink
+│   ├── trpc.ts            # createTRPCReact<AppRouter>() + links (SSE for subscriptions)
+│   ├── restClient.ts      # hc<Api>() for the REST routes
 │   ├── App.css, index.css # Styles
 │   └── assets/            # Static assets
 └── public/                # Public assets (favicon, etc.)
@@ -46,44 +46,45 @@ packages/client/
 
 ## How the type chain works
 
-1. **Calculator state** (`@act/calculator/src/calculator.ts`) defines actions and events using Zod schemas
-2. **Router** (`@act/calculator/src/router.ts`) wraps those Zod schemas as tRPC procedures and exports `CalculatorRouter`
-3. **Server** (`@act/server`) hosts that router on `http://localhost:4000`
-4. **Client** imports `CalculatorRouter` as a type and feeds it to `createTRPCReact<CalculatorRouter>()`:
+1. **Calculator state** (`@act/calculator`) defines actions and events with Zod schemas.
+2. **Server** (`@act/server`, `src/api.ts`) generates the tRPC router and the REST routes from the app, and exports their types the tRPC way:
+
+```ts
+export const router = trpc(calculatorApp, { actor, stream, sse });
+export const api = hono(calculatorApp, { actor, stream, sse });
+export type AppRouter = typeof router;
+export type Api = typeof api;
+```
+
+3. **Client** imports those types and nothing else from the server:
 
 ```ts
 // src/trpc.ts
-import type { CalculatorRouter } from "@act/calculator";
-import { createTRPCReact, httpLink } from "@trpc/react-query";
+import type { AppRouter } from "@act/server";
+export const trpc = createTRPCReact<AppRouter>();
 
-export const trpc = createTRPCReact<CalculatorRouter>();
-export const queryClient = new QueryClient({});
-export const client = trpc.createClient({
-  links: [httpLink({ url: "http://localhost:4000" })],
-});
+// src/restClient.ts
+import type { Api } from "@act/server";
+export const rest = hc<Api>("http://localhost:4000");
 ```
 
-5. The component uses fully-typed mutation hooks:
+4. **The component** writes no types for the API:
 
 ```tsx
-// src/Calculator.tsx
-import type { Digits, Operators } from "@act/calculator";
-
 const pressKey = trpc.PressKey.useMutation({
-  onSuccess: ([snap]) => {
-    setDisplay(`${snap.state.left ?? "0"} ${snap.state.operator ?? ""} ${snap.state.right ?? ""}`);
-  },
+  onSuccess: ([snap]) => setDisplay(format(snap.state)), // snap.state typed
 });
+pressKey.mutate({ key });                                  // key: Keys
 
-const clear = trpc.Clear.useMutation({
-  onSuccess: () => setDisplay("0"),
+const res = await rest.api.actions.PressKey.$post({ json: { key } });
+if (res.ok) show(await res.json());                        // typed snapshots
+
+trpc.subscribe.Calculator.useSubscription({ stream: "calculator" }, {
+  onData: (frame) => { /* frame.data typed: state or patch */ },
 });
-
-// inside the keypad map:
-pressKey.mutate({ key: key as Digits | Operators });
 ```
 
-`snap.state` is typed by the Zod state schema all the way through — change the calculator's state shape in `@act/calculator` and TypeScript will flag mismatches in the client immediately, no codegen step.
+Change the calculator's actions or state shape and TypeScript flags every mismatch in the client, with no codegen step.
 
 ## Notes
 
@@ -92,6 +93,6 @@ pressKey.mutate({ key: key as Digits | Operators });
 
 ## Related
 
-- [`@act/calculator`](../calculator) — defines the state machine, router, and exported types
-- [`@act/server`](../server) — tRPC HTTP server the client connects to
+- [`@act/calculator`](../calculator) — the state machine and `Keys`
+- [`@act/server`](../server) — the server the client connects to, and the API types it imports
 - [tRPC + React Query docs](https://trpc.io/docs/client/react)

@@ -1,5 +1,14 @@
-import type { Actor, Target } from "@rotorsoft/act";
+import type {
+  Act,
+  Actor,
+  Registry,
+  Schema,
+  Schemas,
+  Snapshot,
+  Target,
+} from "@rotorsoft/act";
 import type { IdempotencyStore } from "@rotorsoft/act-ops/idempotency";
+import type { ZodType } from "zod";
 import { withIdempotency } from "./idempotency.js";
 import { track_in_flight } from "./in-flight.js";
 
@@ -16,11 +25,65 @@ export type ActSurface = {
       {
         readonly name: string;
         readonly actions: Record<string, unknown>;
+        /** The state's schema and its events', which the OpenAPI doc describes responses with. */
+        readonly state?: ZodType;
+        readonly events?: Readonly<Record<string, ZodType>>;
       }
     >;
   };
   do(action: string, target: Target, payload: unknown): Promise<unknown>;
 };
+
+/**
+ * The registry types of a built app, read back so a generated API keeps
+ * them: each action's payload, the state it leaves, the events, and the
+ * state names. A bare {@link ActSurface} has none, so its actions take and
+ * return `unknown`.
+ */
+type AppRegistry<TApp> = TApp extends {
+  readonly registry: Registry<infer S, infer E, infer A, infer N>;
+}
+  ? { states: S; events: E; actions: A; names: N }
+  : {
+      states: Record<string, Schema>;
+      events: Schemas;
+      actions: Record<string, unknown>;
+      names: string;
+    };
+
+/** The payload each action of `TApp` takes, by action name. */
+export type AppActions<TApp> = AppRegistry<TApp>["actions"];
+
+/** The state names of `TApp`. */
+export type AppStateNames<TApp> = AppRegistry<TApp>["names"];
+
+/** The state named `N` in `TApp`, as the SSE channel carries it. */
+export type AppState<TApp, N> = (TApp extends Act<any, any, any, infer M, any>
+  ? N extends keyof M
+    ? M[N]
+    : Schema
+  : Schema) & { _v: number };
+
+/** What `app.do` returns for action `K` of `TApp`. */
+export type ActionResult<TApp, K> = Snapshot<
+  K extends keyof AppRegistry<TApp>["states"]
+    ? AppRegistry<TApp>["states"][K]
+    : Schema,
+  AppRegistry<TApp>["events"]
+>[];
+
+/**
+ * What a `stream` or `expectedVersion` resolver receives: the action's
+ * name, its parsed payload and the transport's context, as one tuple per
+ * action, so checking the name narrows the payload.
+ */
+export type ResolverArgs<TApp, C> = {
+  [K in keyof AppActions<TApp> & string]: [
+    action_name: K,
+    input: AppActions<TApp>[K],
+    ctx: C,
+  ];
+}[keyof AppActions<TApp> & string];
 
 /** The target resolvers a generated transport takes, over its own context. */
 type TargetResolvers<C> = {

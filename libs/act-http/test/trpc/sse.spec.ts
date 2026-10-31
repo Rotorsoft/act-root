@@ -10,6 +10,7 @@ import { fixture } from "@rotorsoft/act/test";
 import { initTRPC, TRPCError } from "@trpc/server";
 import { describe, expect } from "vitest";
 import { z } from "zod";
+import type { SseOptions } from "../../src/api/index.js";
 import { BroadcastChannel } from "../../src/sse/index.js";
 import { type TrpcOptions, trpc } from "../../src/trpc/index.js";
 
@@ -43,6 +44,7 @@ const Ticket = state({
 
 const builder = act().withState(Calculator).withState(Ticket);
 const test = fixture(builder);
+type App = ReturnType<typeof builder.build>;
 
 type Ctx = { actorId: string };
 
@@ -50,8 +52,8 @@ const default_options = (
   // `any`: tests intentionally use a wide channel shape so the helper composes with empty and typed states alike
   channel: BroadcastChannel<any>,
   sse_overrides: Record<string, number> = {}
-): TrpcOptions<Ctx> => ({
-  actor: (ctx) => ({ id: (ctx as Ctx).actorId, name: (ctx as Ctx).actorId }),
+): TrpcOptions<Ctx> & { sse: SseOptions } => ({
+  actor: (ctx) => ({ id: ctx.actorId, name: ctx.actorId }),
   stream: () => "calc-1",
   sse: { channel, ...sse_overrides },
 });
@@ -85,9 +87,8 @@ describe("trpc(app, { sse }) — generated subscriptions", () => {
     app,
   }) => {
     const channel = new BroadcastChannel();
-    const router = trpc<Ctx>(app as never, default_options(channel));
-    const def = (router as { _def: { procedures: Record<string, unknown> } })
-      ._def.procedures;
+    const router = trpc<Ctx, typeof app>(app, default_options(channel));
+    const def = router._def.procedures;
     // Nested routers flatten into `_def.procedures` with dot notation.
     const sub_keys = Object.keys(def)
       .filter((k) => k.startsWith("subscribe."))
@@ -96,12 +97,11 @@ describe("trpc(app, { sse }) — generated subscriptions", () => {
   });
 
   test("no router.subscribe when sse option is absent", ({ app }) => {
-    const router = trpc<Ctx>(app as never, {
+    const router = trpc<Ctx, typeof app>(app, {
       actor: () => ({ id: "u-1", name: "alice" }),
       stream: () => "calc-1",
     });
-    const def = (router as { _def: { procedures: Record<string, unknown> } })
-      ._def.procedures;
+    const def = router._def.procedures;
     const sub_keys = Object.keys(def).filter((k) => k.startsWith("subscribe."));
     expect(sub_keys).toEqual([]);
   });
@@ -112,19 +112,11 @@ describe("trpc(app, { sse }) — generated subscriptions", () => {
     const channel = new BroadcastChannel<{ _v: number; display: string }>();
     channel.publish("calc-1", { _v: 1, display: "1" }, [{ display: "1" }]);
 
-    const router = trpc<Ctx>(app as never, default_options(channel));
+    const router = trpc<Ctx, typeof app>(app, default_options(channel));
     const t = initTRPC.context<Ctx>().create();
     const caller = t.createCallerFactory(router)({ actorId: "u-1" });
 
-    const sub = (
-      caller as unknown as {
-        subscribe: {
-          Calculator: (input: {
-            stream: string;
-          }) => Promise<AsyncIterable<SubscriptionFrame>>;
-        };
-      }
-    ).subscribe.Calculator({ stream: "calc-1" });
+    const sub = caller.subscribe.Calculator({ stream: "calc-1" });
     const iter = await sub;
 
     setTimeout(() => {
@@ -141,19 +133,11 @@ describe("trpc(app, { sse }) — generated subscriptions", () => {
     app,
   }) => {
     const channel = new BroadcastChannel<{ _v: number; display: string }>();
-    const router = trpc<Ctx>(app as never, default_options(channel));
+    const router = trpc<Ctx, typeof app>(app, default_options(channel));
     const t = initTRPC.context<Ctx>().create();
     const caller = t.createCallerFactory(router)({ actorId: "u-1" });
 
-    const iter = await (
-      caller as unknown as {
-        subscribe: {
-          Calculator: (input: {
-            stream: string;
-          }) => Promise<AsyncIterable<SubscriptionFrame>>;
-        };
-      }
-    ).subscribe.Calculator({ stream: "calc-1" });
+    const iter = await caller.subscribe.Calculator({ stream: "calc-1" });
 
     setTimeout(() => {
       channel.publish("calc-1", { _v: 1, display: "1" }, [{ display: "1" }]);
@@ -170,22 +154,14 @@ describe("trpc(app, { sse }) — generated subscriptions", () => {
     // runs to its first yield — that's when `acquire()` lands.
     channel.publish("calc-1", { _v: 1, display: "1" }, [{ display: "1" }]);
 
-    const router = trpc<Ctx>(
-      app as never,
+    const router = trpc<Ctx, typeof app>(
+      app,
       default_options(channel, { maxConnections: 1 })
     );
     const t = initTRPC.context<Ctx>().create();
     const caller = t.createCallerFactory(router)({ actorId: "u-1" });
 
-    const sub_proc = (
-      caller as unknown as {
-        subscribe: {
-          Calculator: (input: {
-            stream: string;
-          }) => Promise<AsyncIterable<SubscriptionFrame>>;
-        };
-      }
-    ).subscribe.Calculator;
+    const sub_proc = caller.subscribe.Calculator;
 
     const iter1 = await sub_proc({ stream: "calc-1" });
     const reader1 = iter1[Symbol.asyncIterator]();
@@ -209,22 +185,14 @@ describe("trpc(app, { sse }) — generated subscriptions", () => {
     const channel = new BroadcastChannel<{ _v: number; display: string }>();
     channel.publish("calc-1", { _v: 1, display: "1" }, [{ display: "1" }]);
 
-    const router = trpc<Ctx>(
-      app as never,
+    const router = trpc<Ctx, typeof app>(
+      app,
       default_options(channel, { maxConnections: 1 })
     );
     const t = initTRPC.context<Ctx>().create();
     const caller = t.createCallerFactory(router)({ actorId: "u-1" });
 
-    const sub_proc = (
-      caller as unknown as {
-        subscribe: {
-          Calculator: (input: {
-            stream: string;
-          }) => Promise<AsyncIterable<SubscriptionFrame>>;
-        };
-      }
-    ).subscribe.Calculator;
+    const sub_proc = caller.subscribe.Calculator;
 
     const iter1 = await sub_proc({ stream: "calc-1" });
     const reader1 = iter1[Symbol.asyncIterator]();
@@ -246,19 +214,11 @@ describe("trpc(app, { sse }) — generated subscriptions", () => {
   }) => {
     const channel = new BroadcastChannel<{ _v: number; display: string }>();
     channel.publish("calc-1", { _v: 1, display: "1" }, [{ display: "1" }]);
-    const router = trpc<Ctx>(app as never, default_options(channel));
+    const router = trpc<Ctx, typeof app>(app, default_options(channel));
     const t = initTRPC.context<Ctx>().create();
     const caller = t.createCallerFactory(router)({ actorId: "u-1" });
 
-    const sub_proc = (
-      caller as unknown as {
-        subscribe: {
-          Calculator: (input: {
-            stream: string;
-          }) => Promise<AsyncIterable<SubscriptionFrame>>;
-        };
-      }
-    ).subscribe.Calculator;
+    const sub_proc = caller.subscribe.Calculator;
 
     const iter = await sub_proc({ stream: "calc-1" });
     const reader = iter[Symbol.asyncIterator]();
@@ -274,18 +234,12 @@ describe("trpc(app, { sse }) — generated subscriptions", () => {
     app,
   }) => {
     const channel = new BroadcastChannel<{ _v: number; display: string }>();
-    const router = trpc<Ctx>(app as never, default_options(channel));
+    const router = trpc<Ctx, typeof app>(app, default_options(channel));
     const t = initTRPC.context<Ctx>().create();
     const caller = t.createCallerFactory(router)({ actorId: "u-1" });
 
     await expect(
-      (
-        caller as unknown as {
-          subscribe: {
-            Calculator: (input: { stream: string }) => Promise<unknown>;
-          };
-        }
-      ).subscribe.Calculator({ stream: "" })
+      caller.subscribe.Calculator({ stream: "" })
     ).rejects.toBeInstanceOf(TRPCError);
   });
 });
@@ -307,7 +261,7 @@ describe("trpc(app, { sse }) — the actor extractor gates the open", () => {
     // `any`: same wide channel shape the helper above uses
     channel: BroadcastChannel<any>,
     ran: { value: boolean }
-  ): TrpcOptions<Ctx> => ({
+  ): TrpcOptions<Ctx> & { sse: SseOptions } => ({
     actor: () => {
       ran.value = true;
       throw new Error("nope");
@@ -316,18 +270,15 @@ describe("trpc(app, { sse }) — the actor extractor gates the open", () => {
     sse: { channel },
   });
 
-  const subscribe = (router: ReturnType<typeof trpc<Ctx>>) => {
+  const sse_router = (
+    app: App,
+    options: TrpcOptions<Ctx> & { sse: SseOptions }
+  ) => trpc<Ctx, App>(app, options);
+
+  const subscribe = (router: ReturnType<typeof sse_router>) => {
     const t = initTRPC.context<Ctx>().create();
     const caller = t.createCallerFactory(router)({ actorId: "anonymous" });
-    return (
-      caller as unknown as {
-        subscribe: {
-          Calculator: (i: {
-            stream: string;
-          }) => Promise<AsyncIterable<SubscriptionFrame>>;
-        };
-      }
-    ).subscribe.Calculator({ stream: "calc-1" });
+    return caller.subscribe.Calculator({ stream: "calc-1" });
   };
 
   test("CONTROL — an accepting extractor still yields the cached state", async ({
@@ -336,11 +287,11 @@ describe("trpc(app, { sse }) — the actor extractor gates the open", () => {
     const channel = new BroadcastChannel<{ _v: number; display: string }>();
     channel.publish("calc-1", { _v: 1, display: "7" }, [{ display: "7" }]);
     const ran = { value: false };
-    const router = trpc<Ctx>(app as never, {
+    const router = trpc<Ctx, typeof app>(app, {
       ...default_options(channel),
       actor: (ctx) => {
         ran.value = true;
-        return { id: (ctx as Ctx).actorId, name: (ctx as Ctx).actorId };
+        return { id: ctx.actorId, name: ctx.actorId };
       },
     });
     const abort = new AbortController();
@@ -361,7 +312,7 @@ describe("trpc(app, { sse }) — the actor extractor gates the open", () => {
       { display: "SECRET" },
     ]);
     const ran = { value: false };
-    const router = trpc<Ctx>(app as never, denying(channel, ran));
+    const router = trpc<Ctx, typeof app>(app, denying(channel, ran));
 
     const frames: SubscriptionFrame[] = [];
     await expect(async () => {
@@ -378,7 +329,7 @@ describe("trpc(app, { sse }) — the actor extractor gates the open", () => {
   test("the denial is UNAUTHORIZED, not a framework 500", async ({ app }) => {
     const channel = new BroadcastChannel();
     const ran = { value: false };
-    const router = trpc<Ctx>(app as never, denying(channel, ran));
+    const router = trpc<Ctx, typeof app>(app, denying(channel, ran));
 
     let code: string | undefined;
     try {
@@ -400,9 +351,9 @@ describe("trpc(app, { sse }) — the actor extractor gates the open", () => {
     // would be refused with TOO_MANY_REQUESTS instead of yielding.
     const channel = new BroadcastChannel<{ _v: number; display: string }>();
     channel.publish("calc-1", { _v: 1, display: "9" }, [{ display: "9" }]);
-    const router = trpc<Ctx>(app as never, {
+    const router = trpc<Ctx, typeof app>(app, {
       actor: (ctx) => {
-        const id = (ctx as Ctx).actorId;
+        const id = ctx.actorId;
         if (id === "anonymous") throw new Error("nope");
         return { id, name: id };
       },
@@ -411,15 +362,9 @@ describe("trpc(app, { sse }) — the actor extractor gates the open", () => {
     });
     const t = initTRPC.context<Ctx>().create();
     const open = (actorId: string) =>
-      (
-        t.createCallerFactory(router)({ actorId }) as unknown as {
-          subscribe: {
-            Calculator: (i: {
-              stream: string;
-            }) => Promise<AsyncIterable<SubscriptionFrame>>;
-          };
-        }
-      ).subscribe.Calculator({ stream: "calc-1" });
+      t
+        .createCallerFactory(router)({ actorId })
+        .subscribe.Calculator({ stream: "calc-1" });
 
     try {
       for await (const _ of await open("anonymous")) break;
@@ -446,16 +391,15 @@ describe("trpc(app, { sse }) — an action named subscribe", () => {
     "is refused when sse is on, instead of being silently dropped",
     ({ app }) => {
       expect(() =>
-        trpc<Ctx>(app as never, default_options(new BroadcastChannel()))
+        trpc<Ctx, typeof app>(app, default_options(new BroadcastChannel()))
       ).toThrow(/action named "subscribe" collides/);
     }
   );
 
   feed_test("is generated normally when sse is off", ({ app }) => {
     const { sse: _, ...no_sse } = default_options(new BroadcastChannel());
-    const router = trpc<Ctx>(app as never, no_sse);
-    const procs = (router as { _def: { procedures: Record<string, unknown> } })
-      ._def.procedures;
+    const router = trpc<Ctx, typeof app>(app, no_sse);
+    const procs = router._def.procedures;
     expect(Object.keys(procs)).toContain("subscribe");
   });
 });

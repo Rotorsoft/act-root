@@ -106,24 +106,9 @@ const app = act()
 - The `OperatorPressed` reaction uses a **dynamic** target — Act re-correlates on each scan to discover new `Calculator{stream}` targets.
 - `reactingTo` is injected automatically inside a reaction, so it can be omitted (`main.ts` passes it explicitly; `hello.ts` doesn't).
 
-## tRPC router (`src/router.ts`)
+## The app (`src/router.ts`)
 
-Single shared `calculator` stream, used by `packages/server` and `packages/client`:
-
-```ts
-const target = { stream: "calculator", actor: { id: "1", name: "Calculator" } };
-
-export const calculatorRouter = t.router({
-  PressKey: t.procedure
-    .input(Calculator.actions.PressKey)
-    .mutation(({ input }) => app.do("PressKey", target, input)),
-  Clear: t.procedure.mutation(() => app.do("Clear", target, {})),
-});
-
-export type CalculatorRouter = typeof calculatorRouter;
-```
-
-`Calculator.actions.PressKey` is the original Zod schema, used directly as tRPC input validation — no duplication.
+`calculatorApp` is the built Act behind every transport. The package holds only the domain; `packages/server` generates the tRPC router, REST routes and OpenAPI document from it and exports their types for `packages/client`.
 
 ## Standalone demos
 
@@ -193,6 +178,6 @@ await store().seed();
 ## Related
 
 - [`@rotorsoft/act`](../../libs/act) — core framework
-- [`@act/server`](../server) — tRPC HTTP server that hosts `calculatorRouter`
+- [`@act/server`](../server) — the multi-transport server generated from `calculatorApp`
 - [`@act/client`](../client) — React UI that calls `PressKey` / `Clear`
 - [`@act/wolfdesk`](../wolfdesk) — larger example with multiple slices and a SQLite read model

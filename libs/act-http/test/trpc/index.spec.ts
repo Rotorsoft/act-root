@@ -27,7 +27,7 @@ import { fixture } from "@rotorsoft/act/test";
 import { InMemoryIdempotencyStore } from "@rotorsoft/act-ops/idempotency";
 import { initTRPC, TRPCError } from "@trpc/server";
 import { getHTTPStatusCodeFromError } from "@trpc/server/unstable-core-do-not-import";
-import { describe, expect, expectTypeOf, vi } from "vitest";
+import { assert, describe, expect, vi } from "vitest";
 import { z } from "zod";
 import { toApiError } from "../../src/api/errors.js";
 import { authenticated, type TrpcOptions, trpc } from "../../src/trpc/index.js";
@@ -74,10 +74,7 @@ type Ctx = {
 };
 
 const default_options = (): TrpcOptions<Ctx> => ({
-  actor: (ctx) => ({
-    id: (ctx as Ctx).actorId,
-    name: (ctx as Ctx).actorName,
-  }),
+  actor: (ctx) => ({ id: ctx.actorId, name: ctx.actorName }),
   stream: async (_action, _input, ctx) => `tenant-${ctx.tenant}`,
 });
 
@@ -88,31 +85,12 @@ const make_ctx = (overrides: Partial<Ctx> = {}): Ctx => ({
   ...overrides,
 });
 
-// Caller shape under test — Record-indexed so we can dispatch any
-// procedure by name without per-test typing. Each procedure returns
-// the framework's `Snapshot[]` shape; the few fields the assertions
-// reach for (`event.name`, `event.stream`) are spelled out
-// structurally rather than via the framework's wider type so the
-// test stays narrow.
-type CallerSnapshot = {
-  event: {
-    name: string;
-    stream: string;
-    meta: {
-      causation: { action?: { actor: { id: string; name: string } } };
-    };
-  };
-  state: { display: string };
-};
-type AnyCaller = Record<string, (input?: unknown) => Promise<CallerSnapshot[]>>;
-
 describe("trpc(app, options) — generated router", () => {
   test("emits one flat mutation per registered action across all states", ({
     app,
   }) => {
-    const router = trpc<Ctx>(app as never, default_options());
-    const def = (router as { _def: { procedures: Record<string, unknown> } })
-      ._def.procedures;
+    const router = trpc<Ctx, typeof app>(app, default_options());
+    const def = router._def.procedures;
     expect(Object.keys(def).sort()).toEqual([
       "Clear",
       "OpenTicket",
@@ -123,11 +101,9 @@ describe("trpc(app, options) — generated router", () => {
   test("each emitted procedure is callable as a top-level mutation", ({
     app,
   }) => {
-    const router = trpc<Ctx>(app as never, default_options());
+    const router = trpc<Ctx, typeof app>(app, default_options());
     const t = initTRPC.context<Ctx>().create();
-    const caller = t.createCallerFactory(router)(
-      make_ctx()
-    ) as unknown as AnyCaller;
+    const caller = t.createCallerFactory(router)(make_ctx());
     expect(typeof caller.PressKey).toBe("function");
     expect(typeof caller.Clear).toBe("function");
     expect(typeof caller.OpenTicket).toBe("function");
@@ -137,16 +113,14 @@ describe("trpc(app, options) — generated router", () => {
     app,
   }) => {
     const do_spy = vi.spyOn(app, "do");
-    const router = trpc<Ctx>(app as never, default_options());
+    const router = trpc<Ctx, typeof app>(app, default_options());
     const t = initTRPC.context<Ctx>().create();
-    const caller = t.createCallerFactory(router)(
-      make_ctx()
-    ) as unknown as AnyCaller;
+    const caller = t.createCallerFactory(router)(make_ctx());
 
     const snapshots = await caller.PressKey({ key: "5" });
     expect(snapshots).toHaveLength(1);
-    expect(snapshots[0].event.name).toBe("KeyPressed");
-    expect(snapshots[0].event.stream).toBe("tenant-acme");
+    expect(snapshots[0].event?.name).toBe("KeyPressed");
+    expect(snapshots[0].event?.stream).toBe("tenant-acme");
     expect(do_spy).toHaveBeenCalledWith(
       "PressKey",
       {
@@ -160,11 +134,9 @@ describe("trpc(app, options) — generated router", () => {
   test("maps a malformed body to 422 UNPROCESSABLE_CONTENT (parity with Hono/OpenAPI)", async ({
     app,
   }) => {
-    const router = trpc<Ctx>(app as never, default_options());
+    const router = trpc<Ctx, typeof app>(app, default_options());
     const t = initTRPC.context<Ctx>().create();
-    const caller = t.createCallerFactory(router)(
-      make_ctx()
-    ) as unknown as AnyCaller;
+    const caller = t.createCallerFactory(router)(make_ctx());
 
     // Empty key violates the action's `.min(1)` Zod constraint. The generator
     // validates in-resolver (not via tRPC's `.input()`, which would hardcode a
@@ -175,8 +147,9 @@ describe("trpc(app, options) — generated router", () => {
       await caller.PressKey({ key: "" });
       throw new Error("expected the malformed body to reject");
     } catch (err) {
-      expect((err as { code?: string }).code).toBe("UNPROCESSABLE_CONTENT");
-      expect(getHTTPStatusCodeFromError(err as never)).toBe(422);
+      assert(err instanceof TRPCError);
+      expect(err.code).toBe("UNPROCESSABLE_CONTENT");
+      expect(getHTTPStatusCodeFromError(err)).toBe(422);
     }
   });
 
@@ -185,14 +158,12 @@ describe("trpc(app, options) — generated router", () => {
       app,
     }) => {
       const do_spy = vi.spyOn(app, "do").mockResolvedValueOnce([]);
-      const router = trpc<Ctx>(app as never, {
+      const router = trpc<Ctx, typeof app>(app, {
         ...default_options(),
         expectedVersion: () => 7,
       });
       const t = initTRPC.context<Ctx>().create();
-      const caller = t.createCallerFactory(router)(
-        make_ctx()
-      ) as unknown as AnyCaller;
+      const caller = t.createCallerFactory(router)(make_ctx());
 
       await caller.PressKey({ key: "5" });
       expect(do_spy).toHaveBeenCalledWith(
@@ -210,14 +181,12 @@ describe("trpc(app, options) — generated router", () => {
       app,
     }) => {
       const do_spy = vi.spyOn(app, "do").mockResolvedValueOnce([]);
-      const router = trpc<Ctx>(app as never, {
+      const router = trpc<Ctx, typeof app>(app, {
         ...default_options(),
         expectedVersion: () => undefined,
       });
       const t = initTRPC.context<Ctx>().create();
-      const caller = t.createCallerFactory(router)(
-        make_ctx()
-      ) as unknown as AnyCaller;
+      const caller = t.createCallerFactory(router)(make_ctx());
 
       await caller.PressKey({ key: "5" });
       expect(do_spy).toHaveBeenCalledWith(
@@ -232,11 +201,9 @@ describe("trpc(app, options) — generated router", () => {
   test("wraps unknown thrown values as INTERNAL_SERVER_ERROR", async ({
     app,
   }) => {
-    const router = trpc<Ctx>(app as never, default_options());
+    const router = trpc<Ctx, typeof app>(app, default_options());
     const t = initTRPC.context<Ctx>().create();
-    const caller = t.createCallerFactory(router)(
-      make_ctx()
-    ) as unknown as AnyCaller;
+    const caller = t.createCallerFactory(router)(make_ctx());
 
     vi.spyOn(app, "do").mockRejectedValueOnce(new Error("disk on fire"));
     await expect(caller.PressKey({ key: "5" })).rejects.toMatchObject({
@@ -245,11 +212,9 @@ describe("trpc(app, options) — generated router", () => {
   });
 
   test("non-Error throws still surface as TRPCError", async ({ app }) => {
-    const router = trpc<Ctx>(app as never, default_options());
+    const router = trpc<Ctx, typeof app>(app, default_options());
     const t = initTRPC.context<Ctx>().create();
-    const caller = t.createCallerFactory(router)(
-      make_ctx()
-    ) as unknown as AnyCaller;
+    const caller = t.createCallerFactory(router)(make_ctx());
 
     vi.spyOn(app, "do").mockRejectedValueOnce("not-an-error-instance");
     await expect(caller.PressKey({ key: "5" })).rejects.toBeInstanceOf(
@@ -265,16 +230,14 @@ describe("trpc(app, options) — generated router", () => {
     // `authenticated` middleware returns 401. The guide promises they're
     // identical, so the generated router must map an extractor throw to
     // UNAUTHORIZED (401), preserving the message.
-    const router = trpc<Ctx>(app as never, {
+    const router = trpc<Ctx, typeof app>(app, {
       ...default_options(),
       actor: () => {
         throw new Error("denied");
       },
     });
     const t = initTRPC.context<Ctx>().create();
-    const caller = t.createCallerFactory(router)(
-      make_ctx()
-    ) as unknown as AnyCaller;
+    const caller = t.createCallerFactory(router)(make_ctx());
     const err = await caller.PressKey({ key: "5" }).catch((e) => e);
     expect(err).toBeInstanceOf(TRPCError);
     expect((err as TRPCError).code).toBe("UNAUTHORIZED");
@@ -285,16 +248,14 @@ describe("trpc(app, options) — generated router", () => {
   test("a non-Error actor deny still maps to UNAUTHORIZED (401)", async ({
     app,
   }) => {
-    const router = trpc<Ctx>(app as never, {
+    const router = trpc<Ctx, typeof app>(app, {
       ...default_options(),
       actor: () => {
         throw "nope"; // non-Error throw
       },
     });
     const t = initTRPC.context<Ctx>().create();
-    const caller = t.createCallerFactory(router)(
-      make_ctx()
-    ) as unknown as AnyCaller;
+    const caller = t.createCallerFactory(router)(make_ctx());
     const err = await caller.PressKey({ key: "5" }).catch((e) => e);
     expect((err as TRPCError).code).toBe("UNAUTHORIZED");
     expect(getHTTPStatusCodeFromError(err as TRPCError)).toBe(401);
@@ -379,11 +340,9 @@ describe("trpc(app, options) — generated router", () => {
       test(`${label} → tRPC ${trpcCode} (HTTP ${trpcStatus})`, async ({
         app,
       }) => {
-        const router = trpc<Ctx>(app as never, default_options());
+        const router = trpc<Ctx, typeof app>(app, default_options());
         const t = initTRPC.context<Ctx>().create();
-        const caller = t.createCallerFactory(router)(
-          make_ctx()
-        ) as unknown as AnyCaller;
+        const caller = t.createCallerFactory(router)(make_ctx());
         const thrown = throws();
         vi.spyOn(app, "do").mockRejectedValueOnce(thrown);
         const err = await caller.PressKey({ key: "5" }).catch((e) => e);
@@ -407,7 +366,7 @@ describe("trpc(app, options) — generated router", () => {
     test("fresh key dispatches the handler and returns the snapshots", async ({
       app,
     }) => {
-      const router = trpc<Ctx>(app as never, {
+      const router = trpc<Ctx, typeof app>(app, {
         ...default_options(),
         idempotency: {
           store: new InMemoryIdempotencyStore(),
@@ -417,14 +376,14 @@ describe("trpc(app, options) — generated router", () => {
       const t = initTRPC.context<Ctx>().create();
       const caller = t.createCallerFactory(router)(
         make_ctx({ idempotencyKey: "fresh-1" })
-      ) as unknown as AnyCaller;
+      );
 
       const snapshots = await caller.PressKey({ key: "7" });
-      expect(snapshots[0].event.name).toBe("KeyPressed");
+      expect(snapshots[0].event?.name).toBe("KeyPressed");
     });
 
     test("missing key throws BAD_REQUEST", async ({ app }) => {
-      const router = trpc<Ctx>(app as never, {
+      const router = trpc<Ctx, typeof app>(app, {
         ...default_options(),
         idempotency: {
           store: new InMemoryIdempotencyStore(),
@@ -432,9 +391,7 @@ describe("trpc(app, options) — generated router", () => {
         },
       });
       const t = initTRPC.context<Ctx>().create();
-      const caller = t.createCallerFactory(router)(
-        make_ctx()
-      ) as unknown as AnyCaller;
+      const caller = t.createCallerFactory(router)(make_ctx());
 
       await expect(caller.PressKey({ key: "8" })).rejects.toMatchObject({
         code: "BAD_REQUEST",
@@ -445,7 +402,7 @@ describe("trpc(app, options) — generated router", () => {
       app,
     }) => {
       const store = new InMemoryIdempotencyStore();
-      const router = trpc<Ctx>(app as never, {
+      const router = trpc<Ctx, typeof app>(app, {
         ...default_options(),
         idempotency: {
           store,
@@ -455,7 +412,7 @@ describe("trpc(app, options) — generated router", () => {
       const t = initTRPC.context<Ctx>().create();
       const caller = t.createCallerFactory(router)(
         make_ctx({ idempotencyKey: "dup-1" })
-      ) as unknown as AnyCaller;
+      );
 
       await caller.PressKey({ key: "1" });
       await expect(caller.PressKey({ key: "1" })).rejects.toMatchObject({
@@ -471,7 +428,7 @@ describe("trpc(app, options) — generated router", () => {
         fail = () => reject(new Error("downstream down"));
       });
       const do_spy = vi.spyOn(app, "do").mockImplementationOnce(() => parked);
-      const router = trpc<Ctx>(app as never, {
+      const router = trpc<Ctx, typeof app>(app, {
         ...default_options(),
         idempotency: {
           store: new InMemoryIdempotencyStore(),
@@ -481,7 +438,7 @@ describe("trpc(app, options) — generated router", () => {
       const t = initTRPC.context<Ctx>().create();
       const caller = t.createCallerFactory(router)(
         make_ctx({ idempotencyKey: "slow-1" })
-      ) as unknown as AnyCaller;
+      );
 
       const original = caller.PressKey({ key: "5" });
       await expect(caller.PressKey({ key: "5" })).rejects.toMatchObject({
@@ -506,20 +463,13 @@ describe("trpc(app, options) — generated router", () => {
     test("injects the resolved actor onto downstream ctx", async () => {
       const t = initTRPC.context<{ uid: string }>().create();
       const authed = t.procedure.use(
-        authenticated((ctx) => ({
-          id: (ctx as { uid: string }).uid,
-          name: `user-${(ctx as { uid: string }).uid}`,
+        authenticated((ctx: { uid: string }) => ({
+          id: ctx.uid,
+          name: `user-${ctx.uid}`,
         }))
       );
-      // The middleware returns `any` to avoid the
-      // `unstable-core-do-not-import` namespace dance — the per-call
-      // ctx augmentation is real at runtime but invisible to tRPC's
-      // inference, so the test casts to read `ctx.actor`.
       const router = t.router({
-        whoami: authed.query(
-          ({ ctx }) =>
-            (ctx as unknown as { actor: { id: string; name: string } }).actor
-        ),
+        whoami: authed.query(({ ctx }) => ctx.actor),
       });
       const caller = t.createCallerFactory(router)({ uid: "alice" });
       expect(await caller.whoami()).toEqual({
@@ -531,33 +481,23 @@ describe("trpc(app, options) — generated router", () => {
     test("propagates errors thrown by the extractor", async () => {
       const t = initTRPC.context<{ uid?: string }>().create();
       const authed = t.procedure.use(
-        authenticated((ctx) => {
-          const c = ctx as { uid?: string };
-          if (!c.uid)
+        authenticated((ctx: { uid?: string }) => {
+          if (!ctx.uid)
             throw new TRPCError({
               code: "UNAUTHORIZED",
               message: "no uid in ctx",
             });
-          return { id: c.uid, name: c.uid };
+          return { id: ctx.uid, name: ctx.uid };
         })
       );
       const router = t.router({
-        whoami: authed.query(({ ctx }) => (ctx as { actor?: unknown }).actor),
+        whoami: authed.query(({ ctx }) => ctx.actor),
       });
       const caller = t.createCallerFactory(router)({});
       await expect(caller.whoami()).rejects.toMatchObject({
         code: "UNAUTHORIZED",
       });
     });
-  });
-
-  test("infers procedure input types from the registered Zod schemas", () => {
-    expectTypeOf<z.infer<typeof Calculator.actions.PressKey>>().toEqualTypeOf<{
-      key: string;
-    }>();
-    expectTypeOf<z.infer<typeof Ticket.actions.OpenTicket>>().toEqualTypeOf<{
-      title: string;
-    }>();
   });
 });
 
@@ -572,16 +512,12 @@ describe("action input is parsed once", () => {
     .emit((a) => ["Shouted", { text: a.text }])
     .build();
   const shout_test = fixture(act().withState(Shout));
-  type ShoutCaller = Record<
-    string,
-    (input: unknown) => Promise<Array<{ state: { text: string } }>>
-  >;
 
   shout_test(
     "runs a transforming schema once, and resolvers see the parsed value",
     async ({ app }) => {
       const seen: unknown[] = [];
-      const router = trpc<Ctx>(app as never, {
+      const router = trpc<Ctx, typeof app>(app, {
         ...default_options(),
         stream: async (_action, input) => {
           seen.push(input);
@@ -589,9 +525,7 @@ describe("action input is parsed once", () => {
         },
       });
       const t = initTRPC.context<Ctx>().create();
-      const caller = t.createCallerFactory(router)(
-        make_ctx()
-      ) as unknown as ShoutCaller;
+      const caller = t.createCallerFactory(router)(make_ctx());
       const out = await caller.Shout({ text: "a" });
       expect(out[0].state.text).toBe("a!");
       expect(seen).toEqual([{ text: "a!" }]);
@@ -601,7 +535,7 @@ describe("action input is parsed once", () => {
   shout_test(
     "runs a transforming schema once on the idempotent path",
     async ({ app }) => {
-      const router = trpc<Ctx>(app as never, {
+      const router = trpc<Ctx, typeof app>(app, {
         ...default_options(),
         idempotency: {
           store: new InMemoryIdempotencyStore(),
@@ -609,9 +543,7 @@ describe("action input is parsed once", () => {
         },
       });
       const t = initTRPC.context<Ctx>().create();
-      const caller = t.createCallerFactory(router)(
-        make_ctx()
-      ) as unknown as ShoutCaller;
+      const caller = t.createCallerFactory(router)(make_ctx());
       const out = await caller.Shout({ text: "a" });
       expect(out[0].state.text).toBe("a!");
     }

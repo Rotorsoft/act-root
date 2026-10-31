@@ -41,42 +41,82 @@ Five of those six rows are identical across transports. The remaining row — re
 
 That's all the generators do. There's no codegen step, no schema generator, no second source file to keep in sync. The Zod schemas you already wrote against your actions and events drive the wire format directly.
 
-## Quick start — one Act, three transports
+## Quick start — one Act, a server and a typed client
 
-The shape that lands in the multi-transport demo (`packages/server` in this repo):
+The shape of the calculator demo in this repo (`packages/calculator`, `packages/server`, `packages/client`), cut to its minimum. The server generates every transport from the app and exports their types; the client imports those types and nothing else, the way a tRPC client imports `typeof appRouter`. No codegen, and no type written by hand on either side.
+
+**The app** — your domain, untouched by transport concerns:
 
 ```ts no-check
+// calculator/src/index.ts
 import { act } from "@rotorsoft/act";
-import { hono } from "@rotorsoft/act-http/hono";
-import { openapi } from "@rotorsoft/act-http/openapi";
-import { trpc } from "@rotorsoft/act-http/trpc";
 import { Calculator } from "./calculator.js";
 
-// 1. Build the Act registry. This is your application, untouched by transport concerns.
-const app = act().withState(Calculator).build();
-
-// 2. Generate a tRPC router. Use `typeof tRouter` for a typed client.
-//    Name your context type, and `typeof app` so the router keeps its actions.
-type Ctx = { tenant: string };
-const tRouter = trpc<Ctx, typeof app>(app, {
-  actor: (ctx) => resolveActorFromJwt(ctx), // ctx arrives as `unknown`
-  stream: (action, input, ctx) => `tenant-${ctx.tenant}`,
-});
-
-// 3. Generate a Hono REST surface. POST /api/actions/<action> per registered action.
-const restApi = hono(app, {
-  actor: (c) => resolveActorFromJwt(c),
-  stream: (action, input, c) => `tenant-${c.req.header("x-tenant")}`,
-});
-
-// 4. Emit an OpenAPI 3.1 document describing the REST surface.
-const doc = openapi(app, {
-  info: { title: "Calculator API", version: "1.0.0" },
-  servers: [{ url: "https://api.example.com" }],
-});
+export const calculatorApp = act().withState(Calculator).build();
 ```
 
-That's it — three transports against one registry. Add an action to the Calculator and all three pick it up on next build.
+**The server** — generate, export the types, mount:
+
+```ts no-check
+// server/src/api.ts
+import { calculatorApp } from "@act/calculator";
+import { hono } from "@rotorsoft/act-http/hono";
+import { openapi } from "@rotorsoft/act-http/openapi";
+import { BroadcastChannel } from "@rotorsoft/act-http/sse";
+import { trpc } from "@rotorsoft/act-http/trpc";
+
+const actor = (ctx: unknown) => resolveActorFromJwt(ctx); // throw to deny
+const stream = () => "calculator";
+const sse = { channel: new BroadcastChannel() }; // publish commits to it
+
+export const router = trpc(calculatorApp, { actor, stream, sse }); // tRPC
+export const api = hono(calculatorApp, { actor, stream, sse }); // REST + SSE
+export const doc = openapi(calculatorApp, {
+  info: { title: "Calculator API", version: "1.0.0" },
+});
+
+export type AppRouter = typeof router;
+export type Api = typeof api;
+
+// server/src/server.ts
+const app = new Hono();
+app.route("/", api); // POST /api/actions/<action>, GET /api/sse/<state>
+app.all("/trpc/*", (c) =>
+  fetchRequestHandler({ endpoint: "/trpc", req: c.req.raw, router })
+);
+app.get("/openapi.json", (c) => c.json(doc));
+serve({ fetch: app.fetch, port: 4000 });
+```
+
+**The client** — import the types only:
+
+```tsx no-check
+import type { Api, AppRouter } from "@act/server";
+import { createTRPCReact } from "@trpc/react-query";
+import { hc } from "hono/client";
+
+export const trpc = createTRPCReact<AppRouter>();
+export const rest = hc<Api>("http://localhost:4000");
+
+// tRPC: payload checked, snapshots typed
+const pressKey = trpc.PressKey.useMutation({
+  onSuccess: ([snap]) => show(snap.state.result), // number
+});
+pressKey.mutate({ key: "7" });
+
+// REST: the same, through Hono's client
+const res = await rest.api.actions.PressKey.$post({ json: { key: "7" } });
+if (res.ok) show((await res.json())[0].state.result);
+else console.error((await res.json()).detail); // ApiError
+
+// Live state: one typed subscription per state
+trpc.subscribe.Calculator.useSubscription(
+  { stream: "calculator" },
+  { onData: (frame) => (frame.kind === "state" ? seed(frame.data) : patch(frame.data)) }
+);
+```
+
+Add an action to the Calculator and every transport picks it up on the next build. A client that calls it wrong, or reads a field the state doesn't have, stops compiling. Non-TypeScript clients generate from `/openapi.json`, whose responses are typed per state as well. The full, runnable version is `pnpm dev:http`; `packages/client/src/Calculator.tsx` shows the live panel's patch handling with `applyPatchMessage`.
 
 ## The three subpaths
 
@@ -88,18 +128,18 @@ The generator emits a flat router — one mutation per registered action, keyed 
 type Ctx = { user: { id: string; name: string }; tenant: string };
 
 const router = trpc<Ctx, typeof app>(app, {
-  // The actor extractor receives the context as `unknown`; narrow it.
-  actor: (ctx) => {
-    const { user } = ctx as Ctx;
-    return { id: user.id, name: user.name };
-  },
+  actor: (ctx) => ({ id: ctx.user.id, name: ctx.user.name }),
   stream: (action, input, ctx) => `tenant-${ctx.tenant}`,
   expectedVersion: (action, input, ctx) => readIfMatchHeader(ctx),
 });
 
 // Client side, no codegen:
-await client.OpenTicket.mutate({ title: "support" });
+const client = createTRPCClient<typeof router>({ links });
+const [snap] = await client.OpenTicket.mutate({ title: "support" });
+snap.state.title; // string
 ```
+
+The router is typed from the app. Each mutation takes its action's payload and returns the snapshots `app.do` returns, as they arrive over JSON (dates are strings). With `sse`, each `subscribe.<state>` yields that state's frames. A wrong field or an unknown action fails to compile, in `createTRPCClient` and `createTRPCReact` alike. The `stream` and `expectedVersion` resolvers get the action's name and its payload together, on both generators, so checking `action` narrows `input`; declare all three parameters (`(action, input, ctx)`) for TypeScript to narrow. Pass `typeof app` whenever you pass `Ctx`: given one type argument, TypeScript doesn't infer the other, and an app it can't see has no types to give.
 
 The router is **flat by design**. State-name grouping (e.g. `client.Tickets.OpenTicket`) was considered and dropped — action names are unique across a registry (the framework enforces no duplicates at build), and the extra nesting was overhead that bought nothing.
 
@@ -108,14 +148,6 @@ Errors map through `toApiError(...)` from `@rotorsoft/act-http/api` **by error i
 A **malformed request body** takes the same route: the generator validates the payload inside the resolver (not via tRPC's `.input()`, whose Zod failure is a hardcoded `BAD_REQUEST`/400 that never reaches `toApiError`), so a body that fails an action's Zod schema surfaces as the same `ValidationError → UNPROCESSABLE_CONTENT` (422) a malformed `app.do` payload raises — matching Hono's `422 / VALIDATION` for the same input ([#1295](https://github.com/Rotorsoft/act-root/issues/1295)).
 
 That up-front parse is only a gate. The `stream` and `expectedVersion` resolvers receive its parsed value, but `app.do` receives the **raw** request body and parses it once itself. Handing it the already-parsed value would run a schema's `.transform()` twice, so a "dollars on the wire, cents in the domain" transform would store 100× the amount, and a type-changing `.pipe()` would reject every request ([#1739](https://github.com/Rotorsoft/act-root/issues/1739)). The Hono generator does the same, taking the raw body from the same place its JSON validator did: a request without a JSON `Content-Type` is validated, resolved and executed as `{}`, never re-read ([#1777](https://github.com/Rotorsoft/act-root/issues/1777)).
-
-#### One caveat to know about
-
-tRPC v11's `BuiltRouter` type transitively references an internal `Unwrap` symbol from `@trpc/server/dist/unstable-core-do-not-import`. TypeScript's `--declaration` emitter can't name that symbol portably for the generator's `<TApp>`-parameterized return, which means a consumer doing `createTRPCReact<typeof generatedRouter>()` trips the React-tRPC name-collision check (it sees an over-wide procedure record and complains that procedures like `Provider` or `useContext` clash with built-ins).
-
-In practice that means: the generator is fully usable for **server-only** mounts via `createHTTPHandler` or `fetchRequestHandler`, but if your client wants `createTRPCReact<typeof router>()` end-to-end type sharing, hand-write the small handful of procedures in the calculator-router shape. The hand-written form is short for any concrete registry and the `@rotorsoft/act-http/trpc` test suite continues to exercise the generator. The follow-up is gated on tRPC v11 exposing a portable `BuiltRouter` substitute or this repo enabling `isolatedDeclarations`.
-
-The wolfdesk and calculator examples each take a different side of this trade-off; both work.
 
 ### `@rotorsoft/act-http/hono`
 
@@ -136,7 +168,15 @@ const api = hono(app, {
 
 serve({ fetch: api.fetch, port: 4000 });
 // POST /api/actions/OpenTicket  body: { title }  → 200 Snapshot[] | 4xx ApiError
+
+// Client side, typed from the same app:
+const client = hc<typeof api>("http://localhost:4000");
+const res = await client.api.actions.OpenTicket.$post({ json: { title: "support" } });
+if (res.ok) (await res.json())[0].state.title; // string
+else (await res.json()).code; // ApiError
 ```
+
+The returned app's type lists every route: each action's payload as the JSON body, the snapshots on `200` and `ApiError` on an error status, and with `sse` the `GET /sse/<state>` routes. So `hc<typeof api>` and `testClient(api)` are typed with no casts. The `authenticated` middleware's `401` reaches a typed client when it is mounted on the route (`api.get("/me", authenticated(extract), handler)`); mounted with `api.use`, it works the same but the route's type doesn't list the `401`.
 
 The generator registers one `POST /actions/<actionName>` per action under `basePath` (default `/api`). `@hono/zod-validator` runs each action's registered Zod schema against the request body; a body-schema failure, or a JSON body that doesn't parse, short-circuits with `422 / VALIDATION` and the shared `ApiError` envelope — the same status and shape a `ValidationError` thrown inside `app.do` maps to, so a client parsing `ApiError` sees one shape for both. Other errors map through `toApiError` ([the table](#apierror-envelope--error_map--toapierror)).
 
@@ -164,7 +204,9 @@ api.get("/openapi.json", (c) => c.json(doc));
 
 Zod 4's native `z.toJSONSchema` does the schema conversion — OpenAPI 3.1 uses JSON Schema 2020-12 as its dialect, so there's no lossy translation layer. The output is deterministic given the same registry (entries land in `Object.entries(app.registry.actions)` iteration order), so CI can snapshot the result and catch unintended API-surface changes in the same PR that introduced them.
 
-**Sensitive input fields are marked.** `z.toJSONSchema` has no knowledge of the `sensitive()` registry — the marker lives out-of-band in a `WeakMap`. So the emitter walks each action's sensitive fields (via `pii_fields` from `@rotorsoft/act`) and annotates every matching request-body property `writeOnly: true` + `format: password`. A field declared `email: sensitive(z.string())` surfaces in the doc as a write-only secret, so codegen tools and Swagger UI's "Try It" panel treat it as a password rather than echoing it in cleartext. Response schemas carry no PII (the success shape is a fixed generic `SnapshotArray`), so the marking is request-side only.
+**Sensitive input fields are marked.** `z.toJSONSchema` has no knowledge of the `sensitive()` registry — the marker lives out-of-band in a `WeakMap`. So the emitter walks each action's sensitive fields (via `pii_fields` from `@rotorsoft/act`) and annotates every matching request-body property `writeOnly: true` + `format: password`. A field declared `email: sensitive(z.string())` surfaces in the doc as a write-only secret, so codegen tools and Swagger UI's "Try It" panel treat it as a password rather than echoing it in cleartext. In responses, a sensitive field may read as `[REDACTED]` or `[SHREDDED]` for a caller who may not see it, so its schema there is the field's own or one of those two strings.
+
+**Responses are typed per state.** Each action's `200` points at `<State>Snapshots`, built from the state's Zod schema and its events': `state` as the state schema, `event` as one shape per event the state emits (told apart by `name`, with its `data` schema), and `patch` as the state schema with every field optional or `null`. A client generated from the document (`openapi-typescript` with `openapi-fetch`, or any language's generator) gets typed snapshots, as a tRPC or `hc` client does. `SnapshotArray`, the open shape, stays for an app surface that carries no state schemas.
 
 A clean way to serve the doc plus an interactive explorer in one shot — Scalar reads the live document from the same server:
 
@@ -198,7 +240,7 @@ import {
 
 ### `ActorExtractor`
 
-A type alias for `(request: unknown) => Actor | Promise<Actor>`. The host supplies it; each transport runs it once per call to populate the actor that flows into `app.do(...)`. The transports differ only in what `request` is (a tRPC `ctx`, a Hono `Context`) — the actor type, the signature shape, and the "throw to deny" semantics are identical.
+A type alias for `(request: TRequest) => Actor | Promise<Actor>`, where `TRequest` defaults to `unknown`. The host supplies it; each transport runs it once per call to populate the actor that flows into `app.do(...)`. Each transport types `request` as what it hands over: tRPC as your `Ctx`, Hono as its `Context`, so the extractor reads them without a cast. An extractor that takes `unknown` still plugs into both. The actor type and the "throw to deny" semantics are the same everywhere.
 
 ### `ApiError` envelope + `ERROR_MAP` + `toApiError`
 
@@ -452,13 +494,7 @@ The generator emits a vanilla Hono app — nothing in `hono(app, ...)` ties it t
 
 ### tRPC inside Next.js or a Vite SPA
 
-When the tRPC router is consumed by a typed React client (`createTRPCReact<typeof router>()`), the hand-written-router caveat above applies. The pattern that works today:
-
-- Define the hand-written router in a shared workspace package (e.g. `@app/calculator`), exporting both the runtime router and `typeof router` as `CalculatorRouter`.
-- The server package imports the runtime router and mounts it (under Next.js's `api/trpc/[trpc]` route or a Vite/Express server).
-- The client imports only the type and feeds it to `createTRPCReact<CalculatorRouter>()`.
-
-`packages/calculator` and `packages/client` in this repo demonstrate the pattern; the multi-transport `packages/server` mounts the calculator's tRPC router alongside the generated Hono REST + OpenAPI.
+A typed React client needs only the router's type. Export `typeof router` from a shared workspace package; the server mounts the runtime router (under Next.js's `api/trpc/[trpc]` route or a Vite or Express server), and the client imports only the type and feeds it to `createTRPCReact<typeof router>()`. In this repo `packages/server` generates the router and the Hono app, exports their types (`AppRouter`, `Api`), and mounts both beside the OpenAPI document; `packages/client` imports those types only.
 
 ## Event versioning surfaces in the API
 
@@ -493,12 +529,12 @@ import { trpc } from "@rotorsoft/act-http/trpc";
 type Ctx = { user: { id: string; name: string }; tenantId: string };
 
 export const router = trpc<Ctx, typeof app>(app, {
-  actor: (ctx) => (ctx as Ctx).user,
+  actor: (ctx) => ctx.user,
   stream: (action, input, ctx) => `ticket-${ctx.tenantId}`,
 });
 ```
 
-If `createTRPCReact<typeof router>()` still works (or you're consuming the router server-side only), you're done. If it doesn't and you can't move past the tRPC typing caveat above, keep the hand-written tRPC router and still use the generator for the Hono REST + OpenAPI surfaces — that's the split `packages/calculator` + `packages/server` demonstrates in this repo. One source of truth for the registry, one source of truth for the routes that can be generated, the small remainder explicit.
+The client keeps its types: `createTRPCReact<typeof router>()` sees the same procedures, inputs and outputs the hand-written router declared. `packages/server` generates its tRPC router and REST routes this way, and `packages/client` types itself from them.
 
 ## Pointers
 
@@ -506,6 +542,6 @@ If `createTRPCReact<typeof router>()` still works (or you're consuming the route
 - `libs/act-http/src/api/` — `ActorExtractor`, `ApiError`, `ERROR_MAP`, `toApiError`, `withIdempotency`
 - `libs/act-http/README.md` — full API reference for every option
 - `packages/server/src/server.ts` — multi-transport demo wiring all three generators against the same Act
-- `packages/calculator/src/router.ts` — hand-written tRPC router for the typed client side
+- `packages/server/src/api.ts` — the calculator's generated tRPC router and REST routes, exported as types for the client
 - [External integration patterns](./external-integration.md) — the inbound-webhook side of the same `IdempotencyStore` contract
 - [Event schema evolution](../architecture/event-schema-evolution.md) — what stays stable across `_v<n>` bumps

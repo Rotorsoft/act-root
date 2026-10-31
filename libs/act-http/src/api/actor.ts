@@ -7,14 +7,14 @@ import type { Actor } from "@rotorsoft/act";
  * for this single closure that every transport (tRPC, Hono, OpenAPI
  * docs) composes against.
  *
- * The `request` argument is intentionally generic. Each transport
- * narrows it at the call site (`IncomingMessage` for Hono, the tRPC
- * context object for tRPC, etc.) — keeping the contract here
- * transport-agnostic means one extractor implementation plugs into
- * every adapter unchanged.
+ * Each transport types `request` as what it hands over: the Hono
+ * `Context`, or the host's tRPC context. An extractor that takes
+ * `unknown` still plugs into every transport unchanged.
  *
  * Async is allowed so the extractor can verify a JWT against a
  * remote JWKS endpoint without forcing every host to synchronously
  * cache.
  */
-export type ActorExtractor = (request: unknown) => Actor | Promise<Actor>;
+export type ActorExtractor<TRequest = unknown> = (
+  request: TRequest
+) => Actor | Promise<Actor>;

@@ -129,7 +129,7 @@ my-app/
 │       │   │   ├── auth.ts       # Token signing, password hashing
 │       │   │   ├── broadcast.ts      # BroadcastChannel + PresenceTracker (via @rotorsoft/act-http/sse)
 │       │   │   ├── auth.routes.ts    # Auth endpoints (login, signup, OAuth)
-│       │   │   ├── domain.routes.ts  # Domain mutations + queries
+│       │   │   ├── domain.routes.ts  # Generated mutations (trpc(app)) + queries
 │       │   │   └── events.routes.ts  # SSE subscriptions (state + events)
 │       │   ├── client/           # React + Vite frontend
 │       │   │   ├── App.tsx           # Root (providers, splitLink for SSE)
@@ -185,8 +185,8 @@ For complete workspace configuration files, see [monorepo-template.md](monorepo-
 8. **TypeScript strict mode** — All packages use `"strict": true`.
 9. **ESM only** — All packages use `"type": "module"` and `.js` import extensions.
 10. **Single-key records** — `state({})`, `.on({})`, `.emits({})` take single-key records. Multi-key throws at runtime.
-11. **API decomposition** — Split tRPC router into focused route files (`auth.routes.ts`, `domain.routes.ts`, `events.routes.ts`). Keep `trpc.ts` for init + middleware, `context.ts` for request context, `helpers.ts` for shared utilities.
-12. **Commits settle on their own** — no `committed` listener and no explicit `settle()` in API mutations; call `settle()` only for the startup replay; `reset()` and `unblock()` settle on their own.
+11. **API decomposition** — Generate the domain mutations with `trpc(app, ...)` from `@rotorsoft/act-http/trpc` (typed from the app, no casts), and split the hand-written rest into focused route files (`auth.routes.ts`, `domain.routes.ts` for projection queries, `events.routes.ts`). Keep `trpc.ts` for init + middleware, `context.ts` for request context, `helpers.ts` for shared utilities.
+12. **Commits settle on their own** — nothing calls `settle()` after a commit (the one `committed` listener only broadcasts); call `settle()` only for the startup replay; `reset()` and `unblock()` settle on their own.
 13. **No redundant timestamps in events** — Never add `createdAt`, `updatedAt`, `openedAt`, `closedAt`, `removedAt`, `registeredAt`, or similar timestamp fields to event schemas. Every committed event already has a `created` timestamp provided by the framework. Use `event.created` in projections. Only include dates that represent *business dates* distinct from when the event was recorded (e.g., `transaction_date` for a trade that happened on a different day than when it was entered).
 
 ## Error Handling
@@ -212,9 +212,9 @@ For production deployment (PostgresStore, background processing, automated jobs)
 - [ ] Tests use `fixture(builder)` / `sandbox(builder)` from `@rotorsoft/act/test` for isolation, clearing in-memory projections with `clear*()` at the start of each test
 - [ ] Domain package has no infrastructure dependencies
 - [ ] All packages use `"type": "module"` and TypeScript strict mode
-- [ ] tRPC API decomposed into route files with typed middleware
+- [ ] Domain mutations generated with `trpc(app, ...)`, never hand-written; the rest decomposed into route files with typed middleware
 - [ ] `broadcast.ts` sets up `BroadcastChannel` + `PresenceTracker` from `@rotorsoft/act-http/sse`
-- [ ] `broadcastState()` called after every `app.do()` — sets `_v` from `snap.event.version`
+- [ ] `broadcastState()` runs from one `app.on("committed")` listener — sets `_v` from `snap.event.version`
 - [ ] SSE `onStateChange` subscription uses `broadcast.subscribe()` for incremental state push
 - [ ] SSE `onEvent` subscription wired with `app.on("settled")` for event replay
 - [ ] No `app.settle()` in mutations (each commit settles on its own and emits "settled" after reactions)
