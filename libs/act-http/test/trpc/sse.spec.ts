@@ -404,7 +404,7 @@ describe("trpc(app, { sse }) — an action named subscribe", () => {
   });
 });
 
-describe("trpc(app, { sse }) — a state with sensitive events", () => {
+describe("trpc sse — a state with sensitive events", () => {
   const Registered = z.object({ email: sensitive(z.string()) });
   const User = state({ User: z.object({ email: z.string().optional() }) })
     .init(() => ({}))

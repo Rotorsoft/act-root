@@ -284,7 +284,7 @@ describe("hono(app, { sse }) — generated SSE endpoints", () => {
   });
 });
 
-describe("hono(app, { sse }) — a state with sensitive events", () => {
+describe("hono sse — a state with sensitive events", () => {
   const Registered = z.object({ email: sensitive(z.string()) });
   const User = state({ User: z.object({ email: z.string().optional() }) })
     .init(() => ({}))
