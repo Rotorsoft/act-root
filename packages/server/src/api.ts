@@ -1,4 +1,4 @@
-import { type Calculator, calculatorApp } from "@act/calculator";
+import { Calculator, calculatorApp } from "@act/calculator";
 import { hono } from "@rotorsoft/act-http/hono";
 import { BroadcastChannel } from "@rotorsoft/act-http/sse";
 import { trpc } from "@rotorsoft/act-http/trpc";
@@ -17,23 +17,13 @@ export type LiveState = z.infer<typeof Calculator.state> & { _v: number };
 // every local commit, from either transport, lands here via the
 // `committed` lifecycle event and fans out as version-keyed patches.
 export const broadcast = new BroadcastChannel<LiveState>();
-calculatorApp.on("committed", (snapshots) => {
-  // The lifecycle payload is loosely typed by design — commits from any
-  // registered state land here. This app registers a single state, so
-  // narrow to its shape once.
-  const snaps = snapshots as unknown as {
-    state: Omit<LiveState, "_v">;
-    event?: { stream: string; version: number };
-    patch?: Partial<LiveState>;
-  }[];
-  const last = snaps.at(-1);
+calculatorApp.on("committed", Calculator, (snapshots) => {
+  const last = snapshots.at(-1);
   if (!last?.event) return;
   broadcast.publish(
     last.event.stream,
     { ...last.state, _v: last.event.version },
-    snaps
-      .map((s) => s.patch)
-      .filter((p): p is Partial<LiveState> => p !== undefined)
+    snapshots.map((s) => s.patch ?? {})
   );
 });
 

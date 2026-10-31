@@ -143,16 +143,12 @@ dispose(instrument(app));
 // the page the moment the events land.
 const feed: Array<{ name: string; stream: string; sku?: string }> = [];
 app.on("committed", (snapshots) => {
-  for (const snap of snapshots) {
-    const event = snap.event as {
-      name: string;
-      stream: string;
-      data?: { sku?: string };
-    };
+  for (const { event } of snapshots) {
+    if (!event) continue;
     feed.unshift({
       name: event.name,
       stream: event.stream,
-      sku: event.data?.sku,
+      sku: "sku" in event.data ? event.data.sku : undefined,
     });
   }
   feed.length = Math.min(feed.length, 14);

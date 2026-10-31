@@ -6,7 +6,7 @@ tRPC router in `packages/app/src/api/`, decomposed into focused route modules.
 
 **Why decompose into many small files instead of one router?** Each file has a single responsibility and a clear dependency graph. `trpc.ts` knows nothing about auth; `context.ts` knows nothing about routes; route files know nothing about each other. This prevents circular dependencies and makes it easy to find where a specific endpoint lives. When the spec adds a new domain aggregate, you add handlers to `domain.routes.ts` without touching auth or SSE logic.
 
-**Broadcast once, on `committed`.** `app.on("committed", ...)` in `broadcast.ts` publishes every commit, whichever path made it: a generated mutation, a reaction, a timer. No mutation calls `broadcastState()` itself, so none can forget to. Reactions and projections run on their own after the commit. A generated mutation returns the snapshots of its own commit; never answer a request from a projection, which may lag.
+**Broadcast once, on `committed`.** `app.on("committed", Item, ...)` in `broadcast.ts`, scoped to the state so its snapshots are typed, publishes every commit, whichever path made it: a generated mutation, a reaction, a timer. No mutation calls `broadcastState()` itself, so none can forget to. Reactions and projections run on their own after the commit. A generated mutation returns the snapshots of its own commit; never answer a request from a projection, which may lag.
 
 **Choosing the right procedure type:** Use `publicProcedure` for unauthenticated reads (list views, SSE subscriptions). Use `authedProcedure` for any mutation that modifies state — the middleware guarantees `ctx.actor` is non-null and typed. Use `adminProcedure` for administrative operations (role assignment, user management). Never use `publicProcedure` for mutations unless the spec explicitly allows anonymous writes.
 
@@ -29,7 +29,7 @@ tRPC router in `packages/app/src/api/`, decomposed into focused route modules.
 **Key rules:**
 - Don't call `app.settle()` in mutations — each commit settles its reactions on its own
 - Generate the domain mutations with `trpc(app, ...)`; never hand-write a procedure that only calls `app.do()`
-- `broadcastState()` runs from one `app.on("committed")` listener — pushes incremental patches via `@rotorsoft/act-http/sse`
+- Broadcasting runs from one `app.on("committed", State, ...)` listener per broadcast state (snapshots typed, no casts) — pushes incremental patches via `@rotorsoft/act-http/sse`
 - Use `authedProcedure` / `adminProcedure` for authorization (middleware narrows `ctx.actor`)
 - `onStateChange` SSE uses `broadcast.subscribe()` from `@rotorsoft/act-http/sse` for real-time state push
 - `onEvent` SSE uses `app.on("settled", ...)` which fires only after `correlate()` + `drain()` complete
@@ -153,48 +153,35 @@ export function serializeEvents(events: Array<{ id: number; name: unknown; data:
 App-specific broadcast setup using `@rotorsoft/act-http/sse`. Customize `deriveState()` and `applyPresence()` for your domain.
 
 ```typescript
-import { app } from "@my-app/domain";
+import { app, Item } from "@my-app/domain";
 import { BroadcastChannel, PresenceTracker } from "@rotorsoft/act-http/sse";
-import type { BroadcastState } from "@rotorsoft/act-http/sse";
+import type { z } from "zod";
 
-// Extend with app-specific fields
-export type AppState = BroadcastState & {
-  // ... your domain state shape
-};
+// The broadcast view: the domain state, its stream version, and any
+// app-specific computed fields (deadlines, etc.)
+export type AppState = z.infer<typeof Item.state> & { _v: number };
 
 export const broadcast = new BroadcastChannel<AppState>();
 export const presence = new PresenceTracker();
 
-type Snap = {
-  state?: any;
-  patch?: Partial<AppState>;
-  event?: { version: number; created: Date };
-};
-
-/** Broadcast every commit: generated mutations, reactions and timers alike. */
-app.on("committed", (snaps) => {
-  const stream = snaps.at(-1)?.event?.stream;
-  if (stream) broadcastState(stream, snaps);
-});
-
-export function broadcastState(streamId: string, snaps: Snap[]) {
+/**
+ * Broadcast every commit by the state's actions: generated mutations,
+ * reactions and timers alike. Scoped to the state, so `snaps` is typed
+ * from it. One listener per broadcast state.
+ */
+app.on("committed", Item, (snaps) => {
   const last = snaps.at(-1);
-  const state = last?.state;
-  if (!state) return;
-
+  if (!last?.event) return;
+  const streamId = last.event.stream;
   const fullState: AppState = {
-    ...state,
-    _v: last.event!.version, // MUST come from the event store version
-    // ... app-specific computed fields (deadlines, etc.)
+    ...last.state,
+    _v: last.event.version, // MUST come from the event store version
   };
-
-  // Collect each emitted snapshot's domain patch, in commit order
-  const patches = snaps.map((s) => s.patch).filter(Boolean) as Partial<AppState>[];
-
+  // One domain patch per emitted event, in commit order
+  const patches = snaps.map((s) => s.patch ?? {});
   // Overlay presence on human players/users
-  const withPresence = applyPresence(fullState, streamId);
-  broadcast.publish(streamId, withPresence, patches);
-}
+  broadcast.publish(streamId, applyPresence(fullState, streamId), patches);
+});
 
 /** Re-broadcast with updated presence (called on connect/disconnect). */
 export function broadcastPresenceChange(streamId: string) {
