@@ -407,16 +407,20 @@ function json_schema(
   );
 }
 
-/** Let each named property also read as a redaction marker. */
+/** Let each named property, or every one, also read as a redaction marker. */
 function allow_markers(
   schema: Record<string, unknown>,
-  fields: readonly string[]
+  fields: readonly string[] | "all"
 ): Record<string, unknown> {
   const properties = schema.properties as
     | Record<string, Record<string, unknown>>
     | undefined;
-  const present = fields.filter((f) => properties?.[f]);
-  if (!properties || present.length === 0) return schema;
+  if (!properties) return schema;
+  const present =
+    fields === "all"
+      ? Object.keys(properties)
+      : fields.filter((f) => properties[f]);
+  if (present.length === 0) return schema;
   const next = { ...properties };
   for (const f of present) next[f] = { anyOf: [properties[f], PII_MARKERS] };
   return { ...schema, properties: next };
@@ -425,8 +429,9 @@ function allow_markers(
 /**
  * The typed `Snapshot[]` of one state: its state schema, and the event as
  * one shape per event the state emits, told apart by `name`. A sensitive
- * field, in the event's data or the state field of the same name, may read
- * as `[REDACTED]` or `[SHREDDED]` for a caller who may not see it.
+ * field in the event's data, and every field of a state with sensitive
+ * events, may read as `[REDACTED]` or `[SHREDDED]` for a caller who may not
+ * see it.
  */
 function state_snapshots(
   state: z.ZodType,
@@ -457,8 +462,10 @@ function state_snapshots(
       required: ["id", "stream", "version", "created", "name", "data", "meta"],
     };
   });
+  // A reducer may copy a sensitive value into a state field of any name, so
+  // every field of a state with sensitive events may read as a marker.
   return snapshot_array(
-    allow_markers(json_schema(state, "output"), [...sensitive]),
+    allow_markers(json_schema(state, "output"), sensitive.size ? "all" : []),
     { oneOf: variants }
   );
 }

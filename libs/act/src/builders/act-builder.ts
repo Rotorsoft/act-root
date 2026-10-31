@@ -162,9 +162,10 @@ export function act<
   let _built = false;
 
   // A sensitive field reads as "[REDACTED]" or "[SHREDDED]" to a caller who
-  // may not see it, and so does the state field of the same name: a string.
-  // A field typed as anything else then holds a value its type doesn't
-  // allow, so the first build names each one, once.
+  // may not see it, and so does any state field a reducer copies it into: a
+  // string. A field typed as anything else then holds a value its type
+  // doesn't allow, so the first build names each one, once. A state field is
+  // matched by name; a copy under another name can't be seen from the types.
   const advise_pii_types = () => {
     const fields = new Set<string>();
     for (const state of states.values()) {
