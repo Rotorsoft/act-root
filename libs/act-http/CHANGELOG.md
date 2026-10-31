@@ -1,3 +1,11 @@
+# [@rotorsoft/act-http-v1.12.1](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-http-v1.12.0...@rotorsoft/act-http-v1.12.1) (2026-10-31)
+
+
+### Bug Fixes
+
+* **act-http:** let every field of a sensitive state read as a marker in OpenAPI ([#2246](https://github.com/Rotorsoft/act-root/issues/2246)) ([eeafae1](https://github.com/Rotorsoft/act-root/commit/eeafae1e3e7457ccb630d5f741d539e2740a2894)), closes [#2233](https://github.com/Rotorsoft/act-root/issues/2233)
+* **act-http:** refuse sse for a state with sensitive events ([#2245](https://github.com/Rotorsoft/act-root/issues/2245)) ([9a29c32](https://github.com/Rotorsoft/act-root/commit/9a29c327d9e836f9bdd7254f1bc14c07840943f3)), closes [#2232](https://github.com/Rotorsoft/act-root/issues/2232)
+
 # [@rotorsoft/act-http-v1.12.0](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-http-v1.11.3...@rotorsoft/act-http-v1.12.0) (2026-10-31)
 
 
