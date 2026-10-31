@@ -107,7 +107,7 @@ describe("hono(app, options) — generated REST surface", () => {
       body: JSON.stringify({ key: "5" }),
     });
     expect(res.status).toBe(200);
-    const snapshots = (await res.json()) as Array<{ event: { name: string } }>;
+    const snapshots = await res.json();
     expect(snapshots[0].event.name).toBe("KeyPressed");
     expect(do_spy).toHaveBeenCalledWith(
       "PressKey",
@@ -198,7 +198,7 @@ describe("hono(app, options) — generated REST surface", () => {
       );
     });
 
-    test("undefined resolver result skips the check on the target", async ({
+    test("undefined resolver result leaves expectedVersion off the target", async ({
       app,
     }) => {
       const do_spy = vi.spyOn(app, "do").mockResolvedValueOnce([]);
@@ -246,7 +246,7 @@ describe("hono(app, options) — generated REST surface", () => {
           body: JSON.stringify({ key: "5" }),
         });
         expect(res.status).toBe(status);
-        const body = (await res.json()) as { code: string; detail?: string };
+        const body = await res.json();
         expect(body.code).toBe(code);
       });
     }
@@ -262,7 +262,7 @@ describe("hono(app, options) — generated REST surface", () => {
         body: JSON.stringify({ key: "5" }),
       });
       expect(res.status).toBe(500);
-      const body = (await res.json()) as { code: string; detail?: string };
+      const body = await res.json();
       expect(body.code).toBe("INTERNAL");
       expect(body.detail).toBeUndefined();
     });
@@ -280,9 +280,7 @@ describe("hono(app, options) — generated REST surface", () => {
         body: JSON.stringify({ key: "7" }),
       });
       expect(res.status).toBe(200);
-      const snapshots = (await res.json()) as Array<{
-        event: { name: string };
-      }>;
+      const snapshots = await res.json();
       expect(snapshots[0].event.name).toBe("KeyPressed");
     });
 
@@ -297,7 +295,7 @@ describe("hono(app, options) — generated REST surface", () => {
         body: JSON.stringify({ key: "8" }),
       });
       expect(res.status).toBe(400);
-      const body = (await res.json()) as { code: string; detail?: string };
+      const body = await res.json();
       expect(body.code).toBe("BAD_REQUEST");
     });
 
@@ -337,7 +335,7 @@ describe("hono(app, options) — generated REST surface", () => {
         body: JSON.stringify({ key: "1" }),
       });
       expect(res.status).toBe(409);
-      const body = (await res.json()) as { code: string; detail?: string };
+      const body = await res.json();
       expect(body.code).toBe("CONFLICT");
     });
 
@@ -395,9 +393,7 @@ describe("hono(app, options) — generated REST surface", () => {
       const duplicate = await send();
       expect(duplicate.status).toBe(503);
       expect(duplicate.headers.get("retry-after")).toBe("1");
-      expect(
-        ((await duplicate.json()) as { code: string; detail?: string }).code
-      ).toBe("IN_FLIGHT");
+      expect((await duplicate.json()).code).toBe("IN_FLIGHT");
 
       fail();
       expect((await original).status).toBe(500);
@@ -446,7 +442,7 @@ describe("hono(app, options) — generated REST surface", () => {
 
       const res = await api.request("/me");
       expect(res.status).toBe(401);
-      const body = (await res.json()) as { code: string; detail?: string };
+      const body = await res.json();
       expect(body.code).toBe("UNAUTHORIZED");
       expect(body.detail).toBe("no token");
     });
@@ -463,7 +459,7 @@ describe("hono(app, options) — generated REST surface", () => {
 
       const res = await api.request("/me");
       expect(res.status).toBe(401);
-      const body = (await res.json()) as { code: string; detail?: string };
+      const body = await res.json();
       expect(body.code).toBe("UNAUTHORIZED");
       expect(body.detail).toBeUndefined();
     });
