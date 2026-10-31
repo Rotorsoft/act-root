@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ZodError } from "zod";
+import { sse_state_names } from "../../src/api/sse-states.js";
 import {
   DEFAULT_SSE_HEARTBEAT_MS,
   DEFAULT_SSE_MAX_CONNECTIONS,
@@ -454,5 +455,21 @@ describe("runSseSubscription backlog keeps version-neutral frames", () => {
     expect(payload["3"]).toBeDefined();
     expect(payload["2"]).toBeUndefined();
     await gen.return(undefined as never);
+  });
+});
+
+describe("sse_state_names", () => {
+  it("lists each state once, including states of a bare surface with no event schemas", () => {
+    const app = {
+      do: async () => [],
+      registry: {
+        actions: {
+          open: { name: "Ticket", actions: {} },
+          close: { name: "Ticket", actions: {} },
+          press: { name: "Calculator", actions: {} },
+        },
+      },
+    };
+    expect(sse_state_names(app, "hono")).toEqual(["Ticket", "Calculator"]);
   });
 });
