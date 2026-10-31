@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v1.35.3](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.35.2...@rotorsoft/act-v1.35.3) (2026-10-31)
+
+
+### Bug Fixes
+
+* **act:** an action that emits nothing commits nothing, and an undefined correlator keeps the app's ([#2213](https://github.com/Rotorsoft/act-root/issues/2213)) ([94f7b58](https://github.com/Rotorsoft/act-root/commit/94f7b586f956d9675bc249841c891c0e3f9f4cb3)), closes [#2210](https://github.com/Rotorsoft/act-root/issues/2210) [#2211](https://github.com/Rotorsoft/act-root/issues/2211)
+
 # [@rotorsoft/act-v1.35.2](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.35.1...@rotorsoft/act-v1.35.2) (2026-10-30)
 
 
