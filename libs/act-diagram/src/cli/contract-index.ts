@@ -207,7 +207,6 @@ export const CATEGORY_KEYWORDS: Record<string, Kind> = {
   reactions: "reaction",
 };
 
-/** Return every entry of a given kind, sorted by name. */
 /** The action named `name`, on the state named `qualifier` when given. */
 export function find_action(
   model: DomainModel,
@@ -222,6 +221,7 @@ export function find_action(
   return {};
 }
 
+/** Return every entry of a given kind, sorted by name. */
 export function list_by_kind(idx: ContractIndex, kind: Kind): IndexEntry[] {
   return idx.entries
     .filter((e) => e.kind === kind)

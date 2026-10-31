@@ -16,11 +16,11 @@
  * a rebuild. Hence `Store`. Implementations should preserve records
  * for at least the sender's full retry envelope; see
  * [external integration](https://rotorsoft.github.io/act-root/docs/guides/external-integration)
- * for TTL sizing guidance (the matching helper lands in #747).
+ * for TTL sizing guidance, and `minSafeTtl` for the arithmetic.
  *
  * Implementations may be sync (in-memory) or async (durable adapters
- * backed by Postgres, Redis, etc.). The middleware that consumes
- * this port (`#744`) awaits unconditionally, so either shape
+ * backed by Postgres, Redis, etc.). act-http's `withIdempotency`, which
+ * consumes this port, awaits unconditionally, so either shape
  * composes cleanly with framework-agnostic receivers.
  */
 export interface IdempotencyStore {
