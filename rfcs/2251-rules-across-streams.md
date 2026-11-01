@@ -26,44 +26,67 @@ One new idea: **an action can commit to several streams atomically, each guarded
 A rule that spans streams lives in the aggregate that owns it. The action that must respect it **also** runs that aggregate's action, in the same commit:
 
 ```ts
+const Enroll = z.object({ course: z.string(), student: z.string() });
+const Enrolled = Enroll;
+const TakeSeat = z.object({ student: z.string() });
+const SeatTaken = TakeSeat;
+
 // Seats is an ordinary state, one stream per course, owning its events.
 const Seats = state({ Seats: z.object({ taken: z.number(), capacity: z.number() }) })
   .init(() => ({ taken: 0, capacity: 30 }))
-  .emits({ SeatTaken, SeatReleased })
-  .patch({ ... })
-  .on({ takeSeat: z.object({ student: z.string() }) })
-  .requires([{ description: "the course has a free seat", holds: (_p, s) => s.taken < s.capacity }])
-  .emit((p) => ["SeatTaken", p])
+  .emits({ SeatTaken })
+  .patch({ SeatTaken: (_, s) => ({ taken: s.taken + 1 }) })
+
+  .on({ TakeSeat })
+  .requires([{ description: "the course has a free seat", holds: (_, s) => s.taken < s.capacity }])
+  .emit("SeatTaken")
   .build();
 
-const Enrollment = state({ Enrollment })
-  // ...
-  .on({ enroll: z.object({ course: z.string(), student: z.string() }) })
-  .also(Seats, "takeSeat", (p) => ({ stream: `course-${p.course}`, payload: { student: p.student } }))
-  .emit((p) => ["Enrolled", p])
+const Enrollment = state({ Enrollment: z.object({ course: z.string(), student: z.string() }) })
+  .init(() => ({ course: "", student: "" }))
+  .emits({ Enrolled })
+  .patch({ Enrolled: ({ data }) => data })
+
+  .on({ Enroll })
+  .also(Seats, "TakeSeat", (data) => ({
+    stream: `course-${data.course}`,
+    payload: { student: data.student },
+  }))
+  .emit("Enrolled")
   .build();
 ```
 
-`app.do("enroll", ...)` loads the enrollment stream and `course-c1`, runs both actions' preconditions, folds both, and commits `Enrolled` and `SeatTaken` in one step, guarded by both streams' versions. If anyone took a seat meanwhile, the commit fails with `ConcurrencyError` and the action's `maxRetries` reloads and re-checks. A full course refuses with `PreconditionError` from `takeSeat`'s rule.
+`app.do("Enroll", ...)` loads the enrollment stream and `course-c1`, runs both actions' preconditions, folds both, and commits `Enrolled` and `SeatTaken` in one step, guarded by both streams' versions. If anyone took a seat meanwhile, the commit fails with `ConcurrencyError` and the action's `maxRetries` reloads and re-checks. A full course refuses with `PreconditionError` from `TakeSeat`'s rule. `.also` sits where `.requires` sits, between `.on` and `.emit`, and names the other action exactly as that state declares it.
 
 A rule that only needs to look reads the other stream and guards its version without writing to it:
 
 ```ts
-.on({ reserveItem: z.object({ product: z.string(), qty: z.number() }) })
-.reads(Product, (p) => p.product)
-.requires([{ description: "enough stock", holds: (p, _s, _a, { Product }) => Product.stock >= p.qty }])
+const ReserveItem = z.object({ product: z.string(), qty: z.number() });
+
+  .on({ ReserveItem })
+  .reads(Product, (data) => data.product)
+  .requires([{
+    description: "enough stock",
+    holds: (data, _, __, { Product }) => Product.stock >= data.qty,
+  }])
+  .emit("ItemReserved")
 ```
 
-The two rules apps state most often need no hand-written state at all:
+The two rules apps state most often need no hand-written state at all. They sit beside the state's other policies, like `.discloses` or `.autocloses`:
 
 ```ts
 const User = state({ User: z.object({ email: z.string(), active: z.boolean() }) })
-  // ...
+  .init(() => ({ email: "", active: false }))
+  .emits({ Registered, EmailChanged, Deactivated })
+  .patch({ ... })
   .unique("email", { while: (s) => s.active, normalize: (e) => e.toLowerCase() })
 
-const Enrollment = state({ Enrollment })
+  .on({ Register })
+  .emit("Registered")
   // ...
-  .limits("course", 30)
+
+const Enrollment = state({ Enrollment: ... })
+  // ...
   .limits("student", 5)
 ```
 
@@ -108,14 +131,14 @@ Each ships as a test; the starred ones also as a recipe or in an example app.
 |---|---|
 | ★ User email: register, change (release old, take new), deactivate (`while`), erase (`onForget`) | takes the new value and frees the old (`.unique`) |
 | Vehicle plate never reissued | keeps the value taken after close (`onClose: "keep"`) |
-| ★ Course capacity, student max courses | `takeSeat` on `course-c1`; at most 5 courses per student (`.limits`) |
+| ★ Course capacity, student max courses | `TakeSeat` on `course-c1`; at most 5 courses per student (`.limits`) |
 | Sessions per user, released on timeout | at most 3 per user (`.limits`); a deferred reaction frees one on timeout |
 | ★ Wolfdesk: 5 open tickets per agent | at most 5 per agent with `while: open`; a reassign frees one agent's slot and takes another's in one commit |
-| ★ Room booking, no overlap | `reserve` on `room-r1`, whose precondition is "no overlap" |
-| Invoice payments | `applyPayment` on `invoice-i`, whose precondition is "not over the amount" |
-| ★ Inventory | `reserveStock` on the product's stream; a deferred reaction releases expired holds |
-| Money transfer | `debit` on `account-a` and `credit` on `account-b`, three streams in one commit |
-| Gapless invoice numbers | `next` on an `invoices` counter stream |
+| ★ Room booking, no overlap | `ReserveRoom` on `room-r1`, whose precondition is "no overlap" |
+| Invoice payments | `ApplyPayment` on `invoice-i`, whose precondition is "not over the amount" |
+| ★ Inventory | `ReserveStock` on the product's stream; a deferred reaction releases expired holds |
+| Money transfer | `Debit` on `account-a` and `Credit` on `account-b`, three streams in one commit |
+| Gapless invoice numbers | `NextNumber` on an `invoices` counter stream |
 | Idempotency or opt-in token; one review per customer per product | `.unique` on the token, or on the customer and product together |
 | Library loans | the borrower's stream comes from the copy's loaded state |
 | Bike rental, displayed price | `.reads` only |
