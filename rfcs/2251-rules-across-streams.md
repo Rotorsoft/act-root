@@ -149,7 +149,7 @@ Every new step is typed from the states it names, end to end, and a type-level t
 - **`.loads`:** a `State` carries its name as a literal type, so each load adds `{ [name]: thatState }` to the action's `loaded` type, in declaration order; a target function sees only the loads declared before it. A load name is a literal too, so a duplicate fails to compile.
 - **Preconditions:** `holds(payload, state, actor, loaded)`, the fourth parameter optional, so a shared `Precondition<S, unknown>` still fits every action.
 - **`.emit`:** `(payload, snapshot, target, loaded)`, and its return type is the state's own events plus the events each loaded state **accepts**. A tuple's third element is typed as the names of the loads whose state owns that event, so a wrong or missing load name fails to compile. An event name belongs to one state per app (the build already refuses a duplicate), so routing by name is never ambiguous except for a state loaded twice, which is exactly when the name is required.
-- **`.unique` and `.limits`:** `field` accepts only state keys whose type is a string, number or enum; `while` gets the typed state; `normalize` and a `max` function get the field's type.
+- **`.unique` and `.limits`:** `field` accepts only top-level state keys whose type is a string, number or enum, optional or not, so an unknown field, an array or an object fails to compile; `while` gets the typed state; `normalize` and a `max` function get the field's type. The build checks the same against the state's schema (through `internal/zod.ts`, so wrappers are seen through), for plain JavaScript and dynamically built states.
 - **`app.do` and act-http:** unchanged return types. A generated tRPC or Hono mutation still returns its action's snapshots, typed; the other streams' commits reach typed state-scoped `committed` listeners.
 
 ## Scenarios
@@ -255,6 +255,7 @@ The scaffold skill generates `.loads`, `.accepts`, `.unique` and `.limits` when 
 - partial states and slices keep `.loads` on the action that declared it.
 
 **`.unique`, `.limits`:**
+- at build: an unknown field, a nested path, an array or object field, a `max` of `0`, negative, fractional, `NaN` or `Infinity` (a `ZodError`), and two partials declaring different limits on one field all throw;
 - set, change (free the old and take the new in one commit), unset, and set to the same value (nothing changes);
 - `while` turning false frees the value and turning true takes it;
 - `normalize` makes two spellings collide;
