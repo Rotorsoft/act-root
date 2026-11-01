@@ -6,6 +6,7 @@
  * commit, load and dispatch live in `internal/pii.ts`.
  */
 import type { z } from "zod";
+import { def_of } from "./internal/date-reviver.js";
 
 /**
  * Marker key stamped onto a schema's own `def`. Zod clones a schema on every
@@ -21,11 +22,7 @@ const _SENSITIVE = Symbol.for("act.sensitive");
  * Stamp the def-level marker. Called by the public `sensitive()`.
  */
 export function _mark_sensitive(schema: z.ZodType): void {
-  const def = (
-    schema as unknown as {
-      _zod?: { def?: Record<PropertyKey, unknown> };
-    }
-  )._zod?.def;
+  const def = def_of(schema);
   if (def) def[_SENSITIVE] = true;
 }
 
@@ -34,7 +31,7 @@ export function _mark_sensitive(schema: z.ZodType): void {
  *
  * Walks through Zod wrapper layers (`.optional()`, `.nullable()`,
  * `.default()`, `.readonly()`, and the pipe `.transform()` and `.pipe()`
- * build) by following `_def.innerType` or `_def.in` until it reaches
+ * build) by following the definition's `innerType` or `in` until it reaches
  * a non-wrapper schema, then checks the marker. Wrappers create new schema
  * instances; the marker lives on the *inner* schema the user wrapped, so we
  * test that one.
@@ -42,17 +39,11 @@ export function _mark_sensitive(schema: z.ZodType): void {
 function is_pii(schema: z.ZodType): boolean {
   let cur: z.ZodType = schema;
   while (true) {
-    const def = (
-      cur as unknown as {
-        _zod?: { def?: Record<PropertyKey, unknown> };
-      }
-    )._zod?.def;
+    const def = def_of(cur);
     if (def?.[_SENSITIVE] === true) return true;
-    const d = (cur as { _def?: { innerType?: z.ZodType; in?: z.ZodType } })
-      ._def;
     // `.transform()` and `.pipe()` wrap the schema in a pipe that keeps it
     // under `in`, not `innerType`.
-    const inner = d?.innerType ?? d?.in;
+    const inner = (def?.innerType ?? def?.in) as z.ZodType | undefined;
     if (!inner || inner === cur) return false;
     cur = inner;
   }

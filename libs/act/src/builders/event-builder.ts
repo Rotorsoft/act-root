@@ -32,7 +32,7 @@
  */
 
 import { z } from "zod";
-import { date_reviver_schema } from "../internal/date-reviver.js";
+import { date_reviver_schema, def_of } from "../internal/date-reviver.js";
 import {
   type EventGate,
   IDENTITY_GATE,
@@ -48,6 +48,8 @@ import { DEFAULT_LANE, SNAP_EVENT } from "../types/index.js";
 export type EventTags = {
   /** Keys marked `sensitive(...)`, top level (and across union variants). */
   readonly sensitive: readonly string[];
+  /** The sensitive keys whose type isn't a string. */
+  readonly non_string: readonly string[];
   /**
    * Revives the dates in a stored `data` payload, or `undefined` when the
    * schema declares none.
@@ -79,9 +81,11 @@ export function event_tags(schema: z.ZodType): EventTags {
   // beside a plain sibling that is a Date.
   const pii = pii_schemas(schema);
   const pii_dates: Record<string, z.ZodType> = {};
+  const non_string: string[] = [];
   for (const [key, field] of Object.entries(pii)) {
     const dates = date_reviver_schema(field);
     if (dates) pii_dates[key] = dates.optional();
+    if (!reads_as_string(field)) non_string.push(key);
   }
 
   const data_reviver_schema = date_reviver_schema(schema);
@@ -95,6 +99,7 @@ export function event_tags(schema: z.ZodType): EventTags {
   const dated_pii = Object.keys(pii_dates).length > 0;
   return {
     sensitive: Object.keys(pii),
+    non_string,
     date_reviver: data_reviver_schema && revive(data_reviver_schema),
     pii_date_reviver: dated_pii ? revive(z.looseObject(pii_dates)) : undefined,
   };
@@ -177,6 +182,8 @@ function make_event_reader(
 export type BuiltEvents = {
   /** Backs `registry.sensitive_fields`. */
   readonly sensitive: Map<string, readonly string[]>;
+  /** Sensitive `Event.field`s, and `State.field`s of their name, not strings. */
+  readonly non_string: ReadonlySet<string>;
   /** Backs `registry.query_gate` — the actor-less read surfaces. */
   readonly query_readers: Map<string, EventGate>;
   /** Readers for handlers — sensitive keys removed, payload typed. */
@@ -279,11 +286,27 @@ export function build_events(
   // Per-state wiring, all of it derived from the same event resolution: the
   // read view, the write split, and the guard that refuses to combine the two
   // things that cannot coexist.
+  //
+  // A sensitive field reads as "[REDACTED]" or "[SHREDDED]" to a caller who
+  // may not see it, and so does any state field a reducer copies it into: a
+  // string. A field typed as anything else then holds a value its type
+  // doesn't allow, so it is named in `non_string`. A state field is matched
+  // by name; a copy under another name can't be seen from the types.
+  const non_string = new Set<string>();
   for (const state of states.values()) {
+    const shape: Record<string, z.ZodType> = state.state.shape ?? {};
     const state_fields = new Map<string, readonly string[]>();
     for (const event_name of Object.keys(state.events)) {
       const fields = sensitive.get(event_name);
-      if (fields) state_fields.set(event_name, fields);
+      if (!fields) continue;
+      state_fields.set(event_name, fields);
+      const event = tags.get(event_name) as EventTags;
+      for (const field of fields) {
+        if (event.non_string.includes(field))
+          non_string.add(`${event_name}.${field}`);
+        if (shape[field] && !reads_as_string(shape[field]))
+          non_string.add(`${state.name}.${field}`);
+      }
     }
 
     if (state_fields.size > 0) {
@@ -325,5 +348,16 @@ export function build_events(
       (readers.get(event.name) ?? IDENTITY_GATE)(event as never, actor);
   }
 
-  return { sensitive, query_readers, handler_readers };
+  return { sensitive, non_string, query_readers, handler_readers };
+}
+
+// Whether a schema's value is a string, so a redaction marker fits its type:
+// through optional, nullable and default wrappers and a pipe's output. A
+// transform's output can't be known here, so it counts as a string rather
+// than be named falsely.
+function reads_as_string(schema: z.ZodType): boolean {
+  const def = def_of(schema) as Record<string, any>;
+  if (def.type === "string" || def.type === "transform") return true;
+  if (def.out) return reads_as_string(def.out);
+  return def.innerType ? reads_as_string(def.innerType) : false;
 }

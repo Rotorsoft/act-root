@@ -10,10 +10,13 @@
 
 import { z } from "zod";
 
+/** A Zod schema's definition, which every wrapper and marker lives on. */
+type Def = Record<PropertyKey, any>;
+
 /** Zod exposes its shape under `_zod.def` in v4 and `def` in older builds. */
-const def_of = (schema: unknown): Record<string, unknown> | undefined =>
-  (schema as { _zod?: { def?: Record<string, unknown> } })._zod?.def ??
-  (schema as { def?: Record<string, unknown> }).def;
+export const def_of = (schema: unknown): Def | undefined =>
+  (schema as { _zod?: { def?: Def } })._zod?.def ??
+  (schema as { def?: Def }).def;
 
 /**
  * Rebuild one union variant so it still recognises its own payloads.
