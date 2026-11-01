@@ -32,7 +32,7 @@
  */
 
 import { z } from "zod";
-import { date_reviver_schema, def_of } from "../internal/date-reviver.js";
+import { date_reviver_schema } from "../internal/date-reviver.js";
 import {
   type EventGate,
   IDENTITY_GATE,
@@ -40,6 +40,7 @@ import {
   pii_split,
   pii_strip,
 } from "../internal/pii.js";
+import { def_of, output_of } from "../internal/zod.js";
 import { pii_schemas } from "../sensitive.js";
 import type { Actor, LaneConfig, Registry } from "../types/index.js";
 import { DEFAULT_LANE, SNAP_EVENT } from "../types/index.js";
@@ -351,13 +352,10 @@ export function build_events(
   return { sensitive, non_string, query_readers, handler_readers };
 }
 
-// Whether a schema's value is a string, so a redaction marker fits its type:
-// through optional, nullable and default wrappers and a pipe's output. A
-// transform's output can't be known here, so it counts as a string rather
-// than be named falsely.
+// Whether a schema's value is a string, so a redaction marker fits its type.
+// A transform's output can't be known, so it counts as a string rather than
+// be named falsely.
 function reads_as_string(schema: z.ZodType): boolean {
-  const def = def_of(schema) as Record<string, any>;
-  if (def.type === "string" || def.type === "transform") return true;
-  if (def.out) return reads_as_string(def.out);
-  return def.innerType ? reads_as_string(def.innerType) : false;
+  const type = def_of(output_of(schema))?.type;
+  return type === "string" || type === "transform";
 }

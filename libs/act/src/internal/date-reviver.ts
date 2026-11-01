@@ -9,14 +9,7 @@
  */
 
 import { z } from "zod";
-
-/** A Zod schema's definition, which every wrapper and marker lives on. */
-type Def = Record<PropertyKey, any>;
-
-/** Zod exposes its shape under `_zod.def` in v4 and `def` in older builds. */
-export const def_of = (schema: unknown): Def | undefined =>
-  (schema as { _zod?: { def?: Def } })._zod?.def ??
-  (schema as { def?: Def }).def;
+import { def_of } from "./zod.js";
 
 /**
  * Rebuild one union variant so it still recognises its own payloads.
@@ -77,7 +70,9 @@ function variant_schema(schema: unknown): {
  * Zod does the walking, so nesting, arrays, records, unions and the wrappers
  * are handled by the engine rather than by a traversal of our own that would
  * drift as Zod grows constructs. A construct this doesn't recognise
- * contributes no date, which is the documented fallthrough.
+ * contributes no date, which is the documented fallthrough. `z.lazy()` is one
+ * on purpose: this walk descends into shapes, so a recursive schema would
+ * never end.
  */
 export function date_reviver_schema(schema: unknown): z.ZodType | undefined {
   const def = def_of(schema);
@@ -125,6 +120,10 @@ export function date_reviver_schema(schema: unknown): z.ZodType | undefined {
     case "nullable":
       // Keep the null: coercing it would hand back the epoch.
       return inner()?.nullable();
+    case "pipe":
+      // `z.preprocess()` and `.pipe()`: the stored value is the output side.
+      // A `.transform()`'s output is unknown, so it revives nothing.
+      return date_reviver_schema(def.out);
     case "optional":
     case "nonoptional":
     case "readonly":
