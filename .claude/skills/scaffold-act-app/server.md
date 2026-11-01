@@ -441,11 +441,11 @@ const presence = new PresenceTracker();
 // The single broadcast entry point, run on every commit by the state's
 // actions; scoped to the state, so `snaps` is typed from it
 app.on("committed", MyState, (snaps) => {
-  const last = snaps.at(-1);
-  if (!last?.event) return;
-  const streamId = last.event.stream;
+  const last = snaps.at(-1)!;                     // fired only with committed snapshots,
+  const event = last.event!;                     // so the last one and its event exist
+  const streamId = event.stream;
   const state = deriveFullState(last);           // app-specific state derivation
-  state._v = last.event.version;                 // MUST set from event store version
+  state._v = event.version;                      // MUST set from event store version
   const patches = snaps.map((s) => s.patch ?? {}); // one per emitted event
   const withPresence = applyPresence(state, streamId); // app-specific overlay
   broadcast.publish(streamId, withPresence, patches);
