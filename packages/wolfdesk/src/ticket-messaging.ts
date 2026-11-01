@@ -48,7 +48,10 @@ export const TicketMessaging = state({ Ticket: TicketMessagingState })
     },
   ])
 
-  .on({ MarkMessageDelivered })
+  // Timer and assignment reactions commit to the same ticket, so a delivery
+  // can lose a race: the retry reloads and marks it in the same pass, instead
+  // of waiting out the delivery's backoff while the ticket moves on.
+  .on({ MarkMessageDelivered }, { maxRetries: 3 })
   .requires([mustBeOpen, messageExists])
   .emit("MessageDelivered")
 

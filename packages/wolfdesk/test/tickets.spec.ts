@@ -1,4 +1,4 @@
-import type { Cache } from "@rotorsoft/act";
+import type { Cache, Store } from "@rotorsoft/act";
 import { sandbox } from "@rotorsoft/act/test";
 import { Chance } from "chance";
 import { eq } from "drizzle-orm";
@@ -23,6 +23,7 @@ describe("tickets", { timeout: 30_000 }, () => {
   // DB is shared (external) and reset below.
   let app: ReturnType<typeof builder.build>;
   let cache: Cache;
+  let store: Store;
   let dispose: () => Promise<void>;
   let addMessage: Actions["addMessage"];
   let assignTicket: Actions["assignTicket"];
@@ -38,6 +39,7 @@ describe("tickets", { timeout: 30_000 }, () => {
     });
     app = ctx.app;
     cache = ctx.cache;
+    store = ctx.store;
     dispose = ctx.dispose;
     ({
       addMessage,
@@ -60,11 +62,30 @@ describe("tickets", { timeout: 30_000 }, () => {
 
   const DAY = 24 * 60 * 60 * 1000;
   const future = () => new Date(Date.now() + DAY);
+  // True while a reaction is still running somewhere or hasn't resolved a
+  // failure: a stream leased (the app's own wake may hold one this test's
+  // pass can't lease), or with work it hasn't consumed that's due now or
+  // waiting out a backoff. A deliberate defer stores `retry: -1`, so an
+  // hour-long timer doesn't count; a blocked stream never runs again.
+  const busy = async () => {
+    const now = Date.now();
+    let busy = false;
+    await store.query_streams((s) => {
+      if (s.blocked) return;
+      const leased = !!s.leased_until && s.leased_until.getTime() > now;
+      const unresolved =
+        s.correlated_at !== undefined &&
+        s.at < s.correlated_at &&
+        (s.retry >= 0 || s.deferred_at === undefined || s.deferred_at <= now);
+      if (leased || unresolved) busy = true;
+    });
+    return busy;
+  };
   // Correlate+drain until the projected row shows the outcome the test
-  // expects and a pass finds nothing left (each pass wakes the streams
-  // whose due-time has passed and runs the next hop of a defer chain). A
-  // quiet pass alone isn't enough: a stream waiting out a backoff leases
-  // nothing, so the chain can look done before it is. The lease outlives
+  // expects and nothing is left to run (each pass wakes the streams whose
+  // due-time has passed and runs the next hop of a defer chain). A pass that
+  // leased nothing isn't enough: a stream waiting out a backoff, or leased
+  // by the app's own wake, leases nothing to this pass. The lease outlives
   // any pass, so a slow pass never loses its ack.
   const settle = async (
     stream: string,
@@ -79,7 +100,8 @@ describe("tickets", { timeout: 30_000 }, () => {
           eventLimit: 100,
           leaseMillis: 10_000,
         });
-        const quiet = !pass.leased.length && scan.last_id === last_id;
+        const quiet =
+          !pass.leased.length && scan.last_id === last_id && !(await busy());
         last_id = scan.last_id;
         expect(quiet && done(await findTicket(stream))).toBe(true);
       },
@@ -123,6 +145,12 @@ describe("tickets", { timeout: 30_000 }, () => {
     // per-event projection undercounted by starting at 0 and counting
     // only MessageAdded; the fold projects the state as it truly is.
     expect(ticket?.messages).toBe(2);
+    // The delivery reaction raced the timers on this ticket and still marked
+    // its message before the close.
+    const delivered = Object.values(
+      (await app.load("Ticket", t.stream)).state.messages
+    ).filter((m) => m.wasDelivered);
+    expect(delivered).toHaveLength(1);
     expect(ticket?.closedById).toBeDefined();
     expect(ticket?.resolvedById).toBeDefined();
     expect(ticket?.escalationId).toBeDefined();
