@@ -200,7 +200,7 @@ it("should process reactions", async () => {
 });
 ```
 
-For multi-hop reaction chains, repeat `correlate → drain` until a pass produces no work.
+For multi-hop reaction chains, repeat `correlate → drain` until nothing is left to run. A pass that leases nothing isn't proof of that: a reaction waiting out a retry backoff, or one the app's own wake is running, leases nothing to your pass. Check the streams too (`store.query_streams`): done means none is leased and none has unconsumed work that is due or in backoff (a deliberate defer stores `retry: -1`). Reactions that commit to the same stream race, and the loser waits out its backoff, so give such an action a `maxRetries` ([concurrency model](../architecture/concurrency-model.md)).
 
 ### Projection Cleanup
 
