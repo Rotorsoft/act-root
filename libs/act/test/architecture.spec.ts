@@ -217,3 +217,15 @@ describe("architecture: PII stays inside the modules that own it", () => {
     expect(schemas).not.toMatch(/\bpii_(split|gate|strip)\b/);
   });
 });
+
+describe("architecture: Zod's internals are read in one place", () => {
+  it("reads `_zod` or `_def` only in internal/zod.ts", () => {
+    const offenders = ts_files(SRC)
+      .filter((path) => !path.endsWith("/internal/zod.ts"))
+      .filter((path) =>
+        /\b_zod\b|\._def\b/.test(code_of(readFileSync(path, "utf8")))
+      )
+      .map((path) => path.slice(SRC.length));
+    expect(offenders).toEqual([]);
+  });
+});

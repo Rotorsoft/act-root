@@ -4,7 +4,6 @@
  *
  * Fluent builder for composing event-sourced applications.
  */
-import type { ZodType } from "zod";
 import { Act } from "../act.js";
 import { synthesize_autoclose_reactions } from "../internal/autoclose-reaction.js";
 import { resolveActConfig } from "../internal/config.js";
@@ -20,7 +19,6 @@ import {
 } from "../internal/projection-fold.js";
 import { log } from "../ports.js";
 import { current_autoclose_window } from "../scoped.js";
-import { pii_schemas } from "../sensitive.js";
 import type { ActBuilder, Projection } from "../types/builders.js";
 import type {
   ActOptions,
@@ -160,34 +158,6 @@ export function act<
   // many Acts (multi-tenant / A-B testing patterns) without re-merging
   // projections or re-logging the deprecation advisory.
   let _built = false;
-
-  // A sensitive field reads as "[REDACTED]" or "[SHREDDED]" to a caller who
-  // may not see it, and so does any state field a reducer copies it into: a
-  // string. A field typed as anything else then holds a value its type
-  // doesn't allow, so the first build names each one, once. A state field is
-  // matched by name; a copy under another name can't be seen from the types.
-  const advise_pii_types = () => {
-    const fields = new Set<string>();
-    for (const state of states.values()) {
-      const shape =
-        (state.state as { shape?: Record<string, ZodType> }).shape ?? {};
-      for (const [event, schema] of Object.entries(state.events))
-        for (const [field, field_schema] of Object.entries(
-          pii_schemas(schema as ZodType)
-        )) {
-          if (!reads_as_string(field_schema)) fields.add(`${event}.${field}`);
-          if (shape[field] && !reads_as_string(shape[field]))
-            fields.add(`${state.name}.${field}`);
-        }
-    }
-    if (fields.size > 0)
-      log().warn(
-        `Act has ${fields.size} sensitive field(s) whose type isn't a string: ${[...fields].join(", ")}. ` +
-          `A caller who may not see one reads "[REDACTED]" or "[SHREDDED]" there instead, ` +
-          `which its type doesn't allow. Declare sensitive fields as strings. ` +
-          `See docs/docs/guides/sensitive-data.md.`
-      );
-  };
 
   /**
    * Wraps a batch handler so it receives events in handler form — payload
@@ -406,7 +376,7 @@ export function act<
           for (const [name, gate] of built.query_readers) _qg.set(name, gate);
           for (const [name, gate] of built.handler_readers) _hr.set(name, gate);
           finalize_deprecations();
-          advise_pii_types();
+          if (built.advisory) log().warn(built.advisory);
 
           for (const state of states.values()) {
             if (state.disclose) _dp.set(state.name, state.disclose);
@@ -446,19 +416,4 @@ export function act<
       events: registry.events,
     };
   return builder;
-}
-
-// Whether a schema's value is a string, so a redaction marker fits its type:
-// through optional, nullable and default wrappers and a pipe's output. A
-// transform's output can't be known here, so it counts as a string rather
-// than be named falsely.
-function reads_as_string(schema: ZodType): boolean {
-  const def = (
-    schema as {
-      _zod: { def: { type: string; innerType?: ZodType; out?: ZodType } };
-    }
-  )._zod.def;
-  if (def.type === "string" || def.type === "transform") return true;
-  if (def.out) return reads_as_string(def.out);
-  return def.innerType ? reads_as_string(def.innerType) : false;
 }
