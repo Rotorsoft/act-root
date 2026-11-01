@@ -719,6 +719,9 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
     const st = sc.steps.find(x => !x.at && !x.reject && (x.stream || sc.stream || "stream") === stream && nodes.get(x.to) && kindOf(nodes.get(x.to)) === "event");
     return st ? barAt(nodes.get(st.to).cx)?.label : undefined;
   }
+  // a refusal reads like Act's own error: a declared precondition that failed says so; anything else
+  // (a throw in .emit) keeps its message
+  const refusal = (action, reason) => (nodes.get(action)?.preconditions || []).includes(reason) ? `failed precondition: ${reason}` : reason;
   // a short, stable id for the correlation an actor's action starts
   const corrId = (sc, i) => sc.correlation ? `${sc.correlation}${i ? "-" + i : ""}` : "c" + ((cur + 1) * 7919 + i * 104729).toString(36).slice(-4);
   // replays steps [0, k) into the event log, the folded state and blocked targets; each event carries its
@@ -754,7 +757,7 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
       changed = [];
       if (st.at) continue;
       const n = nodes.get(st.to);
-      if (st.reject) { log.push({ type: "rej", name: nodes.get(st.from).label, reason: st.reject, who: issuer(sc, i), corr: causeOf(i).corr }); continue; }
+      if (st.reject) { log.push({ type: "rej", name: nodes.get(st.from).label, reason: refusal(st.from, st.reject), who: issuer(sc, i), corr: causeOf(i).corr }); continue; }
       if (st.blocked) { blocked.add(st.from); log.push({ type: "blk", name: st.target || nodes.get(st.from).label, reason: `blocked after ${(st.retries || 0) + 1} attempts` }); continue; }
       if (kindOf(n) !== "event") continue;
       const stream = st.stream || sc.stream || "stream";
@@ -866,7 +869,7 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
     $("say").innerHTML = k === 0 ? `<b>${esc(sc.title)}.</b> ${md(sc.summary || "Press Play to walk the flow.")}` : md(st.say || "");
     $("prog").style.width = `${(k / sc.steps.length) * 100}%`;
     if (!k) return setChip("");
-    if (st.reject) return setChip("✕ " + st.reject, "var(--bad)");
+    if (st.reject) return setChip("✕ " + refusal(st.from, st.reject), "var(--bad)");
     if (st.blocked) return setChip("⛔ target blocked", "var(--bad)");
     if (st.wait) return setChip("⏱ " + st.wait, "var(--reaction)");
     if (st.at) return setChip(st.noop ? "wakes · no-op" : nodes.get(st.at).label, color(nodes.get(st.at)));
