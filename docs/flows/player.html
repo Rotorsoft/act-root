@@ -728,7 +728,10 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
       return `<li class="${cls}"><span class="id">#${e.id}</span><span class="nm">${esc(e.name)}</span><span class="st">${esc(e.stream)} · v${e.v} · ${who}</span>${e.data ? `<span class="dt">${esc(fmt(e.data))}</span>` : ""}</li>`;
     }).join("");
     ol.parentElement.scrollTop = ol.parentElement.scrollHeight;
-    $("state-h").textContent = `${stateBar ? stateBar.label : ""} state`;
+    // the state the scenario's own stream belongs to: the bar over its first action
+    const first = sc.steps.map(x => nodes.get(x.from)).find(n => n && kindOf(n) === "action");
+    const own = first ? barAt(first.cx) : stateBar;
+    $("state-h").textContent = `${own ? own.label : ""} state`;
     $("state-meta").textContent = `${sc.stream || ""}${r.version !== undefined ? " · v" + r.version : ""}`;
     const keys = Object.keys(r.state);
     $("state").innerHTML = keys.length
