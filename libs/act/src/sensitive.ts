@@ -1,39 +1,24 @@
 /**
- * The sensitive-data marker: the registry `sensitive(zodType)` writes to,
- * and the lookups that read it. The public `sensitive()` and the two
- * sentinels live in `types/schemas.ts`, which re-exports `pii_fields` from
- * here. The transforms that apply the marker at commit, load and dispatch
- * live in `internal/pii.ts`.
+ * The sensitive-data marker: the symbol `sensitive(zodType)` stamps on a
+ * schema's definition, and the lookups that read it. The public
+ * `sensitive()` and the two sentinels live in `types/schemas.ts`, which
+ * re-exports `pii_fields` from here. The transforms that apply the marker at
+ * commit, load and dispatch live in `internal/pii.ts`.
  */
-import { z } from "zod";
-
-/**
- * Process-global registry holding every Zod schema marked sensitive. Backed
- * by a `WeakMap`, so wrapper-created instances (`.optional()`, `.nullable()`,
- * `.default()`) that chain off a marked schema produce *new* schema instances
- * the registry doesn't track; the field walker handles those via unwrap.
- *
- * Exported so the public `sensitive(zodType)` wrapper can call `_registry.add`.
- * Underscore prefix marks "framework-private, don't touch from user code."
- */
-export const _registry = z.registry<{ sensitive: true }>();
+import type { z } from "zod";
 
 /**
  * Marker key stamped onto a schema's own `def`. Zod clones a schema on every
  * refinement (`.min()`, `.email()`, `.trim()`, `.describe()`, `.refine()`,
- * …) via `{...def}`, which copies own symbol keys — so a
- * marker on the def survives the whole chain, while the `_registry` WeakMap
- * (keyed on the *instance*) does not.
- *
- * The registry is still populated and still consulted: it covers schemas
- * marked before this key existed, and it is the mechanism the public
- * `sensitive()` doc-comment describes.
+ * …) via `{...def}`, which copies own symbol keys — so a marker on the def
+ * survives the whole chain. Wrappers (`.optional()`, `.nullable()`,
+ * `.default()`, …) build a new schema around the marked one; `is_pii`
+ * unwraps them.
  */
 const _SENSITIVE = Symbol.for("act.sensitive");
 
 /**
- * Stamp the def-level marker. Called by the public `sensitive()` alongside
- * `_registry.add`.
+ * Stamp the def-level marker. Called by the public `sensitive()`.
  */
 export function _mark_sensitive(schema: z.ZodType): void {
   const def = (
@@ -50,16 +35,13 @@ export function _mark_sensitive(schema: z.ZodType): void {
  * Walks through Zod wrapper layers (`.optional()`, `.nullable()`,
  * `.default()`, `.readonly()`, and the pipe `.transform()` and `.pipe()`
  * build) by following `_def.innerType` or `_def.in` until it reaches
- * a non-wrapper schema, then checks the registry. Wrappers create new schema
+ * a non-wrapper schema, then checks the marker. Wrappers create new schema
  * instances; the marker lives on the *inner* schema the user wrapped, so we
  * test that one.
  */
 function is_pii(schema: z.ZodType): boolean {
   let cur: z.ZodType = schema;
   while (true) {
-    if (_registry.has(cur)) return true;
-    // Def-level marker: survives the clone a refinement produces, which the
-    // instance-keyed registry above cannot.
     const def = (
       cur as unknown as {
         _zod?: { def?: Record<PropertyKey, unknown> };

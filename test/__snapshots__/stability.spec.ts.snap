@@ -5527,8 +5527,9 @@ export declare const REDACTED: "[REDACTED]";
 export declare const SHREDDED: "[SHREDDED]";
 /**
  * Mark a Zod schema as sensitive. Returns the same schema instance — the
- * marker is registered out-of-band so the static type is preserved and the
- * call site reads as a pure annotation.
+ * marker is stamped on the schema's definition, so the static type is
+ * preserved, the call site reads as a pure annotation, and the marker
+ * survives any refinement chained after the call.
  *
  * Idempotent: re-wrapping an already-sensitive schema is a no-op.
  *
@@ -5661,28 +5662,15 @@ export declare const QuerySchema: z.ZodReadonly<ZodObject<{
 //# sourceMappingURL=schemas.d.ts.map
 // === sensitive.d.ts ===
 /**
- * The sensitive-data marker: the registry \`sensitive(zodType)\` writes to,
- * and the lookups that read it. The public \`sensitive()\` and the two
- * sentinels live in \`types/schemas.ts\`, which re-exports \`pii_fields\` from
- * here. The transforms that apply the marker at commit, load and dispatch
- * live in \`internal/pii.ts\`.
+ * The sensitive-data marker: the symbol \`sensitive(zodType)\` stamps on a
+ * schema's definition, and the lookups that read it. The public
+ * \`sensitive()\` and the two sentinels live in \`types/schemas.ts\`, which
+ * re-exports \`pii_fields\` from here. The transforms that apply the marker at
+ * commit, load and dispatch live in \`internal/pii.ts\`.
  */
-import { z } from "zod";
+import type { z } from "zod";
 /**
- * Process-global registry holding every Zod schema marked sensitive. Backed
- * by a \`WeakMap\`, so wrapper-created instances (\`.optional()\`, \`.nullable()\`,
- * \`.default()\`) that chain off a marked schema produce *new* schema instances
- * the registry doesn't track; the field walker handles those via unwrap.
- *
- * Exported so the public \`sensitive(zodType)\` wrapper can call \`_registry.add\`.
- * Underscore prefix marks "framework-private, don't touch from user code."
- */
-export declare const _registry: z.core.$ZodRegistry<{
-    sensitive: true;
-}, z.core.$ZodType<unknown, unknown, z.core.$ZodTypeInternals<unknown, unknown>>>;
-/**
- * Stamp the def-level marker. Called by the public \`sensitive()\` alongside
- * \`_registry.add\`.
+ * Stamp the def-level marker. Called by the public \`sensitive()\`.
  */
 export declare function _mark_sensitive(schema: z.ZodType): void;
 /**
@@ -10457,8 +10445,9 @@ export declare const REDACTED: "[REDACTED]";
 export declare const SHREDDED: "[SHREDDED]";
 /**
  * Mark a Zod schema as sensitive. Returns the same schema instance — the
- * marker is registered out-of-band so the static type is preserved and the
- * call site reads as a pure annotation.
+ * marker is stamped on the schema's definition, so the static type is
+ * preserved, the call site reads as a pure annotation, and the marker
+ * survives any refinement chained after the call.
  *
  * Idempotent: re-wrapping an already-sensitive schema is a no-op.
  *
@@ -10591,28 +10580,15 @@ export declare const QuerySchema: z.ZodReadonly<ZodObject<{
 //# sourceMappingURL=schemas.d.ts.map
 // === sensitive.d.ts ===
 /**
- * The sensitive-data marker: the registry \`sensitive(zodType)\` writes to,
- * and the lookups that read it. The public \`sensitive()\` and the two
- * sentinels live in \`types/schemas.ts\`, which re-exports \`pii_fields\` from
- * here. The transforms that apply the marker at commit, load and dispatch
- * live in \`internal/pii.ts\`.
+ * The sensitive-data marker: the symbol \`sensitive(zodType)\` stamps on a
+ * schema's definition, and the lookups that read it. The public
+ * \`sensitive()\` and the two sentinels live in \`types/schemas.ts\`, which
+ * re-exports \`pii_fields\` from here. The transforms that apply the marker at
+ * commit, load and dispatch live in \`internal/pii.ts\`.
  */
-import { z } from "zod";
+import type { z } from "zod";
 /**
- * Process-global registry holding every Zod schema marked sensitive. Backed
- * by a \`WeakMap\`, so wrapper-created instances (\`.optional()\`, \`.nullable()\`,
- * \`.default()\`) that chain off a marked schema produce *new* schema instances
- * the registry doesn't track; the field walker handles those via unwrap.
- *
- * Exported so the public \`sensitive(zodType)\` wrapper can call \`_registry.add\`.
- * Underscore prefix marks "framework-private, don't touch from user code."
- */
-export declare const _registry: z.core.$ZodRegistry<{
-    sensitive: true;
-}, z.core.$ZodType<unknown, unknown, z.core.$ZodTypeInternals<unknown, unknown>>>;
-/**
- * Stamp the def-level marker. Called by the public \`sensitive()\` alongside
- * \`_registry.add\`.
+ * Stamp the def-level marker. Called by the public \`sensitive()\`.
  */
 export declare function _mark_sensitive(schema: z.ZodType): void;
 /**
