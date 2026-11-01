@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v1.37.4](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.37.3...@rotorsoft/act-v1.37.4) (2026-11-01)
+
+
+### Bug Fixes
+
+* **act:** read Zod's internals in one module, so sensitive() is found behind every wrapper ([#2263](https://github.com/Rotorsoft/act-root/issues/2263)) ([620aad2](https://github.com/Rotorsoft/act-root/commit/620aad262dd2e529161b463cc2992c28968e485d))
+
 # [@rotorsoft/act-v1.37.3](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.37.2...@rotorsoft/act-v1.37.3) (2026-11-01)
 
 # [@rotorsoft/act-v1.37.2](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.37.1...@rotorsoft/act-v1.37.2) (2026-10-31)
