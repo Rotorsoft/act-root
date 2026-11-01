@@ -28,7 +28,7 @@ import {
   type IndexEntry,
 } from "./contract-index.js";
 
-const loc = (file?: string, line?: number): string => {
+export const loc = (file?: string, line?: number): string => {
   if (!file) return "";
   return line ? `${file}:${line}` : file;
 };
@@ -58,7 +58,7 @@ export function format_matches(query: string, matches: IndexEntry[]): string {
   return [head, ...lines].join("\n");
 }
 
-const find_actions_emitting = (
+export const find_actions_emitting = (
   model: DomainModel,
   event_name: string
 ): Array<{
@@ -88,7 +88,7 @@ const find_actions_emitting = (
   return out;
 };
 
-const find_reactions_for = (
+export const find_reactions_for = (
   model: DomainModel,
   event_name: string
 ): Array<{
@@ -131,7 +131,7 @@ const find_reactions_for = (
   return out;
 };
 
-const find_projections_for = (
+export const find_projections_for = (
   model: DomainModel,
   event_name: string
 ): Array<{ name: string; file?: string }> =>
