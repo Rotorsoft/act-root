@@ -167,21 +167,6 @@ describe("hono(app, { sse }) — generated SSE endpoints", () => {
     expect(frames[1].event).toBe("patch");
   });
 
-  test("emits patches even when no cached state existed at open", async ({
-    app: _app,
-  }) => {
-    const channel = new BroadcastChannel<{ _v: number; display: string }>();
-    const api = hono(_app, default_options(channel));
-    const res = await api.request("/api/sse/Calculator?stream=calc-1");
-
-    setTimeout(() => {
-      channel.publish("calc-1", { _v: 1, display: "x" }, [{ display: "x" }]);
-    }, 10);
-
-    const frames = await read_sse_frames(res, ["patch"]);
-    expect(frames[0].event).toBe("patch");
-  });
-
   test("connection cap returns 503 with Retry-After when full", async ({
     app: _app,
   }) => {

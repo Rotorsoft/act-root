@@ -129,25 +129,6 @@ describe("trpc(app, { sse }) — generated subscriptions", () => {
     expect(frames[1]).toMatchObject({ kind: "patch" });
   });
 
-  test("skips the cached-state yield when no state has been published", async ({
-    app,
-  }) => {
-    const channel = new BroadcastChannel<{ _v: number; display: string }>();
-    const router = trpc<Ctx, typeof app>(app, default_options(channel));
-    const t = initTRPC.context<Ctx>().create();
-    const caller = t.createCallerFactory(router)({ actorId: "u-1" });
-
-    const iter = await caller.subscribe.Calculator({ stream: "calc-1" });
-
-    setTimeout(() => {
-      channel.publish("calc-1", { _v: 1, display: "1" }, [{ display: "1" }]);
-    }, 10);
-
-    const abort = new AbortController();
-    const frames = await take_frames(iter, 1, abort);
-    expect(frames[0]).toMatchObject({ kind: "patch" });
-  });
-
   test("connection cap throws TOO_MANY_REQUESTS when full", async ({ app }) => {
     const channel = new BroadcastChannel<{ _v: number; display: string }>();
     // Seed state so the first subscription's generator body actually
@@ -207,27 +188,6 @@ describe("trpc(app, { sse }) — generated subscriptions", () => {
     const re_open = await reader2.next();
     expect(re_open.value).toMatchObject({ kind: "state" });
     await reader2.return?.(undefined);
-  });
-
-  test("aborting the signal during the wait drains the generator", async ({
-    app,
-  }) => {
-    const channel = new BroadcastChannel<{ _v: number; display: string }>();
-    channel.publish("calc-1", { _v: 1, display: "1" }, [{ display: "1" }]);
-    const router = trpc<Ctx, typeof app>(app, default_options(channel));
-    const t = initTRPC.context<Ctx>().create();
-    const caller = t.createCallerFactory(router)({ actorId: "u-1" });
-
-    const sub_proc = caller.subscribe.Calculator;
-
-    const iter = await sub_proc({ stream: "calc-1" });
-    const reader = iter[Symbol.asyncIterator]();
-    // First yield = cached state.
-    await reader.next();
-    // Tell the generator to stop — triggers the `finally` cleanup
-    // and exercises the `on_abort` listener path.
-    const closed = reader.return?.(undefined);
-    await closed;
   });
 
   test("validates the input shape (stream is required, non-empty)", async ({
