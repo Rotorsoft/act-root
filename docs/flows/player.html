@@ -981,7 +981,13 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
     el("line", { x1: x, y1: y, x2: x + 4, y2: y }, g);
     return g;
   }
-  const readTime = st => (reduce ? 1600 : 700 + Math.min(1600, (st.say || "").length * 16));
+  // a recorded video holds each caption long enough to read (about 20 characters a second); the live
+  // player keeps a brisk pace, since a viewer can pause or step
+  const readTime = st => {
+    const len = (st.say || "").replace(/\*\*|`/g, "").length;
+    if (RECORD) return 1200 + len * 50;
+    return reduce ? 1600 : 700 + Math.min(1600, len * 16);
+  };
 
   async function doStep(token) {
     const sc = scenarios[cur], st = sc.steps[step];

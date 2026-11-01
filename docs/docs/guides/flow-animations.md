@@ -19,7 +19,7 @@ An Act app already knows its own flows. Every action, the state that checks it, 
 - **Scenarios that cover every flow.** Each tab plays one story. Together they walk every connection on the map, including the ones people forget to show: refused actions, retries with backoff, a blocked target, and timers that wake and do nothing.
 - **The state and the stream, live.** The right rail shows the event stream as it grows (global id, stream version, and the person or automation that caused each event) and the state as each event patches it. Every event shows its correlation and its cause: an action a person or automation invoked starts a new correlation, and an action a reaction invoked carries the correlation of the event that woke it (`← #4`).
 - **One commit, several events.** When one action commits several events, even to several streams, they land together: the checks run once, the tokens travel at once, a bracket under the events reads "one commit", and the event stream groups them under one commit header.
-- **Video.** One script exports a 1080p MP4 per scenario for talks, READMEs and release notes.
+- **Video.** One script exports a 1080p MP4 per scenario for talks, READMEs and release notes. A video holds each caption long enough to read (about 20 characters a second), so it tells the story on its own.
 - **One static file.** No build, no server. It runs on GitHub Pages, any static host, or inside an iframe.
 
 ## Make one with Claude Code
