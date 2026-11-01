@@ -285,7 +285,7 @@ The scaffold skill generates `.loads` and the uniqueness or capacity states when
 - **Reservation streams on today's port.** The same value streams, written in a second commit: a crash between the two leaves a value taken by no one.
 - **Sagas and process managers.** Eventually consistent; they stay the answer for steps outside the store.
 - **A larger aggregate** (Course holds every enrollment). Serializes everything about the course, not only the seat count.
-- **A unique index on a projection table.** Eventual and outside the store.
+- **A unique index on a projection table.** Eventual when the projection runs after the commit; in the same transaction when it runs inline (Marten's inline projections), but then the rule lives in a read model's index, outside the event model and the builders, and covers uniqueness only.
 - **Do nothing.**
 
 ## Stability / charter impact
