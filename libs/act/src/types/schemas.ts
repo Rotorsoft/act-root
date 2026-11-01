@@ -1,5 +1,5 @@
 import { type ZodObject, type ZodRawShape, z } from "zod";
-import { _mark_sensitive, _registry } from "../sensitive.js";
+import { _mark_sensitive } from "../sensitive.js";
 
 /**
  * @packageDocumentation
@@ -32,8 +32,9 @@ export const SHREDDED = "[SHREDDED]" as const;
 
 /**
  * Mark a Zod schema as sensitive. Returns the same schema instance — the
- * marker is registered out-of-band so the static type is preserved and the
- * call site reads as a pure annotation.
+ * marker is stamped on the schema's definition, so the static type is
+ * preserved, the call site reads as a pure annotation, and the marker
+ * survives any refinement chained after the call.
  *
  * Idempotent: re-wrapping an already-sensitive schema is a no-op.
  *
@@ -57,8 +58,7 @@ export const SHREDDED = "[SHREDDED]" as const;
  * @returns The same schema instance, unmodified at the type level.
  */
 export function sensitive<T extends z.ZodType>(schema: T): T {
-  _registry.add(schema, { sensitive: true });
-  // Also stamp the def, so the marker survives the clone Zod produces for
+  // The marker lives on the def, so it survives the clone Zod produces for
   // any refinement chained after this call (`sensitive(z.string()).min(1)`);
   // without it the field would be written as plaintext into `events.data`.
   _mark_sensitive(schema);

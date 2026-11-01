@@ -354,8 +354,8 @@ function strip_json_schema_meta(
 /**
  * Annotate the emitted request-body schema's sensitive properties so
  * codegen / Swagger UI treat them as secrets rather than echoing them
- * freely. `z.toJSONSchema` has no knowledge of the sensitive registry
- * (`sensitive()` marks schemas out-of-band in a WeakMap), so we walk the
+ * freely. `z.toJSONSchema` has no knowledge of the sensitive marker
+ * (`sensitive()` stamps a symbol on the schema's definition), so we walk the
  * action's declared sensitive fields — via `pii_fields`, the same lookup
  * the orchestrator uses — and mark each matching property `writeOnly:
  * true` + `format: password`. Non-object schemas and actions with no
