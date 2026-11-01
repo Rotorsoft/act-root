@@ -48,13 +48,13 @@ export type InMemoryIdempotencyStoreOptions = {
  * - The least-recently-touched *tentative* entry is the eviction victim —
  *   `_record` walks from the front and drops the first tentative key.
  *   Committed entries are skipped: they are durable within their TTL window
- *   and must never be evicted (#1335).
+ *   and must never be evicted.
  * - GC walks until the first non-expired entry and stops.
  *
  * Keeping the key at a stale insertion position instead would let a
  * `commit`-refreshed early entry shield genuinely-expired entries from the
  * GC break-scan and make eviction drop a durable key before a staler
- * tentative one (#1268).
+ * tentative one.
  *
  * Each entry carries a `committed` flag so the two-phase contract
  * holds: {@link claim} records a tentative entry (dedups concurrent
@@ -93,7 +93,7 @@ export class InMemoryIdempotencyStore implements IdempotencyStore {
   commit(key: string, now: number = Date.now()): void {
     // GC before recording so a commit-heavy, claim-light workload still
     // reclaims expired entries promptly instead of parking them in the map
-    // until the next `claim`/`size` (#1336). `now` matches `claim`'s seam.
+    // until the next `claim`/`size`. `now` matches `claim`'s seam.
     this._gc(now);
     this._record(key, now, true);
   }
@@ -109,14 +109,14 @@ export class InMemoryIdempotencyStore implements IdempotencyStore {
     // the tail so iteration stays ordered by last touch. `Map.set` alone
     // updates the value in place but preserves the original insertion
     // position — a refreshed `expires_at` would then sit at a stale early
-    // slot and break both the `_gc` break-scan and `keys().next()` eviction
-    // (#1268). `delete` on an absent key is a harmless no-op.
+    // slot and break both the `_gc` break-scan and `keys().next()`
+    // eviction. `delete` on an absent key is a harmless no-op.
     this._seen.delete(key);
     this._seen.set(key, { expires_at: now + this._ttl_ms, committed });
     if (this._seen.size > this._max_entries) {
       // Evict the least-recently-touched *tentative* entry. Committed
       // entries are durable within their TTL window — dropping one would let
-      // a duplicate delivery reprocess as fresh (#1335), which durable
+      // a duplicate delivery reprocess as fresh, which durable
       // adapters (Postgres unique index, Redis SET NX) never do. So eviction
       // walks in LRU order, skips committed entries, and never targets the
       // just-recorded `key` (it's the most-recently-used). When every other

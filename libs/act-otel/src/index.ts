@@ -166,7 +166,7 @@ function resolveInstrumentConfig(options: InstrumentOptions): InstrumentConfig {
  * is left alone, so prom-client keeps serving its last good sample. That
  * matters because `max(act_streams_blocked) > 0` is a documented page:
  * publishing `0` would resolve it during the very store incident that broke
- * the read (#1702). A *partial* failure still publishes the reduced sum — a
+ * the read. A *partial* failure still publishes the reduced sum — a
  * failing app contributes nothing this scrape.
  * prom-client would otherwise reject the whole `registry.metrics()` if any
  * `collect()` rejected, blinding the dashboard exactly when the store is in
@@ -295,15 +295,15 @@ export function instrument(
         } catch (error) {
           // `warn`, not `error`: a dropped metric sample costs one collection
           // interval and the next scrape retries. Metrics are observability,
-          // so a failure here must not itself page anyone (#1579).
+          // so a failure here must not itself page anyone.
           log().warn(error as Error, "metrics provider threw during collect");
         }
       }
       // Publish only what something actually measured. Setting it
-      // unconditionally meant a scrape where EVERY provider rejected
-      // published `0`, so `max(act_streams_blocked) > 0` — a documented page —
-      // resolved while the streams were still blocked, during the very store
-      // incident that broke the read (#1702). Skipping the set leaves
+      // unconditionally would publish `0` on a scrape where EVERY provider
+      // rejected, so `max(act_streams_blocked) > 0` — a documented page —
+      // would resolve while the streams were still blocked, during the very
+      // store incident that broke the read. Skipping the set leaves
       // prom-client serving the last good sample, which is what the public
       // doc-comment promises and what keeps the alert latched.
       //

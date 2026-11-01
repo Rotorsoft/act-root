@@ -116,8 +116,8 @@ async function show_detail(
   });
   if (isCancel(action)) return;
   // `EventNode.line` / `ActionNode.line` are never populated by the model,
-  // so `entry.line` is usually undefined and the editor opened at line 1.
-  // `navigate_to_code` computes a real position from the source (#1396).
+  // so `entry.line` is usually undefined; `navigate_to_code` computes a
+  // real position from the source.
   const nav = navigate_to_code(files, entry.name, entry.kind, entry.file);
   const line = entry.line ?? nav?.line;
   const result = await open_in_editor(nav?.file ?? entry.file, line, {

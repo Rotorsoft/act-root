@@ -80,7 +80,7 @@ export class PinoLogger implements Logger {
     if (typeof obj === "string") {
       // A string payload is the message — unless a separate context message
       // is ALSO supplied. Then keep the payload as a field so the caller's
-      // message isn't silently dropped (#1319). `Object(str)` is avoided: it
+      // message isn't silently dropped. `Object(str)` is avoided: it
       // would merge into indexed single-char fields.
       if (msg === undefined) this._pino[method](obj);
       else this._pino[method]({ payload: obj }, msg);
@@ -125,9 +125,9 @@ export class PinoLogger implements Logger {
     // PinoLogger()` builds a whole pino instance — including a `pino-pretty`
     // thread-stream Worker when `pretty` is on, which it is by default
     // outside production — and the `defineProperty` below then throws it
-    // away. Since `child()` is the per-request-context API, that leaked one
-    // OS thread per request (#1705). pino's own `child()` is free; the cost
-    // was entirely the discarded constructor.
+    // away. Since `child()` is the per-request-context API, that would leak
+    // one OS thread per request. pino's own `child()` is free; the cost is
+    // entirely the discarded constructor.
     const child = Object.create(PinoLogger.prototype) as PinoLogger;
     Object.defineProperty(child, "_pino", {
       value: this._pino.child(bindings),

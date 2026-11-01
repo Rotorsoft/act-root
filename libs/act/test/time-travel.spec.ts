@@ -174,13 +174,13 @@ describe("time-travel load", () => {
     expect(snap.state.count).toBe(7);
   });
 
-  // RFC 1274: the snapshot resume floor is a current-state optimization. On a
+  // The snapshot resume floor is a current-state optimization. On a
   // stream that snapshots on every event, a snapshot always sits ABOVE any
   // early cutoff — so for every `asOf` bound the orchestrator must suppress the
   // floor (drop `with_snaps`) and full-scan under the bound, never jump to a
   // snapshot outside the window. This one toggle covers all four bounds
   // (`created_*`, `before`, `backward`, `limit`).
-  describe("time-travel ignores snapshots outside the cutoff (RFC 1274)", () => {
+  describe("time-travel ignores snapshots outside the cutoff", () => {
     // Snapshot after every event → a `__snapshot__` above every early cutoff.
     const SnapEvery = state({ SnapEvery: z.object({ count: z.number() }) })
       .init(() => ({ count: 0 }))
