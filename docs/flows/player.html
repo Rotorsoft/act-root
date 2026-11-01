@@ -102,6 +102,8 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
 .state .chg { animation: chg 1.6s ease-out; }
 .state dd.chg { color: var(--state); font-weight: 500; }
 @keyframes chg { from { background: color-mix(in srgb, var(--state) 22%, transparent); } to { background: transparent; } }
+.other { margin-top: 12px; padding-top: 8px; border-top: 1px dashed var(--line); }
+.other .oh { font: 600 10.5px var(--f-mono); color: var(--state); margin-bottom: 4px; overflow-wrap: anywhere; }
 .read { margin-top: 12px; border-top: 1px solid color-mix(in srgb, var(--line) 70%, transparent); padding-top: 8px; }
 .read summary { cursor: pointer; font: 600 11.5px var(--f-body); text-transform: uppercase; letter-spacing: .08em; color: var(--muted); padding: 2px 0 6px; }
 .read p { margin: 0 0 8px; color: var(--muted); font-size: 12.5px; }
@@ -711,6 +713,12 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
     while (b < sc.steps.length && sc.steps[b].commit === c && sc.steps[b].from === sc.steps[i].from) b++;
     return [a, b];
   }
+  // the state a stream belongs to: the bar over the first event the scenario writes to it
+  function stateOfStream(sc, stream) {
+    if (sc.initials?.[stream]?.state) return sc.initials[stream].state;
+    const st = sc.steps.find(x => !x.at && !x.reject && (x.stream || sc.stream || "stream") === stream && nodes.get(x.to) && kindOf(nodes.get(x.to)) === "event");
+    return st ? barAt(nodes.get(st.to).cx)?.label : undefined;
+  }
   // a short, stable id for the correlation an actor's action starts
   const corrId = (sc, i) => sc.correlation ? `${sc.correlation}${i ? "-" + i : ""}` : "c" + ((cur + 1) * 7919 + i * 104729).toString(36).slice(-4);
   // replays steps [0, k) into the event log, the folded state and blocked targets; each event carries its
@@ -719,6 +727,10 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
     const sc = scenarios[cur], log = [], ver = {}, blocked = new Set();
     const corr = new Map(), evIds = new Map();
     let id = sc.startId ?? 1, state = sc.initial ? structuredClone(sc.initial) : {}, changed = [];
+    // every other stream the scenario touches folds its own state, starting from `initials`
+    const others = new Map(Object.entries(sc.initials ?? {}).map(([k, v]) => [k, structuredClone(v.data ?? {})]));
+    for (const [k, v] of Object.entries(sc.initials ?? {})) if (typeof v.version === "number") ver[k] = v.version;
+    const fresh_keys = new Map();
     const causeOf = i => {
       const act = sc.steps[i].from;
       for (let j = i - 1; j >= 0; j--) {
@@ -754,9 +766,16 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
         commit: st.commit !== undefined ? `${g0}:${st.commit}` : `${i}`, corr: cause.corr,
         cause: cause.event ? `#${cause.event}` : `${nodes.get(st.from).label} on ${actStream}` });
       const patch = st.patch ?? st.data;
-      if (stream === (sc.stream || "stream") && isObj(patch)) { state = merge(state, patch); changed = Object.keys(patch); }
+      if (isObj(patch)) {
+        const own = stream === (sc.stream || "stream");
+        if (own) { state = merge(state, patch); changed = Object.keys(patch); }
+        others.set(stream, merge(others.get(stream) ?? {}, patch));
+        if (groupAt(sc, i)[0] === i) fresh_keys.clear(); // highlight only what the latest commit changed
+        fresh_keys.set(stream, Object.keys(patch));
+      }
     }
-    return { log, state, changed, version: ver[sc.stream || "stream"], blocked };
+    others.delete(sc.stream || "stream");
+    return { log, state, changed, version: ver[sc.stream || "stream"], blocked, others, ver, fresh_keys };
   }
   const fmt = v => v == null ? "–" : typeof v === "string" ? v : JSON.stringify(v);
   function renderPanels(k, fresh) {
@@ -793,9 +812,15 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
     $("state-h").textContent = `${own ? own.label : ""} state`;
     $("state-meta").textContent = `${sc.stream || ""}${r.version !== undefined ? " · v" + r.version : ""}`;
     const keys = Object.keys(r.state);
-    $("state").innerHTML = keys.length
-      ? `<dl class="state">${keys.map(key => { const c = fresh && r.changed.includes(key) ? ' class="chg"' : ""; return `<dt${c}>${esc(key)}</dt><dd${c}>${esc(fmt(r.state[key]))}</dd>`; }).join("")}</dl>`
-      : `<span class="empty">Empty until the first event. Every committed event patches it, and the next action is checked against it.</span>`;
+    const dl = (obj, chg) => `<dl class="state">${Object.keys(obj).map(key => { const c = fresh && chg.includes(key) ? ' class="chg"' : ""; return `<dt${c}>${esc(key)}</dt><dd${c}>${esc(fmt(obj[key]))}</dd>`; }).join("")}</dl>`;
+    // the other streams the scenario touches, each with its own state: a decision that spans streams shows them all
+    const rest = [...r.others].map(([stream, obj]) => {
+      const v = r.ver[stream];
+      return `<div class="other"><div class="oh">${esc(stateOfStream(sc, stream) || "state")} · ${esc(stream)}${v !== undefined ? " · v" + v : ""}</div>${Object.keys(obj).length ? dl(obj, r.fresh_keys.get(stream) || []) : `<span class="empty">Empty.</span>`}</div>`;
+    }).join("");
+    $("state").innerHTML = (keys.length
+      ? dl(r.state, r.changed)
+      : `<span class="empty">Empty until the first event. Every committed event patches it, and the next action is checked against it.</span>`) + rest;
     nodes.forEach(n => n.g.classList.toggle("blocked", r.blocked.has(n.id)));
   }
 
