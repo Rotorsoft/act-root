@@ -7,7 +7,6 @@
  * settings — readers expect Markdown to be paste-able into a PR body
  * or a static doc file.
  */
-import type { DomainModel } from "../client/types/index.js";
 import {
   type ContractIndex,
   event_names_for,
@@ -15,87 +14,12 @@ import {
   find_action,
   list_by_kind,
 } from "./contract-index.js";
-
-const loc = (file?: string, line?: number): string => {
-  if (!file) return "";
-  return line ? `${file}:${line}` : file;
-};
-
-const find_actions_emitting = (
-  model: DomainModel,
-  event_name: string
-): Array<{ state: string; action: string; file?: string; line?: number }> => {
-  const out: Array<{
-    state: string;
-    action: string;
-    file?: string;
-    line?: number;
-  }> = [];
-  for (const st of model.states) {
-    for (const act of st.actions) {
-      if (act.emits.includes(event_name)) {
-        out.push({
-          state: st.name,
-          action: act.name,
-          file: st.file,
-          line: act.line,
-        });
-      }
-    }
-  }
-  return out;
-};
-
-const find_reactions_for = (
-  model: DomainModel,
-  event_name: string
-): Array<{
-  slice?: string;
-  handler: string;
-  dispatches: string[];
-  file?: string;
-  line?: number;
-}> => {
-  const out: Array<{
-    slice?: string;
-    handler: string;
-    dispatches: string[];
-    file?: string;
-    line?: number;
-  }> = [];
-  for (const sl of model.slices) {
-    for (const r of sl.reactions) {
-      if (r.event === event_name) {
-        out.push({
-          slice: sl.name,
-          handler: r.handlerName,
-          dispatches: r.dispatches,
-          file: r.file ?? sl.file,
-          line: r.line,
-        });
-      }
-    }
-  }
-  for (const r of model.reactions) {
-    if (r.event === event_name) {
-      out.push({
-        handler: r.handlerName,
-        dispatches: r.dispatches,
-        file: r.file,
-        line: r.line,
-      });
-    }
-  }
-  return out;
-};
-
-const find_projections_for = (
-  model: DomainModel,
-  event_name: string
-): Array<{ name: string; file?: string }> =>
-  model.projections
-    .filter((p) => p.handles.includes(event_name))
-    .map((p) => ({ name: p.name, file: p.file }));
+import {
+  find_actions_emitting,
+  find_projections_for,
+  find_reactions_for,
+  loc,
+} from "./format.js";
 
 const file_suffix = (file?: string, line?: number): string => {
   const l = loc(file, line);
