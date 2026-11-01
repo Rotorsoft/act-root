@@ -5670,7 +5670,9 @@ export declare const QuerySchema: z.ZodReadonly<ZodObject<{
  */
 import type { z } from "zod";
 /**
- * Stamp the def-level marker. Called by the public \`sensitive()\`.
+ * Stamp the def-level marker. Called by the public \`sensitive()\`. Throws on a
+ * schema with no Zod 4 definition: marking nothing would store the field in
+ * plain text.
  */
 export declare function _mark_sensitive(schema: z.ZodType): void;
 /**
@@ -10588,7 +10590,9 @@ export declare const QuerySchema: z.ZodReadonly<ZodObject<{
  */
 import type { z } from "zod";
 /**
- * Stamp the def-level marker. Called by the public \`sensitive()\`.
+ * Stamp the def-level marker. Called by the public \`sensitive()\`. Throws on a
+ * schema with no Zod 4 definition: marking nothing would store the field in
+ * plain text.
  */
 export declare function _mark_sensitive(schema: z.ZodType): void;
 /**
