@@ -69,6 +69,16 @@ const Enrollment = state({ Enrollment })
 
 Each compiles to a framework-owned claim stream per value (`__claim__:User.email:ann@x.io`) with a small claim state, and to `.also` steps on every action that sets the field, changes it, or changes the `while` result: take the new value, release the old. This is the reservation pattern, made atomic.
 
+## What one `app.do` does
+
+1. **Load** the action's own stream (state and version), then each `.also` and `.reads` target in declaration order; each target function sees the streams loaded before it.
+2. **Check every rule before anything is written.** The action's own preconditions see its state and every stream it loaded (`reads`, keyed by state name). Each `.also` action's preconditions see only its own state and payload, as if it were called directly: the rule stays in the aggregate that owns it.
+3. **Fold** each action's events onto its state, and check each folded state against its schema.
+4. **Commit once,** `commit(writes)`, with each stream's expected version set to the version it had **when it was loaded**. A `.reads` stream is an empty write: a version check only.
+5. **The store checks every version in one atomic step.** If any stream moved since its load, nothing is written and the commit throws `ConcurrencyError`; `maxRetries` reruns the sequence from step 1 with fresh loads. An explicit `expectedVersion` from the caller applies to the action's own stream and is never retried.
+
+No rule decides on stale context: every fact a rule read is unchanged at commit time, or nothing commits. A load served from the cache is safe for the same reason; a cached version that's behind fails the check, and the retry reloads.
+
 ## Public surface
 
 ### `Store` port (breaking for adapters; 2.0)
@@ -80,7 +90,8 @@ Each compiles to a framework-owned claim stream per value (`__claim__:User.email
 ### Builders (additive)
 
 - **`.also(State, action, target)`** on the action chain of `state` and `slice`, between `.on(...)` and `.requires(...)`; it can repeat. `target(payload, state, reads)` returns `{ stream, payload }` for that state's action. The other action's preconditions run, its events commit in the same step, and its stream is guarded by its version.
-- **`.reads(State, target)`**: `target(payload, state, reads)` returns a stream id. The loaded state reaches preconditions as a fourth argument and `.emit` on its second (`{ state, reads }`), keyed by state name and typed from each state; its stream is guarded by its version.
+- **`.reads(State, target)`**: `target(payload, state, reads)` returns a stream id, guarded by its version without a write.
+- **`reads`**: every stream the action loaded, through `.reads` or `.also`, keyed by state name and typed from each state, reaches the action's own preconditions as a fourth argument and `.emit` on its second (`{ state, reads }`).
 - Targets resolve in declaration order, and each sees the states loaded before it, so a rule can follow a reference (a loan's copy, then the copy's borrower).
 - **`.unique(field, options?)`** and **`.limits(field, max, options?)`** on `state(...)`. `max` is a number or `(value) => number`. `.unique(f)` is `.limits(f, 1)` with its own message (`"<State>.<field> is unique"`, `"<State>.<field> is limited to <max>"`).
 - **`ClaimOptions`**: `while?: (state) => boolean` (a claim is held only while true), `normalize?: (value) => string` (case, whitespace), `onClose?: "release" | "keep"` and `onForget?: "release" | "keep"` (what closing or forgetting the holder does; `"release"` by default).
