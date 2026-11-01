@@ -23,7 +23,10 @@ The problem has several known solutions. Sagas and reservations keep each write 
 
 One action makes one decision and **commits its events to several streams atomically, each guarded by its own version.** Everything else is what Act already has: states that own their events, streams, `load`, the cache, `expectedVersion`, preconditions, the state schema checked before every commit, and `ConcurrencyError` retried by `maxRetries`.
 
-The one new builder step is **`.loads`**: the action loads another stream it needs for its decision, exactly as `app.load` would. Its preconditions see that state, and when the action emits an event owned by that state, the event commits to that stream.
+Two new builder steps make it work:
+
+- **`.loads`**, on an action: the action loads another stream it needs for its decision, exactly as `app.load` would. Its preconditions see that state, and when the action emits an event owned by that state, the event commits to that stream.
+- **`.accepts`**, on a state: the events of this state that other states' actions may emit into its streams. Everything else stays private to the state's own actions. The owner decides what is open to outside writers, and its schema protects its invariants whoever writes.
 
 ```ts
 const Enroll = z.object({ course: z.string(), student: z.string() });
@@ -39,6 +42,7 @@ const Seats = state({
   .init(() => ({ taken: 0, capacity: 30 }))
   .emits({ SeatTaken })
   .patch({ SeatTaken: (_, s) => ({ taken: s.taken + 1 }) })
+  .accepts(["SeatTaken"]) // other states' actions may emit SeatTaken into a course
   .build();
 
 const Enrollment = state({ Enrollment: z.object({ course: z.string(), student: z.string() }) })
@@ -129,7 +133,8 @@ No decision rests on stale context: every fact the preconditions and schemas saw
 ### Builders (additive)
 
 - **`.loads(State, target)`** and **`.loads(name, State, target)`** on the action chain of `state` and `slice`, between `.on(...)` and `.requires(...)`; it can repeat. `target(payload, state, loaded)` returns a stream id. The loaded states reach preconditions and `.emit` as a new fourth argument, `loaded`, keyed by state name or by `name`, and typed from each state.
-- **`.emit`** may return events owned by any state the action loads. An emitted tuple takes an optional third element, the load's name, when that state is loaded more than once. An event owned by a state the action doesn't load throws at build when the emit is static, and at the call when it isn't.
+- **`.accepts(events)`** on `state(...)`: the names of this state's events (declared in its `.emits`) that other states' actions may emit into its streams. A state that declares none accepts nothing from outside.
+- **`.emit`** may return events a loaded state accepts. An emitted tuple takes an optional third element, the load's name, when that state is loaded more than once. Any other event of another state (one it doesn't accept, or of a state the action doesn't load) fails to compile, and throws at build when the emit is static and at the call when it isn't.
 - **`.unique(field, options?)`** and **`.limits(field, max, options?)`** on `state(...)`. `max` is a number or `(value) => number`. `.unique(f)` is `.limits(f, 1)` with its own message (`"<State>.<field> is unique"`, `"<State>.<field> is limited to <max>"`).
 - **`UniqueOptions`**, for both: `while?: (state) => boolean` (a stream holds its value only while true), `normalize?: (value) => string` (case, whitespace), `onClose?: "release" | "keep"` and `onForget?: "release" | "keep"` (whether closing or forgetting a stream frees its value or keeps it taken; `"release"` by default).
 
@@ -143,7 +148,7 @@ Every new step is typed from the states it names, end to end, and a type-level t
 
 - **`.loads`:** a `State` carries its name as a literal type, so each load adds `{ [name]: thatState }` to the action's `loaded` type, in declaration order; a target function sees only the loads declared before it. A load name is a literal too, so a duplicate fails to compile.
 - **Preconditions:** `holds(payload, state, actor, loaded)`, the fourth parameter optional, so a shared `Precondition<S, unknown>` still fits every action.
-- **`.emit`:** `(payload, snapshot, target, loaded)`, and its return type is the state's own events plus every loaded state's events. A tuple's third element is typed as the names of the loads whose state owns that event, so a wrong or missing load name fails to compile. An event name belongs to one state per app (the build already refuses a duplicate), so routing by name is never ambiguous except for a state loaded twice, which is exactly when the name is required.
+- **`.emit`:** `(payload, snapshot, target, loaded)`, and its return type is the state's own events plus the events each loaded state **accepts**. A tuple's third element is typed as the names of the loads whose state owns that event, so a wrong or missing load name fails to compile. An event name belongs to one state per app (the build already refuses a duplicate), so routing by name is never ambiguous except for a state loaded twice, which is exactly when the name is required.
 - **`.unique` and `.limits`:** `field` accepts only state keys whose type is a string, number or enum; `while` gets the typed state; `normalize` and a `max` function get the field's type.
 - **`app.do` and act-http:** unchanged return types. A generated tRPC or Hono mutation still returns its action's snapshots, typed; the other streams' commits reach typed state-scoped `committed` listeners.
 
@@ -167,18 +172,30 @@ Each ships as a test; the starred ones also as a recipe or in an example app.
 | Library loans | `Copy` by its stream, then `Member` by the copy's borrower |
 | Bike rental, displayed price | a load only: nothing emitted into it |
 
+Each state an outside action emits into lists that event in its `.accepts`: `Seats` accepts `SeatTaken`, `Room` `RoomReserved`, `Invoice` `PaymentApplied`, `Product` `StockReserved`, `Account` `Debited` and `Credited`, `InvoiceCounter` `NumberIssued`. The framework's value streams behind `.unique` and `.limits` accept their own take and free events.
+
 ## Trade-offs
 
 - **Two events for one fact.** `Enrolled` and `SeatTaken` record one enrollment in two streams, and a projection must count one of them. It keeps the store to plain version checks, and every state an aggregate that owns its events. `.unique` and `.limits` keep their own events out of sight.
 - **Hot streams serialize.** Every enrollment in one course goes through `course-c1`; every invoice through the counter. Any design that enforces "at most 30" or "no gaps" strongly pays this. A rule with no natural key ("total spend across all departments") needs one global stream. Splitting a hot resource across several streams is a recipe, not 2.0 surface.
 - **A rule added to existing data** needs its value streams filled from current state once. An operator recipe ships with `.unique`.
-- **Explicit coupling.** `Enrollment` emits `Seats`' event. The build checks the event exists and the state is loaded, and the diagram and CLI show the edge.
+- **Explicit coupling.** `Enrollment` emits `Seats`' event, so it depends on that event's name and shape. The coupling is opt-in and owned: `Seats` lists the events it accepts, the build refuses any other, and the diagram and CLI show every outside writer of each state ("`SeatTaken` is also emitted by `Enrollment.Enroll`").
+- **Who controls writes into a state.** Three ways were weighed, and this RFC takes the second:
+
+  | | The owner's invariants | The owner's action rules | Who decides what outside writers may emit | Cost |
+  |---|---|---|---|---|
+  | A. Any loaded state's events, with the CLI and diagram showing every outside writer | hold (schema) | skipped | nobody: visibility only | no new step |
+  | **B. `.accepts` on the owning state** | hold (schema) | skipped, by design: a rule that must hold for every writer is schema | the owner | one declaration on the owner |
+  | C. Run the owner's action (`.also`) | hold (schema) | run | the owner (its actions) | a second builder step, and two decisions in one commit |
+
+  B keeps one decision and one emit, and gives the owner the say A lacks. C protects the owner's action rules too, at the cost of a second step and a commit that makes two decisions; with B, a rule that must survive every writer moves into the owner's schema.
 - **One store.** A commit is atomic only inside one store: a `.loads` of a state in another scoped Act throws at build. Hash partitions of one Postgres database are one store.
 - **Not for the outside world.** A step that waits on an external confirmation (a payment gateway) stays a reaction-driven process.
 
 ## Objections considered
 
 - **"Modify one aggregate per transaction"** ([Vernon](https://www.dddcommunity.org/wp-content/uploads/files/pdf_articles/Vernon_2011_2.pdf)): its reasons are distributed transactions when aggregates live in different stores, contention, and coupling. An Act app's streams share one store (the cross-store case is refused), the contention is the rule's own, and the coupling is declared. Vernon calls it a rule of thumb, and the `eventsourcing` library argues DDD always permitted a wider transaction ([docs](https://eventsourcing.readthedocs.io/en/latest/_sources/topics/examples/dcb-enrolment-introduction.rst.txt)). Each state's invariants still live in its own schema and hold on every commit. Reactions remain the tool where the business accepts compensation.
+- **"One state now writes into another without its rules."** An outside action emits only events the owning state chose to accept (`.accepts`), and every folded state is checked against its own schema, so whatever must always hold about a state holds whoever writes. What an outside writer skips is the owner's *action* preconditions, which are rules of those decisions; a rule that must hold however the event arrives belongs in the schema. This is the split Act already makes (RFC 2182: invariants are the state schema, preconditions are per decision). Tag-based DCB has the same exposure with less protection: any command can append an event with any tags, and a rule holds only where every command remembers to query it.
 - **Tag-based DCB is more general.** It is, and it pushes domain semantics into the store's queries; the multi-stream optimistic-concurrency approach keeps the store to version checks ([Zenodo](https://zenodo.org/records/21157057)). Every scenario above is expressible with streams.
 - **Deadlocks and lock time.** Loads hold no locks, so a conflict is a retry, never a deadlock. act-pg already serializes commits under one advisory lock; a multi-stream commit does a few more inserts inside it, and a real-adapter bench must show plain actions don't slow down.
 - **"It removes the need for sagas"** (vendor material): only for decisions inside one store.
@@ -186,7 +203,7 @@ Each ships as a test; the starred ones also as a recipe or in an example app.
 ## How it meets every other feature
 
 - **The decider rule.** Every stream loads before the fold; all folds happen before the store assigns ids; every folded state is checked against its schema. One commit.
-- **Event ownership.** Each event still belongs to one state and folds only onto that state's streams. An action may emit another state's events only into a stream it loaded.
+- **Event ownership.** Each event still belongs to one state and folds only onto that state's streams. An action may emit another state's events only into a stream it loaded, and only the events that state accepts.
 - **Cache and snapshots.** Each stream is cached and snapshotted as today. The framework's value streams don't snapshot.
 - **Close, windowed close, archives.** Each stream's lifecycle is its own. Closing a stream frees or keeps its unique values as `onClose` says, by emitting the release into each value's stream in the same close. The framework's value streams are never autoclosed.
 - **`forget` and sensitive fields.** A value stream's id carries the value, so `.unique` on a sensitive field uses a keyed hash of it in the id (#2258), and `forget` frees or keeps it as `onForget` says. A loaded stream loads with the caller's actor, so its sensitive fields are gated as the caller's would be.
@@ -204,7 +221,7 @@ The feature is only as good as the scenarios people can find and run. Every scen
 - **An example app:** a new `packages/rules` (beside the existing examples, which stay as they are), with every scenario as states and tests. Wolfdesk gains the open-tickets-per-agent limit, added, not rewritten.
 - **Recipes:** filling the value streams for a rule added to existing data, and splitting a hot resource across several streams.
 
-The scaffold skill generates `.loads`, `.unique` and `.limits` when a spec states a rule across entities, uniqueness or capacity, and the behavior-contract page gets a row for every runtime guarantee here.
+The scaffold skill generates `.loads`, `.accepts`, `.unique` and `.limits` when a spec states a rule across entities, uniqueness or capacity, and the behavior-contract page gets a row for every runtime guarantee here.
 
 ## Edge cases the tests must cover
 
@@ -221,7 +238,9 @@ The scaffold skill generates `.loads`, `.unique` and `.limits` when a spec state
 **Core (`.loads` and routed events):**
 - a load of the action's own stream, or two loads naming one stream, throws (at build when static, at the call when not);
 - a state loaded twice without names throws at build; an event of that state without a load name throws;
-- an event owned by a state the action doesn't load throws;
+- an event owned by a state the action doesn't load, or one the loaded state doesn't accept, fails to compile and throws at build (or at the call, for a dynamic emit);
+- `.accepts` naming an event the state doesn't emit throws at build; a state with no `.accepts` accepts nothing from outside;
+- the CLI and diagram list every outside writer of each accepted event;
 - a target function that throws commits nothing;
 - a precondition over a loaded state refuses with `PreconditionError`; a loaded state's schema refuses its folded state with `ValidationError`; either way nothing commits;
 - the action emits only its own events, only events into loaded streams, or nothing (nothing commits, no `committed`); the action's own stream is guarded even when it receives no event;
@@ -250,7 +269,8 @@ The scaffold skill generates `.loads`, `.unique` and `.limits` when a spec state
 
 ## Alternatives considered
 
-- **Running another state's action** (`.also(Seats, "TakeSeat", …)`). Considered in this revision and dropped: it's two actions with two decisions, not one, and it needs a second new builder step. Loading the other stream and emitting its event keeps one decision, one emit, and the other state's invariant in its schema.
+- **Running another state's action** (`.also(Seats, "TakeSeat", …)`). Considered in this revision and dropped: it's two actions with two decisions, not one. It runs the owner's preconditions, but `.accepts` plus the owner's schema answer the same concern with one decision.
+- **Any loaded state's events open to outside writers** (no `.accepts`). Simpler, but the owning state loses control over who writes what into it; visibility in the CLI and diagram alone can't stop a writer.
 - **Tag-based DCB** (tags on events, a commit condition over a tag query). Merged first in this RFC (#2252) and replaced: it adds tags or data indexes to every adapter, conditions the store must evaluate, and "decision models" that fold events other states own, with special rules for their cache, snapshots and deleted events.
 - **Links** (one event filed in several streams through a link table). A new table, and deletion rules for events that live in more than one stream.
 - **Reservation streams on today's port.** The same value streams, written in a second commit: a crash between the two leaves a value taken by no one.
@@ -262,12 +282,13 @@ The scaffold skill generates `.loads`, `.unique` and `.limits` when a spec state
 ## Stability / charter impact
 
 - **Breaking, for adapters and direct `Store` callers:** `commit(writes, meta)`. A migration note shows the one-write form; the TCK shows what an adapter adds. Ships in 2.0 with a `BREAKING CHANGE:` footer.
-- **Additive, for apps:** `.loads`, events emitted into loaded streams, `.unique`, `.limits`, `UniqueOptions`. An app that uses none of them behaves as today.
+- **Additive, for apps:** `.loads`, `.accepts`, events emitted into loaded streams, `.unique`, `.limits`, `UniqueOptions`. An app that uses none of them behaves as today.
 
 ## Open questions
 
 0. **Names.** Every new name here is a placeholder until it reads intuitively in a chain:
    - loading another stream for the decision: `.loads` (Act's word for reading a stream folded, as in `app.load`), `.reads`, `.checks`;
+   - the events a state lets outside actions emit: `.accepts`, `.opens`, `.shares`, and whether it takes names (`["SeatTaken"]`) or the schema record (`{ SeatTaken }`);
    - at most N holders per value: `.limits`, `.atMost` (it pairs with `.unique`), `.capacity`;
    - naming a load when a state is loaded twice, and the event tuple's third element.
 
