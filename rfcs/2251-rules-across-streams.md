@@ -205,5 +205,12 @@ The scaffold skill generates `.unique`, `.limits` and `.also` when a spec states
 
 ## Open questions
 
+0. **Names.** Every new name here is a placeholder until it reads intuitively in a chain:
+   - running another state's action in the same commit: `.also` ("on enroll, also take a seat"), `.with`, `.and`, `.together`;
+   - guarding a stream without writing: `.reads`, `.checks`, `.sees`, `.consults`;
+   - at most N holders per value: `.limits`, `.atMost` (it pairs with `.unique`), `.capacity`.
+
+   The tickets use the placeholders.
+
 1. **The hash key for sensitive claims** (#2258): an `ActOptions` field or act-crypto's key provider, and how it rotates without freeing every claim.
 2. **Hot-resource splitting**: a recipe in 2.0; does `.limits` ever need a sharded form?
