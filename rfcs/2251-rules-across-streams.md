@@ -3,7 +3,7 @@
 - **Issue:** #2251
 - **Author:** Claude, for rotorsoft
 - **Created:** 2026-10-31
-- **Revised:** 2026-11-01 (replaces the tag-and-condition design merged in #2252)
+- **Revised:** 2026-11-01 (replaces the first design, merged in #2252)
 - **Ships in:** 2.0 (the `Store.commit` signature changes)
 
 ## Motivation
@@ -67,7 +67,7 @@ const Enrollment = state({ Enrollment })
   .limits("student", 5)
 ```
 
-Each compiles to a framework-owned claim stream per value (`__claim__:User.email:ann@x.io`) with a small claim state, and to `.also` steps on every action that sets the field, changes it, or changes the `while` result: take the new value, release the old. This is the reservation pattern, made atomic.
+Each value gets a small stream that records which streams hold it (`ann@x.io` → `user-42`). The framework writes it, through `.also` steps on every action that sets the field, changes it, or changes the `while` result: take the new value, release the old. Apps never see these streams; they see `.unique` and `.limits`.
 
 ## What one `app.do` does
 
@@ -94,7 +94,7 @@ No rule decides on stale context: every fact a rule read is unchanged at commit 
 - **`reads`**: every stream the action loaded, through `.reads` or `.also`, keyed by state name and typed from each state, reaches the action's own preconditions as a fourth argument and `.emit` on its second (`{ state, reads }`).
 - Targets resolve in declaration order, and each sees the states loaded before it, so a rule can follow a reference (a loan's copy, then the copy's borrower).
 - **`.unique(field, options?)`** and **`.limits(field, max, options?)`** on `state(...)`. `max` is a number or `(value) => number`. `.unique(f)` is `.limits(f, 1)` with its own message (`"<State>.<field> is unique"`, `"<State>.<field> is limited to <max>"`).
-- **`ClaimOptions`**: `while?: (state) => boolean` (a claim is held only while true), `normalize?: (value) => string` (case, whitespace), `onClose?: "release" | "keep"` and `onForget?: "release" | "keep"` (what closing or forgetting the holder does; `"release"` by default).
+- **`UniqueOptions`**, for both: `while?: (state) => boolean` (a stream holds its value only while true), `normalize?: (value) => string` (case, whitespace), `onClose?: "release" | "keep"` and `onForget?: "release" | "keep"` (whether closing or forgetting a stream frees its value or keeps it taken; `"release"` by default).
 
 ### `app.do`, lifecycle events, errors
 
@@ -106,25 +106,25 @@ Each ships as a test; the starred ones also as a recipe or in an example app.
 
 | Scenario | The action also… |
 |---|---|
-| ★ User email: register, change (release old, take new), deactivate (`while`), erase (`onForget`) | takes and releases a claim (`.unique`) |
-| Vehicle plate never reissued | keeps the claim on close (`onClose: "keep"`) |
-| ★ Course capacity, student max courses | `takeSeat` on `course-c1`; a claim on `student-s1` (`.limits`) |
-| Sessions per user, released on timeout | a counted claim (`.limits`); a deferred reaction releases |
-| ★ Wolfdesk: 5 open tickets per agent | a counted claim with `while: open`; a reassign releases one agent and takes another in one commit |
+| ★ User email: register, change (release old, take new), deactivate (`while`), erase (`onForget`) | takes the new value and frees the old (`.unique`) |
+| Vehicle plate never reissued | keeps the value taken after close (`onClose: "keep"`) |
+| ★ Course capacity, student max courses | `takeSeat` on `course-c1`; at most 5 courses per student (`.limits`) |
+| Sessions per user, released on timeout | at most 3 per user (`.limits`); a deferred reaction frees one on timeout |
+| ★ Wolfdesk: 5 open tickets per agent | at most 5 per agent with `while: open`; a reassign frees one agent's slot and takes another's in one commit |
 | ★ Room booking, no overlap | `reserve` on `room-r1`, whose precondition is "no overlap" |
 | Invoice payments | `applyPayment` on `invoice-i`, whose precondition is "not over the amount" |
 | ★ Inventory | `reserveStock` on the product's stream; a deferred reaction releases expired holds |
 | Money transfer | `debit` on `account-a` and `credit` on `account-b`, three streams in one commit |
 | Gapless invoice numbers | `next` on an `invoices` counter stream |
-| Idempotency or opt-in token; one review per customer per product | a claim on `token-x` or `review-c-p` |
+| Idempotency or opt-in token; one review per customer per product | `.unique` on the token, or on the customer and product together |
 | Library loans | the borrower's stream comes from the copy's loaded state |
 | Bike rental, displayed price | `.reads` only |
 
 ## Trade-offs
 
-- **Two events for one fact.** `Enrolled` and `SeatTaken` record one enrollment twice, and a projection must count one of them. DCB's authors name this as the cost of the traditional approach. It buys a store with no tags, indexes or query semantics, and states that stay aggregates owning their events. `.unique` and `.limits` hide their claim events.
-- **Hot streams serialize.** Every enrollment in one course goes through `course-c1`; every invoice through the counter. Any design that enforces "at most 30" or "no gaps" pays this, DCB included. A rule with no natural key ("total spend across all departments") needs one global stream. Splitting a hot resource across several streams is a recipe, not 2.0 surface.
-- **A rule added to existing data** needs its claim streams filled from current state once. An operator recipe ships with `.unique`.
+- **Two events for one fact.** `Enrolled` and `SeatTaken` record one enrollment twice, and a projection must count one of them. It keeps the store to plain version checks, and every state an aggregate that owns its events. `.unique` and `.limits` keep their own events out of sight.
+- **Hot streams serialize.** Every enrollment in one course goes through `course-c1`; every invoice through the counter. Any design that enforces "at most 30" or "no gaps" strongly pays this. A rule with no natural key ("total spend across all departments") needs one global stream. Splitting a hot resource across several streams is a recipe, not 2.0 surface.
+- **A rule added to existing data** needs its value streams filled from current state once. An operator recipe ships with `.unique`.
 - **Explicit coupling.** `Enrollment` names `Seats`' action and payload. The build checks it, and the diagram and CLI show it as an edge.
 - **One store.** A commit is atomic only inside one store: `.also` and `.reads` to a state of another scoped Act throw at build. Hash partitions of one Postgres database are one store.
 - **Not for the outside world.** A step that waits on an external confirmation (a payment gateway) stays a reaction-driven process.
@@ -139,9 +139,9 @@ Each ships as a test; the starred ones also as a recipe or in an example app.
 ## How it meets every other feature
 
 - **The decider rule.** Every stream loads before the fold; each action's preconditions run on its own loaded state; all folds happen before the store assigns ids. One commit.
-- **Cache and snapshots.** Each stream is cached and snapshotted as today. Claim streams don't snapshot.
-- **Close, windowed close, archives.** Each stream's lifecycle is its own; closing a holder releases or keeps its claims as `onClose` says, by adding a release to the claim stream in the close. Claim streams are never autoclosed.
-- **`forget` and sensitive fields.** A claim stream's id carries the value, so a claim on a sensitive field uses a keyed hash of it in the id (#2258), and `forget` releases or keeps it as `onForget` says.
+- **Cache and snapshots.** Each stream is cached and snapshotted as today. The framework's value streams don't snapshot.
+- **Close, windowed close, archives.** Each stream's lifecycle is its own; closing a stream frees or keeps its values as `onClose` says, by adding the release to each value's stream in the same close. The framework's value streams are never autoclosed.
+- **`forget` and sensitive fields.** A value stream's id carries the value, so `.unique` on a sensitive field uses a keyed hash of it in the id (#2258), and `forget` frees or keeps it as `onForget` says.
 - **Reactions, lanes, defer.** Every committed event is correlated as today; a reaction's `app.do` can `.also` too.
 - **Partial states.** `.also` and `.reads` belong to their action; `.unique` and `.limits` survive the merge like other state policies (contract row 269).
 - **Time travel.** `load(..., { asOf })` never runs `.also` or `.reads`.
@@ -154,7 +154,7 @@ The feature is only as good as the scenarios people can find and run. Every scen
 - **The guide:** `docs/docs/guides/rules-across-streams.md`, a catalog: one short section per scenario with the rule in plain words, the builder code, what a race does, and which trade-off it pays. It links the alternatives (reactions with compensation, sagas) for when strong consistency isn't worth it.
 - **Flow animations** (`animate-act-flows`, `docs/flows/*.flow.json`): one map of the scenarios, with flows that play a commit landing in two streams at once, a refusal from the other state's rule, and a lost race being retried. Published with the docs.
 - **An example app:** a new `packages/rules` (beside the existing examples, which stay as they are), with every scenario as a state and its tests. Wolfdesk gains the open-tickets-per-agent limit, added, not rewritten.
-- **Recipes:** filling claim streams for a rule added to existing data, and splitting a hot resource across several streams.
+- **Recipes:** filling the value streams for a rule added to existing data, and splitting a hot resource across several streams.
 
 The scaffold skill generates `.unique`, `.limits` and `.also` when a spec states uniqueness, capacity or a rule across entities, and the behavior-contract page gets a row for every runtime guarantee here.
 
@@ -186,24 +186,24 @@ The scaffold skill generates `.unique`, `.limits` and `.also` when a spec states
 - a target in another scoped Act's store throws at build;
 - partial states and slices keep `.also`/`.reads` on the action that declared them.
 
-**Claims (`.unique`, `.limits`):**
-- set, change (release the old and take the new in one commit), unset, and set to the same value (no claim change);
-- `while` turning false releases and turning true takes;
+**`.unique`, `.limits`:**
+- set, change (free the old and take the new in one commit), unset, and set to the same value (nothing changes);
+- `while` turning false frees the value and turning true takes it;
 - `normalize` makes two spellings collide;
-- an `undefined`, `null` or empty value claims nothing;
+- an `undefined`, `null` or empty value takes nothing;
 - the race for the last slot: one wins, the retry is refused;
 - a `max` function, and a smaller limit than the current holders (existing holders keep, new takes refuse);
-- the holder closed with `onClose` `"release"` and `"keep"`; forgotten with `onForget` `"release"` and `"keep"`;
-- the holder's stream pruned or archived: the claim stays;
+- a holding stream closed with `onClose` `"release"` and `"keep"`; forgotten with `onForget` `"release"` and `"keep"`;
+- a holding stream pruned or archived: its value stays taken;
 - the fill recipe on existing data, run twice (idempotent);
-- claim events never reach the app's reactions or projections;
-- a claim on a sensitive field throws at build until #2258.
+- the framework's value events never reach the app's reactions or projections;
+- `.unique` on a sensitive field throws at build until #2258.
 
 ## Alternatives considered
 
 - **Tag-based DCB** (tags on events, a commit condition over a tag query). Merged first in this RFC (#2252) and replaced: it adds tags or data indexes to every adapter, conditions the store must evaluate, and "decision models" that fold events other states own, with special rules for their cache, snapshots and deleted events.
 - **Links** (one event filed in several streams through a link table). A new table, and deletion rules for events that live in more than one stream.
-- **Reservation streams on today's port.** The same claim streams, written in a second commit: a crash between the two leaves a claim with no owner. This RFC is that pattern, made atomic.
+- **Reservation streams on today's port.** The same value streams, written in a second commit: a crash between the two leaves a value taken by no one.
 - **Sagas and process managers.** Eventually consistent; they stay the answer for steps outside the store.
 - **A larger aggregate** (Course holds every enrollment). Serializes everything about the course, not only the seat count.
 - **A unique index on a projection table.** Eventual and outside the store.
@@ -212,7 +212,7 @@ The scaffold skill generates `.unique`, `.limits` and `.also` when a spec states
 ## Stability / charter impact
 
 - **Breaking, for adapters and direct `Store` callers:** `commit(writes, meta)`. A migration note shows the one-write form; the TCK shows what an adapter adds. Ships in 2.0 with a `BREAKING CHANGE:` footer.
-- **Additive, for apps:** `.also`, `.reads`, `.unique`, `.limits`, `ClaimOptions`. An app that uses none of them behaves as today.
+- **Additive, for apps:** `.also`, `.reads`, `.unique`, `.limits`, `UniqueOptions`. An app that uses none of them behaves as today.
 
 ## Open questions
 
@@ -223,5 +223,5 @@ The scaffold skill generates `.unique`, `.limits` and `.also` when a spec states
 
    The tickets use the placeholders.
 
-1. **The hash key for sensitive claims** (#2258): an `ActOptions` field or act-crypto's key provider, and how it rotates without freeing every claim.
+1. **The hash key for sensitive values** (#2258): an `ActOptions` field or act-crypto's key provider, and how it rotates without freeing every value.
 2. **Hot-resource splitting**: a recipe in 2.0; does `.limits` ever need a sharded form?
