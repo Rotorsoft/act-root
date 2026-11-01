@@ -376,13 +376,7 @@ export function act<
           for (const [name, gate] of built.query_readers) _qg.set(name, gate);
           for (const [name, gate] of built.handler_readers) _hr.set(name, gate);
           finalize_deprecations();
-          if (built.sensitive_non_string.size > 0)
-            log().warn(
-              `Act has ${built.sensitive_non_string.size} sensitive field(s) whose type isn't a string: ${[...built.sensitive_non_string].join(", ")}. ` +
-                `A caller who may not see one reads "[REDACTED]" or "[SHREDDED]" there instead, ` +
-                `which its type doesn't allow. Declare sensitive fields as strings. ` +
-                `See docs/docs/guides/sensitive-data.md.`
-            );
+          if (built.advisory) log().warn(built.advisory);
 
           for (const state of states.values()) {
             if (state.disclose) _dp.set(state.name, state.disclose);

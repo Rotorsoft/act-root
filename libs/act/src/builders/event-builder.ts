@@ -183,7 +183,12 @@ export type BuiltEvents = {
   /** Backs `registry.sensitive_fields`. */
   readonly sensitive: Map<string, readonly string[]>;
   /** The sensitive `Event.field`s, and `State.field`s of their name, a redaction marker doesn't fit. */
-  readonly sensitive_non_string: ReadonlySet<string>;
+  /**
+   * The sensitive-type advisory, naming each sensitive `Event.field`, and
+   * `State.field` of its name, that a redaction marker doesn't fit; or
+   * `undefined` when there are none. The builder logs it once.
+   */
+  readonly advisory: string | undefined;
   /** Backs `registry.query_gate` — the actor-less read surfaces. */
   readonly query_readers: Map<string, EventGate>;
   /** Readers for handlers — sensitive keys removed, payload typed. */
@@ -291,9 +296,9 @@ export function build_events(
   // A sensitive field reads as "[REDACTED]" or "[SHREDDED]" to a caller who
   // may not see it, and so does any state field a reducer copies it into: a
   // string. A field typed as anything else then holds a value its type
-  // doesn't allow, so it is named in `sensitive_non_string`. A state field is
-  // matched by name; a copy under another name can't be seen from the types.
-  const sensitive_non_string = new Set<string>();
+  // doesn't allow, so it is named in the advisory. A state field is matched by
+  // name; a copy under another name can't be seen from the types.
+  const advised = new Set<string>();
   for (const state of states.values()) {
     const shape: Record<string, z.ZodType> = state.state.shape ?? {};
     const state_fields = new Map<string, readonly string[]>();
@@ -304,9 +309,9 @@ export function build_events(
       const event = tags.get(event_name) as EventTags;
       for (const field of fields) {
         if (!reads_as_string(event.sensitive[field]))
-          sensitive_non_string.add(`${event_name}.${field}`);
+          advised.add(`${event_name}.${field}`);
         if (shape[field] && !reads_as_string(shape[field]))
-          sensitive_non_string.add(`${state.name}.${field}`);
+          advised.add(`${state.name}.${field}`);
       }
     }
 
@@ -349,7 +354,14 @@ export function build_events(
       (readers.get(event.name) ?? IDENTITY_GATE)(event as never, actor);
   }
 
-  return { sensitive, sensitive_non_string, query_readers, handler_readers };
+  const advisory =
+    advised.size > 0
+      ? `Act has ${advised.size} sensitive field(s) whose type isn't a string: ${[...advised].join(", ")}. ` +
+        `A caller who may not see one reads "[REDACTED]" or "[SHREDDED]" there instead, ` +
+        `which its type doesn't allow. Declare sensitive fields as strings. ` +
+        `See docs/docs/guides/sensitive-data.md.`
+      : undefined;
+  return { sensitive, advisory, query_readers, handler_readers };
 }
 
 // Whether a schema's value is a string, so a redaction marker fits its type.
