@@ -64,7 +64,7 @@ describe("schema-driven date revival", () => {
         rec: z.record(z.string(), z.date()),
       })
     );
-    expect(tags.sensitive).toEqual([]);
+    expect(tags.sensitive).toEqual({});
     expect(tags.date_reviver).toBeTypeOf("function");
 
     // Zod does the work, so nesting, arrays and records all type correctly —
@@ -143,7 +143,7 @@ describe("schema-driven date revival", () => {
     // child slot must pass through, not crash the build.
     const foreign = { not: "a zod schema" } as unknown as z.ZodType;
     expect(event_tags(foreign).date_reviver).toBeUndefined();
-    expect(event_tags(foreign).sensitive).toEqual([]);
+    expect(event_tags(foreign).sensitive).toEqual({});
 
     // An object def with no shape takes the same path.
     const shapeless = {

@@ -6,57 +6,36 @@
  * commit, load and dispatch live in `internal/pii.ts`.
  */
 import type { z } from "zod";
+import { def_of, some_layer } from "./internal/zod.js";
 
 /**
  * Marker key stamped onto a schema's own `def`. Zod clones a schema on every
  * refinement (`.min()`, `.email()`, `.trim()`, `.describe()`, `.refine()`,
  * …) via `{...def}`, which copies own symbol keys — so a marker on the def
- * survives the whole chain. Wrappers (`.optional()`, `.nullable()`,
- * `.default()`, …) build a new schema around the marked one; `is_pii`
- * unwraps them.
+ * survives the whole chain. Wrappers (`.optional()`, `.transform()`,
+ * `z.preprocess()`, `z.lazy()`, …) build a new schema around the marked one;
+ * `is_pii` looks through them.
  */
 const _SENSITIVE = Symbol.for("act.sensitive");
 
 /**
- * Stamp the def-level marker. Called by the public `sensitive()`.
+ * Stamp the def-level marker. Called by the public `sensitive()`. Throws on a
+ * schema with no Zod 4 definition: marking nothing would store the field in
+ * plain text.
  */
 export function _mark_sensitive(schema: z.ZodType): void {
-  const def = (
-    schema as unknown as {
-      _zod?: { def?: Record<PropertyKey, unknown> };
-    }
-  )._zod?.def;
-  if (def) def[_SENSITIVE] = true;
+  const def = def_of(schema);
+  if (!def) throw new Error("sensitive() takes a Zod 4 schema");
+  def[_SENSITIVE] = true;
 }
 
 /**
- * True when the given schema was marked via `sensitive(...)`.
- *
- * Walks through Zod wrapper layers (`.optional()`, `.nullable()`,
- * `.default()`, `.readonly()`, and the pipe `.transform()` and `.pipe()`
- * build) by following `_def.innerType` or `_def.in` until it reaches
- * a non-wrapper schema, then checks the marker. Wrappers create new schema
- * instances; the marker lives on the *inner* schema the user wrapped, so we
- * test that one.
+ * True when the schema, or any schema it wraps, was marked via
+ * `sensitive(...)`: behind every wrapper, on either side of a pipe, and
+ * inside a lazy schema.
  */
-function is_pii(schema: z.ZodType): boolean {
-  let cur: z.ZodType = schema;
-  while (true) {
-    const def = (
-      cur as unknown as {
-        _zod?: { def?: Record<PropertyKey, unknown> };
-      }
-    )._zod?.def;
-    if (def?.[_SENSITIVE] === true) return true;
-    const d = (cur as { _def?: { innerType?: z.ZodType; in?: z.ZodType } })
-      ._def;
-    // `.transform()` and `.pipe()` wrap the schema in a pipe that keeps it
-    // under `in`, not `innerType`.
-    const inner = d?.innerType ?? d?.in;
-    if (!inner || inner === cur) return false;
-    cur = inner;
-  }
-}
+const is_pii = (schema: z.ZodType): boolean =>
+  some_layer(schema, (def) => def[_SENSITIVE] === true);
 
 /**
  * Derive an event's sensitive fields, as the declared schema of each.

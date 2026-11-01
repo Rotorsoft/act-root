@@ -187,10 +187,13 @@ describe("sensitive() marker survival", () => {
     }
   });
 
-  it("survives .transform() and .pipe() chained after sensitive()", async () => {
+  it("survives .transform(), .pipe(), z.preprocess() and z.lazy() around sensitive()", async () => {
     for (const email of [
       sensitive(z.string()).transform((v) => v.trim()),
       sensitive(z.string()).pipe(z.string().min(1)),
+      z.preprocess((v) => String(v).trim(), sensitive(z.string())),
+      z.string().pipe(sensitive(z.string())),
+      z.lazy(() => sensitive(z.string())),
     ]) {
       const row = await split_for(email as z.ZodType<string>);
       expect(row?.pii).toEqual({ email: "alice@example.com" });

@@ -40,14 +40,18 @@ import {
   pii_split,
   pii_strip,
 } from "../internal/pii.js";
+import { def_of, output_of } from "../internal/zod.js";
 import { pii_schemas } from "../sensitive.js";
 import type { Actor, LaneConfig, Registry } from "../types/index.js";
 import { DEFAULT_LANE, SNAP_EVENT } from "../types/index.js";
 
 /** What one pass over an event's schema resolves. @internal */
 export type EventTags = {
-  /** Keys marked `sensitive(...)`, top level (and across union variants). */
-  readonly sensitive: readonly string[];
+  /**
+   * Keys marked `sensitive(...)`, top level (and across union variants), with
+   * the schema each declares.
+   */
+  readonly sensitive: Readonly<Record<string, z.ZodType>>;
   /**
    * Revives the dates in a stored `data` payload, or `undefined` when the
    * schema declares none.
@@ -94,7 +98,7 @@ export function event_tags(schema: z.ZodType): EventTags {
   };
   const dated_pii = Object.keys(pii_dates).length > 0;
   return {
-    sensitive: Object.keys(pii),
+    sensitive: pii,
     date_reviver: data_reviver_schema && revive(data_reviver_schema),
     pii_date_reviver: dated_pii ? revive(z.looseObject(pii_dates)) : undefined,
   };
@@ -128,7 +132,8 @@ function make_event_reader(
   disclosure: Disclosure,
   predicate: ((event: never, actor: Actor) => boolean) | null = null
 ): EventGate | undefined {
-  const { sensitive, date_reviver, pii_date_reviver } = tags;
+  const { date_reviver, pii_date_reviver } = tags;
+  const sensitive = Object.keys(tags.sensitive);
   if (!date_reviver && sensitive.length === 0) return undefined;
 
   const gate: EventGate =
@@ -177,6 +182,13 @@ function make_event_reader(
 export type BuiltEvents = {
   /** Backs `registry.sensitive_fields`. */
   readonly sensitive: Map<string, readonly string[]>;
+  /** The sensitive `Event.field`s, and `State.field`s of their name, a redaction marker doesn't fit. */
+  /**
+   * The sensitive-type advisory, naming each sensitive `Event.field`, and
+   * `State.field` of its name, that a redaction marker doesn't fit; or
+   * `undefined` when there are none. The builder logs it once.
+   */
+  readonly advisory: string | undefined;
   /** Backs `registry.query_gate` — the actor-less read surfaces. */
   readonly query_readers: Map<string, EventGate>;
   /** Readers for handlers — sensitive keys removed, payload typed. */
@@ -250,7 +262,8 @@ export function build_events(
     // built from: which fields are sensitive, and how to type the payload.
     const event = event_tags(def.schema);
     tags.set(event_name, event);
-    if (event.sensitive.length > 0) sensitive.set(event_name, event.sensitive);
+    const fields = Object.keys(event.sensitive);
+    if (fields.length > 0) sensitive.set(event_name, fields);
 
     // An event needing neither typing nor redaction produces no reader and
     // falls back to the shared IDENTITY_GATE — zero per-event cost.
@@ -279,11 +292,27 @@ export function build_events(
   // Per-state wiring, all of it derived from the same event resolution: the
   // read view, the write split, and the guard that refuses to combine the two
   // things that cannot coexist.
+  //
+  // A sensitive field reads as "[REDACTED]" or "[SHREDDED]" to a caller who
+  // may not see it, and so does any state field a reducer copies it into: a
+  // string. A field typed as anything else then holds a value its type
+  // doesn't allow, so it is named in the advisory. A state field is matched by
+  // name; a copy under another name can't be seen from the types.
+  const advised = new Set<string>();
   for (const state of states.values()) {
+    const shape: Record<string, z.ZodType> = state.state.shape ?? {};
     const state_fields = new Map<string, readonly string[]>();
     for (const event_name of Object.keys(state.events)) {
       const fields = sensitive.get(event_name);
-      if (fields) state_fields.set(event_name, fields);
+      if (!fields) continue;
+      state_fields.set(event_name, fields);
+      const event = tags.get(event_name) as EventTags;
+      for (const field of fields) {
+        if (!reads_as_string(event.sensitive[field]))
+          advised.add(`${event_name}.${field}`);
+        if (shape[field] && !reads_as_string(shape[field]))
+          advised.add(`${state.name}.${field}`);
+      }
     }
 
     if (state_fields.size > 0) {
@@ -325,5 +354,20 @@ export function build_events(
       (readers.get(event.name) ?? IDENTITY_GATE)(event as never, actor);
   }
 
-  return { sensitive, query_readers, handler_readers };
+  const advisory =
+    advised.size > 0
+      ? `Act has ${advised.size} sensitive field(s) whose type isn't a string: ${[...advised].join(", ")}. ` +
+        `A caller who may not see one reads "[REDACTED]" or "[SHREDDED]" there instead, ` +
+        `which its type doesn't allow. Declare sensitive fields as strings. ` +
+        `See docs/docs/guides/sensitive-data.md.`
+      : undefined;
+  return { sensitive, advisory, query_readers, handler_readers };
+}
+
+// Whether a schema's value is a string, so a redaction marker fits its type.
+// A transform's output can't be known, so it counts as a string rather than
+// be named falsely.
+function reads_as_string(schema: z.ZodType): boolean {
+  const type = def_of(output_of(schema))?.type;
+  return type === "string" || type === "transform";
 }

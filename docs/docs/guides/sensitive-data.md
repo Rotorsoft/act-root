@@ -78,7 +78,7 @@ None of this is a policy choice about how much PII may be persisted — it is st
 
 ### Where `sensitive(...)` can sit
 
-`sensitive(...)` marks a schema wherever it appears in an event's top-level shape, including behind `.optional()`, `.nullable()`, `.default()`, `.readonly()`, and `.catch()`, and including inside a `z.union` / `z.discriminatedUnion` variant (a key sensitive in *any* variant is split, since the stored payload could be that variant).
+`sensitive(...)` marks a schema wherever it appears in an event's top-level shape, including behind `.optional()`, `.nullable()`, `.default()`, `.readonly()` and `.catch()`, on either side of a pipe (`z.preprocess(fn, sensitive(z.string()))`, `z.string().pipe(sensitive(z.string()))`), inside `z.lazy()`, and inside a `z.union` / `z.discriminatedUnion` variant (a key sensitive in *any* variant is split, since the stored payload could be that variant).
 
 Refinements chained **after** the call are fine too, `.transform()` and `.pipe()` included: `sensitive(z.string()).min(1)` and `sensitive(z.string().min(1))` behave identically, and so do `sensitive(z.string()).transform(fn)` and `sensitive(z.string().transform(fn))`.
 
