@@ -47,10 +47,11 @@ import { DEFAULT_LANE, SNAP_EVENT } from "../types/index.js";
 
 /** What one pass over an event's schema resolves. @internal */
 export type EventTags = {
-  /** Keys marked `sensitive(...)`, top level (and across union variants). */
-  readonly sensitive: readonly string[];
-  /** The sensitive keys a redaction marker doesn't fit: their type isn't a string. */
-  readonly mistyped: readonly string[];
+  /**
+   * Keys marked `sensitive(...)`, top level (and across union variants), with
+   * the schema each declares.
+   */
+  readonly sensitive: Readonly<Record<string, z.ZodType>>;
   /**
    * Revives the dates in a stored `data` payload, or `undefined` when the
    * schema declares none.
@@ -82,11 +83,9 @@ export function event_tags(schema: z.ZodType): EventTags {
   // beside a plain sibling that is a Date.
   const pii = pii_schemas(schema);
   const pii_dates: Record<string, z.ZodType> = {};
-  const mistyped: string[] = [];
   for (const [key, field] of Object.entries(pii)) {
     const dates = date_reviver_schema(field);
     if (dates) pii_dates[key] = dates.optional();
-    if (!reads_as_string(field)) mistyped.push(key);
   }
 
   const data_reviver_schema = date_reviver_schema(schema);
@@ -99,8 +98,7 @@ export function event_tags(schema: z.ZodType): EventTags {
   };
   const dated_pii = Object.keys(pii_dates).length > 0;
   return {
-    sensitive: Object.keys(pii),
-    mistyped,
+    sensitive: pii,
     date_reviver: data_reviver_schema && revive(data_reviver_schema),
     pii_date_reviver: dated_pii ? revive(z.looseObject(pii_dates)) : undefined,
   };
@@ -134,7 +132,8 @@ function make_event_reader(
   disclosure: Disclosure,
   predicate: ((event: never, actor: Actor) => boolean) | null = null
 ): EventGate | undefined {
-  const { sensitive, date_reviver, pii_date_reviver } = tags;
+  const { date_reviver, pii_date_reviver } = tags;
+  const sensitive = Object.keys(tags.sensitive);
   if (!date_reviver && sensitive.length === 0) return undefined;
 
   const gate: EventGate =
@@ -184,7 +183,7 @@ export type BuiltEvents = {
   /** Backs `registry.sensitive_fields`. */
   readonly sensitive: Map<string, readonly string[]>;
   /** The sensitive `Event.field`s, and `State.field`s of their name, a redaction marker doesn't fit. */
-  readonly mistyped: ReadonlySet<string>;
+  readonly sensitive_non_string: ReadonlySet<string>;
   /** Backs `registry.query_gate` — the actor-less read surfaces. */
   readonly query_readers: Map<string, EventGate>;
   /** Readers for handlers — sensitive keys removed, payload typed. */
@@ -258,7 +257,8 @@ export function build_events(
     // built from: which fields are sensitive, and how to type the payload.
     const event = event_tags(def.schema);
     tags.set(event_name, event);
-    if (event.sensitive.length > 0) sensitive.set(event_name, event.sensitive);
+    const fields = Object.keys(event.sensitive);
+    if (fields.length > 0) sensitive.set(event_name, fields);
 
     // An event needing neither typing nor redaction produces no reader and
     // falls back to the shared IDENTITY_GATE — zero per-event cost.
@@ -291,9 +291,9 @@ export function build_events(
   // A sensitive field reads as "[REDACTED]" or "[SHREDDED]" to a caller who
   // may not see it, and so does any state field a reducer copies it into: a
   // string. A field typed as anything else then holds a value its type
-  // doesn't allow, so it is named in `mistyped`. A state field is matched
-  // by name; a copy under another name can't be seen from the types.
-  const mistyped = new Set<string>();
+  // doesn't allow, so it is named in `sensitive_non_string`. A state field is
+  // matched by name; a copy under another name can't be seen from the types.
+  const sensitive_non_string = new Set<string>();
   for (const state of states.values()) {
     const shape: Record<string, z.ZodType> = state.state.shape ?? {};
     const state_fields = new Map<string, readonly string[]>();
@@ -303,10 +303,10 @@ export function build_events(
       state_fields.set(event_name, fields);
       const event = tags.get(event_name) as EventTags;
       for (const field of fields) {
-        if (event.mistyped.includes(field))
-          mistyped.add(`${event_name}.${field}`);
+        if (!reads_as_string(event.sensitive[field]))
+          sensitive_non_string.add(`${event_name}.${field}`);
         if (shape[field] && !reads_as_string(shape[field]))
-          mistyped.add(`${state.name}.${field}`);
+          sensitive_non_string.add(`${state.name}.${field}`);
       }
     }
 
@@ -349,7 +349,7 @@ export function build_events(
       (readers.get(event.name) ?? IDENTITY_GATE)(event as never, actor);
   }
 
-  return { sensitive, mistyped, query_readers, handler_readers };
+  return { sensitive, sensitive_non_string, query_readers, handler_readers };
 }
 
 // Whether a schema's value is a string, so a redaction marker fits its type.
