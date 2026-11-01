@@ -112,7 +112,7 @@ Each value gets a small stream that records which streams hold it (`ann@x.io` â†
 ## What one `app.do` does
 
 1. **Load** the action's own stream (state and version), then each `.loads` target in declaration order; each target function sees the states loaded before it.
-2. **Check the preconditions** with the action's state and every state it loaded (`loaded`, keyed by state name, or by the load's name when named).
+2. **Check the preconditions** with the action's state and every state it loaded (the fourth argument, `loaded`, keyed by state name, or by the load's name when named).
 3. **Run `.emit` and route each event:** an event owned by the action's state goes to the action's stream; an event owned by a loaded state goes to that load's stream (named, when the state is loaded twice). Fold each event onto its stream's state, and check every folded state against its schema.
 4. **Commit once,** `commit(writes)`, with each stream's expected version set to the version it had **when it was loaded**. A loaded stream that receives no event is an empty write: a version check only.
 5. **The store checks every version in one atomic step.** If any stream moved since its load, nothing is written and the commit throws `ConcurrencyError`; `maxRetries` reruns the sequence from step 1 with fresh loads. An explicit `expectedVersion` from the caller applies to the action's own stream and is never retried.
@@ -128,14 +128,24 @@ No decision rests on stale context: every fact the preconditions and schemas saw
 
 ### Builders (additive)
 
-- **`.loads(State, target)`** and **`.loads(name, State, target)`** on the action chain of `state` and `slice`, between `.on(...)` and `.requires(...)`; it can repeat. `target(payload, state, loaded)` returns a stream id. The loaded state reaches preconditions as a fourth argument and `.emit` on its second (`{ state, loaded }`), keyed by state name or by `name`, and typed from each state.
+- **`.loads(State, target)`** and **`.loads(name, State, target)`** on the action chain of `state` and `slice`, between `.on(...)` and `.requires(...)`; it can repeat. `target(payload, state, loaded)` returns a stream id. The loaded states reach preconditions and `.emit` as a new fourth argument, `loaded`, keyed by state name or by `name`, and typed from each state.
 - **`.emit`** may return events owned by any state the action loads. An emitted tuple takes an optional third element, the load's name, when that state is loaded more than once. An event owned by a state the action doesn't load throws at build when the emit is static, and at the call when it isn't.
 - **`.unique(field, options?)`** and **`.limits(field, max, options?)`** on `state(...)`. `max` is a number or `(value) => number`. `.unique(f)` is `.limits(f, 1)` with its own message (`"<State>.<field> is unique"`, `"<State>.<field> is limited to <max>"`).
 - **`UniqueOptions`**, for both: `while?: (state) => boolean` (a stream holds its value only while true), `normalize?: (value) => string` (case, whitespace), `onClose?: "release" | "keep"` and `onForget?: "release" | "keep"` (whether closing or forgetting a stream frees its value or keeps it taken; `"release"` by default).
 
 ### `app.do`, lifecycle events, errors
 
-`app.do` returns the snapshots of every stream it wrote, its own first. `committed` carries them all; a state-scoped `committed` listener hears its own state's. No new error or event name: a failed rule is `PreconditionError`, a folded state its schema refuses is `ValidationError`, and a race is `ConcurrencyError`.
+`app.do` returns its own stream's snapshots, typed exactly as today. The other streams' commits reach `committed`, and a state-scoped listener (`app.on("committed", Seats, â€¦)`) hears them typed as that state. No new error or event name: a failed rule is `PreconditionError`, a folded state its schema refuses is `ValidationError`, and a race is `ConcurrencyError`.
+
+## Type safety
+
+Every new step is typed from the states it names, end to end, and a type-level test fails to compile when any of these widens:
+
+- **`.loads`:** a `State` carries its name as a literal type, so each load adds `{ [name]: thatState }` to the action's `loaded` type, in declaration order; a target function sees only the loads declared before it. A load name is a literal too, so a duplicate fails to compile.
+- **Preconditions:** `holds(payload, state, actor, loaded)`, the fourth parameter optional, so a shared `Precondition<S, unknown>` still fits every action.
+- **`.emit`:** `(payload, snapshot, target, loaded)`, and its return type is the state's own events plus every loaded state's events. A tuple's third element is typed as the names of the loads whose state owns that event, so a wrong or missing load name fails to compile. An event name belongs to one state per app (the build already refuses a duplicate), so routing by name is never ambiguous except for a state loaded twice, which is exactly when the name is required.
+- **`.unique` and `.limits`:** `field` accepts only state keys whose type is a string, number or enum; `while` gets the typed state; `normalize` and a `max` function get the field's type.
+- **`app.do` and act-http:** unchanged return types. A generated tRPC or Hono mutation still returns its action's snapshots, typed; the other streams' commits reach typed state-scoped `committed` listeners.
 
 ## Scenarios
 
@@ -220,7 +230,7 @@ The scaffold skill generates `.loads`, `.unique` and `.limits` when a spec state
 - a load of a closed stream refuses the whole commit;
 - a loaded stream loads with the caller's actor, so its sensitive fields are gated, and the state check's marker rule applies to it;
 - every written stream's cache entry is updated; a lost race drops the stale ones;
-- `app.do` returns every stream's snapshots, own first; `committed` carries them all; a state-scoped listener hears only its own; every written stream's reactions wake;
+- `app.do` returns only its own stream's snapshots, typed as today; `committed` carries every written stream; a state-scoped listener hears only its own state's, typed; every written stream's reactions wake;
 - a reaction's `app.do` that loads and emits across streams carries `reactingTo`, correlation and causation onto every event;
 - a load of a state in another scoped Act's store throws at build;
 - partial states and slices keep `.loads` on the action that declared it.
