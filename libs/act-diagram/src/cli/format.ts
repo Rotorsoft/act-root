@@ -240,10 +240,8 @@ export function format_action(idx: ContractIndex, entry: IndexEntry): string {
 export function format_state(idx: ContractIndex, entry: IndexEntry): string {
   // A state is commonly declared across several partials, which the
   // registry merges into one. Fold every matching node here rather than
-  // picking one with `.find` — the index collapses partials to the LAST
-  // one while this used to resolve the FIRST, so the header named a file
-  // that contained none of the listed members and the other partials'
-  // actions and events were missing entirely (#1392).
+  // picking one with `.find`, so the header names every partial's file and
+  // lists every partial's actions and events.
   const partials = idx.model.states.filter((s) => s.name === entry.name);
   const lines: string[] = [];
   lines.push(bold(amber(entry.name)));
@@ -294,9 +292,9 @@ export function format_slice(idx: ContractIndex, entry: IndexEntry): string {
   if (sl.error) lines.push(`  ${red("error: " + sl.error)}`);
   if (sl.states.length > 0) {
     // `SliceNode.states` holds internal `${name}:${idx}` disambiguator keys
-    // (build-model.ts). The diagram resolves them through its varName map;
-    // printing them raw named entities that don't exist — `Ticket:1` is not
-    // a state, and `act -q Ticket:1` finds nothing (#1396).
+    // (build-model.ts). Resolve them through the varName map, as the
+    // diagram does: printed raw they name entities that don't exist
+    // (`Ticket:1` is not a state).
     const by_var = new Map(idx.model.states.map((st) => [st.varName, st.name]));
     const names = [...new Set(sl.states.map((s) => by_var.get(s) ?? s))];
     lines.push("  states:");

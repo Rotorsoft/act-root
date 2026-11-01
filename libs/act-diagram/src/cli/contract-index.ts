@@ -5,8 +5,8 @@
  * symbol (events, actions, slices, projections, states, reactions),
  * and exposes a fuzzy lookup over them.
  *
- * Event status is derived from the `_v<digits>` convention documented
- * in CLAUDE.md and ACT-403: an event `Foo` is deprecated when any
+ * Event status is derived from the `_v<digits>` convention (see
+ * event-schema-evolution.md): an event `Foo` is deprecated when any
  * `Foo_v<n>` with a higher version exists.
  */
 import type { ActionNode, DomainModel } from "../client/types/index.js";
@@ -36,9 +36,9 @@ export type ContractIndex = {
   /**
    * Event names declared by each state, keyed by state name. Deprecation
    * is a per-state property — event names are per-state-namespaced, so two
-   * unrelated states may legally share a base name — and classifying over
-   * the global set reported one state's event as superseded by another's
-   * (#1393, the CLI twin of #1310).
+   * unrelated states may legally share a base name — so classifying over
+   * the global set would report one state's event as superseded by
+   * another's.
    */
   events_by_state: Map<string, Set<string>>;
 };
@@ -62,9 +62,8 @@ export function event_names_for(
  *
  * Only `v >= 2` counts as a version, mirroring the framework
  * (`event-versions.ts`): `Foo_v1` is a literal event name, since the base
- * `Foo` is implicitly v1. Treating it as a version made the CLI report a
- * current, emittable event as deprecated and tell operators to migrate
- * off it (#1395).
+ * `Foo` is implicitly v1. Treating it as a version would report a
+ * current, emittable event as deprecated.
  */
 export function decompose_event_name(name: string): {
   base: string;

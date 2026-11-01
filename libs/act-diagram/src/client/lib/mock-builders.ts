@@ -113,7 +113,7 @@ export function mock_state(
     archives: () => action_builder(_currentAction),
     // Disclosure predicate for `sensitive()` fields. Same reasoning as
     // the close-policy methods above: the diagram doesn't render it, but
-    // the chain must survive or the whole state is dropped (#1394).
+    // the chain must survive or the whole state is dropped.
     discloses: () => action_builder(_currentAction),
     build: () => {
       on_build?.(info);
@@ -214,7 +214,7 @@ export function mock_slice(on_build?: (info: any) => void) {
       return builder;
     },
     // Lane declaration — the diagram doesn't render lanes, but the chain
-    // must survive or the slice is dropped (#1394).
+    // must survive or the slice is dropped.
     withLane() {
       return builder;
     },
@@ -267,7 +267,7 @@ export function mock_projection(
     // State-projection (fold) form: `projection(n).of(State, ...).flush(fn)`.
     // The folded state's own events are what the projection handles, so
     // record them from each passed state — that is what makes the
-    // projection show up as a consumer of those events (#1394).
+    // projection show up as a consumer of those events.
     of(...states: any[]) {
       for (const st of states) {
         const events = st?.events;
@@ -333,7 +333,7 @@ export function mock_act(on_build?: (info: any) => void) {
     },
     withActor: () => builder,
     // Lane declaration — not rendered, but the chain must survive or the
-    // whole orchestrator is dropped from the model (#1394).
+    // whole orchestrator is dropped from the model.
     withLane: () => builder,
     on(event_name: string) {
       return {

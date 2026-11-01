@@ -10671,13 +10671,12 @@ export declare class DecryptionError extends Error {
  * important when the provider is a KMS round-trip.
  *
  * "Once" includes concurrent callers. The in-flight promise is what is
- * memoized, not the resolved key: caching the key alone left an \`await\`
- * between the cache miss and the cache write, so every caller arriving
- * before the first provider call settled missed too and made its own. On a
- * cold process serving concurrent requests that is one KMS round-trip per
- * request instead of one per process — rate limits, per-call billing, and
- * an audit-log entry each, exactly where the memo was supposed to help
- * (#1675's sibling, #1704).
+ * memoized, not the resolved key: caching the key alone would leave an
+ * \`await\` between the cache miss and the cache write, so every caller
+ * arriving before the first provider call settled would miss too and make
+ * its own. On a cold process serving concurrent requests that is one KMS
+ * round-trip per request instead of one per process — rate limits, per-call
+ * billing, and an audit-log entry each, exactly where the memo should help.
  *
  * A rejected attempt is not cached. The next call retries, so a transient
  * KMS failure at startup does not poison the resolver for the life of the
@@ -12909,7 +12908,7 @@ export type RedisSubscriber = {
      * node-redis v4: with a \`listener\` argument, removes only that listener;
      * without it, removes **every** listener on the channel. The broker always
      * passes the specific listener so co-subscribers on a shared client survive
-     * one subscriber's dispose (#1279).
+     * one subscriber's dispose.
      */
     unsubscribe(channel: string, listener?: (message: string) => void): Promise<unknown>;
 };
@@ -13473,7 +13472,7 @@ export declare const DEFAULT_BLOCKED_STREAMS_LIMIT = 1000;
  * is left alone, so prom-client keeps serving its last good sample. That
  * matters because \`max(act_streams_blocked) > 0\` is a documented page:
  * publishing \`0\` would resolve it during the very store incident that broke
- * the read (#1702). A *partial* failure still publishes the reduced sum — a
+ * the read. A *partial* failure still publishes the reduced sum — a
  * failing app contributes nothing this scrape.
  * prom-client would otherwise reject the whole \`registry.metrics()\` if any
  * \`collect()\` rejected, blinding the dashboard exactly when the store is in

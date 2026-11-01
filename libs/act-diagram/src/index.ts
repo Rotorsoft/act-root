@@ -6,7 +6,7 @@ export { Tooltip } from "./client/components/Tooltip.js";
 
 // Pipeline stages. `ActDiagram` drives these internally; they are public so
 // an IDE integration can run them itself — cache a model, extract in a
-// worker, or feed a non-standard file source (RFC 1650).
+// worker, or feed a non-standard file source.
 //
 // Public spellings are camelCase per the naming convention; the internal
 // implementations keep their snake_case names.

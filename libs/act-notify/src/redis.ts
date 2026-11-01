@@ -26,7 +26,7 @@ export type RedisSubscriber = {
    * node-redis v4: with a `listener` argument, removes only that listener;
    * without it, removes **every** listener on the channel. The broker always
    * passes the specific listener so co-subscribers on a shared client survive
-   * one subscriber's dispose (#1279).
+   * one subscriber's dispose.
    */
   unsubscribe(
     channel: string,
@@ -68,7 +68,7 @@ export class RedisBroker implements Broker {
     handler: (message: BrokerMessage) => void
   ): Promise<BrokerDisposer> {
     // Capture this subscriber's own listener so dispose removes exactly it —
-    // never the co-subscribers sharing this client (#1279). A channel-wide
+    // never the co-subscribers sharing this client. A channel-wide
     // `unsubscribe(channel)` would silence every worker on a shared broker.
     const listener = (raw: string) => {
       try {

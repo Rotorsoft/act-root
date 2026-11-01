@@ -12,14 +12,13 @@ import { topo_sort } from "./sort.js";
  *  `level: "full"` strips comments + strings + template literals (for scanning).
  *  `level: "nav"` strips comments + template literals only (for navigation).
  *
- *  Single left-to-right pass rather than sequential regex replaces. The
- *  passes used to run comments-first, so a `//` inside a string literal
- *  ("https://host/path") was treated as a comment start: blanking to
- *  end-of-line truncated the literal, and the dangling quote then paired
- *  with the next quote in the file, blanking every line between. One URL
- *  could erase a whole slice declaration (#1391). Scanning once with the
- *  cursor's context tracked makes that structurally impossible, and it
- *  handles the mirror case (a quote inside a comment) for free. */
+ *  Single left-to-right pass rather than sequential regex replaces.
+ *  Stripping comments first would take a `//` inside a string literal
+ *  ("https://host/path") for a comment start: blanking to end-of-line
+ *  truncates the literal, and the dangling quote then pairs with the next
+ *  quote in the file, blanking every line between. Scanning once with the
+ *  cursor's context tracked makes that impossible, and it handles the
+ *  mirror case (a quote inside a comment) for free. */
 export const strip_non_code = (src: string, level: "full" | "nav" = "full") => {
   const strip_strings = level === "full";
   let out = "";

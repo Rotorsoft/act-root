@@ -81,13 +81,12 @@ export class DecryptionError extends Error {
  * important when the provider is a KMS round-trip.
  *
  * "Once" includes concurrent callers. The in-flight promise is what is
- * memoized, not the resolved key: caching the key alone left an `await`
- * between the cache miss and the cache write, so every caller arriving
- * before the first provider call settled missed too and made its own. On a
- * cold process serving concurrent requests that is one KMS round-trip per
- * request instead of one per process — rate limits, per-call billing, and
- * an audit-log entry each, exactly where the memo was supposed to help
- * (#1675's sibling, #1704).
+ * memoized, not the resolved key: caching the key alone would leave an
+ * `await` between the cache miss and the cache write, so every caller
+ * arriving before the first provider call settled would miss too and make
+ * its own. On a cold process serving concurrent requests that is one KMS
+ * round-trip per request instead of one per process — rate limits, per-call
+ * billing, and an audit-log entry each, exactly where the memo should help.
  *
  * A rejected attempt is not cached. The next call retries, so a transient
  * KMS failure at startup does not poison the resolver for the life of the

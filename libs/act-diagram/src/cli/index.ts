@@ -186,8 +186,7 @@ export async function main(deps: RunDeps): Promise<number> {
   // Default interactive flow ships in `repl.ts`; tests inject a stub
   // so the non-`-q` branch is exercised without the clack prompts.
   // Files are threaded through so jump-to-source can resolve a real
-  // line: the model never populates EventNode.line / ActionNode.line, so
-  // the editor always opened at line 1 (#1396).
+  // line: the model never populates EventNode.line / ActionNode.line.
   await (deps.run_interactive ?? run_interactive)(idx, root_dir, files);
   return 0;
 }

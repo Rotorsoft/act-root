@@ -35,7 +35,7 @@ export const patch = <S extends Schema>(
   // large ones. Both branches must produce an ordinary-prototype object —
   // `Object.create(null)` here would return a prototype-less state (breaking
   // `instanceof`, `hasOwnProperty`, prototype-aware equality) for any state
-  // with >16 top-level keys (#1318).
+  // with >16 top-level keys.
   const orig_keys = Object.keys(original);
   const copy: Record<string, any> =
     orig_keys.length <= 16 ? { ...original } : {};

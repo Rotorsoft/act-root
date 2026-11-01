@@ -5562,13 +5562,12 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         expect(bwd).toEqual([10]);
       });
 
-      // Note (RFC 1274): floor-vs-time-bound suppression is no longer a
-      // store-level concern. The store applies the resume floor whenever
-      // `with_snaps` is set; the orchestrator is the single owner of floor
-      // eligibility and never combines `with_snaps` with an `asOf` bound. The
-      // suppression contract (`created_*`, `before`, `limit`)
-      // is now enforced at the orchestrator level in
-      // `libs/act/test/time-travel.spec.ts`.
+      // Floor-vs-time-bound suppression is not a store-level concern. The
+      // store applies the resume floor whenever `with_snaps` is set; the
+      // orchestrator is the single owner of floor eligibility and never
+      // combines `with_snaps` with an `asOf` bound. The suppression contract
+      // (`created_*`, `before`, `limit`) is tested at the orchestrator level
+      // in `libs/act/test/time-travel.spec.ts`.
 
       // Restore must split `pii` into the isolated store so
       // `forget_pii` erases it — otherwise restored PII stays inline and
