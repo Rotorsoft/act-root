@@ -170,12 +170,13 @@ export const presence = new PresenceTracker();
  * from it. One listener per broadcast state.
  */
 app.on("committed", Item, (snaps) => {
-  const last = snaps.at(-1);
-  if (!last?.event) return;
-  const streamId = last.event.stream;
+  // Fired only with committed snapshots: the last one and its event exist.
+  const last = snaps.at(-1)!;
+  const event = last.event!;
+  const streamId = event.stream;
   const fullState: AppState = {
     ...last.state,
-    _v: last.event.version, // MUST come from the event store version
+    _v: event.version, // MUST come from the event store version
   };
   // One domain patch per emitted event, in commit order
   const patches = snaps.map((s) => s.patch ?? {});

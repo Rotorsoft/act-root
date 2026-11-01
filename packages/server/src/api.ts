@@ -18,11 +18,12 @@ export type LiveState = z.infer<typeof Calculator.state> & { _v: number };
 // `committed` lifecycle event and fans out as version-keyed patches.
 export const broadcast = new BroadcastChannel<LiveState>();
 calculatorApp.on("committed", Calculator, (snapshots) => {
-  const last = snapshots.at(-1);
-  if (!last?.event) return;
+  // Fired only with committed snapshots: the last one and its event exist.
+  const last = snapshots.at(-1)!;
+  const event = last.event!;
   broadcast.publish(
-    last.event.stream,
-    { ...last.state, _v: last.event.version },
+    event.stream,
+    { ...last.state, _v: event.version },
     snapshots.map((s) => s.patch ?? {})
   );
 });
