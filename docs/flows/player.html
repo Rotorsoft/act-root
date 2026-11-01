@@ -719,9 +719,9 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
     const st = sc.steps.find(x => !x.at && !x.reject && (x.stream || sc.stream || "stream") === stream && nodes.get(x.to) && kindOf(nodes.get(x.to)) === "event");
     return st ? barAt(nodes.get(st.to).cx)?.label : undefined;
   }
-  // a refusal reads like Act's own error: a declared precondition that failed says so; anything else
-  // (a throw in .emit) keeps its message
-  const refusal = (action, reason) => (nodes.get(action)?.preconditions || []).includes(reason) ? `failed precondition: ${reason}` : reason;
+  // a refused precondition reads as the rule that didn't hold (a precondition is a holds() predicate);
+  // anything else (a throw in .emit) keeps its message
+  const refusal = (action, reason) => (nodes.get(action)?.preconditions || []).includes(reason) ? `"${reason}" didn't hold` : reason;
   // a short, stable id for the correlation an actor's action starts
   const corrId = (sc, i) => sc.correlation ? `${sc.correlation}${i ? "-" + i : ""}` : "c" + ((cur + 1) * 7919 + i * 104729).toString(36).slice(-4);
   // replays steps [0, k) into the event log, the folded state and blocked targets; each event carries its
