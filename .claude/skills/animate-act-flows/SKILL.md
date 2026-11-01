@@ -73,6 +73,9 @@ Each step walks one existing edge (`from`, `to`) or stands at one node (`at`):
 - `action → event` with `"reject": "<reason>"`: the state refuses, nothing commits. Use the real precondition description or error message. While the token stands on the state bar, the player lists the action's `preconditions` and checks them one by one. A reason that matches one of them stops the list on that row with ✕. Any other reason is a `throw` in `.emit(...)`, which runs only after every declared rule passed, so it shows as one more row after them. Keep the list in the order of the `.requires([...])` array (the extractor does; rules from the deprecated `.given([...])` come first).
 - `reaction → external` with `"retries": n` and `"backoff": ["~200 ms", ...]`: fails n times, then succeeds. Add `"blocked": true` and `"target"` when it runs out instead.
 - `{ "at": "<node>", "say": "...", "wait": "...", "noop": true }`: a timer that wakes and does nothing.
+- `"commit": "<id>"` on consecutive `action → event` steps from one action: they are one transaction. The checks run once, every token travels at once, a bracket reads "one commit · N events · M streams", and the event stream groups them. Put the whole commit's caption on its first step. The build refuses a split commit, a commit across two actions, and a commit on a refused step.
+
+The event stream shows each event's correlation and cause on its own: an actor's action starts a correlation, and a reaction's action inherits the correlation of the event that woke it. A scenario may set `"correlation": "<prefix>"` to name them.
 
 The player numbers events and stream versions, folds the state, runs every `event → projection` feed when an event commits, and works out who caused each event (person or automation) from the step that invoked its action.
 
@@ -97,7 +100,7 @@ The docs build runs `flows.mjs build` before Docusaurus, so the page goes live a
 ### 7. Video
 
 ```bash
-pnpm -F docs flows:video <app> [--scenario n] [--out file.mp4] [--size 1920x1080] [--theme dark|light] [--speed 1]
+pnpm -F docs flows:video <app | path/to/spec.flow.json> [--scenario n] [--out file.mp4] [--size 1920x1080] [--theme dark|light] [--speed 1]
 ```
 
 It needs Chrome and ffmpeg, and runs the whole scenario in real time, so record one scenario at a time and tell the user how long it will take. Don't commit videos.
@@ -146,7 +149,9 @@ It needs Chrome and ffmpeg, and runs the whole scenario in real time, so record 
         { "from": "action:CloseTicket", "to": "evt:TicketClosed", "say": "...", "data": {}, "patch": { "closedById": "ticket-timers" } },
         { "from": "action:AddMessage", "to": "evt:MessageAdded", "say": "...", "reject": "Ticket must be open" },
         { "from": "reaction:webhook", "to": "ext:hook", "say": "...", "retries": 3, "backoff": ["~200 ms"], "blocked": true, "target": "ticket-escalation-webhooks" },
-        { "at": "reaction:autoReassign", "say": "...", "wait": "deferred until reassignAfter", "noop": true }
+        { "at": "reaction:autoReassign", "say": "...", "wait": "deferred until reassignAfter", "noop": true },
+        { "from": "action:Enroll", "to": "evt:Enrolled", "say": "One commit writes both...", "commit": "c1" },
+        { "from": "action:Enroll", "to": "evt:SeatTaken", "stream": "course-c1", "commit": "c1" }
       ] }
   ]
 }

@@ -78,6 +78,21 @@ export function validate(spec) {
       if (!edge_keys.has(key)) problems.push(`scenario "${s.title}" step ${i + 1}: no edge ${st.from} -> ${st.to}`);
     });
   }
+  // a commit is consecutive steps from one action into events, with no refusal inside it
+  const lane_of = new Map((spec.nodes ?? []).map((n) => [n.id, n.lane]));
+  for (const s of spec.scenarios ?? []) {
+    const seen = new Set();
+    (s.steps ?? []).forEach((st, i) => {
+      if (st.commit === undefined) return;
+      const prev = s.steps[i - 1];
+      const continues = prev && prev.commit === st.commit && prev.from === st.from;
+      if (!continues && seen.has(st.commit)) problems.push(`scenario "${s.title}" step ${i + 1}: commit ${st.commit} is split; its steps must be consecutive`);
+      seen.add(st.commit);
+      if (lane_of.get(st.from) !== "action" || lane_of.get(st.to) !== "event") problems.push(`scenario "${s.title}" step ${i + 1}: a commit step goes from an action to an event`);
+      if (st.reject) problems.push(`scenario "${s.title}" step ${i + 1}: a refused step commits nothing, so it can't carry a commit`);
+      if (prev && prev.commit === st.commit && prev.from !== st.from) problems.push(`scenario "${s.title}" step ${i + 1}: one commit comes from one action`);
+    });
+  }
   const projections = new Set((spec.nodes ?? []).filter((n) => n.lane === "projection").map((n) => n.id));
   const unwalked = (spec.edges ?? [])
     .filter((e) => !projections.has(e.to) && !walked.has(`${e.from}>${e.to}`))
@@ -165,12 +180,15 @@ function arg(args, name, fallback) {
 async function video(args) {
   const name = args.find((a) => !a.startsWith("--") && !args[args.indexOf(a) - 1]?.startsWith("--"));
   if (!name) throw new Error("usage: flows.mjs video <name> [--scenario n] [--out file.mp4]");
-  const spec = load_spec(join(FLOWS, `${name}.flow.json`));
+  // a name reads docs/flows/<name>.flow.json; a path to a .flow.json reads that file (a preview not yet published)
+  const spec_path = name.endsWith(".flow.json") ? resolve(name) : join(FLOWS, `${name}.flow.json`);
+  const spec = load_spec(spec_path);
   const [width, height] = arg(args, "size", "1920x1080").split("x").map(Number);
   const scenario = arg(args, "scenario");
   const theme = arg(args, "theme", "dark");
   const speed = arg(args, "speed", "1");
-  const out = resolve(arg(args, "out", `${name}${scenario ? "-" + scenario : ""}.mp4`));
+  const base = basename(spec_path, ".flow.json");
+  const out = resolve(arg(args, "out", `${base}${scenario ? "-" + scenario : ""}.mp4`));
   execFileSync("ffmpeg", ["-version"], { stdio: "ignore" });
 
   const work = mkdtempSync(join(tmpdir(), "act-flow-"));

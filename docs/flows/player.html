@@ -83,6 +83,14 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
 .log li.rej .nm, .log li.blk .nm { color: var(--bad); }
 .log .st, .log .dt { grid-column: 2; color: var(--muted); overflow-wrap: anywhere; }
 .log .dt { font-size: 11.5px; }
+.log .mt { grid-column: 2; font-size: 11px; color: var(--muted); opacity: .85; overflow-wrap: anywhere; }
+.log li.tx { display: block; padding: 7px 0 2px; color: var(--muted); font: 600 10.5px var(--f-body); text-transform: uppercase; letter-spacing: .07em; }
+.log li.tx b { color: var(--ink); font-weight: 600; }
+.log li.in { border-left: 2px solid color-mix(in srgb, var(--event) 45%, transparent); padding-left: 8px; border-top-color: transparent; }
+.txb path { fill: none; stroke: var(--event); stroke-width: 1.6; }
+.txb rect { fill: var(--surface); stroke: var(--event); stroke-width: 1.2; }
+.txb text { font: 600 10.5px var(--f-mono); fill: var(--event); }
+.txb { animation: pop .25s ease-out; }
 .log .by { display: inline-flex; align-items: center; gap: 4px; }
 .log .by svg { width: 12px; height: 12px; flex: none; }
 .empty { display: block; color: var(--muted); font: 13px var(--f-body); }
@@ -694,21 +702,57 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
     }
     return null;
   }
-  // replays steps [0, k) into the event log, the folded state and blocked targets
+  // the steps that commit together: consecutive steps from one action that share a `commit` id
+  function groupAt(sc, i) {
+    const c = sc.steps[i]?.commit;
+    if (c === undefined) return [i, i + 1];
+    let a = i, b = i + 1;
+    while (a > 0 && sc.steps[a - 1].commit === c && sc.steps[a - 1].from === sc.steps[i].from) a--;
+    while (b < sc.steps.length && sc.steps[b].commit === c && sc.steps[b].from === sc.steps[i].from) b++;
+    return [a, b];
+  }
+  // a short, stable id for the correlation an actor's action starts
+  const corrId = (sc, i) => sc.correlation ? `${sc.correlation}${i ? "-" + i : ""}` : "c" + ((cur + 1) * 7919 + i * 104729).toString(36).slice(-4);
+  // replays steps [0, k) into the event log, the folded state and blocked targets; each event carries its
+  // commit, its correlation (started by an actor's action, inherited through reactions) and its cause
   function replay(k) {
     const sc = scenarios[cur], log = [], ver = {}, blocked = new Set();
+    const corr = new Map(), evIds = new Map();
     let id = sc.startId ?? 1, state = sc.initial ? structuredClone(sc.initial) : {}, changed = [];
+    const causeOf = i => {
+      const act = sc.steps[i].from;
+      for (let j = i - 1; j >= 0; j--) {
+        const st = sc.steps[j];
+        if (st.to !== act) continue;
+        const n = nodes.get(st.from);
+        if (kindOf(n) === "reaction") {
+          // the reaction ran on an event: the step that fed it names the event, whose commit holds the correlation
+          for (let t = j - 1; t >= 0; t--) {
+            if (sc.steps[t].to !== st.from) continue;
+            const ev = sc.steps[t].from;
+            for (let u = t; u >= 0; u--) if (sc.steps[u].to === ev && corr.has(u)) return { corr: corr.get(u), event: evIds.get(u) };
+          }
+        }
+        return { corr: corrId(sc, j) };
+      }
+      return { corr: corrId(sc, i) };
+    };
     for (let i = 0; i < k; i++) {
       const st = sc.steps[i];
       changed = [];
       if (st.at) continue;
       const n = nodes.get(st.to);
-      if (st.reject) { log.push({ type: "rej", name: nodes.get(st.from).label, reason: st.reject, who: issuer(sc, i) }); continue; }
+      if (st.reject) { log.push({ type: "rej", name: nodes.get(st.from).label, reason: st.reject, who: issuer(sc, i), corr: causeOf(i).corr }); continue; }
       if (st.blocked) { blocked.add(st.from); log.push({ type: "blk", name: st.target || nodes.get(st.from).label, reason: `blocked after ${(st.retries || 0) + 1} attempts` }); continue; }
       if (kindOf(n) !== "event") continue;
       const stream = st.stream || sc.stream || "stream";
       ver[stream] = (ver[stream] ?? -1) + 1;
-      log.push({ type: "evt", id: id++, name: n.label, stream, v: ver[stream], data: st.data, who: issuer(sc, i) });
+      const [g0] = groupAt(sc, i), cause = causeOf(g0);
+      corr.set(i, cause.corr); evIds.set(i, id);
+      const actStream = sc.steps[g0].stream || sc.stream || "stream";
+      log.push({ type: "evt", id: id++, name: n.label, stream, v: ver[stream], data: st.data, who: issuer(sc, i),
+        commit: st.commit !== undefined ? `${g0}:${st.commit}` : `${i}`, corr: cause.corr,
+        cause: cause.event ? `#${cause.event}` : `${nodes.get(st.from).label} on ${actStream}` });
       const patch = st.patch ?? st.data;
       if (stream === (sc.stream || "stream") && isObj(patch)) { state = merge(state, patch); changed = Object.keys(patch); }
     }
@@ -720,13 +764,28 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
     const ol = $("log");
     $("log-meta").textContent = r.log.filter(e => e.type === "evt").length + " committed";
     if (!r.log.length) ol.innerHTML = `<li><span class="empty" style="grid-column:1/-1">No events yet. Each commit lands here with its global id, stream version and who caused it.</span></li>`;
-    else ol.innerHTML = r.log.map((e, i) => {
-      const cls = (fresh && i === r.log.length - 1 ? "new " : "") + (e.type === "evt" ? "" : e.type);
-      const who = e.who ? `<span class="by">${svgIcon(e.who.kind)}${esc(e.who.name)}</span>` : "";
-      if (e.type === "rej") return `<li class="${cls}"><span class="id">✕</span><span class="nm">${esc(e.name)} refused</span><span class="st">${who}</span><span class="dt">${esc(e.reason)} · nothing committed</span></li>`;
-      if (e.type === "blk") return `<li class="${cls}"><span class="id">⛔</span><span class="nm">${esc(e.name)}</span><span class="st">${esc(e.reason)}</span></li>`;
-      return `<li class="${cls}"><span class="id">#${e.id}</span><span class="nm">${esc(e.name)}</span><span class="st">${esc(e.stream)} · v${e.v} · ${who}</span>${e.data ? `<span class="dt">${esc(fmt(e.data))}</span>` : ""}</li>`;
-    }).join("");
+    else {
+      // events of one commit sit under one header: one transaction, however many streams it wrote
+      const sizes = {};
+      for (const e of r.log) if (e.type === "evt") (sizes[e.commit] ??= new Set()).add(e.stream + "|" + e.id);
+      const last = r.log.at(-1), lastCommit = last?.type === "evt" ? last.commit : null;
+      let open = null;
+      ol.innerHTML = r.log.map((e, i) => {
+        const fresh_row = fresh && (i === r.log.length - 1 || (lastCommit && e.commit === lastCommit));
+        const who = e.who ? `<span class="by">${svgIcon(e.who.kind)}${esc(e.who.name)}</span>` : "";
+        if (e.type !== "evt") open = null;
+        if (e.type === "rej") return `<li class="${fresh_row ? "new " : ""}rej"><span class="id">✕</span><span class="nm">${esc(e.name)} refused</span><span class="st">${who}</span><span class="dt">${esc(e.reason)} · nothing committed</span>${e.corr ? `<span class="mt">corr ${esc(e.corr)}</span>` : ""}</li>`;
+        if (e.type === "blk") return `<li class="${fresh_row ? "new " : ""}blk"><span class="id">⛔</span><span class="nm">${esc(e.name)}</span><span class="st">${esc(e.reason)}</span></li>`;
+        const group = [...sizes[e.commit]], many = group.length > 1;
+        let head = "";
+        if (many && open !== e.commit) {
+          open = e.commit;
+          const streams = new Set(group.map(x => x.split("|")[0])).size;
+          head = `<li class="tx${fresh_row ? " new" : ""}">⟦ <b>one commit</b> · ${group.length} events · ${streams} stream${streams > 1 ? "s" : ""} ⟧</li>`;
+        } else if (!many) open = null;
+        return head + `<li class="${fresh_row ? "new " : ""}${many ? "in" : ""}"><span class="id">#${e.id}</span><span class="nm">${esc(e.name)}</span><span class="st">${esc(e.stream)} · v${e.v} · ${who}</span>${e.data ? `<span class="dt">${esc(fmt(e.data))}</span>` : ""}<span class="mt">corr ${esc(e.corr)} · ← ${esc(e.cause)}</span></li>`;
+      }).join("");
+    }
     ol.parentElement.scrollTop = ol.parentElement.scrollHeight;
     // the state the scenario's own stream belongs to: the bar over its first action
     const first = sc.steps.map(x => nodes.get(x.from)).find(n => n && kindOf(n) === "action");
@@ -775,7 +834,7 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
     for (const b of bands) b.g.classList.toggle("on", ids.some(id => b.members.has(id)));
   }
   function setNarr(k) {
-    const sc = scenarios[cur], st = sc.steps[k - 1];
+    const sc = scenarios[cur], st = k ? sc.steps[groupAt(sc, k - 1)[0]] : undefined;
     follow(st);
     lightBands(st);
     $("count").textContent = `${String(k).padStart(2, "0")} / ${String(sc.steps.length).padStart(2, "0")}`;
@@ -787,6 +846,11 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
     if (st.wait) return setChip("⏱ " + st.wait, "var(--reaction)");
     if (st.at) return setChip(st.noop ? "wakes · no-op" : nodes.get(st.at).label, color(nodes.get(st.at)));
     const n = nodes.get(st.to), cross = findEdge(st.from, st.to)?.cross;
+    const [g0, g1] = groupAt(sc, k - 1);
+    if (g1 - g0 > 1) {
+      const streams = new Set(sc.steps.slice(g0, g1).map(x => x.stream || sc.stream)).size;
+      return setChip(`one commit · ${g1 - g0} events · ${streams} streams`, "var(--event)");
+    }
     if (cross) return setChip(`${cross[0].label} → ${cross[1].label}`, cross[1].k);
     setChip((KINDS[kindOf(n)]?.tag || "") + " · " + n.label, color(n));
   }
@@ -864,6 +928,19 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
     const t = el("text", { x: x + 19, y: y + 4 }, g); t.textContent = text;
     return g;
   }
+  // a bracket under the events one commit wrote, so the transaction reads as one unit
+  function commitBrace(targets, streams) {
+    const g = el("g", { class: "txb" }, gFx);
+    const y = Math.max(...targets.map(t => t.bot)) + 10, x0 = Math.min(...targets.map(t => t.left)), x1 = Math.max(...targets.map(t => t.right));
+    let d = `M${x0},${y - 6} L${x0},${y} L${x1},${y} L${x1},${y - 6}`;
+    for (const t of targets.slice(1, -1)) d += ` M${t.cx},${y - 6} L${t.cx},${y}`;
+    el("path", { d }, g);
+    const label = `one commit · ${targets.length} events · ${streams} stream${streams > 1 ? "s" : ""}`;
+    const w = label.length * 6.6 + 14, cx = (x0 + x1) / 2;
+    el("rect", { x: cx - w / 2, y: y + 4, width: w, height: 18, rx: 9 }, g);
+    const t = el("text", { x: cx, y: y + 16.5, "text-anchor": "middle" }, g); t.textContent = label;
+    return g;
+  }
   // an action's preconditions in the order the state runs them
   function checksOf(n) {
     return (n.preconditions || []).map(t => ({ t, k: "pre" }));
@@ -925,6 +1002,27 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
     from.g.classList.add("on");
 
     const bar = barAt(from.cx);
+    const [g0, g1] = groupAt(sc, step);
+    if (g1 - g0 > 1 && kindOf(from) === "action" && bar) {
+      // one transaction: the checks run once, then every event of the commit lands together
+      const group = sc.steps.slice(g0, g1).map(x => ({ st: x, e: findEdge(x.from, x.to), to: nodes.get(x.to) }));
+      const f = fractionAtY(e, bar.cy);
+      if (!(await travel(e, token, 0, f))) return false;
+      ping(bar);
+      const rules = checksOf(from);
+      if (rules.length) { if (!(await checklist(from.cx, bar.cy, rules, undefined, token))) return false; }
+      else { const v = verdict(from.cx, bar.cy, "✓", "var(--good)"); const ok = await wait(650, token); v.remove(); if (!ok) return false; }
+      for (const x of group) x.e.g.classList.add("live");
+      const done = await Promise.all(group.map(x => travel(x.e, token, fractionAtY(x.e, bar.cy), 1)));
+      if (done.some(d => !d)) return false;
+      for (const x of group) { x.e.g.classList.remove("live"); x.e.g.classList.add("trail"); ping(x.to); barAt(x.to.cx)?.g.classList.add("on"); }
+      const brace = commitBrace(group.map(x => x.to), new Set(group.map(x => x.st.stream || sc.stream)).size);
+      step = g1;
+      renderPanels(step, true);
+      const ok = await wait(readTime(st) + 600, token);
+      brace.remove();
+      return ok;
+    }
     if (kindOf(from) === "action" && kindOf(to) === "event" && bar) {
       // the action passes through the state: its checks pass one by one, or one refuses
       const f = fractionAtY(e, bar.cy);
@@ -1010,7 +1108,8 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
   function stop() { run++; playing = false; gFx.innerHTML = ""; edges.forEach(e => e.g.classList.remove("live")); $("play").textContent = "Play"; }
   const toggle = () => playing ? (stop(), paint(step)) : play();
   const forward = async () => { const sc = scenarios[cur]; if (step >= sc.steps.length) return; stop(); paint(step); await doStep(++run); };
-  const backward = () => { stop(); step = Math.max(0, step - 1); paint(step); };
+  // stepping back lands on the start of a commit, never inside one
+  const backward = () => { stop(); const sc = scenarios[cur]; step = Math.max(0, step - 1); if (step < sc.steps.length) step = groupAt(sc, step)[0]; paint(step); };
   $("play").onclick = toggle;
   $("fwd").onclick = forward;
   $("back").onclick = backward;
