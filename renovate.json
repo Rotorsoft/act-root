@@ -41,7 +41,7 @@
       "matchFileNames": ["pnpm-workspace.yaml"]
     },
     {
-      "description": "The docs package is a deliberate TypeScript 6 island (CLAUDE.md \u00a7 Important Constraints). typedoc caps its `typescript` peer at 6.x, and on TS7 it dies inside typedoc reading 'PropertyDeclaration', taking `pnpm -F docs build:all` with it; `check:snippets` fails separately with 'ts.createProgram is not a function', since the TS7 native compiler does not expose the JS API that script uses. The rest of the workspace is on TS7 and pnpm's per-package isolation keeps the two apart. Revisit when typedoc supports TS7 \u2014 and delete this rule then rather than widening it.",
+      "description": "The docs package is a deliberate TypeScript 6 island (CLAUDE.md § Important Constraints). typedoc caps its `typescript` peer at 6.x, and on TS7 it dies inside typedoc reading 'PropertyDeclaration', taking `pnpm -F docs build:all` with it; `check:snippets` fails separately with 'ts.createProgram is not a function', since the TS7 native compiler does not expose the JS API that script uses. The rest of the workspace is on TS7 and pnpm's per-package isolation keeps the two apart. Revisit when typedoc supports TS7 — and delete this rule then rather than widening it.",
       "matchFileNames": ["docs/package.json"],
       "matchPackageNames": ["typescript"],
       "matchUpdateTypes": ["major"],
@@ -55,12 +55,16 @@
         "@fast-check/vitest",
         "hono",
         "@hono/node-server",
-        "@trpc/server",
         "express",
         "fastify",
         "prom-client"
       ],
       "groupName": "{{{depName}}}"
+    },
+    {
+      "description": "Every @trpc package moves in one PR. act-http's generated tRPC router is typed by @trpc/server and the example clients are typed by @trpc/client and @trpc/react-query; when they sit on different versions the client's AppRouter constraint fails and every procedure types as `never` (#2281: client 11.22.1 against server 11.19.0). One group also keeps act-http's @trpc/server peer and devDependency together, which the rule above does for the other peers.",
+      "matchPackageNames": ["@trpc/**"],
+      "groupName": "tRPC"
     },
     {
       "description": "@types/node tracks the oldest Node the libraries support (the engines floor, currently 22), not the newest runtime CI uses. Types newer than the floor let code call APIs a Node 22 user doesn't have, and typecheck would never notice; the weekly node-compat job (conformance.yml) runs the tests on the floor, but only for paths that are exercised. Browser globals are kept out separately, by `lib: [\"ES2022\"]` in libs/tsconfig.base.json. Raise this together with the engines floor.",
@@ -71,6 +75,12 @@
       "description": "react and react-dom must always be the exact same version: React checks this at runtime, and the docs build (Docusaurus server render) throws 'Incompatible React versions' when they differ. They used to sit in the per-package rule above, which split them into two PRs that each bumped one and failed CI on their own. One PR moves both, with every peer and dev entry of each.",
       "matchPackageNames": ["react", "react-dom"],
       "groupName": "react"
+    },
+    {
+      "description": "The Node engines floor (22) is the oldest runtime the published libraries support, tested weekly by node-compat in conformance.yml. Raising it breaks every install on an older Node, so it changes only by hand, in a major release, together with @types/node (the rule above). Renovate otherwise bumps `engines.node` like any dependency (#2282 proposed >=26 across every library).",
+      "matchDepTypes": ["engines"],
+      "matchPackageNames": ["node"],
+      "enabled": false
     }
   ],
   "lockFileMaintenance": {
