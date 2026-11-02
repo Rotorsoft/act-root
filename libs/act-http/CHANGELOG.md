@@ -1,3 +1,10 @@
+# [@rotorsoft/act-http-v1.12.3](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-http-v1.12.2...@rotorsoft/act-http-v1.12.3) (2026-11-02)
+
+
+### Bug Fixes
+
+* **deps:** update dependency hono to ^4.13.14 ([#2277](https://github.com/Rotorsoft/act-root/issues/2277)) ([962c4f0](https://github.com/Rotorsoft/act-root/commit/962c4f0c17b5e63e32de9de59e02ac5809897dbc))
+
 # [@rotorsoft/act-http-v1.12.2](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-http-v1.12.1...@rotorsoft/act-http-v1.12.2) (2026-11-01)
 
 # [@rotorsoft/act-http-v1.12.1](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-http-v1.12.0...@rotorsoft/act-http-v1.12.1) (2026-10-31)
