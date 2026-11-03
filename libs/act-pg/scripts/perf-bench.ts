@@ -34,6 +34,7 @@
 import { performance } from "node:perf_hooks";
 import {
   act,
+  ConcurrencyError,
   cache,
   dispose,
   type ReactionHandler,
@@ -171,6 +172,30 @@ const QS_STREAMS = 200; // streams seeded for query_stats pagination
 const QS_PAGE = 50; // page size for the query_stats fetch
 const NOTIFY_COMMITS = 1; // events per notify run (one round-trip)
 
+const HOT_WRITERS = 8; // concurrent commits on the hot shared stream
+
+/** One event to each of n fresh streams, in one commit. */
+const streamWrites = (n: number) => {
+  const id = Math.random();
+  return Array.from({ length: n }, (_, i) => ({
+    stream: `multi-${id}-${i}`,
+    msgs: incMsgs(1),
+  }));
+};
+
+/** Writes a fresh stream and the shared "hot" stream, retrying a lost race. */
+async function commitWithRetry() {
+  const own = { stream: `own-${Math.random()}`, msgs: incMsgs(1) };
+  for (;;) {
+    try {
+      await store().commit([own, { stream: "hot", msgs: incMsgs(1) }], meta);
+      return;
+    } catch (error) {
+      if (!(error instanceof ConcurrencyError)) throw error;
+    }
+  }
+}
+
 const scenarios: Scenario[] = [
   {
     // Single-event commit — the durable write hot path: one INSERT +
@@ -199,6 +224,45 @@ const scenarios: Scenario[] = [
       await store().commit(
         [{ stream: `batch-${Math.random()}`, msgs: incMsgs(50) }],
         meta
+      );
+    },
+  },
+  {
+    // Two- and three-stream commits — one event per stream, all or none.
+    // Next to "commit: single event", they price each extra stream: one
+    // more head read and one more row in the same write.
+    name: "commit: 2 streams",
+    batchSize: 2,
+    async setup() {
+      await resetStore();
+    },
+    async run() {
+      await store().commit(streamWrites(2), meta);
+    },
+  },
+  {
+    name: "commit: 3 streams",
+    batchSize: 3,
+    async setup() {
+      await resetStore();
+    },
+    async run() {
+      await store().commit(streamWrites(3), meta);
+    },
+  },
+  {
+    // A hot shared stream: HOT_WRITERS commits at once, each writing its
+    // own stream and the same shared one, retried on ConcurrencyError
+    // until every one lands. Prices the contention a counter or a
+    // uniqueness stream sees when many actions write it together.
+    name: `commit: hot shared stream (${HOT_WRITERS} writers)`,
+    batchSize: HOT_WRITERS,
+    async setup() {
+      await resetStore();
+    },
+    async run() {
+      await Promise.all(
+        Array.from({ length: HOT_WRITERS }, () => commitWithRetry())
       );
     },
   },
@@ -371,6 +435,9 @@ async function main() {
   const counts: Record<string, number> = {
     "commit: single event": 100,
     "commit: 50-event batch": 50,
+    "commit: 2 streams": 100,
+    "commit: 3 streams": 100,
+    [`commit: hot shared stream (${HOT_WRITERS} writers)`]: 30,
     "load: cold replay over snapshot floor": 50,
     "drain: correlate+drain 50 events": 30,
     "query_stats: page of 50 (count+names)": 30,

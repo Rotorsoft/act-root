@@ -223,6 +223,73 @@ describe("SqliteStore error paths", () => {
     await real.dispose();
   });
 
+  describe("commit across streams, failing part-way", () => {
+    // A real DB whose transactions run every statement except the ones
+    // `fail` picks, so the first write's rows are inserted before the
+    // second write's insert fails.
+    async function store_failing(fail: (stmt: Stmt) => unknown) {
+      const real = new SqliteStore({ url: tmp_db_url() });
+      await real.seed();
+      const client = (real as unknown as { client: { transaction: unknown } })
+        .client;
+      const begin = (
+        client.transaction as (mode: string) => Promise<unknown>
+      ).bind(client);
+      (
+        client as { transaction: (mode: string) => Promise<unknown> }
+      ).transaction = async (mode: string) => {
+        const tx = (await begin(mode)) as {
+          execute: (stmt: Stmt) => Promise<unknown>;
+        };
+        const execute = tx.execute.bind(tx);
+        tx.execute = (stmt: Stmt) => {
+          const failure = fail(stmt);
+          return failure ? Promise.reject(failure) : execute(stmt);
+        };
+        return tx;
+      };
+      return real;
+    }
+    const inserts_into = (stmt: Stmt, stream: string) =>
+      typeof stmt !== "string" &&
+      stmt.sql.startsWith("INSERT INTO events") &&
+      stmt.args?.[0] === stream;
+    const writes = [
+      { stream: "first", msgs: [{ name: "E", data: {} }] },
+      { stream: "second", msgs: [{ name: "E", data: {} }] },
+    ];
+    const meta = { correlation: "", causation: {} };
+
+    it("rolls back the first write when the second write's insert fails", async () => {
+      const real = await store_failing(
+        (stmt) => inserts_into(stmt, "second") && new Error("disk full")
+      );
+      const err = await real.commit(writes, meta).catch((e) => e);
+      expect(err).toBeInstanceOf(StoreError);
+      expect((err.cause as Error).message).toBe("disk full");
+      const stored: unknown[] = [];
+      await real.query((e) => stored.push(e));
+      expect(stored).toEqual([]);
+      await real.dispose();
+    });
+
+    it("names the second stream when its insert hits a unique collision", async () => {
+      const collision = Object.assign(new Error("UNIQUE constraint failed"), {
+        code: "SQLITE_CONSTRAINT_UNIQUE",
+      });
+      const real = await store_failing(
+        (stmt) => inserts_into(stmt, "second") && collision
+      );
+      const err = await real.commit(writes, meta).catch((e) => e);
+      expect(err).toBeInstanceOf(ConcurrencyError);
+      expect((err as ConcurrencyError).stream).toBe("second");
+      const stored: unknown[] = [];
+      await real.query((e) => stored.push(e));
+      expect(stored).toEqual([]);
+      await real.dispose();
+    });
+  });
+
   it("commit: throws ConcurrencyError when expectedVersion mismatches", async () => {
     const tx = txOk();
     tx.execute.mockImplementation((stmt: Stmt) => {
