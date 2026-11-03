@@ -73,7 +73,7 @@ Each step walks one existing edge (`from`, `to`) or stands at one node (`at`):
 - `action → event` with `"reject": "<reason>"`: the state refuses, nothing commits. Use the real precondition description or error message. While the token stands on the state bar, the player lists the action's `preconditions` and checks them one by one. A reason that matches one of them stops the list on that row with ✕, and the event stream and caption read `"<reason>" didn't hold`. Any other reason is a `throw` in `.emit(...)`, which runs only after every declared rule passed, so it shows as one more row after them. Keep the list in the order of the `.requires([...])` array (the extractor does; rules from the deprecated `.given([...])` come first).
 - `reaction → external` with `"retries": n` and `"backoff": ["~200 ms", ...]`: fails n times, then succeeds. Add `"blocked": true` and `"target"` when it runs out instead.
 - `{ "at": "<node>", "say": "...", "wait": "...", "noop": true }`: a timer that wakes and does nothing.
-- `"commit": "<id>"` on consecutive `action → event` steps from one action: they are one transaction. The checks run once, every token travels at once, a bracket reads "one commit · N events · M streams", and the event stream groups them. Put the whole commit's caption on its first step. The build refuses a split commit, a commit across two actions, and a commit on a refused step.
+- `"commit": "<id>"` on consecutive `action → event` steps from one action: they are one transaction. The checks run once, every token travels at once, a bracket reads "one commit · N events · M streams", and the event stream groups them. Put the whole commit's caption on its first step. The build refuses a split commit, a commit across two actions, and a commit on a refused step. A 1.x action commits to its own stream only; a commit across streams is the 2.0 design (RFC 2251), for a spec with `preview` set.
 
 The event stream shows each event's correlation and cause on its own: an actor's action starts a correlation, and a reaction's action inherits the correlation of the event that woke it. A scenario may set `"correlation": "<prefix>"` to name them.
 
@@ -112,6 +112,7 @@ It needs Chrome and ffmpeg, and runs the whole scenario in real time, so record 
   "title": "WolfDesk Ticket Flows",       // page name, 2-4 words
   "subtitle": "One sentence on what the map shows.",
   "source": "packages/wolfdesk/src",
+  "preview": "RFC 2251",                  // only for a design not built yet: a "Design preview" badge
   "colWidth": 142,                         // optional
   "lanes": [                               // top to bottom; empty lanes are dropped
     { "id": "actor", "label": "Actors" },
@@ -150,8 +151,8 @@ It needs Chrome and ffmpeg, and runs the whole scenario in real time, so record 
         { "from": "action:AddMessage", "to": "evt:MessageAdded", "say": "...", "reject": "Ticket must be open" },
         { "from": "reaction:webhook", "to": "ext:hook", "say": "...", "retries": 3, "backoff": ["~200 ms"], "blocked": true, "target": "ticket-escalation-webhooks" },
         { "at": "reaction:autoReassign", "say": "...", "wait": "deferred until reassignAfter", "noop": true },
-        { "from": "action:Enroll", "to": "evt:Enrolled", "say": "One commit writes both...", "commit": "c1" },
-        { "from": "action:Enroll", "to": "evt:SeatTaken", "stream": "course-c1", "commit": "c1" }
+        { "from": "action:OpenTicket", "to": "evt:TicketOpened", "say": "One commit writes both...", "commit": "c1" },
+        { "from": "action:OpenTicket", "to": "evt:TicketAssigned", "commit": "c1" }
       ] }
   ]
 }

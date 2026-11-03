@@ -130,7 +130,7 @@ function gallery(specs) {
   const cards = specs
     .map(
       (s) => `<a class="card" href="${esc_attr(s.slug)}.html">
-      <span class="name">${esc_attr(s.title)}</span>
+      <span class="name">${esc_attr(s.title)}</span>${s.preview ? `\n      <span class="badge">Design preview · ${esc_attr(s.preview)}</span>` : ""}
       <span class="desc">${esc_attr(s.subtitle)}</span>
       <span class="meta">${s.scenarios.length} scenarios · ${s.nodes.length} elements · ${esc_attr(s.source)}</span>
     </a>`
@@ -152,11 +152,12 @@ a { color: var(--accent); }
 .card:hover, .card:focus-visible { border-color: var(--accent); }
 .name { font: 600 19px "IBM Plex Sans Condensed", system-ui, sans-serif; }
 .desc { color: var(--muted); font-size: 14px; }
+.badge { justify-self: start; font: 500 12px "IBM Plex Mono", ui-monospace, monospace; color: var(--accent); border: 1px solid var(--accent); border-radius: 999px; padding: 1px 9px; }
 .meta { font: 12px "IBM Plex Mono", ui-monospace, monospace; color: var(--muted); }
 </style>
 <main>
   <h1>Act flow animations</h1>
-  <p>Each map below is generated from an Act application's builders: every action, state check, event, projection, reaction and timer, with scenarios that play the flows step by step. <a href="../docs/guides/flow-animations">Make one for your app</a>.</p>
+  <p>Each map below is generated from an Act application's builders, or from an RFC's design, marked as a preview: every action, state check, event, projection, reaction and timer, with scenarios that play the flows step by step. <a href="../docs/guides/flow-animations">Make one for your app</a>.</p>
   <div class="grid">
 ${cards}
   </div>

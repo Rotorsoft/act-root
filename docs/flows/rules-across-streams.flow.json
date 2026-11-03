@@ -2,6 +2,7 @@
   "title": "Rules Across Streams",
   "subtitle": "A design preview of Act 2.0 (RFC 2251): one action loads the streams its decision needs, and commits its events to all of them at once.",
   "source": "rfcs/2251-rules-across-streams.md",
+  "preview": "RFC 2251",
   "lanes": [
     {
       "id": "actor",
@@ -44,7 +45,7 @@
       "col": 1,
       "preconditions": ["the course has a free seat"],
       "schema": "course: string\nstudent: string",
-      "description": ".on({ Enroll }).loads(Seats, (data) => `course-${data.course}`, [\"SeatTaken\"]). It loads the course's Seats before checking its rule, may emit SeatTaken to it, and commits Enrolled and SeatTaken together, guarded by both streams' versions."
+      "description": ".on({ Enroll }, { maxRetries: 1 }).loads(Seats, (data) => `course-${data.course}`, [\"SeatTaken\"]). It loads the course's Seats before checking its rule, may emit SeatTaken to it, and commits Enrolled and SeatTaken together, guarded by both streams' versions."
     },
     {
       "id": "action:Register",
@@ -400,7 +401,7 @@
         },
         {
           "at": "action:Enroll",
-          "say": "In Act 2.0, Enroll adds one line: `.loads(Seats, course, [\"SeatTaken\"])`. It loads the course's Seats for its decision, and may commit **SeatTaken** to it."
+          "say": "In Act 2.0, Enroll adds one line: `.loads(Seats, course, [\"SeatTaken\"])`, and `{ maxRetries: 1 }` so a lost race is decided again. It loads the course's Seats for its decision, and may commit **SeatTaken** to it."
         },
         {
           "from": "actor:student",
@@ -484,7 +485,7 @@
         {
           "from": "actor:student",
           "to": "action:Enroll",
-          "say": "Bob's commit expected course-c1 at the version he loaded. It moved, so **nothing of his was written** (`ConcurrencyError`), and `maxRetries` reloads both streams."
+          "say": "Bob's commit expected course-c1 at the version he loaded. It moved, so **nothing of his was written** (`ConcurrencyError`), and Enroll's `maxRetries: 1` reloads both streams."
         },
         {
           "from": "action:Enroll",
@@ -605,7 +606,7 @@
         },
         {
           "at": "state:Email",
-          "say": "Had any of the three streams moved since it was loaded, **nothing** would have been written, and the action would retry with fresh loads."
+          "say": "Had any of the three streams moved since it was loaded, **nothing** would have been written, and the action's `maxRetries` would retry with fresh loads."
         }
       ],
       "initials": {
