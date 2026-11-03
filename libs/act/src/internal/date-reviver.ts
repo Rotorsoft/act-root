@@ -9,7 +9,7 @@
  */
 
 import { z } from "zod";
-import { def_of } from "./zod.js";
+import { def_of, inner_of } from "./zod.js";
 
 /**
  * Rebuild one union variant so it still recognises its own payloads.
@@ -124,14 +124,7 @@ export function date_reviver_schema(schema: unknown): z.ZodType | undefined {
       // `z.preprocess()` and `.pipe()`: the stored value is the output side.
       // A `.transform()`'s output is unknown, so it revives nothing.
       return date_reviver_schema(def.out);
-    case "optional":
-    case "nonoptional":
-    case "readonly":
-    case "default":
-    case "prefault":
-    case "catch":
-      return inner();
     default:
-      return undefined;
+      return inner_of(def) ? inner() : undefined;
   }
 }
