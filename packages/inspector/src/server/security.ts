@@ -34,6 +34,32 @@ export function resolveBindHost(
 }
 
 /**
+ * Host header check, against DNS rebinding. A page on any domain can point
+ * that domain at 127.0.0.1; the browser then treats the inspector as the
+ * page's own origin, sends reads with no `Origin`, and lets the page read
+ * the answers. The `Host` header still names the page's domain, so a
+ * request is served only when it names a loopback host, the host the
+ * server is bound to, or one listed in `ACT_INSPECTOR_ALLOWED_HOSTS`
+ * (comma-separated). A request with no `Host` is refused.
+ */
+export function hostAllowed(
+  host: string | undefined,
+  bindHost: string,
+  allowlist: string | undefined
+): boolean {
+  if (!host) return false;
+  const name = host
+    .replace(/:\d+$/, "")
+    .replace(/^\[(.*)\]$/, "$1")
+    .toLowerCase();
+  const allowed = (allowlist ?? "")
+    .split(",")
+    .map((h) => h.trim().toLowerCase())
+    .filter(Boolean);
+  return LOOPBACK.has(name) || name === bindHost || allowed.includes(name);
+}
+
+/**
  * CORS origin decision. Two modes:
  *
  *   - `CORS_ORIGIN` set — strict allowlist, echo only that exact

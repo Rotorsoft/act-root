@@ -108,7 +108,7 @@ Every client-supplied file path a `transfer` uses — the `csv` and `sqlite` sou
 
 The server binds **loopback (`127.0.0.1`) by default** — the unauthenticated tRPC surface (file transfer, `prioritize`) is reachable only from the operator's own machine. To expose it on the network, set `ACT_INSPECTOR_HOST` (e.g. `0.0.0.0`) explicitly; the server logs a warning when it binds to anything other than loopback. Behind that, put the inspector on a firewalled host or behind auth — nothing in the inspector authenticates callers.
 
-CORS allows any `http(s)://localhost` origin in local dev (or the exact `CORS_ORIGIN` when set). Origin-less requests can still *read*, but **mutations from an origin-less or cross-site request are refused** unless an explicit `CORS_ORIGIN` allowlist pins the caller — a small CSRF hardening for the mutating procedures.
+CORS allows any `http(s)://localhost` origin in local dev (or the exact `CORS_ORIGIN` when set). Every request must name the inspector in its `Host` header: a loopback name, the `ACT_INSPECTOR_HOST` it is bound to, or a host listed in `ACT_INSPECTOR_ALLOWED_HOSTS` (comma-separated); anything else gets 403. That stops a DNS-rebinding page, which points its own domain at `127.0.0.1`, from reading the inspector through your browser. Origin-less requests can still *read*, but **mutations from an origin-less or cross-site request are refused** unless an explicit `CORS_ORIGIN` allowlist pins the caller — a small CSRF hardening for the mutating procedures.
 
 ### Navigation
 
