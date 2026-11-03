@@ -103,7 +103,7 @@ Idempotent. Creates the events table, the streams (subscription) table, and the 
 
 ### Concurrency model
 
-SQLite serializes write transactions at the database level. No application-layer locking, no `FOR UPDATE SKIP LOCKED` needed — writes queue on the store's connection, and `ack`/`block` validate `leased_by` to prevent stale workers from interfering. For a single-server deployment, this gives the same isolation guarantees as Postgres.
+SQLite serializes write transactions at the database level. No `FOR UPDATE SKIP LOCKED` needed — the store runs its statements and transactions one at a time on its connection, so concurrent calls from one process (two requests committing at once, a commit beside the drain's claim) wait their turn instead of failing, and `ack`/`block` validate `leased_by` to prevent stale workers from interfering. For a single-server deployment, this gives the same isolation guarantees as Postgres.
 
 #### One connection per database file
 

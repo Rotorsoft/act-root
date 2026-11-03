@@ -9415,11 +9415,14 @@ export declare function streamPatternToGlob(input: string): string;
  * Provides persistent event storage using SQLite via \`@libsql/client\`.
  * All write operations use transactions for ACID guarantees.
  *
- * SQLite is a single-writer store: concurrent write transactions raise
- * \`SQLITE_BUSY\` rather than serializing transparently, so it does not
- * support competing consumers the way PostgreSQL's \`FOR UPDATE SKIP LOCKED\`
- * does (the TCK leaves \`concurrent_claim\` off for this reason). The intended
- * model is a single drain worker per database file.
+ * SQLite is a single-writer store. The store runs its statements and
+ * transactions one at a time on its one connection, so concurrent calls
+ * from one process wait their turn. A second connection to the same file
+ * (another process, another \`SqliteStore\`) still fails with \`SQLITE_BUSY\`,
+ * so it does not support competing consumers the way PostgreSQL's
+ * \`FOR UPDATE SKIP LOCKED\` does (the TCK leaves \`concurrent_claim\` off for
+ * this reason). The intended model is one store, and one drain worker, per
+ * database file.
  *
  * **\`Store.notify\` is intentionally not implemented.** The notify hook is
  * a cross-process wake-up signal that lets a horizontally-scaled Act
@@ -9445,6 +9448,9 @@ export declare class SqliteStore implements Store {
     private _parse_pii_from_read;
     seed(): Promise<void>;
     drop(): Promise<void>;
+    private _turn;
+    private _serial;
+    private _exec;
     private _tx;
     dispose(): Promise<void>;
     commit<E extends Schemas>(stream: string, msgs: Message<E, keyof E>[], meta: EventMeta, expectedVersion?: number): Promise<Committed<E, keyof E>[]>;
