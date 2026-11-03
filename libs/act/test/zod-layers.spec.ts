@@ -7,7 +7,8 @@ import { sensitive } from "../src/types/schemas.js";
 
 /**
  * Every feature that looks inside a field's schema sees through the same
- * wrappers, because they all ask `internal/zod.ts`. Each row places a schema
+ * wrappers, because they all ask `internal/zod.ts`; the date reviver's two
+ * exceptions (nullable, lazy) have their own tests. Each row places a schema
  * behind one wrapper and checks the three things features ask of it.
  */
 const placements: Record<string, (inner: () => z.ZodType) => z.ZodType> = {
@@ -79,6 +80,15 @@ describe("seeing through Zod wrappers", () => {
     const self: z.ZodType = z.lazy(() => self);
     expect(some_layer(self, () => false)).toBe(false);
     expect(output_of(self)).toBe(self);
+  });
+
+  it("sees nothing inside z.success or z.promise, whose value isn't the inner one", () => {
+    for (const s of [z.success(z.date()), z.promise(z.date())]) {
+      expect(wrapped(s)).toEqual([]);
+      expect(output_of(s)).toBe(s);
+      expect(date_reviver_schema(s)).toBeUndefined();
+    }
+    expect(is_sensitive(z.success(sensitive(z.string())))).toBe(false);
   });
 
   it("finds no layers in a schema without a definition", () => {
