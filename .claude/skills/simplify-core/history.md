@@ -8,24 +8,24 @@ Least recently run goes next. A lens with no accepted proposal in its last three
 
 | lens | last run | runs | accepted | status |
 |---|---|---|---|---|
-| Public surface | 2026-10-30 | 8 | 2 | active (#2201 left `action()`'s doc and act-http's "undefined skips the check"; `ConcurrencyError`'s example hand-rolls the retry) |
-| Dead code (tool) | 2026-10-31 | 9 | 8 | active (two `sensitive()` markers where one covers every case; act-diagram's CLI defines four helpers twice; knip clean in core) |
+| Public surface | 2026-11-03 | 9 | 2 | active (no surface growth; `Store.query`'s published doc still describes adapter-side date revival, #2284) |
+| Dead code (tool) | 2026-10-31 | 9 | 10 | active (two `sensitive()` markers where one covers every case; act-diagram's CLI defines four helpers twice; knip clean in core) |
 | Hotspots (tool) | 2026-10-20 | 5 | 1 | retired 2026-10-20: two runs with no proposal; every branch in the hot functions (correlate, action, drain) is a separate rule |
-| File budget | 2026-10-30 | 9 | 1 | active (9 over 300 code lines; event-sourcing.ts 473 → 504 with #2200's check) |
-| Comment noise | 2026-10-31 | 9 | 9 | active (29 ticket refs outside core; act-ops' published doc names shipped tickets in future tense; the stacked-doc awk missed one-line blocks) |
-| Concepts and options | 2026-10-30 | 9 | 3 | active (action × reaction retries multiply, (N+1)(M+1); `reactingTo` now only builds meta) |
+| File budget | 2026-11-03 | 10 | 1 | active (9 over 300 code lines; act.ts 857 with #2228's overloads; no split subtracts) |
+| Comment noise | 2026-10-31 | 9 | 11 | active (29 ticket refs outside core; act-ops' published doc names shipped tickets in future tense; the stacked-doc awk missed one-line blocks) |
+| Concepts and options | 2026-11-03 | 10 | 3 | active (RFC 2251 reviewed before it is built: five cuts, #2289–#2293) |
 | Core or decorator? | 2026-10-15 | 3 | 0 | retired 2026-10-15: three runs, findings only (PII, audit, breaker, lanes stay; priority is a major-version question) |
-| DRY across adapters and builders | 2026-10-31 | 9 | 13 | active (#2230's warning re-walks the event schemas `build_events` walks; Zod definitions read three ways, and `is_pii`'s missed `.transform`/`.pipe`) |
-| Reading path | 2026-10-30 | 8 | 3 | active (13 files, ~33 names; `app.do` breaks on an action that emits nothing; the correlator default in three places) |
+| DRY across adapters and builders | 2026-10-31 | 9 | 15 | active (#2230's warning re-walks the event schemas `build_events` walks; Zod definitions read three ways, and `is_pii`'s missed `.transform`/`.pipe`) |
+| Reading path | 2026-11-03 | 9 | 3 | active (13 files, ~33 names; #2263 adds `zod.ts` to the build path only) |
 | Newcomer test (quarterly) | 2026-10-17 | 2 | 0 | active (21 concepts, 3 imports; a package.json without name/version crashes) |
-| Tests by concept | 2026-10-31 | 9 | 15 | active (row 261's test never blocks; the partial options merge survives a mutation; four defer tests in real-clock windows) |
+| Tests by concept | 2026-10-31 | 9 | 18 | active (row 261's test never blocks; the partial options merge survives a mutation; four defer tests in real-clock windows) |
 | Mutation evidence (monthly, CI) | never | 0 | 0 | retired: setup removed (#1805), see baselines below |
 | Packages earn their place | 2026-10-15 | 4 | 0 | retired 2026-10-15: four runs, no proposal (removal is ruled out; act-tck churn is the snapshot, now P2026-10-15p-1) |
-| Infra | 2026-10-30 | 9 | 2 | active (per-package tsc red where the gate is green; Biome schema drift; 59 private JSDoc blocks in the published .d.ts) |
-| One source of truth | 2026-10-30 | 9 | 8 | active (configuration.md's stale copy of the state-check docs) |
-| Examples | 2026-10-30 | 8 | 3 | active (the close-the-books recipe can't run: `@act/wolfdesk` has no entry point) |
-| Process | 2026-10-30 | 8 | 9 | active (3 of 4 CI-CD reds in a week were the snapshot alone; release-check names a script no package has) |
-| Feature interactions | 2026-10-31 | 9 | 17 | active (SSE broadcasts the committer's view; three owners decide which state fields can read as a marker; the actor-gated fold meets every new reader) |
+| Infra | 2026-11-03 | 10 | 2 | active (the act `./types` snapshot block repeats root, #2288; Renovate's dev-deps splitter and its three undo rules, backlog) |
+| One source of truth | 2026-11-03 | 10 | 8 | active (`Store.query` and `pii_schemas` docs contradict their owners, #2284) |
+| Examples | 2026-11-03 | 9 | 3 | active (5 of 5 runnable recipes green; the RFC 2251 preview loses its label when embedded, #2285) |
+| Process | 2026-11-03 | 9 | 9 | active (/pr asks for two body shapes and 36 PRs used ~20, backlog; the context hook's separator, #2286) |
+| Feature interactions | 2026-10-31 | 9 | 20 | active (SSE broadcasts the committer's view; three owners decide which state fields can read as a marker; the actor-gated fold meets every new reader) |
 
 ## Interaction register
 
@@ -83,6 +83,7 @@ Where two features meet, and why. The Feature interactions lens reads this first
 | marker-capable state fields: state check, sensitive-type warning, OpenAPI | the check filters by value; the warning and `<State>Snapshots` match by name and miss renamed copies | accidental (three owners) | i-2, i-3 → #2233 |
 | state-scoped `committed`, generic `committed` | one call site in `Act.do`, after #2213's patch check | shared primitive | the empty-action check covers both (probed) |
 | state-scoped `committed`, remote commits | neither fires for another process's commit; hosts use `notified` | justified | same as the generic listener |
+| multi-stream commit (RFC 2251, planned), act-pg commit lock | a guard on a loaded stream that gets no events: the unique index fires only for rows inserted, and a read inside the locked statement sees the snapshot from before the lock | accidental, in the design | #2289 (probed on real Postgres: head `-1` vs truth `0`; control `0`); SQLite checks inside its write transaction |
 
 ## Mutation baselines
 
@@ -103,6 +104,9 @@ The last trusted Stryker scores, recorded when the setup was removed (#1805) bec
 
 Sound proposals that missed a run's cut. The next run ranks these before looking for new ones.
 
+- Renovate: drop the "Dev dependencies" group rule, which splits a package's peer and dev entries into two PRs, and the three rules that undo it (the peer/dev list, the @trpc rule from #2283, react/react-dom), relying on `config:recommended`'s `group:monorepos` (~−1.8 KB of 5.5 KB, 4 of 11 rules). Unprobed: grouping shows only on the dashboard after merge; the peer/dev rule also isolates zod, vitest and hono minors, which is the user's call. (P2026-11-03p-2)
+- `/pr` asks for two body shapes (a section list and "four questions"); 36 PRs since 10-30 used ~20 heading sets. Keep the four questions plus `Closes #N` and the charter line (~−0.6 KB). (P2026-11-03p-3)
+
 - history.md has no budget (140 KB on 2026-10-30, was 119 KB; run entries before 2026-10-22 are 69 KB, read by every run and specialist): keep the tables, the backlog, the self-changes and the last three runs, and fold each older run into one line with its tickets and rejections (~−64 KB). A change to the skill's memory: the user's call. (P2026-10-27p-3)
 
 - `export *` over `ports.ts`, `utils.ts`, `config.ts` publishes anything added there without an RFC. (The `@internal` tags half is P2026-10-23-3.)
@@ -122,6 +126,8 @@ Sound proposals that missed a run's cut. The next run ranks these before looking
 - Workflow and Renovate comments cut to their why: workflow comment lines 164 → 43, `renovate.json` 5.1 → 2.8 KB (ticket-history rule descriptions). Same kind as #2075, outside core. (P2026-10-23p-2)
 
 ## Self-changes
+
+- 2026-11-03: the Specialists section resizes the main pane to half the window right after spawning (the user: "the skill didnt remember to set the panel width to half the screen"; the rule lived only in memory). Specialists write their final report into their notes file: three of four reports arrived cut off in the idle notification, and two specialists stopped on the usage limit and were resumed from their notes. `metrics.sh` counts an RFC only if `rfcs/` has it: "RFC 4180" (the CSV standard) in an inspector test name read as a ticket ref.
 
 - 2026-10-31: step 6 now tickets every verified finding when the report is done and closes each specialist as it reports; the specialists run as named teammates. The user gave the same instruction two runs in a row ("create tickets and close teammates as they finish") and asked not to repeat it. The Comment noise awk now checks the open before the close (it missed a one-line `/** */` above another) and uses `[ \t]` (macOS awk ignores `\s`); `metrics.sh` counts `RFC nnnn` refs. Evidence: act-diagram's `list_by_kind` doc and "RFC 1274" in a test name, both missed.
 
@@ -863,3 +869,43 @@ Findings, not proposed: the actor-gated fold has met every new reader of state (
 Lens metrics: knip 40 unused files, all known false positives; ticket refs outside core 29 (+2 RFC refs in a test); time-budget tests verified 3 (+1 same shape); tests that can't fail for their name 3 + 1 title; adapter suites repeating the TCK 0 new; fix commits in lib sources over 4 months 213, the active cluster the actor-gated fold × readers of state; the lanes/lease/defer cluster has had no fix since #2117.
 
 Tickets: #2231–#2242.
+
+### 2026-11-03 — full run (four specialists: public surface + file budget + reading path, concepts and options + field, source of truth + examples, process + infra)
+
+| metric | 2026-10-31 | now | why |
+|---|---|---|---|
+| core lines (libs/act/src) | 17834 | 17873 | #2263 (+146/−95: `internal/zod.ts`, every walker through it, three leaking placements fixed), #2261 (−18), #2244 (+5) |
+| ticket refs in test names | 0 | 0 | the count read 1 ("RFC 4180", the CSV standard) until `metrics.sh` matched only RFCs in `rfcs/` |
+| files over 300 code lines | 10 | 9 | act-builder.ts 327 → 293 (#2263) |
+| spec files / test lines | 221 / 60968 | 221 / 61129 | #2263's `zod-layers.spec` (+95), #2264 (−96), #2247, #2248 |
+| docs lines | 9385 | 9428 | #2244–#2246, #2263, #2274 |
+| everything else | | unchanged | 52 exports, 8 / 24 / 18 / 11, 0 ticket refs in core, 42% (29% / 14%) comments, 9 files touching 5+ features, 5 workflows / 575 lines, CLAUDE.md 27 KB |
+
+Audit: 27 PRs since the last run, 7 from Renovate. All twelve tickets from 2026-10-31 shipped (#2244–#2249, #2261, #2263–#2267). The sensitive-field walkers were fixed four times in two days (#2244 → #2246 → #2261 → #2263), a fix-on-fix chain that #2263 ended by giving Zod's internals one owner; the date reviver kept its own wrapper list (#2287). New design, not yet built: RFC 2251 (rules across streams, #2271) and its flow preview (#2275), with ten 2.0 tickets open (#2253–#2260, #2272, #2273). #2283 added a Renovate rule that undoes another rule (backlog).
+
+Decisions on P2026-10-31*: all accepted and shipped (dry-D1 → #2244, i-1 → #2245, i-2 + i-3 → #2246, t-1/3/4 → #2247, t-2 → #2248, d-D1–D3 → #2249, d-1 → #2261, dry-1 → #2263, t-s1 + t-s2 → #2264, d-2 → #2265, d-3 → #2266, i-4 → #2267).
+
+Promises kept: dry-1 −16 → +51 source (it took in the plain-text leak #2269 and four walkers' worth of wrappers; act-builder.ts did reach 293); d-1 ~−20 → −18; d-2 −76 → −76; t-s1 + t-s2 −109 → −96; i-4 −3 → +2 (the scaffold skill's copies changed too).
+
+Verified in the main loop before ranking: the act-pg probe on port 5431 (a read in the same statement after the CTE's advisory lock sees head `-1` where the truth is `0`; control, lock then a separate read, `0`); RFC 2251 lines 64, 139, 265 and the flow's "The last seat" against `maxRetries`' default 0; `ports.ts:606-612` against `extension-points.md:78`; `sensitive.ts:44` and `event-builder.ts:185`; `date-reviver.ts:127-132`'s own wrapper list; the `./types` snapshot block, 11 files each identical to root's copy; `IFS=' · '` joining with a space; `player.html:203` hiding `.embed .brand` and `flows.mjs:159`'s "generated from an Act application's builders".
+
+Proposals, ticketed when the report was done. Defects first:
+- sb-D1 + te-2 + te-3. Three doc comments contradict the code (`Store.query`'s date revival, published; `pii_schemas`' wrapper list, published; a stacked `BuiltEvents` doc) → #2284.
+- c-D2 + te-1. RFC 2251's example promises a retry it doesn't declare, and the preview label is lost when embedded and in the gallery intro, guide and animate skill → #2285.
+- p-D2. The context hook joins with a space, not " · " → #2286.
+- c-D1 is part of c-1 below.
+Simplifications:
+- sb-P1. One list of single-inner Zod wrappers in `zod.ts`, the reviver included (~−3) → #2287.
+- p-1. Drop the act `./types` snapshot block, 4,635 of 14,995 lines, derived from root's `export *` → #2288.
+- c-1. 2.0: a load without events is a read; guard only streams written (the act-pg promise needs a locked round trip otherwise; Marten and Kurrent 25.1 guard written streams only) → #2289, the user's call.
+- c-2. 2.0: `.loads` targets get the payload and the action's state, no chaining (one of 13 scenarios needs it) → #2290.
+- c-3. 2.0: the keyed hash for sensitive stream ids as a docs section, not act-crypto's first hashing export → #2291.
+- c-4. 2.0: teach 13 scenarios as 6 patterns, one place each, in the flow file #2275 already shipped → #2292.
+- c-5. 2.0: a loaded state must be registered in this Act, instead of a cross-scope check → #2293.
+Backlog: p-2 (Renovate splitter), p-3 (`/pr` one shape); the history fold (P2026-10-27p-3) stays pending: history.md is 154 KB.
+
+Findings, not proposed: wolfdesk's `tickets.spec` `busy()` reads six subscription fields and knows `retry: -1` means a defer, and testing.md:203 teaches it (0 of 10 failures with and without it, inconclusive); six example sites pass `{ reactingTo: event }`, which `Act.do` injects (examples aren't rewritten; event-sourcing.md:165 is a text fix); act-http's README SSE snippet lacks the sensitive-state warning; `default_correlator` still falls back in three places (one owner costs ~70 test edits); `docs-build.yml` doesn't run on lib-only PRs while deploy-docs does (0 failures since 10-31); `no-check` snippets that call the API were not type-checked this run (due next run). Field: Wolverine routes events by the stream handle appended to, with no static list; tag-based DCB (Axon 5) stays rejected, multi-stream append is the smaller port.
+
+Lens metrics: files over 300 code lines 9 (act.ts 857, in-memory-store 730, audit 566, event-sourcing 504, types/builders 464, drain-cycle 457, close-cycle 450, correlate-cycle 418, types/action 325); reading path 13 files, ~33 names; RFC 2251 planned additions: 1 port signature, 1 builder step, 1 handler argument, ~7 build checks, 1 act-crypto export, 13 scenarios × 4 places (c-1–c-5 remove the export, the chaining rule, the read-only guard and ~8 scenario copies); CI-CD reds 4 of 73 (3 the tRPC split #2283 fixed, 1 snapshot-only); runnable recipes 5 of 5 green.
+
+Tickets: #2284–#2293.
