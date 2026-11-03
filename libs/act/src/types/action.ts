@@ -368,25 +368,6 @@ export type Snapshot<TState extends Schema, TEvents extends Schemas> = {
 };
 
 /**
- * A rule declared with the deprecated `.given([...])`: a condition the
- * current state (and the actor) must meet for an action to run now.
- *
- * Despite the name, it's a precondition, not an invariant: it guards one
- * action and is false at other times by design. What must hold after every
- * action belongs in the state's schema, which every action checks before it
- * commits.
- *
- * @deprecated Declare the rule with `.requires([...])` as a
- * {@link Precondition} that ignores the payload. Removed in 2.0.
- * @template TState - State schema.
- * @template TActor - Actor type extending base Actor.
- */
-export type Invariant<TState extends Schema, TActor extends Actor = Actor> = {
-  description: string;
-  valid: (state: Readonly<TState>, actor?: TActor) => boolean;
-};
-
-/**
  * A precondition is a named rule an action requires before it runs: what
  * the state, the actor and the payload must meet for the action to run now,
  * such as "the ticket must be open". Declared with `.requires([...])` and
@@ -513,15 +494,6 @@ export type ActionHandlers<
   TActions extends Schemas,
 > = {
   [TKey in keyof TActions]: ActionHandler<TState, TEvents, TActions, TKey>;
-};
-
-/**
- * Maps action names to the deprecated `.given` rules checked before the action's handler runs.
- * @template TState - State schema.
- * @template TActions - Action schemas.
- */
-export type GivenHandlers<TState extends Schema, TActions extends Schemas> = {
-  [TKey in keyof TActions]?: Invariant<TState>[];
 };
 
 /**
@@ -739,7 +711,6 @@ export type State<
   init: () => Readonly<TState>;
   patch: PatchHandlers<TState, TEvents>;
   on: ActionHandlers<TState, TEvents, TActions>;
-  given?: GivenHandlers<TState, TActions>;
   requires?: RequiresHandlers<TState, TActions>;
   snap?: (snapshot: Snapshot<TState, TEvents>) => boolean;
   /**

@@ -19,7 +19,6 @@ import type {
   EventRegister,
   FoldOptions,
   IAct,
-  Invariant,
   LaneConfig,
   PatchHandlers,
   Precondition,
@@ -422,7 +421,7 @@ type ActionEmit<
 };
 
 /**
- * What follows `.on(...)` or `.given(...)`: the preconditions, then the
+ * What follows `.on(...)`: the preconditions, then the
  * `.emit(...)` that finishes the action.
  */
 type ActionRules<
@@ -544,7 +543,7 @@ export type ActionBuilder<
    * @param entry - Single-key record `{ ActionName: schema }`
    * @param options - Optional per-action retry policy
    *   ({@link ActionOptions}).
-   * @returns An object with `.given()`, `.requires()` and `.emit()` for further configuration
+   * @returns An object with `.requires()` and `.emit()` for further configuration
    *
    * @example Simple action without preconditions
    * ```typescript
@@ -555,41 +554,7 @@ export type ActionBuilder<
   on: <TKey extends string, TNewActions extends Schema>(
     entry: ActionEntry<TKey, TNewActions>,
     options?: ActionOptions
-  ) => ActionRules<
-    TState,
-    TEvents,
-    TActions,
-    TName,
-    TSnap,
-    TKey,
-    TNewActions
-  > & {
-    /**
-     * Adds rules the current state (and the actor) must meet for the action
-     * to run now, checked before `.requires()`. A rule whose
-     * `valid(state, actor?)` returns `false` refuses the action with the
-     * deprecated `InvariantError` (`"<action> failed invariant: ..."`).
-     *
-     * @deprecated These rules are preconditions, not invariants. Declare
-     * them with `.requires()`, whose `holds(payload, state, actor?)` can
-     * ignore the payload; invariants belong in the state's schema. Removed
-     * in 2.0.
-     *
-     * @param rules - Array of {@link Invariant} objects (`{ description, valid }`)
-     * @returns An object with `.requires()` and `.emit()` to finish the action
-     */
-    given: (
-      rules: Invariant<TState>[]
-    ) => ActionRules<
-      TState,
-      TEvents,
-      TActions,
-      TName,
-      TSnap,
-      TKey,
-      TNewActions
-    >;
-  };
+  ) => ActionRules<TState, TEvents, TActions, TName, TSnap, TKey, TNewActions>;
   /**
    * Defines a snapshotting strategy to optimize state reconstruction.
    *

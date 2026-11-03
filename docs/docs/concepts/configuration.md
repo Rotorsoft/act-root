@@ -142,7 +142,6 @@ const app = act()
 - **`listen`** (default `true`) — subscribe to `Store.notify` on this instance. Set `false` on writer-only instances: commits still notify, but the instance doesn't subscribe to the channel. The subscriber-connection budget is the practical scaling ceiling for the notify/listen pattern; writer-only fleets shouldn't spend it.
 - **`drain`** (default `true`) — run the local reaction pipeline. Set `false` to make `correlate()`, `drain()`, and `settle()` no-ops and skip auto-cycle workers. The `notified` lifecycle event still fires when `listen` is on, so observability sidecars (`listen: true, drain: false`) work.
 - **`circuitBreaker`** (defaults: `failureThreshold` 5, `cooldownMs` 30_000) — see [Circuit breaker](#circuit-breaker) below. Out-of-range values throw a `ZodError` at `build()`.
-- **`validateFoldedState`** — deprecated and ignored: every action checks its invariants before it commits. See [Invariants](#invariants) below.
 
 ### Circuit breaker
 
@@ -171,7 +170,7 @@ A single-node deployment rarely needs to tune this; raise the threshold for flak
 
 ### Invariants
 
-There is nothing to configure: every action checks the state it leaves against the state's Zod schema before it commits. What the check covers and what it ignores is in [state-management § Invariants](./state-management.md#invariants). `ActOptions.validateFoldedState` is deprecated and ignored, and is removed in 2.0.
+There is nothing to configure: every action checks the state it leaves against the state's Zod schema before it commits. What the check covers and what it ignores is in [state-management § Invariants](./state-management.md#invariants).
 
 ### Deployment shapes via `listen` / `drain`
 

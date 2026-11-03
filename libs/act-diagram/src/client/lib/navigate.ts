@@ -46,12 +46,12 @@ function build_patterns(esc: string, type?: string): RegExp[] {
   const guard_patterns = [
     // Guard definition — prefer jumping to the declaration
     new RegExp(
-      `(?:const|let|var)\\s+(${esc})\\s*(?::\\s*(?:Invariant|Precondition)\\b[^=]*)?\\s*=`
+      `(?:const|let|var)\\s+(${esc})\\s*(?::\\s*Precondition\\b[^=]*)?\\s*=`
     ),
     new RegExp(`rule\\(\\s*["'\`](${esc})["'\`]`),
     new RegExp(`description:\\s*["'\`](${esc})["'\`]`),
-    // .given() or .requires() usage in the state builder — last resort
-    new RegExp(`\\.(?:given|requires)\\([\\s\\S]*?(${esc})`),
+    // .requires() usage in the state builder — last resort
+    new RegExp(`\\.requires\\([\\s\\S]*?(${esc})`),
   ];
   const slice_patterns = [
     new RegExp(`(?:const|let|var)\\s+(${esc})\\s*=\\s*slice\\s*\\(`),
@@ -162,7 +162,7 @@ export function navigate_to_code(
         if (desc_match) {
           const before = c.slice(0, desc_match.index);
           const decl_re =
-            /(?:export\s+)?(?:const|let|var)\s+(\w+)\s*(?::\s*(?:Invariant|Precondition)[^=]*)?\s*=/g;
+            /(?:export\s+)?(?:const|let|var)\s+(\w+)\s*(?::\s*Precondition[^=]*)?\s*=/g;
           let last_decl: RegExpExecArray | null = null;
           let m: RegExpExecArray | null;
           while ((m = decl_re.exec(before)) !== null) {
@@ -223,7 +223,7 @@ export function navigate_to_code(
       if (desc_match) {
         const before = c.slice(0, desc_match.index);
         const decl_re =
-          /(?:export\s+)?(?:const|let|var)\s+(\w+)\s*(?::\s*(?:Invariant|Precondition)[^=]*)?\s*=/g;
+          /(?:export\s+)?(?:const|let|var)\s+(\w+)\s*(?::\s*Precondition[^=]*)?\s*=/g;
         let last_decl: RegExpExecArray | null = null;
         let m: RegExpExecArray | null;
         while ((m = decl_re.exec(before)) !== null) last_decl = m;

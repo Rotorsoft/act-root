@@ -76,7 +76,6 @@ export function mock_state(
     schema: entry[name],
     events: {} as Record<string, any>,
     actions: {} as Record<string, any>,
-    given: {} as Record<string, any[]>,
     requires: {} as Record<string, any[]>,
     patches: new Set<string>(),
     _tag: "State" as const,
@@ -94,14 +93,7 @@ export function mock_state(
         if (rules) info.requires[action_name] = rules;
         return { emit };
       };
-      return {
-        given(rules?: any[]) {
-          if (rules) info.given[action_name] = rules;
-          return { requires, emit };
-        },
-        requires,
-        emit,
-      };
+      return { requires, emit };
     },
     snap: () => action_builder(_currentAction),
     // Close-the-books policy methods. The diagram doesn't render the
@@ -376,14 +368,7 @@ export function mock_act(on_build?: (info: any) => void) {
   return builder;
 }
 
-class InvariantError extends Error {
-  constructor(message?: string) {
-    super(message);
-    this.name = "InvariantError";
-  }
-}
-
-class PreconditionError extends InvariantError {
+class PreconditionError extends Error {
   constructor(message?: string) {
     super(message);
     this.name = "PreconditionError";
@@ -408,7 +393,6 @@ export const MODULES: Record<string, Record<string, unknown>> = {
     }),
     dispose: () => () => Promise.resolve(),
     ZodEmpty: z.record(z.string(), z.never()),
-    InvariantError,
     PreconditionError,
   },
   zod: { z, ...z },

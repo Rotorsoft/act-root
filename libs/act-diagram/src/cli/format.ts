@@ -222,7 +222,7 @@ export function format_action(idx: ContractIndex, entry: IndexEntry): string {
       `  in:      ${dim(loc(state_file, action?.line ?? entry.line))}`
     );
   if (action) {
-    const preconditions = action.preconditions ?? action.invariants;
+    const preconditions = action.preconditions ?? [];
     if (preconditions.length) {
       lines.push("  preconditions:");
       for (const pre of preconditions) lines.push(`    - ${pre}`);

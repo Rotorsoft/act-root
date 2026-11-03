@@ -260,7 +260,6 @@ type ApiError = {
 |---|---|---|
 | `ValidationError` | 422 / `VALIDATION` | `UNPROCESSABLE_CONTENT` |
 | `PreconditionError` | 409 / `PRECONDITION` | `CONFLICT` |
-| `InvariantError` (deprecated, from `.given` rules) | 409 / `INVARIANT` | `CONFLICT` |
 | `ConcurrencyError` | 412 / `CONCURRENCY` | `PRECONDITION_FAILED` |
 | `StreamClosedError` | 410 / `STREAM_CLOSED` | `NOT_FOUND` (404): tRPC has no 410 |
 | `NonRetryableError` | 400 / `NON_RETRYABLE` | `BAD_REQUEST` |

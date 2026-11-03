@@ -8,7 +8,6 @@ import { prettifyError, ZodError, type ZodType } from "zod";
 import { cache, log, store } from "../ports.js";
 import {
   ConcurrencyError,
-  InvariantError,
   PreconditionError,
   StreamClosedError,
   ValidationError,
@@ -477,17 +476,8 @@ export async function action<
       // stream expects -1, so two callers creating it can't both commit.
       const expected = expectedVersion ?? snapshot.version;
 
-      // Deprecated `.given` rules, then preconditions, each in declaration
-      // order: the first rule that fails refuses the action.
-      for (const { valid, description } of me.given?.[action] ?? [])
-        if (!valid(snapshot.state, actor))
-          throw new InvariantError(
-            action,
-            validated,
-            target,
-            snapshot,
-            description
-          );
+      // Preconditions in declaration order: the first that fails refuses
+      // the action.
       for (const { holds, description } of me.requires?.[action] ?? [])
         if (!holds(validated, snapshot.state, actor))
           throw new PreconditionError(

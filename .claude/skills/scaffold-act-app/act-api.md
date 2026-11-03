@@ -343,7 +343,7 @@ type Precondition<S extends Schema, P> = {
 };
 ```
 
-`.requires([...])` declares the preconditions; one typed `Precondition<S, unknown>` ignores the payload and serves every action. A failed one refuses with a `PreconditionError` and commits nothing. Rules on the payload alone belong in the action's Zod schema, and rules every state must keep (invariants) in the state's Zod schema, which every action checks before it commits. Don't use the deprecated `.given([...])`. When to use which: [domain.md § Business Rules](domain.md#business-rules).
+`.requires([...])` declares the preconditions; one typed `Precondition<S, unknown>` ignores the payload and serves every action. A failed one refuses with a `PreconditionError` and commits nothing. Rules on the payload alone belong in the action's Zod schema, and rules every state must keep (invariants) in the state's Zod schema, which every action checks before it commits. When to use which: [domain.md § Business Rules](domain.md#business-rules).
 
 ## 9. Emit Handler Signature
 

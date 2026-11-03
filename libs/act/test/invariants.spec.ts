@@ -73,13 +73,6 @@ describe("invariants", () => {
     expect((caught as ValidationError).target).toBe("Calc.divide");
   });
 
-  it("is always on: the deprecated validateFoldedState: false changes nothing", async () => {
-    const app = act().withState(calc()).build({ validateFoldedState: false });
-    await expect(
-      app.do("divide", { stream: "c2", actor }, {})
-    ).rejects.toBeInstanceOf(ValidationError);
-  });
-
   it("checks the state the action leaves, not the states between its events", async () => {
     // `n` is -1 between the two events, and 1 when the action ends.
     const counter = state({ Counter: z.object({ n: z.number().min(0) }) })

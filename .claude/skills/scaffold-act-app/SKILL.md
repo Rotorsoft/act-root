@@ -205,7 +205,7 @@ For production deployment (PostgresStore, background processing, automated jobs)
 - [ ] AppActor type defined extending Actor, systemActor constant exported
 - [ ] Every action emits at least one event
 - [ ] Patch handlers are pure functions returning partial state
-- [ ] Preconditions (`.requires`) guard every action; invariants live in the state schemas; no deprecated `.given`
+- [ ] Preconditions (`.requires`) guard every action; invariants live in the state schemas
 - [ ] Reactions pass triggering event for causation tracking
 - [ ] Projections co-located with slices, with query and clear functions
 - [ ] Projections register only lifecycle event handlers when using @rotorsoft/act-http/sse broadcast

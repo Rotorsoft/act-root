@@ -61,15 +61,10 @@ function build_state(
     const emits: string[] =
       (raw_actions[`__emits_${action_name}`] as string[]) ?? [];
     const describe = (rule: any) => rule.description ?? "";
-    const invariants = (st.given?.[action_name] ?? []).map(describe);
-    const preconditions = [
-      ...invariants,
-      ...(st.requires?.[action_name] ?? []).map(describe),
-    ];
+    const preconditions = (st.requires?.[action_name] ?? []).map(describe);
     action_nodes.push({
       name: action_name,
       emits,
-      invariants,
       ...(preconditions.length ? { preconditions } : {}),
       zod: raw_actions[action_name],
     });

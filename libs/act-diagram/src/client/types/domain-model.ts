@@ -62,9 +62,7 @@ export type EventNode = {
 export type ActionNode = {
   name: string;
   emits: string[]; // event names this action emits
-  /** @deprecated The `.given([...])` rule descriptions, also listed in `preconditions`. Removed in 2.0. */
-  invariants: string[];
-  /** Descriptions of the action's preconditions in the order they run: the deprecated `.given([...])`, then `.requires([...])`. */
+  /** Descriptions of the action's `.requires([...])` preconditions in the order they run; absent when there are none. */
   preconditions?: string[];
   line?: number;
   /**

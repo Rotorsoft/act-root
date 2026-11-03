@@ -4,8 +4,6 @@ import {
   act,
   ConcurrencyError,
   Errors,
-  type Invariant,
-  InvariantError,
   type Precondition,
   PreconditionError,
   state,
@@ -16,8 +14,7 @@ import { sandbox } from "../src/test/index.js";
  * Preconditions: named rules an action requires, declared with
  * `.requires([...])`, that read the state, the actor and the payload. They
  * run in declaration order, and the first that doesn't hold refuses the
- * action with a `PreconditionError`. The deprecated `.given([...])` rules
- * run before them and refuse with `InvariantError`.
+ * action with a `PreconditionError`.
  */
 type Board = { owner: Record<string, string>; armies: Record<string, number> };
 const Board = z.object({
@@ -253,53 +250,6 @@ describe("preconditions", () => {
       ).rejects.toMatchObject({
         message: "claim failed precondition: You must own the source",
       });
-    } finally {
-      await dispose();
-    }
-  });
-});
-
-describe("deprecated .given", () => {
-  const notEmpty: Invariant<Board> = {
-    description: "The board must be open",
-    valid: (s) => Object.keys(s.owner).length > 0,
-  };
-  const Legacy = state({ Board })
-    .init(() => ({ owner: {}, armies: {} }))
-    .emits({ Claimed: Claim })
-    .on({ claim: Claim })
-    .given([notEmpty])
-    .requires([traced(ownsFrom)])
-    .emit("Claimed")
-    .build();
-
-  it("refuses with InvariantError, as before, and runs no precondition", async () => {
-    const { app, dispose } = await sandbox(act().withState(Legacy));
-    try {
-      seen.length = 0;
-      const refused = app.do(
-        "claim",
-        { stream: "l", actor: ann },
-        { from: "x" }
-      );
-      await expect(refused).rejects.toBeInstanceOf(InvariantError);
-      await expect(refused).rejects.not.toBeInstanceOf(PreconditionError);
-      await expect(refused).rejects.toMatchObject({
-        name: Errors.InvariantError,
-        message: "claim failed invariant: The board must be open",
-      });
-      expect(seen).toEqual([]);
-    } finally {
-      await dispose();
-    }
-  });
-
-  it("lets code that catches InvariantError keep catching preconditions", async () => {
-    const { app, dispose } = await board();
-    try {
-      await expect(
-        app.do("claim", { stream: "b", actor: bob }, { from: "x" })
-      ).rejects.toBeInstanceOf(InvariantError);
     } finally {
       await dispose();
     }

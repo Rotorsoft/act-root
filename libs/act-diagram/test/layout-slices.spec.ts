@@ -81,8 +81,8 @@ const SLICE_MODEL: DomainModel = emptyModel({
         { name: "TicketAssigned", hasCustomPatch: false },
       ],
       actions: [
-        { name: "OpenTicket", emits: ["TicketOpened"], invariants: [] },
-        { name: "AssignTicket", emits: ["TicketAssigned"], invariants: [] },
+        { name: "OpenTicket", emits: ["TicketOpened"] },
+        { name: "AssignTicket", emits: ["TicketAssigned"] },
       ],
     },
   ],
@@ -110,17 +110,13 @@ const TWO_SLICES_MODEL: DomainModel = emptyModel({
       name: "Ticket",
       varName: "Ticket",
       events: [{ name: "TicketOpened", hasCustomPatch: false }],
-      actions: [
-        { name: "OpenTicket", emits: ["TicketOpened"], invariants: [] },
-      ],
+      actions: [{ name: "OpenTicket", emits: ["TicketOpened"] }],
     },
     {
       name: "Invoice",
       varName: "Invoice",
       events: [{ name: "InvoiceCreated", hasCustomPatch: false }],
-      actions: [
-        { name: "CreateInvoice", emits: ["InvoiceCreated"], invariants: [] },
-      ],
+      actions: [{ name: "CreateInvoice", emits: ["InvoiceCreated"] }],
     },
   ],
   slices: [
@@ -219,8 +215,8 @@ describe("compute_layout — slices", () => {
               { name: "E2", hasCustomPatch: false },
             ],
             actions: [
-              { name: "A1", emits: ["E1"], invariants: [] },
-              { name: "A2", emits: ["E2"], invariants: [] },
+              { name: "A1", emits: ["E1"] },
+              { name: "A2", emits: ["E2"] },
             ],
           },
         ],
@@ -272,10 +268,10 @@ describe("compute_layout — slices", () => {
               { name: "E4", hasCustomPatch: false },
             ],
             actions: [
-              { name: "A1", emits: ["E1"], invariants: [] },
-              { name: "A2", emits: ["E2"], invariants: [] },
-              { name: "A3", emits: ["E3"], invariants: [] },
-              { name: "A4", emits: ["E4"], invariants: [] },
+              { name: "A1", emits: ["E1"] },
+              { name: "A2", emits: ["E2"] },
+              { name: "A3", emits: ["E3"] },
+              { name: "A4", emits: ["E4"] },
             ],
           },
         ],
@@ -373,15 +369,15 @@ describe("compute_layout — slices", () => {
               { name: "E2", hasCustomPatch: false },
             ],
             actions: [
-              { name: "Do1", emits: ["E1"], invariants: [] },
-              { name: "Do2", emits: ["E2"], invariants: [] },
+              { name: "Do1", emits: ["E1"] },
+              { name: "Do2", emits: ["E2"] },
             ],
           },
           {
             name: "B",
             varName: "B",
             events: [{ name: "E3", hasCustomPatch: false }],
-            actions: [{ name: "Do3", emits: ["E3"], invariants: [] }],
+            actions: [{ name: "Do3", emits: ["E3"] }],
           },
         ],
         slices: [
@@ -545,10 +541,10 @@ describe("compute_layout — slices", () => {
               { name: "E4", hasCustomPatch: false },
             ],
             actions: [
-              { name: "A1", emits: ["E1"], invariants: [] },
-              { name: "A2", emits: ["E2"], invariants: [] },
-              { name: "A3", emits: ["E3"], invariants: [] },
-              { name: "A4", emits: ["E4"], invariants: [] },
+              { name: "A1", emits: ["E1"] },
+              { name: "A2", emits: ["E2"] },
+              { name: "A3", emits: ["E3"] },
+              { name: "A4", emits: ["E4"] },
             ],
           },
         ],
@@ -633,9 +629,9 @@ describe("compute_layout — slices", () => {
               { name: "E3", hasCustomPatch: false },
             ],
             actions: [
-              { name: "A1", emits: ["E1"], invariants: [] },
-              { name: "A2", emits: ["E2"], invariants: [] },
-              { name: "A3", emits: ["E3"], invariants: [] },
+              { name: "A1", emits: ["E1"] },
+              { name: "A2", emits: ["E2"] },
+              { name: "A3", emits: ["E3"] },
             ],
           },
         ],
@@ -683,9 +679,7 @@ describe("compute_layout — slices", () => {
             name: "Ticket",
             varName: "TicketCreation",
             events: [{ name: "TicketOpened", hasCustomPatch: false }],
-            actions: [
-              { name: "OpenTicket", emits: ["TicketOpened"], invariants: [] },
-            ],
+            actions: [{ name: "OpenTicket", emits: ["TicketOpened"] }],
           },
           {
             name: "Ticket",
@@ -695,7 +689,6 @@ describe("compute_layout — slices", () => {
               {
                 name: "AssignTicket",
                 emits: ["TicketAssigned"],
-                invariants: [],
               },
             ],
           },
@@ -735,13 +728,13 @@ describe("compute_layout — slices", () => {
             name: "S",
             varName: "S1",
             events: [{ name: "E", hasCustomPatch: false }],
-            actions: [{ name: "doIt", emits: ["E"], invariants: [] }],
+            actions: [{ name: "doIt", emits: ["E"] }],
           },
           {
             name: "S",
             varName: "S2",
             events: [{ name: "E", hasCustomPatch: false }],
-            actions: [{ name: "doIt", emits: ["E"], invariants: [] }],
+            actions: [{ name: "doIt", emits: ["E"] }],
           },
         ],
         slices: [
@@ -789,13 +782,13 @@ describe("compute_layout — slices", () => {
             name: "A",
             varName: "A",
             events: [{ name: "EvtA", hasCustomPatch: false }],
-            actions: [{ name: "doA", emits: ["EvtA"], invariants: [] }],
+            actions: [{ name: "doA", emits: ["EvtA"] }],
           },
           {
             name: "B",
             varName: "B",
             events: [{ name: "EvtB", hasCustomPatch: false }],
-            actions: [{ name: "doB", emits: ["EvtB"], invariants: [] }],
+            actions: [{ name: "doB", emits: ["EvtB"] }],
           },
         ],
         slices: [
@@ -840,7 +833,7 @@ describe("compute_layout — slices", () => {
             name: "S",
             varName: "S",
             events: [{ name: "Evt", hasCustomPatch: false }],
-            actions: [{ name: "a", emits: ["Evt"], invariants: [] }],
+            actions: [{ name: "a", emits: ["Evt"] }],
           },
         ],
         slices: [
@@ -873,7 +866,7 @@ describe("compute_layout — slices", () => {
             name: "S",
             varName: "S",
             events: [{ name: "Evt", hasCustomPatch: false }],
-            actions: [{ name: "a", emits: ["Evt"], invariants: [] }],
+            actions: [{ name: "a", emits: ["Evt"] }],
           },
         ],
         slices: [
@@ -913,9 +906,9 @@ describe("compute_layout — slices", () => {
               { name: "E3", hasCustomPatch: false },
             ],
             actions: [
-              { name: "A1", emits: ["E1"], invariants: [] },
-              { name: "A2", emits: ["E2"], invariants: [] },
-              { name: "A3", emits: ["E3"], invariants: [] },
+              { name: "A1", emits: ["E1"] },
+              { name: "A2", emits: ["E2"] },
+              { name: "A3", emits: ["E3"] },
             ],
           },
         ],
@@ -943,8 +936,8 @@ describe("compute_layout — slices", () => {
     });
   });
 
-  describe("dispatched action with invariants", () => {
-    it("annotates dispatched action with guards when target action has invariants", () => {
+  describe("dispatched action with preconditions", () => {
+    it("annotates dispatched action with guards when target action has preconditions", () => {
       const model = emptyModel({
         states: [
           {
@@ -955,11 +948,11 @@ describe("compute_layout — slices", () => {
               { name: "E2", hasCustomPatch: false },
             ],
             actions: [
-              { name: "A1", emits: ["E1"], invariants: [] },
+              { name: "A1", emits: ["E1"] },
               {
                 name: "A2",
                 emits: ["E2"],
-                invariants: ["must be valid"],
+                preconditions: ["must be valid"],
               },
             ],
           },
@@ -998,7 +991,7 @@ describe("compute_layout — slices", () => {
             name: "S",
             varName: "S",
             events: [{ name: "E1", hasCustomPatch: false }],
-            actions: [{ name: "A1", emits: ["E1"], invariants: [] }],
+            actions: [{ name: "A1", emits: ["E1"] }],
           },
         ],
         slices: [
@@ -1040,7 +1033,7 @@ describe("compute_layout — slices", () => {
             varName: "T",
             file: "src/ticket.ts",
             events: [{ name: "Opened", hasCustomPatch: false }],
-            actions: [{ name: "Open", emits: ["Opened"], invariants: [] }],
+            actions: [{ name: "Open", emits: ["Opened"] }],
           },
         ],
         slices: [
@@ -1100,7 +1093,7 @@ describe("compute_layout — slices", () => {
               { name: "EmittedEvt", hasCustomPatch: false },
               { name: "OrphanEvt", hasCustomPatch: false },
             ],
-            actions: [{ name: "doIt", emits: ["EmittedEvt"], invariants: [] }],
+            actions: [{ name: "doIt", emits: ["EmittedEvt"] }],
           },
         ],
         slices: [
@@ -1131,7 +1124,7 @@ describe("compute_layout — slices", () => {
             name: "S",
             varName: "S",
             events: [{ name: "Evt", hasCustomPatch: false }],
-            actions: [{ name: "a", emits: ["Evt"], invariants: [] }],
+            actions: [{ name: "a", emits: ["Evt"] }],
           },
         ],
         slices: [
@@ -1181,7 +1174,7 @@ describe("compute_layout — slices", () => {
             name: "S",
             varName: "S",
             events: [{ name: "Evt", hasCustomPatch: false }],
-            actions: [{ name: "a", emits: ["Evt"], invariants: [] }],
+            actions: [{ name: "a", emits: ["Evt"] }],
           },
         ],
         slices: [
@@ -1228,10 +1221,10 @@ describe("compute_layout — slices", () => {
               { name: "Logged", hasCustomPatch: false },
             ],
             actions: [
-              { name: "Archive", emits: ["Archived"], invariants: [] },
-              { name: "Review", emits: ["Reviewed"], invariants: [] },
-              { name: "Notify", emits: ["Notified"], invariants: [] },
-              { name: "Log", emits: ["Logged"], invariants: [] },
+              { name: "Archive", emits: ["Archived"] },
+              { name: "Review", emits: ["Reviewed"] },
+              { name: "Notify", emits: ["Notified"] },
+              { name: "Log", emits: ["Logged"] },
             ],
           },
         ],
@@ -1300,8 +1293,8 @@ describe("compute_layout — slices", () => {
             varName: "S",
             events: [{ name: "Evt", hasCustomPatch: false }],
             actions: [
-              { name: "a1", emits: ["Evt"], invariants: [] },
-              { name: "a2", emits: ["Evt"], invariants: [] },
+              { name: "a1", emits: ["Evt"] },
+              { name: "a2", emits: ["Evt"] },
             ],
           },
         ],
@@ -1343,8 +1336,8 @@ describe("compute_layout — slices", () => {
               { name: "CartPublished", hasCustomPatch: false },
             ],
             actions: [
-              { name: "PlaceOrder", emits: ["CartSubmitted"], invariants: [] },
-              { name: "PublishCart", emits: ["CartPublished"], invariants: [] },
+              { name: "PlaceOrder", emits: ["CartSubmitted"] },
+              { name: "PublishCart", emits: ["CartPublished"] },
             ],
           },
           {
@@ -1359,17 +1352,14 @@ describe("compute_layout — slices", () => {
               {
                 name: "ImportInventory",
                 emits: ["InventoryImported"],
-                invariants: [],
               },
               {
                 name: "AdjustInventory",
                 emits: ["InventoryAdjusted"],
-                invariants: [],
               },
               {
                 name: "DecommissionInventory",
                 emits: ["InventoryDecommissioned"],
-                invariants: [],
               },
             ],
           },
@@ -1444,8 +1434,8 @@ describe("compute_layout — slices", () => {
               { name: "E2", hasCustomPatch: false },
             ],
             actions: [
-              { name: "a1", emits: ["E1"], invariants: [] },
-              { name: "a2", emits: ["E2"], invariants: [] },
+              { name: "a1", emits: ["E1"] },
+              { name: "a2", emits: ["E2"] },
             ],
           },
         ],

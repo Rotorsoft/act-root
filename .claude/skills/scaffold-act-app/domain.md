@@ -101,8 +101,6 @@ const Ticket = z
 
 Every action checks the state its events fold into against that schema before the commit, and a state the schema rejects refuses the action with a `ValidationError`. Nothing is stored. There's nothing to turn on.
 
-Don't use `.given([...])`, `Invariant` or `InvariantError`: they're deprecated (the rules they declared were always preconditions) and go away in Act 2.0.
-
 Keep a `throw` inside `.emit()` only for rules that don't fit a predicate: a rule that branches on the state, or one that needs an app-specific error type.
 
 Keep this validation in the aggregate, not the router. The aggregate is the system of record for its rules — router-level checks are invisible to other callers (CLI, reactions, replays) and let bad events sneak in via internal `app.do()` calls.
