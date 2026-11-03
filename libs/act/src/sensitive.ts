@@ -41,8 +41,7 @@ const is_pii = (schema: z.ZodType): boolean =>
  * Derive an event's sensitive fields, as the declared schema of each.
  *
  * Walks the top-level shape of a `z.object({...})` and keeps the keys whose
- * schema (after unwrapping optional/nullable/default wrappers) was marked via
- * `sensitive(...)`. Returns an empty object for non-object schemas or events
+ * schema was marked via `sensitive(...)`, behind any wrapper (see `is_pii`). Returns an empty object for non-object schemas or events
  * with no sensitive fields — the common-case zero-cost path.
  *
  * Only the top-level shape is walked. Sensitive fields nested inside a

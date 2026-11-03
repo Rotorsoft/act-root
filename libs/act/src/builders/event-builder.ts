@@ -182,7 +182,6 @@ function make_event_reader(
 export type BuiltEvents = {
   /** Backs `registry.sensitive_fields`. */
   readonly sensitive: Map<string, readonly string[]>;
-  /** The sensitive `Event.field`s, and `State.field`s of their name, a redaction marker doesn't fit. */
   /**
    * The sensitive-type advisory, naming each sensitive `Event.field`, and
    * `State.field` of its name, that a redaction marker doesn't fit; or

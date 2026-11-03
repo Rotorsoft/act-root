@@ -604,13 +604,11 @@ export interface Store extends Disposable, EventSource {
    * Calls the callback for each matching event. The callback approach allows
    * processing large result sets without loading everything into memory.
    *
-   * **Payload dates round-trip as `Date`.** A `Date` committed inside event
-   * `data` (or `meta`) is returned as a `Date`, not an ISO string — every
-   * adapter revives ISO-8601 strings on read. A consequence: a plain string
-   * that happens to match ISO-8601 exactly is revived to a `Date` too, and a
-   * timezone-less ISO string is parsed in the reader's local time. Keep
-   * ISO-shaped strings you want to stay strings out of event payloads, or
-   * carry them in a wrapper field.
+   * **The adapter returns what it stored.** A `Date` is stored as its ISO
+   * string and comes back as that string; the framework turns the fields an
+   * event's schema declares `z.date()` back into `Date`s, so an ISO-shaped
+   * `z.string()` stays a string. See the Store contract in
+   * `docs/docs/architecture/extension-points.md`.
    *
    * @template E - Event schemas
    * @param callback - Function invoked for each matching event
