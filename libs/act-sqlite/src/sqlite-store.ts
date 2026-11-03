@@ -1,4 +1,9 @@
-import { type Client, createClient, type Transaction } from "@libsql/client";
+import {
+  type Client,
+  createClient,
+  type InStatement,
+  type Transaction,
+} from "@libsql/client";
 import type {
   BlockedLease,
   Committed,
@@ -276,11 +281,14 @@ export function streamPatternToGlob(input: string): string {
  * Provides persistent event storage using SQLite via `@libsql/client`.
  * All write operations use transactions for ACID guarantees.
  *
- * SQLite is a single-writer store: concurrent write transactions raise
- * `SQLITE_BUSY` rather than serializing transparently, so it does not
- * support competing consumers the way PostgreSQL's `FOR UPDATE SKIP LOCKED`
- * does (the TCK leaves `concurrent_claim` off for this reason). The intended
- * model is a single drain worker per database file.
+ * SQLite is a single-writer store. The store runs its statements and
+ * transactions one at a time on its one connection, so concurrent calls
+ * from one process wait their turn. A second connection to the same file
+ * (another process, another `SqliteStore`) still fails with `SQLITE_BUSY`,
+ * so it does not support competing consumers the way PostgreSQL's
+ * `FOR UPDATE SKIP LOCKED` does (the TCK leaves `concurrent_claim` off for
+ * this reason). The intended model is one store, and one drain worker, per
+ * database file.
  *
  * **`Store.notify` is intentionally not implemented.** The notify hook is
  * a cross-process wake-up signal that lets a horizontally-scaled Act
@@ -353,8 +361,8 @@ export class SqliteStore implements Store {
   }
 
   async seed() {
-    await this.client.execute("PRAGMA journal_mode=WAL");
-    await this.client.execute(`
+    await this._exec("PRAGMA journal_mode=WAL");
+    await this._exec(`
       CREATE TABLE IF NOT EXISTS events (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         stream TEXT NOT NULL,
@@ -373,21 +381,21 @@ export class SqliteStore implements Store {
     // row format skips NULL columns, so events without sensitive
     // declarations pay zero extra bytes.
     try {
-      await this.client.execute("ALTER TABLE events ADD COLUMN pii TEXT");
+      await this._exec("ALTER TABLE events ADD COLUMN pii TEXT");
     } catch {
       // already present
     }
-    await this.client.execute(
+    await this._exec(
       "CREATE INDEX IF NOT EXISTS idx_events_stream ON events(stream)"
     );
-    await this.client.execute(
+    await this._exec(
       "CREATE INDEX IF NOT EXISTS idx_events_name ON events(name)"
     );
     // Partial index over snapshot rows only, so the with_snaps "resume at
     // the latest snapshot" floor (MAX(id) WHERE stream=? AND
     // name='__snapshot__') is an O(log) lookup and costs nothing for
     // streams with no snapshot (the index has no rows for them).
-    await this.client.execute(
+    await this._exec(
       "CREATE INDEX IF NOT EXISTS idx_events_snapshot ON events(stream, id) WHERE name = '__snapshot__'"
     );
     // Complement of the snapshot index, and the one the drain fetch seeks
@@ -395,10 +403,10 @@ export class SqliteStore implements Store {
     // sargable `stream = ? AND id > ?`. The existing idx_events_stream is
     // stream-only and would walk every event of that stream. Partial over non-snapshot rows so the two
     // indexes partition the table rather than overlapping.
-    await this.client.execute(
+    await this._exec(
       "CREATE INDEX IF NOT EXISTS idx_events_stream_id ON events(stream, id) WHERE name <> '__snapshot__'"
     );
-    await this.client.execute(`
+    await this._exec(`
       CREATE TABLE IF NOT EXISTS streams (
         stream TEXT PRIMARY KEY,
         source TEXT,
@@ -418,7 +426,7 @@ export class SqliteStore implements Store {
     // libSQL surfaces "duplicate column" as an error, hence the
     // try/swallow — this mirrors PG's `ADD COLUMN IF NOT EXISTS`.
     try {
-      await this.client.execute(
+      await this._exec(
         "ALTER TABLE streams ADD COLUMN priority INTEGER NOT NULL DEFAULT 0"
       );
     } catch {
@@ -426,15 +434,13 @@ export class SqliteStore implements Store {
     }
     // Migration for tables created before deferred reactions.
     try {
-      await this.client.execute(
-        "ALTER TABLE streams ADD COLUMN deferred_at TEXT"
-      );
+      await this._exec("ALTER TABLE streams ADD COLUMN deferred_at TEXT");
     } catch {
       // already present
     }
     // Migration for tables created before drain lanes.
     try {
-      await this.client.execute(
+      await this._exec(
         "ALTER TABLE streams ADD COLUMN lane TEXT NOT NULL DEFAULT 'default'"
       );
     } catch {
@@ -442,9 +448,7 @@ export class SqliteStore implements Store {
     }
     // Migration for tables created before the work set.
     try {
-      await this.client.execute(
-        "ALTER TABLE streams ADD COLUMN correlated_at INTEGER"
-      );
+      await this._exec("ALTER TABLE streams ADD COLUMN correlated_at INTEGER");
     } catch {
       // already present
     }
@@ -459,7 +463,7 @@ export class SqliteStore implements Store {
     // the watermark catches the mark and the stream leaves the claimable set
     // with an honest position. One extra cycle per pre-existing subscription,
     // paid once, in exchange for a schema step with no per-row probing.
-    await this.client.execute(
+    await this._exec(
       `UPDATE streams
        SET correlated_at = (SELECT COALESCE(MAX(id), -1) FROM events)
        WHERE correlated_at IS NULL`
@@ -481,12 +485,12 @@ export class SqliteStore implements Store {
     // means rebuilding: copy the single row's checkpoint across as the shared
     // row, then swap the tables. Guarded on the old `id` column, so a seed
     // against either shape converges and the checkpoint survives.
-    const correlated_columns = await this.client.execute(
+    const correlated_columns = await this._exec(
       "PRAGMA table_info(correlated)"
     );
     const legacy = correlated_columns.rows.some((r) => r.name === "id");
     if (legacy) {
-      await this.client.execute(`
+      await this._exec(`
         CREATE TABLE IF NOT EXISTS correlated_keyed (
           key TEXT PRIMARY KEY,
           at INTEGER NOT NULL DEFAULT -1,
@@ -494,15 +498,13 @@ export class SqliteStore implements Store {
           leased_until INTEGER
         )
       `);
-      await this.client.execute(
+      await this._exec(
         "INSERT OR IGNORE INTO correlated_keyed (key, at) SELECT '', at FROM correlated WHERE id = 0"
       );
-      await this.client.execute("DROP TABLE correlated");
-      await this.client.execute(
-        "ALTER TABLE correlated_keyed RENAME TO correlated"
-      );
+      await this._exec("DROP TABLE correlated");
+      await this._exec("ALTER TABLE correlated_keyed RENAME TO correlated");
     } else {
-      await this.client.execute(`
+      await this._exec(`
         CREATE TABLE IF NOT EXISTS correlated (
           key TEXT PRIMARY KEY,
           at INTEGER NOT NULL DEFAULT -1,
@@ -511,17 +513,15 @@ export class SqliteStore implements Store {
         )
       `);
     }
-    await this.client.execute(
-      "INSERT OR IGNORE INTO correlated (key) VALUES ('')"
-    );
-    await this.client.execute(
+    await this._exec("INSERT OR IGNORE INTO correlated (key) VALUES ('')");
+    await this._exec(
       "CREATE INDEX IF NOT EXISTS idx_streams_claim ON streams(blocked, priority DESC, at)"
     );
     // The correlated set IS the index: it holds only streams with
     // work, so `claim` scans candidates instead of every subscription. A
     // stream leaves when `ack` advances `at` to `correlated_at`, and re-enters
     // when correlate raises the mark.
-    await this.client.execute(
+    await this._exec(
       "CREATE INDEX IF NOT EXISTS idx_streams_correlated_at ON streams(lane, priority DESC, at) WHERE blocked = 0 AND at < correlated_at"
     );
     // The same set without the lane prefix. SQLite can only use an index for
@@ -529,40 +529,59 @@ export class SqliteStore implements Store {
     // lane filter — the shape every app that never calls `.withLane` issues —
     // could not use the index above and fell back to sorting the whole
     // eligible set. With this one the scan stops at `lagging + leading` rows.
-    await this.client.execute(
+    await this._exec(
       "CREATE INDEX IF NOT EXISTS idx_streams_correlated_at_any_lane ON streams(priority DESC, at) WHERE blocked = 0 AND at < correlated_at"
     );
     // Lane filter index.
-    await this.client.execute(
+    await this._exec(
       "CREATE INDEX IF NOT EXISTS idx_streams_lane ON streams(lane)"
     );
   }
 
   async drop() {
-    await this.client.execute("DROP TABLE IF EXISTS events");
-    await this.client.execute("DROP TABLE IF EXISTS streams");
-    await this.client.execute("DROP TABLE IF EXISTS correlated");
+    await this._exec("DROP TABLE IF EXISTS events");
+    await this._exec("DROP TABLE IF EXISTS streams");
+    await this._exec("DROP TABLE IF EXISTS correlated");
   }
 
-  // One write transaction: any failure rolls back and throws a {@link StoreError} naming the operation.
-  private async _tx<T>(
+  // One connection serves the whole store, and it can't run a statement
+  // while a write transaction is open on it: a second one fails at once
+  // (`TRANSACTION_ACTIVE` in memory, `SQLITE_BUSY` on a file) instead of
+  // waiting. So every statement and every transaction takes its turn here.
+  // A turn covers only the database work, never a caller's callback, so a
+  // callback that writes to the store can't wait on itself.
+  private _turn: Promise<unknown> = Promise.resolve();
+  private _serial<T>(work: () => Promise<T>): Promise<T> {
+    const run = this._turn.then(work);
+    this._turn = run.catch(() => undefined);
+    return run;
+  }
+
+  // One statement, in its turn.
+  private _exec(stmt: InStatement) {
+    return this._serial(() => this.client.execute(stmt));
+  }
+
+  // One write transaction, in its turn: any failure rolls back and throws a {@link StoreError} naming the operation.
+  private _tx<T>(
     operation: string,
     work: (tx: Transaction) => Promise<T>
   ): Promise<T> {
-    const tx = await this.client.transaction("write");
-    try {
-      const result = await work(tx);
-      await tx.commit();
-      return result;
-    } catch (e) {
-      await tx.rollback();
-      throw new StoreError(operation, { cause: e });
-    }
+    return this._serial(async () => {
+      const tx = await this.client.transaction("write");
+      try {
+        const result = await work(tx);
+        await tx.commit();
+        return result;
+      } catch (e) {
+        await tx.rollback();
+        throw new StoreError(operation, { cause: e });
+      }
+    });
   }
 
   async dispose() {
-    await Promise.resolve();
-    this.client.close();
+    await this._serial(async () => this.client.close());
   }
 
   // --- commit: transaction + optimistic concurrency ---
@@ -572,81 +591,83 @@ export class SqliteStore implements Store {
     meta: EventMeta,
     expectedVersion?: number
   ): Promise<Committed<E, keyof E>[]> {
-    const tx = await this.client.transaction("write");
-    // Hoisted so the catch can build a ConcurrencyError with the head
-    // version on a (stream, version) unique collision.
-    let current_version = -1;
-    try {
-      const version_row = await tx.execute({
-        sql: "SELECT COALESCE(MAX(version), -1) as v FROM events WHERE stream = ?",
-        args: [stream],
-      });
-      current_version = Number(version_row.rows[0].v);
+    return this._serial(async () => {
+      const tx = await this.client.transaction("write");
+      // Hoisted so the catch can build a ConcurrencyError with the head
+      // version on a (stream, version) unique collision.
+      let current_version = -1;
+      try {
+        const version_row = await tx.execute({
+          sql: "SELECT COALESCE(MAX(version), -1) as v FROM events WHERE stream = ?",
+          args: [stream],
+        });
+        current_version = Number(version_row.rows[0].v);
 
-      if (
-        typeof expectedVersion === "number" &&
-        current_version !== expectedVersion
-      ) {
-        throw new ConcurrencyError(
-          stream,
-          current_version,
-          msgs as Message<Schemas, keyof Schemas>[],
-          expectedVersion
-        );
-      }
+        if (
+          typeof expectedVersion === "number" &&
+          current_version !== expectedVersion
+        ) {
+          throw new ConcurrencyError(
+            stream,
+            current_version,
+            msgs as Message<Schemas, keyof Schemas>[],
+            expectedVersion
+          );
+        }
 
-      const now = new Date().toISOString();
-      const committed: Committed<E, keyof E>[] = [];
-      let version = current_version + 1;
+        const now = new Date().toISOString();
+        const committed: Committed<E, keyof E>[] = [];
+        let version = current_version + 1;
 
-      for (const { name, data, pii } of msgs) {
-        const pii_for_write = await this._stringify_pii_for_write(pii);
-        const result = await tx.execute({
-          sql: "INSERT INTO events (stream, version, name, data, meta, created, pii) VALUES (?, ?, ?, ?, ?, ?, ?)",
-          args: [
+        for (const { name, data, pii } of msgs) {
+          const pii_for_write = await this._stringify_pii_for_write(pii);
+          const result = await tx.execute({
+            sql: "INSERT INTO events (stream, version, name, data, meta, created, pii) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            args: [
+              stream,
+              version,
+              name as string,
+              JSON.stringify(data),
+              JSON.stringify(meta),
+              now,
+              pii_for_write,
+            ],
+          });
+          committed.push({
+            id: Number(result.lastInsertRowid),
             stream,
             version,
-            name as string,
-            JSON.stringify(data),
-            JSON.stringify(meta),
-            now,
-            pii_for_write,
-          ],
-        });
-        committed.push({
-          id: Number(result.lastInsertRowid),
-          stream,
-          version,
-          created: new Date(now),
-          name,
-          data,
-          meta,
-          ...(pii == null ? {} : { pii }),
-        });
-        version++;
-      }
+            created: new Date(now),
+            name,
+            data,
+            meta,
+            ...(pii == null ? {} : { pii }),
+          });
+          version++;
+        }
 
-      await tx.commit();
-      return committed;
-    } catch (e) {
-      await tx.rollback();
-      // Map the (stream, version) unique collision to
-      // ConcurrencyError — the same signal PG raises from 23505 — so a
-      // caller retries on the framework contract, not a raw libsql error.
-      // This is the race where the version probe passed but a concurrent
-      // INSERT (a second store on the same file, tooling, the act CLI)
-      // beat this one to the row. Every other driver error is wrapped in
-      // StoreError('commit') for parity with the adapter's other methods.
-      if (e instanceof ConcurrencyError) throw e;
-      if (is_unique_violation(e))
-        throw new ConcurrencyError(
-          stream,
-          current_version,
-          msgs as Message<Schemas, keyof Schemas>[],
-          expectedVersion ?? -1
-        );
-      throw new StoreError("commit", { cause: e });
-    }
+        await tx.commit();
+        return committed;
+      } catch (e) {
+        await tx.rollback();
+        // Map the (stream, version) unique collision to
+        // ConcurrencyError — the same signal PG raises from 23505 — so a
+        // caller retries on the framework contract, not a raw libsql error.
+        // This is the race where the version probe passed but a concurrent
+        // INSERT (a second store on the same file, tooling, the act CLI)
+        // beat this one to the row. Every other driver error is wrapped in
+        // StoreError('commit') for parity with the adapter's other methods.
+        if (e instanceof ConcurrencyError) throw e;
+        if (is_unique_violation(e))
+          throw new ConcurrencyError(
+            stream,
+            current_version,
+            msgs as Message<Schemas, keyof Schemas>[],
+            expectedVersion ?? -1
+          );
+        throw new StoreError("commit", { cause: e });
+      }
+    });
   }
 
   // --- query: read-only, no transaction needed ---
@@ -715,7 +736,7 @@ export class SqliteStore implements Store {
       args.push(query.limit);
     }
 
-    const result = await this.client.execute({ sql, args: args as any[] });
+    const result = await this._exec({ sql, args: args as any[] });
     let count = 0;
 
     for (const row of result.rows) {
@@ -1222,8 +1243,8 @@ export class SqliteStore implements Store {
     args.push(limit);
 
     const [streamsResult, maxResult] = await Promise.all([
-      this.client.execute({ sql, args: args as any[] }),
-      this.client.execute("SELECT COALESCE(MAX(id), -1) AS m FROM events"),
+      this._exec({ sql, args: args as any[] }),
+      this._exec("SELECT COALESCE(MAX(id), -1) AS m FROM events"),
     ]);
 
     let count = 0;
@@ -1403,10 +1424,8 @@ export class SqliteStore implements Store {
       limit !== undefined ? [...args, ...args, limit] : [...args, ...args];
 
     const [headRes, tailRes] = await Promise.all([
-      this.client.execute({ sql: head_sql, args: head_args as any[] }),
-      tail_sql
-        ? this.client.execute({ sql: tail_sql, args: tail_args as any[] })
-        : null,
+      this._exec({ sql: head_sql, args: head_args as any[] }),
+      tail_sql ? this._exec({ sql: tail_sql, args: tail_args as any[] }) : null,
     ]);
 
     const out = new Map<string, StreamStats<E>>();
@@ -1499,7 +1518,7 @@ export class SqliteStore implements Store {
     // order so the returned Map's key order is the next cursor. The LIMIT
     // arg binds last when present (unbounded otherwise).
     const full_args = limit !== undefined ? [...args, limit] : args;
-    const res = await this.client.execute({ sql, args: full_args as any[] });
+    const res = await this._exec({ sql, args: full_args as any[] });
 
     const out = new Map<string, StreamStats<E>>();
     for (const row of res.rows) {
@@ -1654,40 +1673,42 @@ export class SqliteStore implements Store {
       callback: (event: Committed<Schemas, keyof Schemas>) => Promise<number>
     ) => Promise<void>
   ): Promise<void> {
-    const tx = await this.client.transaction("write");
-    try {
-      await tx.execute("DELETE FROM events");
-      await tx.execute("DELETE FROM streams");
-      // The restored log is renumbered from 1, so every correlate checkpoint
-      // (an event id) starts over in the same transaction, or correlate
-      // would resume above the restored events and never resolve their
-      // reactions. Correlator leases are kept.
-      await tx.execute("UPDATE correlated SET at = -1");
-      // Reset the autoincrement counter so the new sequence is dense
-      // from 1. `DELETE FROM sqlite_sequence WHERE name = '?'` is the
-      // canonical SQLite reset; safe even if the row doesn't exist.
-      await tx.execute("DELETE FROM sqlite_sequence WHERE name = 'events'");
-      await driver(async (event) => {
-        const pii_for_write = await this._stringify_pii_for_write(event.pii);
-        const ins = await tx.execute({
-          sql: "INSERT INTO events (stream, version, name, data, meta, created, pii) VALUES (?, ?, ?, ?, ?, ?, ?)",
-          args: [
-            event.stream,
-            event.version,
-            event.name,
-            JSON.stringify(event.data),
-            JSON.stringify(event.meta),
-            event.created.toISOString(),
-            pii_for_write,
-          ],
+    return this._serial(async () => {
+      const tx = await this.client.transaction("write");
+      try {
+        await tx.execute("DELETE FROM events");
+        await tx.execute("DELETE FROM streams");
+        // The restored log is renumbered from 1, so every correlate checkpoint
+        // (an event id) starts over in the same transaction, or correlate
+        // would resume above the restored events and never resolve their
+        // reactions. Correlator leases are kept.
+        await tx.execute("UPDATE correlated SET at = -1");
+        // Reset the autoincrement counter so the new sequence is dense
+        // from 1. `DELETE FROM sqlite_sequence WHERE name = '?'` is the
+        // canonical SQLite reset; safe even if the row doesn't exist.
+        await tx.execute("DELETE FROM sqlite_sequence WHERE name = 'events'");
+        await driver(async (event) => {
+          const pii_for_write = await this._stringify_pii_for_write(event.pii);
+          const ins = await tx.execute({
+            sql: "INSERT INTO events (stream, version, name, data, meta, created, pii) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            args: [
+              event.stream,
+              event.version,
+              event.name,
+              JSON.stringify(event.data),
+              JSON.stringify(event.meta),
+              event.created.toISOString(),
+              pii_for_write,
+            ],
+          });
+          return Number(ins.lastInsertRowid);
         });
-        return Number(ins.lastInsertRowid);
-      });
-      await tx.commit();
-    } catch (error) {
-      await tx.rollback();
-      throw error;
-    }
+        await tx.commit();
+      } catch (error) {
+        await tx.rollback();
+        throw error;
+      }
+    });
   }
 
   /**
@@ -1708,7 +1729,7 @@ export class SqliteStore implements Store {
    * @returns Count of events whose `pii` was set to `NULL`
    */
   async forget_pii(stream: string): Promise<number> {
-    const r = await this.client.execute({
+    const r = await this._exec({
       sql: "UPDATE events SET pii = NULL WHERE stream = ? AND pii IS NOT NULL",
       args: [stream],
     });

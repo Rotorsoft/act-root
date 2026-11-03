@@ -138,6 +138,7 @@ Pinned in the TCK unless the citation names an adapter.
 
 | Claim | Source | Backing test |
 |---|---|---|
+| One store instance takes concurrent commits, reads and writes from one process, and a race on one stream has one winner (`ConcurrencyError` for the other) | [act-sqlite README § Concurrency model](https://github.com/Rotorsoft/act-root/tree/master/libs/act-sqlite#concurrency-model) | `store-tck.ts` → "takes concurrent commits, reads and writes on one instance" |
 | `subscribe` is idempotent | `Store.subscribe` doc | `store-tck.ts` → "subscribes new streams and is idempotent on repeat" |
 | A `subscribe` batch carries at most one entry per stream | `Store.subscribe` doc | `classify.spec.ts` → "collapses same-target reactions from different sources, keeping the max priority" / "keeps the max priority regardless of declaration order"; `act-pg` `priority.spec.ts` → "restores the declared maximum priority on boot" |
 | `subscribe` keeps the maximum priority, so a boot restores a `prioritize()` downgrade | `Store.subscribe` doc | `store-tck.ts` → "keeps the maximum priority when a stream is re-subscribed", "keeps the maximum for negative and zero priorities too", "restores the declared priority on the next subscribe after a prioritize() downgrade" |
