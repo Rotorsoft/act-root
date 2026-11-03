@@ -21,8 +21,8 @@ bits=("branch=$branch")
 [[ "$uncommitted" != "0" ]] && bits+=("uncommitted=$uncommitted files")
 [[ "$ahead" != "0" ]] && bits+=("unpushed=$ahead commits")
 
-# Join with " · " for a one-line readout.
-ctx="$(IFS=' · '; echo "${bits[*]}")"
+# One line, space-separated.
+ctx="${bits[*]}"
 
 jq -n --arg ctx "$ctx" '{
   hookSpecificOutput: { hookEventName: "UserPromptSubmit", additionalContext: $ctx }
