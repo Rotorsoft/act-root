@@ -124,7 +124,7 @@ export function format_markdown(idx: ContractIndex): string {
         `- **defined in:** \`${loc(state_file, action?.line ?? a.line)}\``
       );
     if (action) {
-      const preconditions = action.preconditions ?? action.invariants;
+      const preconditions = action.preconditions ?? [];
       if (preconditions.length) {
         lines.push("- **preconditions:**");
         for (const pre of preconditions) lines.push(`  - ${pre}`);

@@ -25,7 +25,6 @@ import type {
   AutoclosePolicy,
   AutoclosePredicate,
   Committed,
-  Invariant,
   PassthroughPatchHandler,
   PatchHandlers,
   Precondition,
@@ -49,7 +48,7 @@ import type {
  * 2. Event types via `.emits()` — all events default to passthrough (`({ data }) => data`)
  * 3. Custom event reducers via `.patch()` (optional — only for events that need custom logic)
  * 4. Actions (commands) via `.on()` → `.emit()` — pass an event name string for passthrough
- * 5. Business rules: preconditions via `.requires()` (`.given()` is deprecated)
+ * 5. Business rules: preconditions via `.requires()`
  * 6. Snapshotting strategy via `.snap()`
  *
  * @template TState - Zod schema type defining the shape of the state
@@ -177,11 +176,6 @@ function action_builder<
         (internal.options as Record<string, ActionOptions>)[action] = options;
       }
 
-      function given(rules: Invariant<TState>[]) {
-        ((internal.given ??= {}) as Record<string, unknown>)[action] = rules;
-        return { requires, emit };
-      }
-
       function requires(rules: Precondition<TState, TNewActions>[]) {
         ((internal.requires ??= {}) as Record<string, unknown>)[action] = rules;
         return { emit };
@@ -218,7 +212,7 @@ function action_builder<
         >;
       }
 
-      return { given, requires, emit };
+      return { requires, emit };
     },
 
     snap(snap: (snapshot: Snapshot<TState, TEvents>) => boolean) {

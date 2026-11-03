@@ -574,40 +574,6 @@ describe("partial-state", () => {
       );
     });
   });
-
-  it("should merge the deprecated .given rules from partials", async () => {
-    const PartWithInvariant = state({
-      Guarded: z.object({ locked: z.boolean() }),
-    })
-      .init(() => ({ locked: false }))
-      .emits({ Locked: ZodEmpty })
-      .patch({ Locked: () => ({ locked: true }) })
-      .on({ lock: ZodEmpty })
-      .emit(() => ["Locked", {}])
-      .build();
-
-    const PartWithGuardedAction = state({
-      Guarded: z.object({ locked: z.boolean() }),
-    })
-      .init(() => ({ locked: false }))
-      .emits({ Attempted: ZodEmpty })
-      .patch({ Attempted: () => ({}) })
-      .on({ attempt: ZodEmpty })
-      .given([{ description: "Must not be locked", valid: (s) => !s.locked }])
-      .emit(() => ["Attempted", {}])
-      .build();
-
-    const { app, dispose } = await sandbox(
-      act().withState(PartWithInvariant).withState(PartWithGuardedAction)
-    );
-
-    await app.do("lock", { stream: "g1", actor }, {});
-    await expect(
-      app.do("attempt", { stream: "g1", actor }, {})
-    ).rejects.toThrow("Must not be locked");
-
-    await dispose();
-  });
 });
 
 /**

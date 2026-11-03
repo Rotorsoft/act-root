@@ -189,16 +189,14 @@ const Board = z.object({
 });
 ```
 
-## Why `.given` and `InvariantError` are deprecated
+## Upgrading from `.given` (removed in 2.0)
 
-Act used to call the rules in `.given([...])` invariants, typed `Invariant` and refused with `InvariantError`. That was the wrong word: every one of them guards one action and is false at some point in a normal lifecycle, so each was a precondition. The real invariants of a domain were written nowhere.
+Act 1.x called the rules in `.given([...])` invariants, typed `Invariant` and refused with `InvariantError`. That was the wrong word: every one of them guards one action and is false at some point in a normal lifecycle, so each was a precondition, and the real invariants of a domain were written nowhere. 1.35 deprecated them, and 2.0 removes them:
 
-So, since 1.35:
-
-- Business rules are preconditions: write `.given([rule])` as `.requires([rule])`, with `valid: (state, actor) => ...` becoming `holds: (_, state, actor) => ...`, and catch `PreconditionError`. It extends `InvariantError`, so a `catch` on `InvariantError` still catches every refused action.
-- Invariants are the state's schema, checked before every commit. The `validateFoldedState` option is ignored, because the check is always on.
-- A state field cleared with `null` in a patch must be `.optional()` or `.nullish()`. `null` deletes the key, so a `.nullable()` field, which requires the key, now refuses every action after the one that cleared it. Before 1.35 nothing checked, so such a state was stored as is.
-- `.given`, `Invariant`, `InvariantError`, `Errors.InvariantError` and `validateFoldedState` keep working, are marked `@deprecated`, and are removed in 2.0.
+- Write `.given([rule])` as `.requires([rule])`, with `valid: (state, actor) => ...` becoming `holds: (_, state, actor) => ...`, and type a shared rule `Precondition<S, unknown>` instead of `Invariant<S>`.
+- Catch `PreconditionError` instead of `InvariantError`; `Errors.InvariantError` (`ERR_INVARIANT`) is gone, and act-http no longer has the `INVARIANT` code.
+- Remove `validateFoldedState` from `act().build(...)`: invariants are the state's schema, checked before every commit, and the option was already ignored.
+- A state field cleared with `null` in a patch must be `.optional()` or `.nullish()`. `null` deletes the key, so a `.nullable()` field, which requires the key, refuses every action after the one that cleared it (since 1.35).
 
 ## Snapshots
 

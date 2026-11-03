@@ -485,7 +485,6 @@ const target = { stream: "s1", actor: { id: "1", name: "test" } };
     ])
     .emit("Moved")
     .on({ moveChecked: Move })
-    .given([{ description: "has pieces", valid: (s) => s.count > 0 }])
     .requires([fromOnly])
     .emit("Moved")
     .on({ moveTyped: Move })
@@ -544,15 +543,15 @@ const target = { stream: "s1", actor: { id: "1", name: "test" } };
   // @ts-expect-error - a precondition needs a description
   base().requires([{ holds: () => true }]);
 
-  base()
-    .requires([
-      {
-        description: "inline, fully inferred",
-        holds: (p, s) => p.count <= s.count,
-      },
-    ])
-    // @ts-expect-error - .given comes before .requires
-    .given([]);
+  base().requires([
+    {
+      description: "inline, fully inferred",
+      holds: (p, s) => p.count <= s.count,
+    },
+  ]);
+
+  // @ts-expect-error - .given was removed in 2.0: declare the rule with .requires
+  base().given([]);
 
   base().requires([
     {

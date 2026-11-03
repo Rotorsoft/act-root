@@ -44,29 +44,13 @@ describe("mock_state", () => {
     expect(built[0].patches.has("E1")).toBe(true);
   });
 
-  it("captures given invariants", () => {
+  it("captures requires preconditions, and none when called empty", () => {
     const built: any[] = [];
-    const inv = { description: "must be open", valid: () => true };
-    mock_state({ S: {} }, (info) => built.push(info))
-      .init()
-      .emits({ Done: {} })
-      .on({ doIt: {} })
-      .given([inv])
-      .emit("Done")
-      .build();
-
-    expect(built[0].given.doIt).toEqual([inv]);
-  });
-
-  it("captures requires preconditions, after given or on their own", () => {
-    const built: any[] = [];
-    const inv = { description: "must be open", valid: () => true };
     const pre = { description: "must own it", holds: () => true };
     mock_state({ S: {} }, (info) => built.push(info))
       .init()
       .emits({ Done: {} })
       .on({ doIt: {} })
-      .given([inv])
       .requires([pre])
       .emit("Done")
       .on({ doThat: {} })
@@ -77,7 +61,6 @@ describe("mock_state", () => {
       .emit("Done")
       .build();
 
-    expect(built[0].given.doIt).toEqual([inv]);
     expect(built[0].requires).toEqual({ doIt: [pre], doThat: [pre] });
   });
 
@@ -293,19 +276,6 @@ describe("mock_state", () => {
       .build();
 
     expect(built[0].actions.__emits_doIt).toEqual([]);
-  });
-
-  it("handles .given() without arguments", () => {
-    const built: any[] = [];
-    mock_state({ S: {} }, (info) => built.push(info))
-      .init()
-      .emits({ E: {} })
-      .on({ doIt: {} })
-      .given(undefined)
-      .emit("E")
-      .build();
-
-    expect(built[0].given.doIt).toBeUndefined();
   });
 
   it("handles .patch() without arguments", () => {
@@ -730,19 +700,12 @@ describe("MODULES", () => {
     expect((MODULES["node:crypto"] as any).randomUUID()).toBe("mock-uuid");
   });
 
-  it("InvariantError is an Error subclass", () => {
-    const Err = MODULES["@rotorsoft/act"].InvariantError as any;
-    const e = new Err("test");
-    expect(e).toBeInstanceOf(Error);
-    expect(e.name).toBe("InvariantError");
-    expect(e.message).toBe("test");
-  });
-
-  it("PreconditionError extends InvariantError", () => {
+  it("PreconditionError is an Error subclass", () => {
     const mod = MODULES["@rotorsoft/act"] as any;
     const e = new mod.PreconditionError("test");
-    expect(e).toBeInstanceOf(mod.InvariantError);
+    expect(e).toBeInstanceOf(Error);
     expect(e.name).toBe("PreconditionError");
+    expect(e.message).toBe("test");
   });
 });
 

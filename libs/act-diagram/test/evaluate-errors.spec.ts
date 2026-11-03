@@ -95,7 +95,7 @@ const MySlice = slice()
     expect(model.slices[0].error).toBeDefined();
   });
 
-  it("regex fallback extracts given invariants", () => {
+  it("regex fallback extracts preconditions", () => {
     const files: FileTab[] = [
       {
         path: "src/b.ts",
@@ -107,7 +107,7 @@ export const S = state({ S: z.object({}) })
   .init(() => ({}))
   .emits({ Done: z.object({}) })
   .on({ doIt: z.object({}) })
-    .given([{ description: "must be valid", valid: () => true }])
+    .requires([{ description: "must be valid", holds: () => true }])
     .emit("Done")
   .build();
 `,
@@ -117,7 +117,7 @@ export const S = state({ S: z.object({}) })
     const st = model.states.find((s) => s.name === "S");
     if (st) {
       const action = st.actions.find((a) => a.name === "doIt");
-      if (action) expect(action.invariants).toContain("must be valid");
+      if (action) expect(action.preconditions).toContain("must be valid");
     }
   });
 

@@ -69,7 +69,7 @@ function formatModelTree(model: DomainModel): string {
         if (!st) continue;
         lines.push(`  State: ${st.name}`);
         for (const a of st.actions) {
-          const rules = a.preconditions ?? a.invariants;
+          const rules = a.preconditions ?? [];
           let line = `    ${a.name} → [${a.emits.join(", ")}]`;
           if (rules.length) line += ` preconditions: [${rules.join(", ")}]`;
           lines.push(line);

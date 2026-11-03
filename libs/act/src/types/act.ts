@@ -191,13 +191,4 @@ export type ActOptions<TLanes extends string = string> = {
     readonly end: number;
     readonly timeZone?: string;
   };
-  /**
-   * Ignored: every action checks the state it leaves against the state's
-   * schema before it commits, so a broken invariant refuses the action
-   * with a {@link ValidationError} and nothing is stored. Loads, replays and
-   * projection folds don't check.
-   *
-   * @deprecated The check is always on. Remove the option; removed in 2.0.
-   */
-  readonly validateFoldedState?: boolean;
 };
