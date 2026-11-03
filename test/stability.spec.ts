@@ -62,6 +62,19 @@ function discover_packages(): Pkg[] {
       const key = subpath === "." ? "" : subpath;
       entry_points[key] = abs_types;
     }
+    // A subpath the root re-exports whole is already in the root's block;
+    // snapshotting it again would show every change to it twice.
+    const root = entry_points[""];
+    if (root) {
+      const root_text = readFileSync(root, "utf8");
+      for (const [key, types] of Object.entries(entry_points)) {
+        const rel = path
+          .relative(path.dirname(root), types)
+          .replace(/\.d\.ts$/, ".js");
+        if (key && root_text.includes(`export * from "./${rel}";`))
+          delete entry_points[key];
+      }
+    }
     if (Object.keys(entry_points).length > 0) {
       packages.push({ name: manifest.name, entry_points });
     }
