@@ -10,7 +10,6 @@ import { sandbox } from "../src/test/index.js";
 import type {
   Committed,
   EventMeta,
-  Message,
   Schemas,
   StreamWrite,
 } from "../src/types/index.js";

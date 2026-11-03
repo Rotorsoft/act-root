@@ -54,15 +54,12 @@ describe("PostgresStore", () => {
   });
 
   describe("commit", () => {
-    it("returns [] for empty events", async () => {
-      // @ts-expect-error mock
-      vi.spyOn(pg.Pool.prototype, "query").mockResolvedValue({ rows: [] });
+    it("returns [] for no writes, without touching the database", async () => {
+      const connect = vi.spyOn(pg.Pool.prototype, "connect");
       await expect(
-        store.commit([{ stream: "stream", msgs: [] }], {
-          correlation: "c",
-          causation: {},
-        })
+        store.commit([], { correlation: "c", causation: {} })
       ).resolves.toEqual([]);
+      expect(connect).not.toHaveBeenCalled();
     });
 
     it("wraps a driver error from the head probe in StoreError('commit')", async () => {

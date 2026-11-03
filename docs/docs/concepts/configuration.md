@@ -426,7 +426,7 @@ Implement the `Store` interface for custom backends:
 interface Store extends Disposable {
   seed(): Promise<void>;
   drop(): Promise<void>;
-  commit(stream, msgs, meta, expectedVersion?): Promise<Committed[]>;
+  commit(writes, meta): Promise<Committed[]>;
   query(callback, filter?): Promise<number>;
   claim(lagging, leading, by, millis, lane?): Promise<Lease[]>;
   subscribe(streams): Promise<{ subscribed: number; watermark: number }>;

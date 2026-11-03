@@ -388,8 +388,8 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         );
       });
 
-      for (const at of [0, 1, 2]) {
-        it(`stores nothing when write ${at + 1} of 3 is stale, and names its stream`, async () => {
+      it("stores nothing when the first, a middle or the last write is stale, and names its stream", async () => {
+        for (const at of [0, 1, 2]) {
           const streams = [0, 1, 2].map((i) => `across-stale-${i}-${uid()}`);
           for (const stream of streams)
             await store.commit<CounterEvents>(
@@ -407,8 +407,8 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           await expect(refused).rejects.toBeInstanceOf(ConcurrencyError);
           await expect(refused).rejects.toMatchObject({ stream: streams[at] });
           for (const stream of streams) expect(await count(stream)).toBe(1);
-        });
-      }
+        }
+      });
 
       it("refuses a stream named twice and a write with no events, storing nothing", async () => {
         const a = `across-twice-${uid()}`;
@@ -550,6 +550,44 @@ export const runStoreTck = (options: StoreTckOptions): void => {
             make_meta({ stream: s })
           )
         ).rejects.toBeInstanceOf(ConcurrencyError);
+      });
+
+      it("takes concurrent commits, reads and writes on one instance", async () => {
+        // Two requests at once, or a commit beside the drain's claim: one
+        // store instance serves them all. A race on one stream still has
+        // one winner.
+        const x = `commit-concurrent-x-${uid()}`;
+        const y = `commit-concurrent-y-${uid()}`;
+        const [first, second, other, read, subscribed] =
+          await Promise.allSettled([
+            store.commit<CounterEvents>(
+              [{ stream: x, msgs: [inc(1)], expectedVersion: -1 }],
+              make_meta({ stream: x })
+            ),
+            store.commit<CounterEvents>(
+              [{ stream: x, msgs: [inc(2)], expectedVersion: -1 }],
+              make_meta({ stream: x })
+            ),
+            store.commit<CounterEvents>(
+              [{ stream: y, msgs: [inc(1)] }],
+              make_meta({ stream: y })
+            ),
+            store.query(() => {}, { stream: x, stream_exact: true }),
+            // A source nothing writes, so later claims never see it.
+            store.subscribe([
+              { stream: `${y}-idle`, source: `${y}-no-source` },
+            ]),
+          ]);
+        expect(
+          [first, second].filter((r) => r.status === "fulfilled")
+        ).toHaveLength(1);
+        const lost = [first, second].find((r) => r.status === "rejected");
+        expect((lost as PromiseRejectedResult).reason).toBeInstanceOf(
+          ConcurrencyError
+        );
+        expect(other.status).toBe("fulfilled");
+        expect(read.status).toBe("fulfilled");
+        expect(subscribed.status).toBe("fulfilled");
       });
 
       it("preserves prior events when a concurrent commit is rejected", async () => {

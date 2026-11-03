@@ -141,13 +141,42 @@ describe("withBroker", () => {
     ).resolves.toHaveLength(1);
   });
 
-  it("skips the publish when a commit lands no events", async () => {
+  it("skips the publish when a commit has no writes", async () => {
     const broker = new LoopbackBroker();
     let published = 0;
     broker.subscribe(() => published++);
     const wrapped = withBroker(new InMemoryStore(), broker);
-    await wrapped.commit([{ stream: "s1", msgs: [] }], meta);
+    await wrapped.commit([], meta);
     expect(published).toBe(0);
+  });
+
+  it("publishes one notification per stream a commit writes", async () => {
+    const broker = new LoopbackBroker();
+    const seen: { stream: string; events: number }[] = [];
+    broker.subscribe(({ notification }) =>
+      seen.push({
+        stream: notification.stream,
+        events: notification.events.length,
+      })
+    );
+    const wrapped = withBroker(new InMemoryStore(), broker);
+    await wrapped.commit(
+      [
+        {
+          stream: "a",
+          msgs: [
+            { name: "E", data: {} },
+            { name: "E", data: {} },
+          ],
+        },
+        { stream: "b", msgs: [{ name: "E", data: {} }] },
+      ],
+      meta
+    );
+    expect(seen).toEqual([
+      { stream: "a", events: 2 },
+      { stream: "b", events: 1 },
+    ]);
   });
 
   describe("a broker that stalls or fails never holds the orchestrator up", () => {

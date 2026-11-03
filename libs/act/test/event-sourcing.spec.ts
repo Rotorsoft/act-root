@@ -389,10 +389,8 @@ describe("event-sourcing", () => {
     );
 
     expect(commitSpy).toHaveBeenCalledWith(
-      "s",
-      expect.any(Array),
-      expect.any(Object),
-      0 // expectedVersion from snapshot.event.version
+      [{ stream: "s", msgs: expect.any(Array), expectedVersion: 0 }], // expectedVersion from snapshot.event.version
+      expect.any(Object)
     );
   });
 
@@ -445,10 +443,8 @@ describe("event-sourcing", () => {
     // The expectedVersion passed to commit should be the version from the snapshot.event
     // In this case, after the initial commit, the version would be 0.
     expect(commitSpy).toHaveBeenCalledWith(
-      "s",
-      expect.any(Array),
-      expect.any(Object),
-      0 // This should be snapshot.event?.version
+      [{ stream: "s", msgs: expect.any(Array), expectedVersion: 0 }], // This should be snapshot.event?.version
+      expect.any(Object)
     );
   });
 
