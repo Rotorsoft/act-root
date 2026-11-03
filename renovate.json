@@ -5,7 +5,8 @@
     "config:recommended",
     ":automergePatch",
     ":maintainLockFilesWeekly",
-    ":enableVulnerabilityAlerts"
+    ":enableVulnerabilityAlerts",
+    "helpers:pinGitHubActionDigests"
   ],
   "gitAuthor": "Rotorsoft Renovate <41707007+Rotorsoft@users.noreply.github.com>",
   "rebaseWhen": "conflicted",

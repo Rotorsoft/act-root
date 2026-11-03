@@ -62,3 +62,16 @@ overrides:
   "find-my-way@<=9.6.0": ">=9.10.0"
   "browserslist@<4.28.7": ">=4.29.5"
   "postcss-selector-parser@<7.1.3": ">=7.1.7"
+
+# Advisories that don't affect this repo, with the reason; re-check each
+# when its package updates. Both reach only the docs build.
+auditConfig:
+  ignoreGhsas:
+    # minimatch <11.0.1: the fix only touches optimizationLevel >= 2. The
+    # default is 1 and nothing here raises it (typedoc, serve-handler);
+    # serve-handler's minimatch 3.1.5 doesn't have the code at all. typedoc
+    # breaks on minimatch 11, so it can't be forced up.
+    - GHSA-g3hv-75wg-m249
+    # deepmerge <=4.3.1, no patched release: only @svgr/plugin-svgo uses it,
+    # to merge the SVGO config written in this repo; no outside input.
+    - GHSA-gcqx-w48m-w2h4
