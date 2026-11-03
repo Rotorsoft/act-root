@@ -13,23 +13,22 @@ import type {
   EventMeta,
   Message,
   Schemas,
+  StreamWrite,
 } from "../src/types/index.js";
 
 /** Holds the next commit until released, so a second writer lands first. */
 class GatedStore extends InMemoryStore {
   gate?: Promise<void>;
   override async commit<E extends Schemas>(
-    stream: string,
-    msgs: Message<E, keyof E>[],
-    meta: EventMeta,
-    expectedVersion?: number
+    writes: readonly StreamWrite<E>[],
+    meta: EventMeta
   ): Promise<Committed<E, keyof E>[]> {
     if (this.gate) {
       const g = this.gate;
       this.gate = undefined;
       await g;
     }
-    return super.commit(stream, msgs, meta, expectedVersion);
+    return super.commit(writes, meta);
   }
 }
 

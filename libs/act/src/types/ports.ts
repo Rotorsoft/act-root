@@ -495,6 +495,21 @@ export type SubscribeInput = {
 };
 
 /**
+ * One stream's part of a {@link Store.commit}: the events to append and,
+ * optionally, the version the stream must be at.
+ *
+ * @template E - Event schemas
+ */
+export type StreamWrite<E extends Schemas> = {
+  /** The stream the events go to; named at most once per commit. */
+  readonly stream: string;
+  /** The events to append, at least one. */
+  readonly msgs: readonly Message<E, keyof E>[];
+  /** The version the stream must be at; `-1` expects an empty stream, `undefined` skips the check. */
+  readonly expectedVersion?: number;
+};
+
+/**
  * Interface for event store implementations.
  *
  * The Store interface defines the contract for persistence adapters in Act.
@@ -562,40 +577,41 @@ export interface Store extends Disposable, EventSource {
   drop: () => Promise<void>;
 
   /**
-   * Commits one or more events to a stream atomically.
+   * Commits events to one or more streams atomically: every write lands,
+   * or none does.
    *
-   * This is the core method for persisting events. It must:
-   * - Assign global sequence IDs to events
-   * - Increment the stream version
-   * - Check optimistic concurrency if expectedVersion is provided
-   * - Store events atomically (all or nothing)
-   * - Attach metadata (id, stream, version, created timestamp)
+   * Each write names its stream, its events and, optionally, the version
+   * the stream must be at. The store must:
+   * - check every `expectedVersion` against its own stream before writing
+   *   anything (`-1` expects an empty stream, `undefined` skips the check),
+   *   and throw {@link ConcurrencyError} naming the first stream that moved;
+   * - refuse a stream named twice and a write with no events (a plain
+   *   `Error`), so a commit is never a version check alone;
+   * - assign global ids in write order, then event order, and make the
+   *   events visible in that order;
+   * - continue each stream's versions from its head, and attach `meta` to
+   *   every event.
+   *
+   * No writes at all commits nothing and returns `[]`.
    *
    * @template E - Event schemas
-   * @param stream - The stream ID to commit to
-   * @param msgs - Array of messages (events) to commit
-   * @param meta - Event metadata (correlation, causation)
-   * @param expectedVersion - Expected current version for optimistic concurrency;
-   * `-1` expects an empty stream, `undefined` skips the check
-   * @returns Array of committed events with full metadata
+   * @param writes - One {@link StreamWrite} per stream
+   * @param meta - Event metadata (correlation, causation), shared by every event
+   * @returns The committed events of every write, in write order
    *
-   * @throws {ConcurrencyError} If expectedVersion doesn't match current version
+   * @throws {ConcurrencyError} If a stream's version doesn't match its `expectedVersion`
    *
    * @example
    * ```typescript
    * const events = await store().commit(
-   *   "user-123",
-   *   [{ name: "UserCreated", data: { email: "user@example.com" } }],
-   *   { correlation: "req-456", causation: { action: {...} } },
-   *   -1 // Expect an empty (new) stream
+   *   [{ stream: "user-123", msgs: [{ name: "UserCreated", data: { email: "user@example.com" } }], expectedVersion: -1 }],
+   *   { correlation: "req-456", causation: { action: {...} } }
    * );
    * ```
    */
   commit: <E extends Schemas>(
-    stream: string,
-    msgs: Message<E, keyof E>[],
-    meta: EventMeta,
-    expectedVersion?: number
+    writes: readonly StreamWrite<E>[],
+    meta: EventMeta
   ) => Promise<Committed<E, keyof E>[]>;
 
   /**

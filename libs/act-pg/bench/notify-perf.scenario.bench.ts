@@ -153,12 +153,15 @@ async function runScenario(
     for (let i = 0; i < COMMITS; i++) {
       const id = `${prefix}-${i}`;
       rec.start(id);
-      await writer.commit("stream-x", [{ name: "Tick", data: {} }], {
-        correlation: id,
-        causation: {
-          action: { stream: "stream-x", name: "tick", actor: ACTOR },
-        },
-      });
+      await writer.commit(
+        [{ stream: "stream-x", msgs: [{ name: "Tick", data: {} }] }],
+        {
+          correlation: id,
+          causation: {
+            action: { stream: "stream-x", name: "tick", actor: ACTOR },
+          },
+        }
+      );
       await new Promise((r) => setTimeout(r, COMMIT_GAP_MS));
     }
     // Allow trailing reactions to drain. Polling needs more headroom

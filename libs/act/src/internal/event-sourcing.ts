@@ -142,13 +142,18 @@ export async function snap<TState extends Schema, TEvents extends Schemas>(
   const { id, stream, name, meta, version } = snapshot.event!;
   try {
     const [committed] = await store().commit(
-      stream,
-      [{ name: SNAP_EVENT, data: snapshot.state }],
+      [
+        {
+          stream,
+          msgs: [{ name: SNAP_EVENT, data: snapshot.state }],
+          // IMPORTANT! - state events are committed right after the snapshot event
+          expectedVersion: version,
+        },
+      ],
       {
         correlation: meta.correlation,
         causation: { event: { id, name: name as string, stream } },
-      },
-      version // IMPORTANT! - state events are committed right after the snapshot event
+      }
     );
     return committed as Committed<TEvents, keyof TEvents>;
   } catch (error) {
@@ -170,10 +175,14 @@ export async function tombstone(
 ): Promise<Committed<Schemas, keyof Schemas> | undefined> {
   try {
     const [committed] = await store().commit(
-      stream,
-      [{ name: TOMBSTONE_EVENT, data: {} }],
-      { correlation, causation: {} },
-      expectedVersion
+      [
+        {
+          stream,
+          msgs: [{ name: TOMBSTONE_EVENT, data: {} }],
+          expectedVersion,
+        },
+      ],
+      { correlation, causation: {} }
     );
     return committed;
   } catch (error) {
@@ -559,7 +568,10 @@ export async function action<
 
       let committed: Committed<TEvents, keyof TEvents>[];
       try {
-        committed = await store().commit(stream, emitted, meta, expected);
+        committed = await store().commit(
+          [{ stream, msgs: emitted, expectedVersion: expected }],
+          meta
+        );
       } catch (error) {
         // Fire-and-forget, so a cache failure can't replace the ConcurrencyError.
         if (error instanceof ConcurrencyError) void cache_drop(stream);

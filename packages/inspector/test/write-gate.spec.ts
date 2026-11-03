@@ -32,10 +32,13 @@ async function buildRelativeSqlite(name: string, n: number): Promise<string> {
   try {
     await store.seed();
     for (let i = 0; i < n; i++)
-      await store.commit("s1", [{ name: "Tick", data: { i } }], {
-        correlation: "test",
-        causation: {},
-      });
+      await store.commit(
+        [{ stream: "s1", msgs: [{ name: "Tick", data: { i } }] }],
+        {
+          correlation: "test",
+          causation: {},
+        }
+      );
   } finally {
     await store.dispose();
   }

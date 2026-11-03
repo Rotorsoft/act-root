@@ -621,7 +621,7 @@ describe("partial-state — policies declared on a later partial", () => {
     store.commit = (async (...args: Parameters<Store["commit"]>) => {
       if (!thrown) {
         thrown = true;
-        throw new ConcurrencyError(args[0] as string, 0, [], 0);
+        throw new ConcurrencyError(args[0][0].stream, 0, [], 0);
       }
       return original(...args);
     }) as Store["commit"];
@@ -654,10 +654,10 @@ describe("partial-state — policies declared on a later partial", () => {
     const original = store.commit.bind(store);
     const raced = new Set<string>();
     store.commit = (async (...args: Parameters<Store["commit"]>) => {
-      const name = args[1][0]?.name as string;
+      const name = args[0][0].msgs[0]?.name as string;
       if (!raced.has(name)) {
         raced.add(name);
-        throw new ConcurrencyError(args[0] as string, 0, [], 0);
+        throw new ConcurrencyError(args[0][0].stream, 0, [], 0);
       }
       return original(...args);
     }) as Store["commit"];

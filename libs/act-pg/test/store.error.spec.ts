@@ -58,7 +58,10 @@ describe("PostgresStore", () => {
       // @ts-expect-error mock
       vi.spyOn(pg.Pool.prototype, "query").mockResolvedValue({ rows: [] });
       await expect(
-        store.commit("stream", [], { correlation: "c", causation: {} })
+        store.commit([{ stream: "stream", msgs: [] }], {
+          correlation: "c",
+          causation: {},
+        })
       ).resolves.toEqual([]);
     });
 
@@ -69,7 +72,7 @@ describe("PostgresStore", () => {
         makeClient(vi.fn().mockRejectedValue(cause))
       );
       const error = await store
-        .commit("stream", [{ name: "E", data: {} }], {
+        .commit([{ stream: "stream", msgs: [{ name: "E", data: {} }] }], {
           correlation: "c",
           causation: {},
         })
@@ -99,7 +102,7 @@ describe("PostgresStore", () => {
         notify: true,
       });
       const error = await notifying
-        .commit("stream", [{ name: "E", data: {} }], {
+        .commit([{ stream: "stream", msgs: [{ name: "E", data: {} }] }], {
           correlation: "c",
           causation: {},
         })
@@ -127,7 +130,7 @@ describe("PostgresStore", () => {
         makeClient(queryMock)
       );
       await expect(
-        store.commit("stream", [{ name: "E", data: {} }], {
+        store.commit([{ stream: "stream", msgs: [{ name: "E", data: {} }] }], {
           correlation: "c",
           causation: {},
         })
@@ -607,7 +610,7 @@ describe("PostgresStore", () => {
         StoreError
       );
       await expect(
-        store.commit("s", [{ name: "A", data: {} }], {
+        store.commit([{ stream: "s", msgs: [{ name: "A", data: {} }] }], {
           correlation: "",
           causation: {},
         })

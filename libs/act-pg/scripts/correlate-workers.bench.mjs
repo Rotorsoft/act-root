@@ -82,9 +82,7 @@ async function commit_load(deadline) {
   while (Date.now() < deadline) {
     await writer
       .commit(
-        `order-${n % AGGREGATES}`,
-        [{ name: "Placed", data: {} }],
-        { correlation: "c", causation: {} }
+        [{ stream: `order-${n % AGGREGATES}`, msgs: [{ name: "Placed", data: {} }] }], { correlation: "c", causation: {} }
       )
       .catch(() => {});
     n++;

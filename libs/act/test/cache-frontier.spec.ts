@@ -12,6 +12,7 @@ import type {
   EventMeta,
   Message,
   Schemas,
+  StreamWrite,
 } from "../src/types/index.js";
 
 /**
@@ -22,17 +23,15 @@ import type {
 class GatedStore extends InMemoryStore {
   gate?: Promise<void>;
   override async commit<E extends Schemas>(
-    stream: string,
-    msgs: Message<E, keyof E>[],
-    meta: EventMeta,
-    expectedVersion?: number
+    writes: readonly StreamWrite<E>[],
+    meta: EventMeta
   ): Promise<Committed<E, keyof E>[]> {
     if (this.gate) {
       const g = this.gate;
       this.gate = undefined;
       await g;
     }
-    return super.commit(stream, msgs, meta, expectedVersion);
+    return super.commit(writes, meta);
   }
 }
 

@@ -124,7 +124,7 @@ async function committer() {
     await timed(commit, () =>
       // Each committer owns its own streams: shared ones would collide on
       // version and record fast ConcurrencyErrors as though they were commits.
-      log.commit(`hot-${WORKER_ID}-${n % 50}`, [{ name: "Opened", data: {} }], {
+      log.commit([{ stream: `hot-${WORKER_ID}-${n % 50}`, msgs: [{ name: "Opened", data: {} }] }], {
         correlation: "c",
         causation: {},
       })

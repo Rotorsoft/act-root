@@ -151,8 +151,7 @@ describe("CsvFile (file mode — read + write round trip)", () => {
     const store = new InMemoryStore();
     await store.seed();
     await store.commit(
-      "s1",
-      [{ name: "Tick", data: { at: when } }] as never,
+      [{ stream: "s1", msgs: [{ name: "Tick", data: { at: when } }] as never }],
       { correlation: "c", causation: {}, stream: "s1" } as never
     );
 

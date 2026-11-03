@@ -14,6 +14,7 @@ import type {
   StreamFilter,
   StreamPosition,
   StreamStats,
+  StreamWrite,
   SubscribeInput,
   SubscribeResult,
 } from "@rotorsoft/act";
@@ -99,6 +100,18 @@ export interface SqliteConfig {
  * by "no such table: events" on readback.
  * @internal
  */
+// A commit names each stream once, and every write carries events.
+function check_writes<E extends Schemas>(writes: readonly StreamWrite<E>[]) {
+  const seen = new Set<string>();
+  for (const { stream, msgs } of writes) {
+    if (!msgs.length)
+      throw new Error(`commit: the write to "${stream}" has no events`);
+    if (seen.has(stream))
+      throw new Error(`commit: stream "${stream}" is written twice`);
+    seen.add(stream);
+  }
+}
+
 const SHARED_MEMORY_URL = "file::memory:?cache=shared";
 
 /**
@@ -565,65 +578,69 @@ export class SqliteStore implements Store {
     this.client.close();
   }
 
-  // --- commit: transaction + optimistic concurrency ---
+  // --- commit: one transaction across every write ---
   async commit<E extends Schemas>(
-    stream: string,
-    msgs: Message<E, keyof E>[],
-    meta: EventMeta,
-    expectedVersion?: number
+    writes: readonly StreamWrite<E>[],
+    meta: EventMeta
   ): Promise<Committed<E, keyof E>[]> {
+    check_writes(writes);
+    if (!writes.length) return [];
     const tx = await this.client.transaction("write");
-    // Hoisted so the catch can build a ConcurrencyError with the head
-    // version on a (stream, version) unique collision.
-    let current_version = -1;
+    // The write being inserted and its head, so the catch can name the
+    // stream a (stream, version) unique collision hit.
+    let writing = writes[0];
+    let head = -1;
     try {
-      const version_row = await tx.execute({
-        sql: "SELECT COALESCE(MAX(version), -1) as v FROM events WHERE stream = ?",
-        args: [stream],
-      });
-      current_version = Number(version_row.rows[0].v);
-
-      if (
-        typeof expectedVersion === "number" &&
-        current_version !== expectedVersion
-      ) {
-        throw new ConcurrencyError(
-          stream,
-          current_version,
-          msgs as Message<Schemas, keyof Schemas>[],
-          expectedVersion
-        );
+      // Every head is read and checked before anything is inserted.
+      const heads = new Map<string, number>();
+      for (const { stream, msgs, expectedVersion } of writes) {
+        const row = await tx.execute({
+          sql: "SELECT COALESCE(MAX(version), -1) as v FROM events WHERE stream = ?",
+          args: [stream],
+        });
+        const current = Number(row.rows[0].v);
+        if (typeof expectedVersion === "number" && current !== expectedVersion)
+          throw new ConcurrencyError(
+            stream,
+            current,
+            msgs as unknown as Message<Schemas, keyof Schemas>[],
+            expectedVersion
+          );
+        heads.set(stream, current);
       }
 
       const now = new Date().toISOString();
       const committed: Committed<E, keyof E>[] = [];
-      let version = current_version + 1;
-
-      for (const { name, data, pii } of msgs) {
-        const pii_for_write = await this._stringify_pii_for_write(pii);
-        const result = await tx.execute({
-          sql: "INSERT INTO events (stream, version, name, data, meta, created, pii) VALUES (?, ?, ?, ?, ?, ?, ?)",
-          args: [
-            stream,
+      for (const write of writes) {
+        writing = write;
+        head = heads.get(write.stream)!;
+        let version = head + 1;
+        for (const { name, data, pii } of write.msgs) {
+          const pii_for_write = await this._stringify_pii_for_write(pii);
+          const result = await tx.execute({
+            sql: "INSERT INTO events (stream, version, name, data, meta, created, pii) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            args: [
+              write.stream,
+              version,
+              name as string,
+              JSON.stringify(data),
+              JSON.stringify(meta),
+              now,
+              pii_for_write,
+            ],
+          });
+          committed.push({
+            id: Number(result.lastInsertRowid),
+            stream: write.stream,
             version,
-            name as string,
-            JSON.stringify(data),
-            JSON.stringify(meta),
-            now,
-            pii_for_write,
-          ],
-        });
-        committed.push({
-          id: Number(result.lastInsertRowid),
-          stream,
-          version,
-          created: new Date(now),
-          name,
-          data,
-          meta,
-          ...(pii == null ? {} : { pii }),
-        });
-        version++;
+            created: new Date(now),
+            name,
+            data,
+            meta,
+            ...(pii == null ? {} : { pii }),
+          });
+          version++;
+        }
       }
 
       await tx.commit();
@@ -640,10 +657,10 @@ export class SqliteStore implements Store {
       if (e instanceof ConcurrencyError) throw e;
       if (is_unique_violation(e))
         throw new ConcurrencyError(
-          stream,
-          current_version,
-          msgs as Message<Schemas, keyof Schemas>[],
-          expectedVersion ?? -1
+          writing.stream,
+          head,
+          writing.msgs as unknown as Message<Schemas, keyof Schemas>[],
+          writing.expectedVersion ?? -1
         );
       throw new StoreError("commit", { cause: e });
     }

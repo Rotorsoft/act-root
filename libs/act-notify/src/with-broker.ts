@@ -14,10 +14,10 @@ import { randomUUID } from "node:crypto";
 import type {
   Committed,
   EventMeta,
-  Message,
   Schemas,
   Store,
   StoreNotification,
+  StreamWrite,
 } from "@rotorsoft/act";
 import { log } from "@rotorsoft/act";
 
@@ -93,20 +93,16 @@ export function withBroker<S extends Store>(
   const origin = randomUUID();
 
   const commit = async <E extends Schemas>(
-    stream: string,
-    msgs: Message<E, keyof E>[],
-    meta: EventMeta,
-    expectedVersion?: number
+    writes: readonly StreamWrite<E>[],
+    meta: EventMeta
   ): Promise<Committed<E, keyof E>[]> => {
-    const committed = await store.commit(stream, msgs, meta, expectedVersion);
-    if (committed.length > 0) {
-      const notification: StoreNotification = {
-        stream,
-        events: committed.map(({ id, name }) => ({
-          id,
-          name: name as string,
-        })),
-      };
+    const committed = await store.commit(writes, meta);
+    // One notification per stream written, as a store's own notify sends.
+    for (const { stream } of writes) {
+      const events = committed
+        .filter((e) => e.stream === stream)
+        .map(({ id, name }) => ({ id, name: name as string }));
+      const notification: StoreNotification = { stream, events };
       // Hint, not a contract: the publish must never gate the durable
       // write's return. Invoke it synchronously (so an in-process broker
       // fans out before commit resolves) but do NOT await the result — a

@@ -508,14 +508,17 @@ const apply_plan = async (
           ? op.msgs.map((m, i) => (i === 0 ? { ...m, pii: op.pii } : m))
           : op.msgs;
       await store.commit<CounterEvents>(
-        op.stream,
-        msgs as CounterMessage[],
+        [{ stream: op.stream, msgs: msgs as CounterMessage[] }],
         make_meta({ stream: op.stream, correlation: plan.correlation })
       );
     } else if (op.t === "snapshot") {
       await store.commit(
-        op.stream,
-        [{ name: SNAP_EVENT, data: { count: op.count } }],
+        [
+          {
+            stream: op.stream,
+            msgs: [{ name: SNAP_EVENT, data: { count: op.count } }],
+          },
+        ],
         make_meta({ stream: op.stream, correlation: plan.correlation })
       );
     } else if (op.t === "truncate") {
@@ -528,8 +531,12 @@ const apply_plan = async (
       // wide so it never excludes the boundary. Deterministic across
       // adapters: the boundary is a real event the workload wrote.
       await store.commit(
-        op.stream,
-        [{ name: SNAP_EVENT, data: { count: 1 } }],
+        [
+          {
+            stream: op.stream,
+            msgs: [{ name: SNAP_EVENT, data: { count: 1 } }],
+          },
+        ],
         make_meta({ stream: op.stream, correlation: plan.correlation })
       );
       await store.truncate([

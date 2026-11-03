@@ -180,7 +180,10 @@ const scenarios: Scenario[] = [
       await resetStore();
     },
     async run() {
-      await store().commit(`single-${Math.random()}`, incMsgs(1), meta);
+      await store().commit(
+        [{ stream: `single-${Math.random()}`, msgs: incMsgs(1) }],
+        meta
+      );
     },
   },
   {
@@ -193,7 +196,10 @@ const scenarios: Scenario[] = [
       await resetStore();
     },
     async run() {
-      await store().commit(`batch-${Math.random()}`, incMsgs(50), meta);
+      await store().commit(
+        [{ stream: `batch-${Math.random()}`, msgs: incMsgs(50) }],
+        meta
+      );
     },
   },
   {
@@ -206,14 +212,21 @@ const scenarios: Scenario[] = [
     async setup() {
       await resetStore();
       const stream = "cold-floor";
-      await store().commit(stream, incMsgs(COLD_FLOOR_EVENTS), meta);
-      // Seed a snapshot at the floor so cold load reads from here, not 0.
       await store().commit(
-        stream,
-        [{ name: SNAP_EVENT, data: { count: COLD_FLOOR_EVENTS } }],
+        [{ stream, msgs: incMsgs(COLD_FLOOR_EVENTS) }],
         meta
       );
-      await store().commit(stream, incMsgs(COLD_TAIL_EVENTS), meta);
+      // Seed a snapshot at the floor so cold load reads from here, not 0.
+      await store().commit(
+        [
+          {
+            stream,
+            msgs: [{ name: SNAP_EVENT, data: { count: COLD_FLOOR_EVENTS } }],
+          },
+        ],
+        meta
+      );
+      await store().commit([{ stream, msgs: incMsgs(COLD_TAIL_EVENTS) }], meta);
     },
     async preIteration() {
       // Drop the cache so each iter replays from the store (cold).
@@ -235,7 +248,7 @@ const scenarios: Scenario[] = [
     },
     async run() {
       const src = `drain-src-${Math.random()}`;
-      await store().commit(src, incMsgs(50), meta);
+      await store().commit([{ stream: src, msgs: incMsgs(50) }], meta);
       await app.correlate();
       await app.drain({ streamLimit: 100, eventLimit: 1000 });
     },
@@ -250,8 +263,7 @@ const scenarios: Scenario[] = [
       await resetStore();
       for (let i = 0; i < QS_STREAMS; i++) {
         await store().commit(
-          `qs-${String(i).padStart(4, "0")}`,
-          incMsgs(5),
+          [{ stream: `qs-${String(i).padStart(4, "0")}`, msgs: incMsgs(5) }],
           meta
         );
       }
@@ -333,7 +345,7 @@ async function notifyRun() {
       clearTimeout(timer);
       resolve();
     };
-    notifyWriter!.commit(stream, incMsgs(1), meta).catch((err) => {
+    notifyWriter!.commit([{ stream, msgs: incMsgs(1) }], meta).catch((err) => {
       clearTimeout(timer);
       notifyResolve = null;
       reject(err);

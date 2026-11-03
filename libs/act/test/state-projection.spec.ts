@@ -315,10 +315,13 @@ describe("state projection (.of)", () => {
       await app.do("increment", { stream: "c1", actor }, { by: 1 });
       await app.do("increment", { stream: "c1", actor }, { by: 2 });
       // Snapshot at the head, then more traffic on top of it.
-      await store().commit("c1", [{ name: SNAP_EVENT, data: { count: 3 } }], {
-        correlation: "t",
-        causation: {},
-      });
+      await store().commit(
+        [{ stream: "c1", msgs: [{ name: SNAP_EVENT, data: { count: 3 } }] }],
+        {
+          correlation: "t",
+          causation: {},
+        }
+      );
       await app.do("increment", { stream: "c1", actor }, { by: 4 });
       // Cold engine + cold act cache: the miss-load must take the
       // snapshot floor and fold only the tail on top of it.
@@ -1033,10 +1036,14 @@ describe("fold PII treatment is path-independent", () => {
       // Committed straight to the store, so no state is cached and the
       // first-sight load replays through the view.
       await ctx.store.commit(
-        "n",
         [
-          { name: "Noted", data: { text: "a" } },
-          { name: "Noted", data: { text: "b" } },
+          {
+            stream: "n",
+            msgs: [
+              { name: "Noted", data: { text: "a" } },
+              { name: "Noted", data: { text: "b" } },
+            ],
+          },
         ],
         { correlation: "n", causation: {} }
       );
