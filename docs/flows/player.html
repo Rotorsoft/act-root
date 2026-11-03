@@ -34,6 +34,7 @@ body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.5 var(-
 .top { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--surface); }
 .brand { min-width: 0; flex: 1 1 260px; }
 h1 { font: 600 19px/1.2 var(--f-display); margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.preview-tag { flex: none; font: 500 11.5px var(--f-mono); color: var(--state); border: 1px solid var(--state); border-radius: 999px; padding: 2px 9px; white-space: nowrap; }
 .sub { color: var(--muted); font-size: 12.5px; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tabs { display: flex; flex-wrap: wrap; gap: 3px; padding: 3px; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; }
 .tabs button { border: 0; background: transparent; color: var(--muted); font: 500 12.5px var(--f-body); padding: 5px 10px; border-radius: 7px; cursor: pointer; }
@@ -230,6 +231,7 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
       <h1 id="title"></h1>
       <p class="sub" id="subtitle"></p>
     </div>
+    <span class="preview-tag" id="preview" hidden></span>
     <div class="tabs" role="tablist" id="tabs"></div>
     <div class="ctl">
       <button id="restart" title="Restart scenario" aria-label="Restart scenario">⟲</button>
@@ -563,6 +565,7 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
   $("title").textContent = spec.title;
   $("subtitle").textContent = spec.subtitle || "";
   $("subtitle").title = spec.subtitle || "";
+  if (spec.preview) { $("preview").textContent = `Design preview · ${spec.preview}`; $("preview").hidden = false; }
   const used = new Set([...nodes.values()].map(kindOf));
   $("legend").innerHTML = Object.entries(KINDS).filter(([k]) => used.has(k))
     .map(([k, v]) => `<div><i style="background:var(${v.color})"></i>${v.name}</div>`).join("") +
