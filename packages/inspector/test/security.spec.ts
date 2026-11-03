@@ -34,6 +34,7 @@ const { inspectorRouter, resolveSslConfig, resolveUnderCwd } = await import(
 );
 const {
   DEFAULT_BIND_HOST,
+  hostAllowed,
   isOriginAllowed,
   mutationOriginAllowed,
   resolveBindHost,
@@ -237,5 +238,38 @@ describe("CORS origin decisions", () => {
     expect(
       mutationOriginAllowed("https://evil.example", "https://app.example")
     ).toBe(false);
+  });
+});
+
+describe("Host header check (DNS rebinding)", () => {
+  it("serves loopback hosts, with or without a port", () => {
+    for (const host of [
+      "localhost:4001",
+      "127.0.0.1:4001",
+      "[::1]:4001",
+      "LOCALHOST",
+    ])
+      expect(hostAllowed(host, "127.0.0.1", undefined)).toBe(true);
+  });
+
+  it("refuses a rebinding page's own domain, and a missing Host", () => {
+    expect(
+      hostAllowed("rebind.attacker.example:4001", "127.0.0.1", undefined)
+    ).toBe(false);
+    expect(hostAllowed(undefined, "127.0.0.1", undefined)).toBe(false);
+  });
+
+  it("serves the bound host and the hosts an operator lists", () => {
+    expect(hostAllowed("10.0.0.5:4001", "10.0.0.5", undefined)).toBe(true);
+    expect(
+      hostAllowed(
+        "inspector.internal",
+        "0.0.0.0",
+        " ops.internal, Inspector.Internal "
+      )
+    ).toBe(true);
+    expect(hostAllowed("other.internal", "0.0.0.0", "inspector.internal")).toBe(
+      false
+    );
   });
 });
