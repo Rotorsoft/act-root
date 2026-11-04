@@ -102,6 +102,33 @@ describe("the model", () => {
   });
 });
 
+describe("a state with sensitive fields", () => {
+  it("is read like any other, along with what follows it in the file", () => {
+    const { model: read } = extract_model([
+      {
+        path: "user.ts",
+        content: `
+          import { act, sensitive, state } from "@rotorsoft/act";
+          import { z } from "zod";
+          const Registered = z.object({ email: sensitive(z.string()) });
+          export const User = state({ User: z.object({}) })
+            .init(() => ({}))
+            .emits({ Registered })
+            .on({ Register: z.object({ email: z.string() }) })
+            .emit("Registered")
+            .build();
+          export const Later = state({ Later: z.object({}) })
+            .init(() => ({}))
+            .emits({ Done: z.object({}) })
+            .build();
+          export const app = act().withState(User).withState(Later).build();`,
+      },
+    ]);
+    expect(read.states.map((s) => s.name)).toEqual(["User", "Later"]);
+    expect(read.states[0].actions[0].name).toBe("Register");
+  });
+});
+
 describe("an action without loads", () => {
   const action = { name: "a", emits: ["E"] };
 

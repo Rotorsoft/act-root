@@ -241,9 +241,10 @@ export const app = act().withState(Seats).withState(Enrollment).build();
 - **A load without events is a read.** The decision sees the state, but nothing is appended to its stream, so it isn't guarded: the commit lands even if that stream moved. A decision that must be refused when a stream moves appends to it.
 - **The loaded state's schema guards every fold,** whichever action emits into it, and each event's `meta.causation.action` names the action that emitted it, so an owner's own `SeatTaken` and one from `Enroll` are told apart.
 - **What `app.do` returns** is its own stream's snapshots, typed as without loads. `committed` fires once for each stream the action appended to, its own first, so a listener always gets one stream's snapshots; a state-scoped listener (`app.on("committed", Seats, ...)`) hears its own state's streams, and the reactions of every stream appended to wake.
+- **Freeing a value is an action.** `app.close` runs no action, so it can't append to another stream. To free a value when its holder goes away, an action frees it (a logout, a deactivation), then the stream closes; closing without that keeps the value taken.
 - **One store.** A loaded state must be registered in the same Act (`act().build()` throws otherwise), so every stream of the commit lives in one store. A loaded stream loads with the caller's actor, so its sensitive fields are gated as the caller's would be.
 
-Uniqueness and limits are ordinary states: an `Email` state, one stream per value, that a registration loads and appends `EmailTaken` to; a `Seats` state with a count. The scenarios behind this design (room booking, payments, inventory, transfers, invoice numbers, loans, rentals) run as tests in `libs/act/test/rules-across-streams.spec.ts`, and [RFC 2251](https://github.com/Rotorsoft/act-root/blob/master/rfcs/2251-rules-across-streams.md) explains the trade-offs.
+Uniqueness and limits are ordinary states: an `Email` state, one stream per value, that a registration loads and appends `EmailTaken` to; a `Seats` state with a count. Every scenario behind this design runs as a state with tests in the [rules across streams recipe](../examples/rules.md), and [RFC 2251](https://github.com/Rotorsoft/act-root/blob/master/rfcs/2251-rules-across-streams.md) explains the trade-offs.
 
 ## Upgrading from `.given` (removed in 2.0)
 

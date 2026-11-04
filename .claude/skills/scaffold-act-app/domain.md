@@ -164,10 +164,10 @@ export const User = state({ User: z.object({ email: z.string() }) })
 - **A load with no events is a read.** It isn't guarded, so the commit lands even if that stream moved. If the decision must be refused when it moves, list an event and append to it.
 - **Each event goes to one stream.** List it on one load of the action. A target that names no stream, the action's own stream, or a stream another load names refuses with `PreconditionError` before any rule runs, so a transfer to the same account or a change to the address it already has is a 409 for the client.
 - **Register every loaded state in the same Act**, with `.withState(...)` in a slice or the app, or `build()` throws. A commit is atomic only inside one store.
-- **Put the limit in the loaded state's schema too**, so no action can break it. The precondition gives the caller a clear refusal; the schema is what holds.
+- **Put a fixed limit in the loaded state's schema too**, so no action can break it. The precondition gives the caller a clear refusal; the schema is what holds. A limit that can be lowered stays a precondition only: with `taken <= capacity` in the schema, lowering it below the seats taken would be refused, and those enrolled should keep their seats.
 - **Reach for a reaction instead** when the other stream can catch up later, and the rule doesn't have to hold at the moment of the commit. A loaded stream every action writes to is a point of contention.
 
-Freeing a value is an action too (a logout, a deactivation): `app.close` runs no action, so free the value first, then close.
+Freeing a value is an action too (a logout, a deactivation): `app.close` runs no action, so free the value first, then close. [`recipes/rules-across-streams`](../../../recipes/rules-across-streams/README.md) has every scenario as a working state with tests.
 
 ## States
 

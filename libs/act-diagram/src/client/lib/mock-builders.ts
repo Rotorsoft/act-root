@@ -420,6 +420,9 @@ export const MODULES: Record<string, Record<string, unknown>> = {
     }),
     dispose: () => () => Promise.resolve(),
     ZodEmpty: z.record(z.string(), z.never()),
+    // Runs where an event schema is declared, so a file that can't call it
+    // stops there and loses every state after it.
+    sensitive: (schema: unknown) => schema,
     PreconditionError,
   },
   zod: { z, ...z },
