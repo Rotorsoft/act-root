@@ -390,13 +390,35 @@ export type Precondition<
   TState extends Schema,
   TPayload,
   TActor extends Actor = Actor,
+  TLoaded extends Schemas = {},
 > = {
   description: string;
   holds: (
     payload: Readonly<TPayload>,
     state: Readonly<TState>,
-    actor?: TActor
+    actor: TActor | undefined,
+    loaded: Readonly<TLoaded>
   ) => boolean;
+};
+
+/**
+ * One `.loads(...)` of an action: another state the decision needs, at the
+ * stream `target` names, and the events of that state the action may emit
+ * to that stream. A load without events is a read: nothing is appended
+ * to its stream, and it isn't guarded.
+ *
+ * Built by the state builder; resolved to the registered state by
+ * `act().build()`.
+ */
+export type Load = {
+  /** The loaded state; after build, the one registered under its name. */
+  readonly state: State<any, any, any>;
+  /** The stream to load, from the payload and the action's state. */
+  readonly target: (payload: any, state: any) => string;
+  /** The loaded state's events the action may emit to that stream. */
+  readonly events: readonly string[];
+  /** The key of this load in `loaded`: the load's name, or the state's. */
+  readonly name: string;
 };
 
 /**
@@ -476,11 +498,14 @@ export type ActionHandler<
   TEvents extends Schemas,
   TActions extends Schemas,
   TKey extends keyof TActions,
+  TLoaded extends Schemas = {},
+  TRouted extends Schemas = {},
 > = (
   action: Readonly<TActions[TKey]>,
   snapshot: Readonly<Snapshot<TState, TEvents>>,
-  target: Target
-) => Emitted<TEvents> | Emitted<TEvents>[] | undefined;
+  target: Target,
+  loaded: Readonly<TLoaded>
+) => Emitted<TEvents & TRouted> | Emitted<TEvents & TRouted>[] | undefined;
 
 /**
  * Maps action names to their handlers.
@@ -505,7 +530,12 @@ export type RequiresHandlers<
   TState extends Schema,
   TActions extends Schemas,
 > = {
-  [TKey in keyof TActions]?: Precondition<TState, TActions[TKey]>[];
+  [TKey in keyof TActions]?: Precondition<
+    TState,
+    TActions[TKey],
+    Actor,
+    Schemas
+  >[];
 };
 
 // ---------------------------------------------------------------------------
@@ -712,6 +742,11 @@ export type State<
   patch: PatchHandlers<TState, TEvents>;
   on: ActionHandlers<TState, TEvents, TActions>;
   requires?: RequiresHandlers<TState, TActions>;
+  /**
+   * The other states each action loads, keyed by action name. Set by
+   * `.loads(...)`; an action without an entry loads only its own stream.
+   */
+  loads?: { [TKey in keyof TActions]?: readonly Load[] };
   snap?: (snapshot: Snapshot<TState, TEvents>) => boolean;
   /**
    * Per-action retry policy keyed by action name. Set by

@@ -25,6 +25,7 @@ import type {
   AutoclosePolicy,
   AutoclosePredicate,
   Committed,
+  Load,
   PassthroughPatchHandler,
   PatchHandlers,
   Precondition,
@@ -176,6 +177,33 @@ function action_builder<
         (internal.options as Record<string, ActionOptions>)[action] = options;
       }
 
+      const loads: Load[] = [];
+
+      function load(
+        state: State<any, any, any>,
+        target: Load["target"],
+        events: readonly string[] = [],
+        name: string = state.name
+      ) {
+        if (loads.some((l) => l.name === name))
+          throw new Error(
+            `Action "${action}" loads "${name}" twice; name each load of the same state`
+          );
+        for (const event of events) {
+          if (!(event in state.events))
+            throw new Error(
+              `Action "${action}" lists "${event}" on its load of "${state.name}", which doesn't emit it`
+            );
+          if (loads.some((l) => l.events.includes(event)))
+            throw new Error(
+              `Action "${action}" lists "${event}" on two loads; an event goes to one stream`
+            );
+        }
+        loads.push({ state, target, events, name });
+        ((internal.loads ??= {}) as Record<string, Load[]>)[action] = loads;
+        return { loads: load, requires, emit };
+      }
+
       function requires(rules: Precondition<TState, TNewActions>[]) {
         ((internal.requires ??= {}) as Record<string, unknown>)[action] = rules;
         return { emit };
@@ -189,11 +217,10 @@ function action_builder<
         if (typeof handler === "string") {
           const event_name = handler;
           // Tag the synthetic function with the static event name so
-          // the act-builder can detect emissions of deprecated events
-          // at build time. Dynamic forms — where the
-          // returned event name is computed inside the user's
-          // function — can't be inspected statically; they're caught
-          // by the runtime warning in event-sourcing.ts.
+          // the act-builder can check it at build time (a deprecated
+          // event, an event a load lists). Dynamic forms compute the
+          // event name inside the user's function, so the build can't
+          // see it.
           const emit_fn = Object.assign(
             (payload: any) => [event_name, payload],
             {
@@ -212,7 +239,8 @@ function action_builder<
         >;
       }
 
-      return { requires, emit };
+      // Typed by the public signature; the runtime bag is the same at every step.
+      return { loads: load, requires, emit } as never;
     },
 
     snap(snap: (snapshot: Snapshot<TState, TEvents>) => boolean) {

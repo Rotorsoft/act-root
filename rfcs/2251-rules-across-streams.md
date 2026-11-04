@@ -3,7 +3,7 @@
 - **Issue:** #2251
 - **Author:** Claude, for rotorsoft
 - **Created:** 2026-10-31
-- **Revised:** 2026-11-01 (replaces the first design, merged in #2252); 2026-11-03 (a load without events is a read, no chained targets, no act-crypto helper, a loaded state is registered in this Act, teaching by pattern: #2285, #2289–#2293)
+- **Revised:** 2026-11-01 (replaces the first design, merged in #2252); 2026-11-03 (a load without events is a read, no chained targets, no act-crypto helper, a loaded state is registered in this Act, teaching by pattern: #2285, #2289–#2293); 2026-11-03 (`commit(appends, meta)`, and `.loads` is positional: #2304, #2255); 2026-11-04 (an action appends to its own stream too)
 - **Ships in:** 2.0 (the `Store.commit` signature changes)
 
 ## Motivation
@@ -134,7 +134,7 @@ A limit is the same pattern with a count, like `Seats`. What a framework helper 
 
 1. **Load** the action's own stream (state and version), then every `.loads` target at once; a target function sees the payload and the action's state.
 2. **Check the preconditions** with the action's state and every state it loaded (the fourth argument, `loaded`, keyed by state name, or by the load's name when it has one).
-3. **Run `.emit` and route each event:** an event of the action's own state goes to its stream; an event listed on a load goes to that load's stream. Fold each event onto its stream's state, and check every folded state against its schema.
+3. **Run `.emit` and route each event:** an event of the action's own state goes to its stream; an event listed on a load goes to that load's stream. An action that emits to loaded streams emits to its own stream too: its own stream records the decision, so an action whose events all go to loaded streams throws, and a change to one stream alone belongs on that stream's state. Fold each event onto its stream's state, and check every folded state against its schema.
 4. **Commit once,** `commit(appends)`, with each stream's expected version set to the version it had **when it was loaded**. A loaded stream that receives no event gets no append, so it isn't guarded.
 5. **The store checks every version in one atomic step.** If any stream moved since its load, nothing is written and the commit throws `ConcurrencyError`; `maxRetries` reruns the sequence from step 1 with fresh loads. An explicit `expectedVersion` from the caller applies to the action's own stream and is never retried.
 
@@ -165,11 +165,11 @@ No write rests on stale context: every stream the action writes is unchanged sin
 Every new piece is typed from the states it names, end to end, and a type-level test fails to compile when any of these widens:
 
 - **`.loads`:** a `State` carries its name as a literal type, so each load adds `{ [name]: thatState }` to the action's `loaded` type. `events` accepts only the loaded state's event names. A load name is a literal too, so a duplicate fails to compile.
-- **Preconditions:** `holds(payload, state, actor, loaded)`, the fourth parameter optional, so a shared `Precondition<S, unknown>` still fits every action.
+- **Preconditions:** `holds(payload, state, actor, loaded)`. The type declares `actor` and `loaded` as parameters (not optional ones, so a rule can destructure `loaded`), and a shared `Precondition<S, unknown>` that leaves them out still fits every action.
 - **`.emit`:** `(payload, snapshot, target, loaded)`, and its return type is the state's own events plus every event listed on its loads, each with its own payload type. An event listed on no load fails to compile; an event listed on two loads of one action fails to compile.
 - **`app.do` and act-http:** unchanged return types. A generated tRPC or Hono mutation still returns its action's snapshots, typed; the other streams' commits reach typed state-scoped `committed` listeners.
 
-The build checks the same for plain JavaScript and dynamically built states: a load of the action's own stream, an event that doesn't belong to the loaded state, an event listed on two loads, a state loaded twice without names, and an emitted event no load lists all throw.
+The build checks the same for plain JavaScript and dynamically built states: a load of the action's own stream, an event that doesn't belong to the loaded state, an event listed on two loads, a state loaded twice without names, a static `.emit` of an event a load lists, and an emitted event no load lists all throw.
 
 ## Scenarios
 
@@ -260,6 +260,7 @@ The scaffold skill generates `.loads` and the uniqueness or capacity states when
 - a state loaded twice without names throws at build; a duplicate load name fails to compile;
 - an event listed on a load that doesn't belong to the loaded state, an event listed on two loads, and an emitted event of another state that no load lists all fail to compile and throw at build (or at the call, for a dynamic emit);
 - a target function that throws commits nothing;
+- an action whose events all go to loaded streams throws, storing nothing;
 - a precondition over a loaded state refuses with `PreconditionError`; a loaded state's schema refuses its folded state with `ValidationError`; either way nothing commits;
 - the action emits only its own events, only events to loaded streams, or nothing (nothing commits, no `committed`); every written stream is guarded;
 - a load without events is not guarded: the commit lands when that stream moved;
@@ -297,5 +298,5 @@ The scaffold skill generates `.loads` and the uniqueness or capacity states when
 
 ## Open questions
 
-1. **`.loads`' signature.** Positional (`State, target, events?, name?`) or an options object for the optional parts (`.loads(Account, (d) => d.from, { emits: ["Debited"], as: "from" })`).
+1. ~~**`.loads`' signature.**~~ Settled (2026-11-03): positional, `.loads(State, target, events?, name?)`, simpler to write. Both shapes keep the load's name in the type when it's written inline; an options object held in a variable widens it to `string`, a positional name in a `const` doesn't.
 2. **Hot-resource splitting:** a recipe in 2.0; does it ever need surface?

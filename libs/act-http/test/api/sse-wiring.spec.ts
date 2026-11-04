@@ -1,5 +1,6 @@
+import { act, type State, sensitive, state } from "@rotorsoft/act";
 import { describe, expect, it } from "vitest";
-import { ZodError } from "zod";
+import { ZodError, z } from "zod";
 import { sse_state_names } from "../../src/api/sse-states.js";
 import {
   DEFAULT_SSE_HEARTBEAT_MS,
@@ -464,12 +465,56 @@ describe("sse_state_names", () => {
       do: async () => [],
       registry: {
         actions: {
-          open: { name: "Ticket", actions: {} },
+          open: { name: "Ticket", actions: {}, loads: { open: undefined } },
           close: { name: "Ticket", actions: {} },
           press: { name: "Calculator", actions: {} },
         },
       },
     };
     expect(sse_state_names(app, "hono")).toEqual(["Ticket", "Calculator"]);
+  });
+
+  describe("a state only reached through .loads", () => {
+    const Taken = z.object({ who: z.string() });
+    const loading = (loaded: State<any, any, any, string>, event: string) =>
+      act()
+        .withState(loaded)
+        .withState(
+          state({ Enrollment: z.object({}) })
+            .init(() => ({}))
+            .emits({ Enrolled: z.object({}) })
+            .patch({ Enrolled: () => ({}) })
+            .on({ Enroll: z.object({ who: z.string() }) })
+            .loads(loaded, () => "shared", [event])
+            .emit(({ who }) => [
+              ["Enrolled", {}],
+              [event, { who }],
+            ])
+            .build()
+        )
+        .build();
+
+    it("gets its own subscription: its streams change too", () => {
+      const Seats = state({ Seats: z.object({}) })
+        .init(() => ({}))
+        .emits({ SeatTaken: Taken })
+        .patch({ SeatTaken: () => ({}) })
+        .build();
+      expect(sse_state_names(loading(Seats, "SeatTaken"), "trpc")).toEqual([
+        "Enrollment",
+        "Seats",
+      ]);
+    });
+
+    it("throws when its events declare sensitive fields", () => {
+      const Vault = state({ Vault: z.object({}) })
+        .init(() => ({}))
+        .emits({ Locked: z.object({ who: sensitive(z.string()) }) })
+        .patch({ Locked: () => ({}) })
+        .build();
+      expect(() => sse_state_names(loading(Vault, "Locked"), "trpc")).toThrow(
+        'trpc: state "Vault" can\'t be served over SSE'
+      );
+    });
   });
 });

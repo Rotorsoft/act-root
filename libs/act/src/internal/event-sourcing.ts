@@ -19,7 +19,9 @@ import type {
   Emitted,
   EventMeta,
   EventSource,
+  Load,
   LoadTarget,
+  Message,
   PatchFn,
   ScanOptions,
   ScanResult,
@@ -442,10 +444,68 @@ export async function load<
   };
 }
 
+/** A stream an action may append to (its own, or one of its loads'), with the events it emits there. */
+type Pending = {
+  readonly state: State<any, any, any>;
+  readonly stream: string;
+  readonly snapshot: Snapshot<any, any>;
+  readonly expected: number;
+  readonly events: { name: string; data: Schema }[];
+};
+
 /**
- * Validates, checks preconditions, folds, checks the invariants and commits. On {@link ConcurrencyError}
- * it re-runs from `load` within the action's `maxRetries`; any other error
+ * Loads the other streams an action's decision needs, all at once. A load
+ * of the action's own stream, two loads of one stream, and a load of a
+ * closed stream throw.
+ */
+async function load_others(
+  loads: readonly Load[],
+  action: string,
+  payload: Schema,
+  own: { stream: string; state: Schema },
+  actor: Target["actor"],
+  patch_fn: PatchFn
+): Promise<Pending[]> {
+  const streams = loads.map((l) => l.target(payload, own.state));
+  streams.forEach((stream, i) => {
+    if (typeof stream !== "string" || !stream)
+      throw new Error(
+        `Action "${action}" loads "${loads[i].name}" from an empty stream name`
+      );
+    if (stream === own.stream)
+      throw new Error(`Action "${action}" loads its own stream "${stream}"`);
+    if (streams.indexOf(stream) !== i)
+      throw new Error(`Action "${action}" loads stream "${stream}" twice`);
+  });
+  return Promise.all(
+    loads.map(async (l, i) => {
+      const snapshot = await load(
+        l.state,
+        { stream: streams[i], actor },
+        undefined,
+        patch_fn
+      );
+      if (snapshot.event?.name === TOMBSTONE_EVENT)
+        throw new StreamClosedError(streams[i]);
+      return {
+        state: l.state,
+        stream: streams[i],
+        snapshot,
+        expected: snapshot.version,
+        events: [],
+      };
+    })
+  );
+}
+
+/**
+ * Validates, checks preconditions, folds, checks the invariants and commits.
+ * An action with loads appends to every stream it emits to in one commit,
+ * each guarded by its version at load. On {@link ConcurrencyError} it
+ * re-runs from `load` within the action's `maxRetries`; any other error
  * rethrows.
+ *
+ * Returns the snapshots of every stream appended to, the action's own first.
  */
 export async function action<
   TState extends Schema,
@@ -470,6 +530,7 @@ export async function action<
 
   const opts = me.options?.[action];
   const max_retries = opts?.maxRetries ?? 0;
+  const loads = me.loads?.[action] ?? [];
 
   for (let attempt = 0; ; attempt++) {
     try {
@@ -483,12 +544,31 @@ export async function action<
         throw new StreamClosedError(stream);
       // `version`, not `event`: on a warm hit `event` is undefined. A new
       // stream expects -1, so two callers creating it can't both commit.
-      const expected = expectedVersion ?? snapshot.version;
+      const own: Pending = {
+        state: me,
+        stream,
+        snapshot,
+        expected: expectedVersion ?? snapshot.version,
+        events: [],
+      };
+      const others = loads.length
+        ? await load_others(
+            loads,
+            action as string,
+            validated,
+            { stream, state: snapshot.state },
+            target.actor,
+            patch_fn
+          )
+        : [];
+      const loaded = Object.fromEntries(
+        others.map((p, i) => [loads[i].name, p.snapshot.state])
+      );
 
       // Preconditions in declaration order: the first that fails refuses
       // the action.
       for (const { holds, description } of me.requires?.[action] ?? [])
-        if (!holds(validated, snapshot.state, actor))
+        if (!holds(validated, snapshot.state, actor, loaded))
           throw new PreconditionError(
             action,
             validated,
@@ -497,7 +577,7 @@ export async function action<
             description
           );
 
-      const result = me.on[action](validated, snapshot, target);
+      const result = me.on[action](validated, snapshot, target, loaded);
       if (!result || (Array.isArray(result) && !result.length))
         return [snapshot];
 
@@ -505,11 +585,27 @@ export async function action<
         ? (result as Emitted<TEvents>[]) // array of tuples
         : ([result] as Emitted<TEvents>[]); // single tuple
 
-      const events = tuples.map(([name, data]) => ({
-        name,
-        data: validate(name as string, data, me.events[name]),
-      }));
-      const emitted = events.map((e) => me.message(e));
+      // An event listed on a load goes to that load's stream; the state's
+      // own events go to its own stream.
+      for (const [name, data] of tuples) {
+        const i = loads.findIndex((l) => l.events.includes(name as string));
+        const to = i >= 0 ? others[i] : name in me.events ? own : undefined;
+        if (!to)
+          throw new Error(
+            `Action "${action as string}" emitted "${name as string}", which isn't an event of "${me.name}" and isn't listed on any of its loads`
+          );
+        to.events.push({
+          name: name as string,
+          data: validate(name as string, data, to.state.events[name]),
+        });
+      }
+      // The action's own stream records the decision, so an action that
+      // appends to other streams appends to its own too.
+      if (!own.events.length)
+        throw new Error(
+          `Action "${action as string}" appends only to the streams it loads; it must append an event to its own stream too`
+        );
+      const appends = [own, ...others].filter((p) => p.events.length);
 
       const meta: EventMeta = {
         correlation:
@@ -538,82 +634,101 @@ export async function action<
 
       // Fold before the commit (the decider rule), so a state that breaks
       // its schema (the invariants) is refused before anything is stored.
-      // Reducers see the event data and the next version; the store assigns
-      // `id` and `created`, so they get placeholders here (`-1`, the commit
-      // time).
-      let { state, patches } = snapshot;
+      // Each event folds onto its own stream's state. Reducers see the event
+      // data and the next version; the store assigns `id` and `created`, so
+      // they get placeholders here (`-1`, the commit time).
       const created = new Date();
-      const folded = events.map((e, i) => {
-        const event = {
-          ...e,
-          id: -1,
-          stream,
-          version: snapshot.version + i + 1,
-          created,
-          meta,
-        } as Committed<TEvents, keyof TEvents>;
-        const patch = me.patch[event.name](event, state);
-        state = patch_fn(me, state, patch, event);
-        patches++;
-        return { state, patch, patches };
+      const folds = appends.map((p) => {
+        let { state, patches } = p.snapshot;
+        const folded = p.events.map((e, i) => {
+          const event = {
+            ...e,
+            id: -1,
+            stream: p.stream,
+            version: p.snapshot.version + i + 1,
+            created,
+            meta,
+          } as Committed<Schemas, string>;
+          const patch = p.state.patch[event.name](event, state);
+          state = patch_fn(p.state, state, patch, event);
+          patches++;
+          return { state, patch, patches };
+        });
+        // Once per stream, on the state the action leaves: invariants hold
+        // between actions, not between one action's events.
+        check_invariants(
+          `${p.state.name}.${action as string}`,
+          state,
+          p.state.state,
+          p.state.pii_aware
+        );
+        return folded;
       });
-      // Once, on the state the action leaves: invariants hold between
-      // actions, not between one action's events.
-      check_invariants(
-        `${me.name}.${action as string}`,
-        state,
-        me.state,
-        me.pii_aware
-      );
 
-      let committed: Committed<TEvents, keyof TEvents>[];
+      let committed: Committed<Schemas, keyof Schemas>[];
       try {
-        committed = await store().commit(
-          [{ stream, msgs: emitted, expectedVersion: expected }],
+        committed = await store().commit<Schemas>(
+          appends.map((p) => ({
+            stream: p.stream,
+            msgs: p.events.map((e) => p.state.message(e)) as Message<
+              Schemas,
+              string
+            >[],
+            expectedVersion: p.expected,
+          })),
           meta
         );
       } catch (error) {
         // Fire-and-forget, so a cache failure can't replace the ConcurrencyError.
-        if (error instanceof ConcurrencyError) void cache_drop(stream);
+        if (error instanceof ConcurrencyError) void cache_drop(error.stream);
         throw error;
       }
 
-      // The stored rows carry the real `id` and `created`; the state is
-      // already folded. The caller sent the plaintext, so no view/gate
-      // round-trip.
-      const snapshots = committed.map((row, i) => ({
-        event: { ...row, data: events[i].data },
-        state: folded[i].state,
-        version: row.version,
-        id: row.id,
-        patches: folded[i].patches,
-        snaps: snapshot.snaps,
-        patch: folded[i].patch,
-        cache_hit: snapshot.cache_hit,
-        replayed: snapshot.replayed,
-      }));
-
-      const last = snapshots.at(-1)!;
-
-      // Awaited, so the cache holds the post-snap checkpoint for the next caller.
-      const snap_event = me.snap?.(last) ? await snap(last) : undefined;
-
-      // Sensitive states depend on the actor, so they aren't cached.
-      if (!me.pii_aware)
-        void cache_put<TState>(stream, {
-          stream,
-          state: last.state,
-          version: snap_event?.version ?? last.event.version,
-          event_id: snap_event?.id ?? last.event.id,
-          patches: snap_event ? 0 : last.patches,
-          snaps: snap_event ? last.snaps + 1 : last.snaps,
+      // The stored rows come back in append order, then event order, with
+      // the real `id` and `created`; the states are already folded. The
+      // caller sent the plaintext, so no view/gate round-trip.
+      let row = 0;
+      const snapshots: Snapshot<any, any>[] = [];
+      for (const [a, append] of appends.entries()) {
+        const { snapshot: base, state: owner } = append;
+        const appended = append.events.map((e, i) => {
+          const stored = committed[row++];
+          const fold = folds[a][i];
+          return {
+            event: { ...stored, data: e.data },
+            state: fold.state,
+            version: stored.version,
+            id: stored.id,
+            patches: fold.patches,
+            snaps: base.snaps,
+            patch: fold.patch,
+            cache_hit: base.cache_hit,
+            replayed: base.replayed,
+          };
         });
+        const last = appended.at(-1)!;
 
-      return snapshots;
+        // Awaited, so the cache holds the post-snap checkpoint for the next caller.
+        const snap_event = owner.snap?.(last) ? await snap(last) : undefined;
+
+        // Sensitive states depend on the actor, so they aren't cached.
+        if (!owner.pii_aware)
+          void cache_put(append.stream, {
+            stream: append.stream,
+            state: last.state,
+            version: snap_event?.version ?? last.event.version,
+            event_id: snap_event?.id ?? last.event.id,
+            patches: snap_event ? 0 : last.patches,
+            snaps: snap_event ? last.snaps + 1 : last.snaps,
+          });
+        snapshots.push(...appended);
+      }
+
+      return snapshots as Snapshot<TState, TEvents>[];
     } catch (error) {
       if (!(error instanceof ConcurrencyError)) throw error;
       // A caller-pinned version would conflict again on every retry.
-      if (expectedVersion !== undefined) throw error;
+      if (expectedVersion !== undefined && error.stream === stream) throw error;
       if (attempt >= max_retries) throw error;
       if (opts?.backoff) {
         const delay_ms = compute_backoff_delay(attempt, opts.backoff);

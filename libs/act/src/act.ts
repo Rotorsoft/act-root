@@ -224,8 +224,8 @@ export class Act<
    * event-specific payload.
    *
    * `committed` also takes a state, as a `State` or its name: the listener
-   * then hears only commits by that state's actions, with its snapshots
-   * typed from that state.
+   * then hears only commits to that state's streams, whichever action
+   * appended them, with its snapshots typed from that state.
    *
    * @example
    * ```typescript
@@ -737,15 +737,30 @@ export class Act<
       );
       // An action that emits nothing returns the loaded snapshot, which has
       // no `patch`: nothing committed, so nothing to wake or announce.
+      // Snapshots of the streams its loads appended to follow its own.
       if (!snapshots[0].patch) return snapshots;
+      const me = this.registry.actions[action];
       // A local commit runs its reactions the way a remote one does.
       this._wake(snapshots.map((s) => s.event!.name as string));
-      this.emit("committed", snapshots);
-      this._notify(
-        `committed:${this.registry.actions[action].name}`,
-        snapshots
-      );
-      return snapshots;
+      // `committed` fires once per stream appended to, its own first, so a
+      // listener always gets one stream's snapshots, as without loads.
+      const by_stream = new Map<string, typeof snapshots>();
+      for (const s of snapshots) {
+        const of_stream = by_stream.get(s.event!.stream);
+        if (of_stream) of_stream.push(s);
+        else by_stream.set(s.event!.stream, [s]);
+      }
+      for (const [stream, of_stream] of by_stream) {
+        const owner =
+          stream === target.stream
+            ? me
+            : me.loads![action]!.find((l) =>
+                l.events.includes(of_stream[0].event!.name as string)
+              )!.state;
+        this.emit("committed", of_stream);
+        this._notify(`committed:${owner.name}`, of_stream);
+      }
+      return snapshots.filter((s) => s.event!.stream === target.stream);
     });
   }
 
