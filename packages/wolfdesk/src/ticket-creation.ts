@@ -61,10 +61,14 @@ export const TicketCreation = state({ Ticket: TicketCreationState })
   .on({ CloseTicket }, { maxRetries: 4 })
   .loads(AgentLoad, (_, state) => agentStream(state.agentId), ["TicketDropped"])
   .requires([mustBeOpen])
-  .emit((_, { state }, { actor }) => [
-    ["TicketClosed", { closedById: actor.id }],
-    ...(state.agentId ? ([["TicketDropped", {}]] as const) : []),
-  ])
+  .emit((_, { state }, { actor }) =>
+    state.agentId
+      ? [
+          ["TicketClosed", { closedById: actor.id }],
+          ["TicketDropped", {}],
+        ]
+      : ["TicketClosed", { closedById: actor.id }]
+  )
 
   .on({ MarkTicketResolved })
   .requires([mustBeOpen, mustBeUserOrAgent])

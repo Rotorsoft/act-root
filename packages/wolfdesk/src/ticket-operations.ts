@@ -50,11 +50,18 @@ export const TicketOperations = state({ Ticket: TicketOperationsState })
     "next"
   )
   .requires([mustBeOpen])
-  .emit((data, { state }) => [
-    ["TicketAssigned", data],
-    ...(state.agentId ? ([["TicketDropped", {}]] as const) : []),
-    ["TicketTaken", {}],
-  ])
+  .emit((data, { state }) =>
+    state.agentId
+      ? [
+          ["TicketAssigned", data],
+          ["TicketDropped", {}],
+          ["TicketTaken", {}],
+        ]
+      : [
+          ["TicketAssigned", data],
+          ["TicketTaken", {}],
+        ]
+  )
 
   .on({ RequestTicketEscalation })
   .requires([mustBeOpen, mustBeUser, mustBeDueForEscalation])
@@ -92,11 +99,18 @@ export const TicketOperations = state({ Ticket: TicketOperationsState })
     mustBeDueForReassignment,
     mustNotBeAcknowledgedByAgent,
   ])
-  .emit((data, { state }) => [
-    ["TicketReassigned", data],
-    ...(state.agentId ? ([["TicketDropped", {}]] as const) : []),
-    ["TicketTaken", {}],
-  ])
+  .emit((data, { state }) =>
+    state.agentId
+      ? [
+          ["TicketReassigned", data],
+          ["TicketDropped", {}],
+          ["TicketTaken", {}],
+        ]
+      : [
+          ["TicketReassigned", data],
+          ["TicketTaken", {}],
+        ]
+  )
 
   .build();
 

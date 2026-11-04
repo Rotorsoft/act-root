@@ -202,11 +202,18 @@ An agent holds at most 5 open tickets. The count is a state of its own, `AgentLo
 .loads(AgentLoad, (_, state) => agentStream(state.agentId), ["TicketDropped"], "current")
 .loads(AgentLoad, (data) => agentStream(data.agentId), ["TicketTaken"], "next")
 .requires([mustBeOpen, mustBeEscalated, mustBeDueForReassignment, mustNotBeAcknowledgedByAgent])
-.emit((data, { state }) => [
-  ["TicketReassigned", data],
-  ...(state.agentId ? ([["TicketDropped", {}]] as const) : []),
-  ["TicketTaken", {}],
-])
+.emit((data, { state }) =>
+  state.agentId
+    ? [
+        ["TicketReassigned", data],
+        ["TicketDropped", {}],
+        ["TicketTaken", {}],
+      ]
+    : [
+        ["TicketReassigned", data],
+        ["TicketTaken", {}],
+      ]
+)
 ```
 
 A load always names a stream, so a ticket with no agent names a placeholder and emits nothing to it, which makes that load a read. When the agent is full, the assign reaction fails, and its retry (10 seconds later, by default) asks `assignAgent` for another agent. If every attempt finds a full agent, the ticket's reaction stream blocks after 4 tries, and `app.unblock` resumes it. A resolved ticket holds its slot until it closes. [Rules across streams](rules.md) has the pattern on its own.
