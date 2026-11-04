@@ -2306,31 +2306,23 @@ export type StateEntry<TKey extends string = string, TState extends Schema = Sch
 export type ActionEntry<TKey extends string = string, TNewActions extends Schema = Schema> = {
     [P in TKey]: ZodType<TNewActions>;
 };
-/**
- * Event data with any field its schema doesn't declare typed \`never\`, at any
- * depth. Distributes over a schema that's a union, so the data fits any member.
- */
-type ExactData<TData, TSchema> = TSchema extends unknown ? TData extends readonly (infer TItem)[] ? TSchema extends readonly (infer TSchemaItem)[] ? readonly ExactData<TItem, TSchemaItem>[] : never : TData extends Date ? TData : TData extends object ? TSchema extends object ? {
+/** Event data with any field its schema doesn't declare typed \`never\`, at any depth. */
+type ExactData<TData, TSchema> = TSchema extends unknown ? TData extends readonly (infer TItem)[] ? TSchema extends readonly (infer TSchemaItem)[] ? readonly ExactData<TItem, TSchemaItem>[] : never : TData extends object ? TSchema extends object ? {
     [TKey in keyof TData]: TKey extends keyof TSchema ? ExactData<TData[TKey], TSchema[TKey]> : never;
 } : never : TData : never;
-/** One event tuple with its data checked for exactness. */
+/** One event tuple with its data checked. */
 type ExactEmitted<TOut, TEvents extends Schemas> = TOut extends readonly [
     infer TEvent,
     infer TData
 ] ? [TEvent] extends [keyof TEvents] ? readonly [TEvent, ExactData<TData, TEvents[TEvent]>] : TOut : TOut;
-/**
- * What a handler may return: one event tuple, a list of them, or \`undefined\`
- * to commit nothing.
- */
+/** What a handler may return: one event tuple, a list of them, or \`undefined\`. */
 type EmitOut<TEvents extends Schemas> = Emitted<TEvents> | readonly Emitted<TEvents>[] | undefined;
 /**
  * Checks what a handler returned, for what TypeScript doesn't check on a
  * callback's return value: an extra field in an event's data. Also refuses an
  * action that emits only to the streams it loads.
  */
-type CheckEmitted<TOut, TOwn extends Schemas, TEvents extends Schemas> = TOut extends undefined ? TOut : TOut extends readonly [] ? TOut : TOut extends readonly [PropertyKey, unknown] ? TOut[0] extends keyof TOwn ? ExactEmitted<TOut, TEvents> : "an action must append an event to its own stream" : TOut extends readonly unknown[] ? [Extract<TOut[number], readonly [keyof TOwn, unknown]>] extends [
-    never
-] ? "an action must append an event to its own stream" : {
+type CheckEmitted<TOut, TOwn extends Schemas, TEvents extends Schemas> = TOut extends readonly [PropertyKey, unknown] ? TOut[0] extends keyof TOwn ? ExactEmitted<TOut, TEvents> : "an action must append an event to its own stream" : TOut extends readonly [unknown, ...unknown[]] ? [Extract<TOut[number], readonly [keyof TOwn, unknown]>] extends [never] ? "an action must append an event to its own stream" : {
     [TIndex in keyof TOut]: ExactEmitted<TOut[TIndex], TEvents>;
 } : TOut;
 /**
@@ -2338,29 +2330,25 @@ type CheckEmitted<TOut, TOwn extends Schemas, TEvents extends Schemas> = TOut ex
  * returns the events, or an event name to pass the payload through as the
  * event data.
  */
-type ActionEmit<TState extends Schema, TEvents extends Schemas, TActions extends Schemas, TName extends string, TSnap extends boolean, TKey extends string, TNewActions extends Schema, TLoaded extends Schemas = {}, TRouted extends Schemas = {}> = {
+type ActionEmit<TState extends Schema, TEvents extends Schemas, TActions extends Schemas, TName extends string, TSnap extends boolean, TKey extends string, TNewActions extends Schema, TLoaded extends Schemas = {}, TRouted extends Schemas = {}, TDone = ActionBuilder<TState, TEvents, TActions & {
+    [P in TKey]: TNewActions;
+}, TName, TSnap>, TEventName = Exclude<keyof TEvents & string, keyof TRouted>> = {
     /**
      * Finishes the action with a handler, which receives \`(action, snapshot,
      * target, loaded)\` and returns one or more \`[EventName, data]\` tuples (or
      * \`undefined\`): the state's own events, and the events listed on its loads.
      */
-    <const TOut extends EmitOut<TEvents & TRouted>>(handler: (action: Readonly<TNewActions>, snapshot: Readonly<Snapshot<TState, TEvents>>, target: Target, loaded: Readonly<TLoaded>) => TOut & CheckEmitted<TOut, TEvents, TEvents & TRouted>): ActionBuilder<TState, TEvents, TActions & {
-        [P in TKey]: TNewActions;
-    }, TName, TSnap>;
+    <const TOut extends EmitOut<TEvents & TRouted>>(handler: EmitHandler<TState, TEvents, TNewActions, TLoaded, TRouted, TOut>): TDone;
     /**
      * Finishes the action by passing the payload through as the data of an event
      * declared in \`.emits()\` that no load lists.
      */
-    (event_name: Exclude<keyof TEvents & string, keyof TRouted>): ActionBuilder<TState, TEvents, TActions & {
-        [P in TKey]: TNewActions;
-    }, TName, TSnap>;
-    (event_name: Exclude<keyof TEvents & string, keyof TRouted>): ActionBuilder<TState, TEvents, TActions & {
-        [P in TKey]: TNewActions;
-    }, TName, TSnap>;
-    <const TOut extends EmitOut<TEvents & TRouted>>(handler: (action: Readonly<TNewActions>, snapshot: Readonly<Snapshot<TState, TEvents>>, target: Target, loaded: Readonly<TLoaded>) => TOut & CheckEmitted<TOut, TEvents, TEvents & TRouted>): ActionBuilder<TState, TEvents, TActions & {
-        [P in TKey]: TNewActions;
-    }, TName, TSnap>;
+    (event_name: TEventName): TDone;
+    (event_name: TEventName): TDone;
+    <const TOut extends EmitOut<TEvents & TRouted>>(handler: EmitHandler<TState, TEvents, TNewActions, TLoaded, TRouted, TOut>): TDone;
 };
+/** A handler whose returned list is checked by {@link CheckEmitted}. */
+type EmitHandler<TState extends Schema, TEvents extends Schemas, TNewActions extends Schema, TLoaded extends Schemas, TRouted extends Schemas, TOut> = (action: Readonly<TNewActions>, snapshot: Readonly<Snapshot<TState, TEvents>>, target: Target, loaded: Readonly<TLoaded>) => TOut & CheckEmitted<TOut, TEvents, TEvents & TRouted>;
 /**
  * What \`.loads(...)\` returns when its load name is already taken by an
  * earlier load of the action: no further step, so the chain fails to

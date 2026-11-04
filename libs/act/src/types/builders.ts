@@ -383,29 +383,24 @@ export type ActionEntry<
   [P in TKey]: ZodType<TNewActions>;
 };
 
-/**
- * Event data with any field its schema doesn't declare typed `never`, at any
- * depth. Distributes over a schema that's a union, so the data fits any member.
- */
+/** Event data with any field its schema doesn't declare typed `never`, at any depth. */
 type ExactData<TData, TSchema> = TSchema extends unknown
   ? TData extends readonly (infer TItem)[]
     ? TSchema extends readonly (infer TSchemaItem)[]
       ? readonly ExactData<TItem, TSchemaItem>[]
       : never
-    : TData extends Date
-      ? TData
-      : TData extends object
-        ? TSchema extends object
-          ? {
-              [TKey in keyof TData]: TKey extends keyof TSchema
-                ? ExactData<TData[TKey], TSchema[TKey]>
-                : never;
-            }
-          : never
-        : TData
+    : TData extends object
+      ? TSchema extends object
+        ? {
+            [TKey in keyof TData]: TKey extends keyof TSchema
+              ? ExactData<TData[TKey], TSchema[TKey]>
+              : never;
+          }
+        : never
+      : TData
   : never;
 
-/** One event tuple with its data checked for exactness. */
+/** One event tuple with its data checked. */
 type ExactEmitted<TOut, TEvents extends Schemas> = TOut extends readonly [
   infer TEvent,
   infer TData,
@@ -415,10 +410,7 @@ type ExactEmitted<TOut, TEvents extends Schemas> = TOut extends readonly [
     : TOut
   : TOut;
 
-/**
- * What a handler may return: one event tuple, a list of them, or `undefined`
- * to commit nothing.
- */
+/** What a handler may return: one event tuple, a list of them, or `undefined`. */
 type EmitOut<TEvents extends Schemas> =
   | Emitted<TEvents>
   | readonly Emitted<TEvents>[]
@@ -433,21 +425,15 @@ type CheckEmitted<
   TOut,
   TOwn extends Schemas,
   TEvents extends Schemas,
-> = TOut extends undefined
-  ? TOut
-  : TOut extends readonly []
-    ? TOut
-    : TOut extends readonly [PropertyKey, unknown]
-      ? TOut[0] extends keyof TOwn
-        ? ExactEmitted<TOut, TEvents>
-        : "an action must append an event to its own stream"
-      : TOut extends readonly unknown[]
-        ? [Extract<TOut[number], readonly [keyof TOwn, unknown]>] extends [
-            never,
-          ]
-          ? "an action must append an event to its own stream"
-          : { [TIndex in keyof TOut]: ExactEmitted<TOut[TIndex], TEvents> }
-        : TOut;
+> = TOut extends readonly [PropertyKey, unknown]
+  ? TOut[0] extends keyof TOwn
+    ? ExactEmitted<TOut, TEvents>
+    : "an action must append an event to its own stream"
+  : TOut extends readonly [unknown, ...unknown[]]
+    ? [Extract<TOut[number], readonly [keyof TOwn, unknown]>] extends [never]
+      ? "an action must append an event to its own stream"
+      : { [TIndex in keyof TOut]: ExactEmitted<TOut[TIndex], TEvents> }
+    : TOut;
 
 /**
  * The `.emit(...)` step that finishes an action declaration: a handler that
@@ -464,6 +450,14 @@ type ActionEmit<
   TNewActions extends Schema,
   TLoaded extends Schemas = {},
   TRouted extends Schemas = {},
+  TDone = ActionBuilder<
+    TState,
+    TEvents,
+    TActions & { [P in TKey]: TNewActions },
+    TName,
+    TSnap
+  >,
+  TEventName = Exclude<keyof TEvents & string, keyof TRouted>,
 > = {
   // The order of these four is load-bearing, so don't merge the duplicates.
   // The first handler gives a function with no parameters its types: TypeScript
@@ -477,56 +471,33 @@ type ActionEmit<
    * `undefined`): the state's own events, and the events listed on its loads.
    */
   <const TOut extends EmitOut<TEvents & TRouted>>(
-    handler: (
-      action: Readonly<TNewActions>,
-      snapshot: Readonly<Snapshot<TState, TEvents>>,
-      target: Target,
-      loaded: Readonly<TLoaded>
-    ) => TOut & CheckEmitted<TOut, TEvents, TEvents & TRouted>
-  ): ActionBuilder<
-    TState,
-    TEvents,
-    TActions & { [P in TKey]: TNewActions },
-    TName,
-    TSnap
-  >;
+    handler: EmitHandler<TState, TEvents, TNewActions, TLoaded, TRouted, TOut>
+  ): TDone;
   /**
    * Finishes the action by passing the payload through as the data of an event
    * declared in `.emits()` that no load lists.
    */
-  (
-    event_name: Exclude<keyof TEvents & string, keyof TRouted>
-  ): ActionBuilder<
-    TState,
-    TEvents,
-    TActions & { [P in TKey]: TNewActions },
-    TName,
-    TSnap
-  >;
-  (
-    event_name: Exclude<keyof TEvents & string, keyof TRouted>
-  ): ActionBuilder<
-    TState,
-    TEvents,
-    TActions & { [P in TKey]: TNewActions },
-    TName,
-    TSnap
-  >;
+  (event_name: TEventName): TDone;
+  (event_name: TEventName): TDone;
   <const TOut extends EmitOut<TEvents & TRouted>>(
-    handler: (
-      action: Readonly<TNewActions>,
-      snapshot: Readonly<Snapshot<TState, TEvents>>,
-      target: Target,
-      loaded: Readonly<TLoaded>
-    ) => TOut & CheckEmitted<TOut, TEvents, TEvents & TRouted>
-  ): ActionBuilder<
-    TState,
-    TEvents,
-    TActions & { [P in TKey]: TNewActions },
-    TName,
-    TSnap
-  >;
+    handler: EmitHandler<TState, TEvents, TNewActions, TLoaded, TRouted, TOut>
+  ): TDone;
 };
+
+/** A handler whose returned list is checked by {@link CheckEmitted}. */
+type EmitHandler<
+  TState extends Schema,
+  TEvents extends Schemas,
+  TNewActions extends Schema,
+  TLoaded extends Schemas,
+  TRouted extends Schemas,
+  TOut,
+> = (
+  action: Readonly<TNewActions>,
+  snapshot: Readonly<Snapshot<TState, TEvents>>,
+  target: Target,
+  loaded: Readonly<TLoaded>
+) => TOut & CheckEmitted<TOut, TEvents, TEvents & TRouted>;
 
 /**
  * What `.loads(...)` returns when its load name is already taken by an
