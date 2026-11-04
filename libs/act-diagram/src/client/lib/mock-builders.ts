@@ -10,7 +10,11 @@ import type { ReactionNode } from "../types/index.js";
 export function proxy_target() {}
 
 function attach_emit(
-  info: { actions: Record<string, any>; events: Record<string, any> },
+  info: {
+    actions: Record<string, any>;
+    events: Record<string, any>;
+    loads: Record<string, { events: string[] }[]>;
+  },
   action_name: string,
   handler: any
 ) {
@@ -18,9 +22,12 @@ function attach_emit(
   if (typeof handler === "string") {
     emits.push(handler);
   } else if (typeof handler === "function") {
-    // Strategy 1: string search for event names in handler source
+    // Strategy 1: string search for event names in handler source: the
+    // state's own events, and the events its loads list (emitted to the
+    // loaded streams).
     const src = String(handler);
-    for (const event_name of Object.keys(info.events)) {
+    const routed = (info.loads[action_name] ?? []).flatMap((l) => l.events);
+    for (const event_name of [...Object.keys(info.events), ...routed]) {
       if (
         src.includes(`"${event_name}"`) ||
         src.includes(`'${event_name}'`) ||
@@ -54,7 +61,7 @@ function attach_emit(
             },
           }
         );
-        const result = handler(dummy_arg, dummy_arg, dummy_arg);
+        const result = handler(dummy_arg, dummy_arg, dummy_arg, dummy_arg);
         if (Array.isArray(result) && typeof result[0] === "string") {
           emits.push(result[0]);
         }
@@ -77,6 +84,12 @@ export function mock_state(
     events: {} as Record<string, any>,
     actions: {} as Record<string, any>,
     requires: {} as Record<string, any[]>,
+    // Each action's `.loads(...)`: the loaded state's name, the events
+    // listed on it, and the load's name.
+    loads: {} as Record<
+      string,
+      { state: string; events: string[]; name: string }[]
+    >,
     patches: new Set<string>(),
     _tag: "State" as const,
   };
@@ -93,7 +106,21 @@ export function mock_state(
         if (rules) info.requires[action_name] = rules;
         return { emit };
       };
-      return { requires, emit };
+      const loads = (
+        state?: { name?: string },
+        _target?: unknown,
+        events: string[] = [],
+        name?: string
+      ) => {
+        const state_name = state?.name ?? "";
+        (info.loads[action_name] ??= []).push({
+          state: state_name,
+          events,
+          name: name ?? state_name,
+        });
+        return { loads, requires, emit };
+      };
+      return { loads, requires, emit };
     },
     snap: () => action_builder(_currentAction),
     // Close-the-books policy methods. The diagram doesn't render the

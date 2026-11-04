@@ -166,9 +166,12 @@ describe("an action that loads another stream", () => {
     expect(taken.meta).toEqual(enrolled.meta);
     expect(taken.meta.causation.action?.name).toBe("Enroll");
 
+    // Once per stream appended to, its own first.
     expect(
-      every.mock.calls[0][0].map((s: Snapshot<any, any>) => s.event?.stream)
-    ).toEqual(["enr-1", "course-c1"]);
+      every.mock.calls.map(([snaps]: Snapshot<any, any>[][]) =>
+        snaps.map((s) => s.event?.stream)
+      )
+    ).toEqual([["enr-1"], ["course-c1"]]);
     expect(seats.mock.calls[0][0][0].state).toEqual({ taken: 1, capacity: 2 });
     expect(enrollments.mock.calls[0][0]).toHaveLength(1);
     // The loaded stream's reactions wake.

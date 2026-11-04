@@ -743,20 +743,24 @@ export class Act<
       if (!committed.length) return snapshots;
       // A local commit runs its reactions the way a remote one does.
       this._wake(committed.map((s) => s.event!.name as string));
-      this.emit("committed", committed);
-      // Each state's listeners hear the snapshots of its own streams.
-      const by_state = new Map<string, typeof committed>();
+      // `committed` fires once per stream appended to, its own first, so a
+      // listener always gets one stream's snapshots, as without loads.
+      const by_stream = new Map<string, typeof committed>();
       for (const s of committed) {
+        const of_stream = by_stream.get(s.event!.stream);
+        if (of_stream) of_stream.push(s);
+        else by_stream.set(s.event!.stream, [s]);
+      }
+      for (const [stream, of_stream] of by_stream) {
         const owner =
-          s.event!.stream === target.stream
+          stream === target.stream
             ? me
             : me.loads![action]!.find((l) =>
-                l.events.includes(s.event!.name as string)
+                l.events.includes(of_stream[0].event!.name as string)
               )!.state;
-        by_state.set(owner.name, [...(by_state.get(owner.name) ?? []), s]);
+        this.emit("committed", of_stream);
+        this._notify(`committed:${owner.name}`, of_stream);
       }
-      for (const [name, of_state] of by_state)
-        this._notify(`committed:${name}`, of_state);
       return snapshots.filter(
         (s) => !s.patch || s.event!.stream === target.stream
       );

@@ -734,6 +734,36 @@ describe("builder-surface coverage", () => {
     expect(Object.keys(built.events)).toContain("Happened");
   });
 
+  it("mock_state survives .loads() and counts the events listed on it as emitted", () => {
+    let built: any;
+    const seats = { name: "Seats" };
+    mock_state({ Enrollment: {} }, (i) => {
+      built = i;
+    })
+      .init()
+      .emits({ Enrolled: {} })
+      .on({ Enroll: {} })
+      .loads(seats, () => "course-1", ["SeatTaken"])
+      .loads(seats, () => "course-2", undefined, "other")
+      .requires([{ description: "a free seat", holds: () => true }])
+      .emit(() => [
+        ["Enrolled", {}],
+        ["SeatTaken", {}],
+      ])
+      .on({ Peek: {} })
+      .loads(undefined)
+      // Found only by running the handler, which destructures `loaded`.
+      .emit((_: any, __: any, ___: any, { Seats }: any) => Seats.next)
+      .build();
+    expect(built.loads.Enroll).toEqual([
+      { state: "Seats", events: ["SeatTaken"], name: "Seats" },
+      { state: "Seats", events: [], name: "other" },
+    ]);
+    expect(built.loads.Peek).toEqual([{ state: "", events: [], name: "" }]);
+    expect(built.actions.__emits_Enroll).toEqual(["Enrolled", "SeatTaken"]);
+    expect(built.requires.Enroll).toHaveLength(1);
+  });
+
   it("mock_projection records the folded state's events via .of().flush()", () => {
     let built: any;
     const proj = mock_projection("totals", (i) => {
