@@ -1,6 +1,6 @@
 // Shared preconditions
 
-export { Agent, AgentSlice, agentStream, MAX_OPEN_TICKETS } from "./agent.js";
+export { Agent, agentStream, MAX_OPEN_TICKETS } from "./agent.js";
 // Partial state definitions and slices
 export { TicketCreation, TicketCreationSlice } from "./ticket-creation.js";
 export { TicketMessaging, TicketMessagingSlice } from "./ticket-messaging.js";

@@ -1,4 +1,4 @@
-import { slice, state, ZodEmpty } from "@rotorsoft/act";
+import { state, ZodEmpty } from "@rotorsoft/act";
 import { z } from "zod";
 
 export const MAX_OPEN_TICKETS = 5;
@@ -25,6 +25,3 @@ export const Agent = state({
  */
 export const agentStream = (agentId?: string) =>
   `agent-${agentId ?? "unassigned"}`;
-
-// --- Slice ---
-export const AgentSlice = slice().withState(Agent).build();

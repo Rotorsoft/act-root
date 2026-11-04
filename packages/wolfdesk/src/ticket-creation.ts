@@ -100,6 +100,7 @@ export const TicketCreation = state({ Ticket: TicketCreationState })
 // --- Slice ---
 // prettier-ignore
 export const TicketCreationSlice = slice()
+  .withState(Agent)
   .withState(TicketCreation)
   .withState(TicketOperations)
 

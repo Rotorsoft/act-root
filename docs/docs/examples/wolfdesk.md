@@ -20,7 +20,7 @@ bootstrap.ts          → act().withSlice(Creation).withSlice(Messaging).withSli
 ticket-creation.ts    → TicketCreation state + TicketCreationSlice
 ticket-messaging.ts   → TicketMessaging state + TicketMessagingSlice
 ticket-operations.ts  → TicketOperations state + TicketOpsSlice
-agent.ts              → Agent state + AgentSlice (open tickets per agent)
+agent.ts              → Agent state (open tickets per agent), registered by the slices that load it
 ticket-timers.ts      → TicketTimersSlice (deferred escalate / reassign / close timers)
 ticket-projections.ts → TicketProjection (read model)
 ticket-preconditions.ts  → Business rules (preconditions)
@@ -228,7 +228,6 @@ export const app = act()
   .withSlice(TicketCreationSlice)
   .withSlice(TicketMessagingSlice)
   .withSlice(TicketOpsSlice)
-  .withSlice(AgentSlice)
   .withSlice(TicketTimersSlice)
   .withProjection(TicketProjection)
   .build();

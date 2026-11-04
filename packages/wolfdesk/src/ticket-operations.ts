@@ -109,6 +109,7 @@ export const TicketOperations = state({ Ticket: TicketOperationsState })
 // --- Slice ---
 // prettier-ignore
 export const TicketOpsSlice = slice()
+  .withState(Agent)
   .withState(TicketOperations)
   .on("TicketEscalationRequested")
   .do(async function escalate(event, _stream, app) {

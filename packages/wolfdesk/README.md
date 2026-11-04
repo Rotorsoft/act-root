@@ -46,7 +46,7 @@ packages/wolfdesk/
 │   ├── ticket-creation.ts       # TicketCreation partial + TicketCreationSlice (Open / Close / Resolve + auto-assign reaction)
 │   ├── ticket-messaging.ts      # TicketMessaging partial + TicketMessagingSlice (Add/Deliver/Ack + delivery reaction)
 │   ├── ticket-operations.ts     # TicketOperations partial + TicketOpsSlice (Assign / Escalate / Reassign + escalate reaction)
-│   ├── agent.ts                 # Agent state + AgentSlice: open tickets per agent
+│   ├── agent.ts                 # Agent state: open tickets per agent
 │   ├── ticket-preconditions.ts  # The business rules (preconditions)
 │   ├── ticket-projections.ts    # TicketProjection — Drizzle/SQLite read model updater
 │   ├── bootstrap.ts             # Composes act() with the slices + the projection
