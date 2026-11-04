@@ -422,6 +422,28 @@ describe("one state loaded twice, by name", () => {
     expect(await events("tr-10")).toEqual(["Transferred"]);
   });
 
+  test("a state's committed listener hears each of its streams in its own call", async ({
+    app,
+  }) => {
+    await app.do("Deposit", at("acc-5"), { amount: 10 });
+    const heard: { stream?: string; balances: number[] }[] = [];
+    app.on("committed", Account, (snapshots) =>
+      heard.push({
+        stream: snapshots[0].event?.stream,
+        balances: snapshots.map((s) => s.state.balance),
+      })
+    );
+    await app.do("Transfer", at("tr-12"), {
+      from: "acc-5",
+      to: "acc-6",
+      amount: 4,
+    });
+    expect(heard).toEqual([
+      { stream: "acc-5", balances: [6] },
+      { stream: "acc-6", balances: [4] },
+    ]);
+  });
+
   test("refuses with the named load's precondition", async ({ app }) => {
     await expect(
       app.do("Transfer", at("tr-11"), { from: "acc-3", to: "acc-4", amount: 1 })
