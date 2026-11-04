@@ -169,7 +169,7 @@ Every new piece is typed from the states it names, end to end, and a type-level 
 - **`.emit`:** `(payload, snapshot, target, loaded)`, and its return type is the state's own events plus every event listed on its loads, each with its own payload type. An event listed on no load fails to compile; an event listed on two loads of one action fails to compile.
 - **`app.do` and act-http:** unchanged return types. A generated tRPC or Hono mutation still returns its action's snapshots, typed; the other streams' commits reach typed state-scoped `committed` listeners.
 
-The build checks the same for plain JavaScript and dynamically built states: a load of the action's own stream, an event that doesn't belong to the loaded state, an event listed on two loads, a state loaded twice without names, a static `.emit` of an event a load lists, and an emitted event no load lists all throw.
+The build checks the same for plain JavaScript and dynamically built states: an event that doesn't belong to the loaded state, an event listed on two loads, a state loaded twice without names, a static `.emit` of an event a load lists, and an emitted event no load lists all throw. A target depends on the caller's input, so a load of the action's own stream, or two loads naming one stream (a transfer to the same account), refuses at the call with `PreconditionError`.
 
 ## Scenarios
 
@@ -256,7 +256,7 @@ The scaffold skill generates `.loads` and the uniqueness or capacity states when
 - two connections racing on a shared stream: exactly one wins; on disjoint streams: both win.
 
 **Core (`.loads` and routed events):**
-- a load of the action's own stream, or two loads naming one stream, throws (at build when static, at the call when not);
+- a load of the action's own stream, or two loads naming one stream, refuses with `PreconditionError` at the call: a target often comes from the caller's input;
 - a state loaded twice without names throws at build; a duplicate load name fails to compile;
 - an event listed on a load that doesn't belong to the loaded state, an event listed on two loads, and an emitted event of another state that no load lists all fail to compile and throw at build (or at the call, for a dynamic emit);
 - a target function that throws commits nothing;

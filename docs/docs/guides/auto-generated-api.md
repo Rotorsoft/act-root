@@ -266,6 +266,8 @@ type ApiError = {
 | anything else | 500 / `INTERNAL` | `INTERNAL_SERVER_ERROR` |
  The transports never define their own mapping — they all call `toApiError(err)` at their error boundary and forward `{ status, body }` to the wire. Operators wanting different mappings wrap the transport instead of mutating the table; consistency is the load-bearing property, not the specific status codes.
 
+An action with [`.loads`](../concepts/state-management.md#rules-across-streams-loads) adds nothing here. Its route returns its own stream's snapshots, typed by its own state. A rule over a loaded state answers 409, with `detail` naming the action and the rule. A rival on a loaded stream answers 412, with `detail` naming that stream, and nothing lands on any stream. OpenAPI describes both on each route.
+
 ### `withIdempotency`
 
 `withIdempotency(store, key, handler)` wraps an action handler in an `Idempotency-Key` claim. It reuses the `@rotorsoft/act-ops/idempotency` contract — the same `IdempotencyStore` that `@rotorsoft/act-http/receiver` consumes, so one store implementation covers both halves of the "Act over the wire" surface: outbound (this package's generated APIs) and inbound (the receiver's webhook ingestion).

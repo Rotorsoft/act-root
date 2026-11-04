@@ -430,19 +430,23 @@ describe("one state loaded twice, by name", () => {
 });
 
 describe("what an action may load and emit", () => {
-  test("a load of its own stream throws", async ({ app }) => {
+  test("a load of its own stream refuses", async ({ app }) => {
     await expect(
       app.do("Enroll", at("course-c9"), { course: "c9", student: "s" })
-    ).rejects.toThrow('Action "Enroll" loads its own stream "course-c9"');
+    ).rejects.toThrow(
+      'Enroll failed precondition: loads its own stream "course-c9"'
+    );
   });
 
-  test("two loads naming one stream throw", async ({ app }) => {
+  test("two loads naming one stream refuse", async ({ app }) => {
     await expect(
       app.do("Transfer", at("tr-20"), { from: "acc-x", to: "acc-x", amount: 0 })
-    ).rejects.toThrow('Action "Transfer" loads stream "acc-x" twice');
+    ).rejects.toThrow(
+      'Transfer failed precondition: loads stream "acc-x" twice'
+    );
   });
 
-  test("a target that names no stream throws", async () => {
+  test("a target that names no stream refuses", async () => {
     const Blank = state({ Blank: z.object({}) })
       .init(() => ({}))
       .emits({ Done: z.object({}) })
@@ -452,7 +456,7 @@ describe("what an action may load and emit", () => {
       .build();
     const blank = act().withState(Seats).withState(Blank).build();
     await expect(blank.do("go", at("blank-1"), {})).rejects.toThrow(
-      'Action "go" loads "Seats" from an empty stream name'
+      'go failed precondition: loads "Seats" from an empty stream name'
     );
   });
 
