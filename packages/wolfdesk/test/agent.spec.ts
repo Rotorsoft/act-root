@@ -110,13 +110,13 @@ describe("open tickets per agent", () => {
 
   it("closing a ticket with no agent touches no agent", async () => {
     const t = await open();
-    await actions.closeTicket(t);
-    const events: string[] = [];
-    await app.query({ stream: agentStream(), stream_exact: true }, (e) =>
-      events.push(e.name as string)
+    const [closed] = await actions.closeTicket(t);
+    const streams = new Set<string>();
+    await app.query({ correlation: closed.event!.meta.correlation }, (e) =>
+      streams.add(e.stream)
     );
-    expect(events).toEqual([]);
-    expect((await app.load("Ticket", t.stream)).state.closedById).toBeDefined();
+    expect([...streams]).toEqual([t.stream]);
+    expect(closed.state.closedById).toBeDefined();
   });
 
   it("assigning again moves the ticket to the new agent", async () => {

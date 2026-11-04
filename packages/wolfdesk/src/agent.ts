@@ -42,11 +42,6 @@ export const Agent = state({
 
 export const AgentSlice = slice().withState(Agent).build();
 
-/**
- * A load always names a stream, so a ticket with no agent names this one. An
- * action emits nothing to it, which makes that load a read.
- */
-export const agentStream = (agentId?: string) =>
-  `agent-${agentId ?? "unassigned"}`;
+export const agentStream = (agentId: string) => `agent-${agentId}`;
 
 export const agentOfStream = (stream: string) => stream.slice("agent-".length);

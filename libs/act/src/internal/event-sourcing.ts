@@ -455,9 +455,9 @@ type Pending = {
 
 /**
  * Loads the other streams an action's decision needs, all at once. A target
- * can name a stream from the caller's input, so one that names no stream, the
- * action's own or another load's refuses the action, as a rule would. A load
- * of a closed stream throws.
+ * returning `undefined` skips its load. A target can name a stream from the
+ * caller's input, so an empty name, the action's own stream or another load's
+ * refuses the action, as a rule would. A load of a closed stream throws.
  */
 async function load_others(
   loads: readonly Load[],
@@ -466,9 +466,10 @@ async function load_others(
   actor: Target["actor"],
   patch_fn: PatchFn,
   refuse: (description: string) => Error
-): Promise<Pending[]> {
+): Promise<(Pending | undefined)[]> {
   const streams = loads.map((l) => l.target(payload, own.state));
   streams.forEach((stream, i) => {
+    if (stream === undefined) return;
     if (typeof stream !== "string" || !stream)
       throw refuse(`loads "${loads[i].name}" from an empty stream name`);
     if (stream === own.stream) throw refuse(`loads its own stream "${stream}"`);
@@ -477,17 +478,19 @@ async function load_others(
   });
   return Promise.all(
     loads.map(async (l, i) => {
+      const stream = streams[i];
+      if (stream === undefined) return undefined;
       const snapshot = await load(
         l.state,
-        { stream: streams[i], actor },
+        { stream, actor },
         undefined,
         patch_fn
       );
       if (snapshot.event?.name === TOMBSTONE_EVENT)
-        throw new StreamClosedError(streams[i]);
+        throw new StreamClosedError(stream);
       return {
         state: l.state,
-        stream: streams[i],
+        stream,
         snapshot,
         expected: snapshot.version,
         events: [],
@@ -567,7 +570,7 @@ export async function action<
           )
         : [];
       const loaded = Object.fromEntries(
-        others.map((p, i) => [loads[i].name, p.snapshot.state])
+        others.map((p, i) => [loads[i].name, p?.snapshot.state])
       );
 
       // Preconditions in declaration order: the first that fails refuses
@@ -590,11 +593,12 @@ export async function action<
         ? (result as Emitted<TEvents>[]) // array of tuples
         : ([result] as Emitted<TEvents>[]); // single tuple
 
-      // An event listed on a load goes to that load's stream; the state's
-      // own events go to its own stream.
+      // An event listed on a load goes to that load's stream, and is dropped
+      // when the load was skipped; the state's own events go to its own stream.
       for (const [name, data] of tuples) {
         const event = name as string;
         const i = loads.findIndex((l) => l.events.includes(event));
+        if (i >= 0 && !others[i]) continue;
         const to = i >= 0 ? others[i] : name in me.events ? own : undefined;
         if (!to)
           throw new Error(
@@ -611,7 +615,9 @@ export async function action<
         throw new Error(
           `Action "${action as string}" appends only to the streams it loads; it must append an event to its own stream too`
         );
-      const appends = [own, ...others].filter((p) => p.events.length);
+      const appends = [own, ...others].filter(
+        (p): p is Pending => !!p?.events.length
+      );
 
       const meta: EventMeta = {
         correlation:

@@ -390,7 +390,7 @@ export type Precondition<
   TState extends Schema,
   TPayload,
   TActor extends Actor = Actor,
-  TLoaded extends Schemas = {},
+  TLoaded extends Record<string, Schema | undefined> = {},
 > = {
   description: string;
   holds: (
@@ -413,8 +413,11 @@ export type Precondition<
 export type Load = {
   /** The loaded state; after build, the one registered under its name. */
   readonly state: State<any, any, any>;
-  /** The stream to load, from the payload and the action's state. */
-  readonly target: (payload: any, state: any) => string;
+  /**
+   * The stream to load, from the payload and the action's state; `undefined`
+   * skips this load.
+   */
+  readonly target: (payload: any, state: any) => string | undefined;
   /** The loaded state's events the action may emit to that stream. */
   readonly events: readonly string[];
   /** The key of this load in `loaded`: the load's name, or the state's. */
@@ -498,7 +501,7 @@ export type ActionHandler<
   TEvents extends Schemas,
   TActions extends Schemas,
   TKey extends keyof TActions,
-  TLoaded extends Schemas = {},
+  TLoaded extends Record<string, Schema | undefined> = {},
   TRouted extends Schemas = {},
 > = (
   action: Readonly<TActions[TKey]>,

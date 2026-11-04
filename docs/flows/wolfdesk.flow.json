@@ -499,7 +499,7 @@
       "id": "state:Agent",
       "lane": "state",
       "label": "Agent",
-      "description": "An agent on the desk, one stream per agent, in one support category, with at most 5 open tickets, held by its schema whichever action takes a ticket. Declared by its own slice and by the creation and operations slices, whose actions load it: it's one state, drawn in each. A ticket with no agent names agent-unassigned and emits nothing to it, so that load is a read.",
+      "description": "An agent on the desk, one stream per agent, in one support category, with at most 5 open tickets, held by its schema whichever action takes a ticket. Declared by its own slice and by the creation and operations slices, whose actions load it: it's one state, drawn in each. A ticket with no agent loads none: its load is skipped, and TicketDropped with it.",
       "schema": "name: string\nsupportCategoryId: string\nopen: number ≥ 0, ≤ 5"
     },
     {
@@ -853,7 +853,7 @@
           "from": "reaction:assign",
           "to": "action:AssignTicket",
           "say": "It picks an agent and invokes **AssignTicket** as the automation actor, with the event as `reactingTo`. It loads Ada's count, 2 of 5. This ticket has no agent yet, so its other load is a read of a placeholder.",
-          "loads": ["agent-unassigned", "agent-ada"]
+          "loads": [null, "agent-ada"]
         },
         {
           "from": "action:AssignTicket",
@@ -1057,12 +1057,6 @@
         }
       ],
       "initials": {
-        "agent-unassigned": {
-          "state": "Agent",
-          "data": {
-            "open": 0
-          }
-        },
         "agent-ada": {
           "state": "Agent",
           "data": {
@@ -1329,7 +1323,7 @@
           "from": "reaction:assign",
           "to": "action:AssignTicket",
           "say": "It invokes **AssignTicket**.",
-          "loads": ["agent-unassigned", "agent-ada"]
+          "loads": [null, "agent-ada"]
         },
         {
           "from": "action:AssignTicket",
@@ -1436,12 +1430,6 @@
         }
       ],
       "initials": {
-        "agent-unassigned": {
-          "state": "Agent",
-          "data": {
-            "open": 0
-          }
-        },
         "agent-ada": {
           "state": "Agent",
           "data": {
@@ -1688,12 +1676,6 @@
       "stream": "ticket-4826",
       "summary": "The agents table still shows Ada with 4, but her stream already holds 5. The assign reaction picks her, and Agent's schema refuses the commit. The retry finds the table caught up and picks Ben. Later the ticket moves again, and the count moves with it, in one commit.",
       "initials": {
-        "agent-unassigned": {
-          "state": "Agent",
-          "data": {
-            "open": 0
-          }
-        },
         "agent-ada": {
           "state": "Agent",
           "data": {
@@ -1744,7 +1726,7 @@
         {
           "from": "reaction:assign",
           "to": "action:AssignTicket",
-          "loads": ["agent-unassigned", "agent-ada"],
+          "loads": [null, "agent-ada"],
           "say": "It picks **Ada**, and AssignTicket loads her count: really **5 of 5**."
         },
         {
@@ -1762,7 +1744,7 @@
           "from": "reaction:assign",
           "to": "action:AssignTicket",
           "wait": "retries after 10 seconds",
-          "loads": ["agent-unassigned", "agent-ben"],
+          "loads": [null, "agent-ben"],
           "say": "The reaction fails, and its retry asks again. The table has caught up: **Ben**, with 4 of 5. If every retry found a full agent, the stream would block until `app.unblock`."
         },
         {
@@ -1838,12 +1820,6 @@
       "stream": "ticket-5120",
       "summary": "A manager adds Dee to the desk. The next ticket in her category goes to her, since she holds the fewest.",
       "initials": {
-        "agent-unassigned": {
-          "state": "Agent",
-          "data": {
-            "open": 0
-          }
-        },
         "agent-ada": {
           "state": "Agent",
           "data": {
@@ -1911,7 +1887,7 @@
         {
           "from": "reaction:assign",
           "to": "action:AssignTicket",
-          "loads": ["agent-unassigned", "agent-dee"],
+          "loads": [null, "agent-dee"],
           "say": "AssignTicket loads Dee's stream, and the stream has the real count."
         },
         {
@@ -1952,12 +1928,6 @@
       "stream": "ticket-5121",
       "summary": "Everyone in the category is full, so a new ticket waits. When Ben resolves a ticket, his slot frees, and the next look assigns the waiting ticket to him.",
       "initials": {
-        "agent-unassigned": {
-          "state": "Agent",
-          "data": {
-            "open": 0
-          }
-        },
         "agent-ada": {
           "state": "Agent",
           "data": {
@@ -2050,7 +2020,7 @@
         {
           "from": "reaction:assign",
           "to": "action:AssignTicket",
-          "loads": ["agent-unassigned", "agent-ben"],
+          "loads": [null, "agent-ben"],
           "say": "AssignTicket loads Ben's stream."
         },
         {

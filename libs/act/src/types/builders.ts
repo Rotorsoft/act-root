@@ -403,7 +403,7 @@ type ActionRules<
   TSnap extends boolean,
   TKey extends string,
   TNewActions extends Schema,
-  TLoaded extends Schemas = {},
+  TLoaded extends Record<string, Schema | undefined> = {},
   TRouted extends Schemas = {},
 > = {
   /**
@@ -418,8 +418,12 @@ type ActionRules<
    * by the version it had when loaded. A load without events is a read:
    * nothing is appended to its stream, and it isn't guarded.
    *
+   * A target that can return `undefined` makes the load optional: when it does,
+   * nothing is loaded, `loaded` holds `undefined` for it (and is typed so), and
+   * `.emit`'s events listed on it are dropped.
+   *
    * @param state - The state to load; it must be registered in the same Act.
-   * @param target - The stream to load, from the payload and the action's state.
+   * @param target - The stream to load, from the payload and the action's state; `undefined` skips the load.
    * @param events - The loaded state's events the action may emit to that stream.
    * @param name - The key of this load in `loaded`; needed to load one state twice.
    *
@@ -437,10 +441,14 @@ type ActionRules<
     TLName extends string,
     const TList extends Exclude<keyof TLEvents & string, keyof TRouted> = never,
     const TAs extends string = TLName,
+    TStream extends string | undefined = string,
   >(
     state: State<TLState, TLEvents, any, TLName> &
       (TAs extends keyof TLoaded ? DuplicateLoad<TAs> : unknown),
-    target: (payload: Readonly<TNewActions>, state: Readonly<TState>) => string,
+    target: (
+      payload: Readonly<TNewActions>,
+      state: Readonly<TState>
+    ) => TStream,
     events?: readonly TList[],
     name?: TAs
   ) => TAs extends keyof TLoaded
@@ -453,7 +461,9 @@ type ActionRules<
         TSnap,
         TKey,
         TNewActions,
-        TLoaded & { [P in TAs]: TLState },
+        TLoaded & {
+          [P in TAs]: undefined extends TStream ? TLState | undefined : TLState;
+        },
         TRouted & { [E in TList]: TLEvents[E] }
       >;
   /**

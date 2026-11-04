@@ -200,24 +200,17 @@ An agent holds at most 5 open tickets. The count is a state of its own, `Agent`,
 
 ```typescript no-check
 .on({ ReassignTicket }, { maxRetries: 4 })
-.loads(Agent, (_, state) => agentStream(state.agentId), ["TicketDropped"], "current")
+.loads(Agent, (_, state) => state.agentId && agentStream(state.agentId), ["TicketDropped"], "current")
 .loads(Agent, (data) => agentStream(data.agentId), ["TicketTaken"], "next")
 .requires([mustBeOpen, mustBeEscalated, mustBeDueForReassignment, mustNotBeAcknowledgedByAgent])
-.emit((data, { state }) =>
-  state.agentId
-    ? [
-        ["TicketReassigned", data],
-        ["TicketDropped", {}],
-        ["TicketTaken", {}],
-      ]
-    : [
-        ["TicketReassigned", data],
-        ["TicketTaken", {}],
-      ]
-)
+.emit((data) => [
+  ["TicketReassigned", data],
+  ["TicketDropped", {}],
+  ["TicketTaken", {}],
+])
 ```
 
-A load always names a stream, so a ticket with no agent names a placeholder and emits nothing to it, which makes that load a read. When a pick finds a full agent, the assign reaction fails, and its retry (10 seconds later, by default) asks `assignAgent` for another agent. If every attempt finds a full agent, the ticket's reaction stream blocks after 4 tries, and `app.unblock` resumes it. A ticket holds its slot until it's resolved or closed, whichever comes first, and frees it once, so a resolved ticket retired by `.autocloses` doesn't keep one. A resolved ticket can't be assigned or reassigned. [Rules across streams](rules.md) has the pattern on its own.
+A ticket with no agent has no slot to free, so its `current` load returns `undefined`: nothing is loaded, and `TicketDropped` is dropped from the commit. The ticket's own version guards that fact, so if someone assigns it first, this action's retry sees the agent and loads them. When a pick finds a full agent, the assign reaction fails, and its retry (10 seconds later, by default) asks `assignAgent` for another agent. If every attempt finds a full agent, the ticket's reaction stream blocks after 4 tries, and `app.unblock` resumes it. A ticket holds its slot until it's resolved or closed, whichever comes first, and frees it once, so a resolved ticket retired by `.autocloses` doesn't keep one. A resolved ticket can't be assigned or reassigned. [Rules across streams](rules.md) has the pattern on its own.
 
 ### Picking an Agent
 

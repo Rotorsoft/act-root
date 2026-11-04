@@ -150,7 +150,7 @@ No write rests on stale context: every stream the action writes is unchanged sin
 ### Builders (additive)
 
 - **`.loads(State, target, events?, name?)`** on the action chain of `state` and `slice`, between `.on(...)` and `.requires(...)`; it can repeat.
-  - `target(payload, state)` returns the stream id;
+  - `target(payload, state)` returns the stream id, or `undefined` to skip the load, for a relation that may not exist yet: `loaded` then holds `undefined` for it, typed so only for such a target, and events listed on it are dropped;
   - `events` lists the loaded state's events this action may emit to that stream (none: a read, not guarded);
   - `name` keys the load when the action loads the same state twice.
 - **Preconditions and `.emit`** get the loaded states as a new fourth argument, `loaded`: `holds(payload, state, actor, loaded)` and `emit(payload, snapshot, target, loaded)`.

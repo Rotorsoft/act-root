@@ -814,7 +814,7 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
   // a stream's version as a person reads it
   const vLabel = v => v === undefined || v < 0 ? "new" : `v${v}`;
   // a step's loads, in the order of the action's `.loads`: the i-th stream is the i-th load
-  const loadsAt = st => (st.loads || []).map((stream, i) => ({ stream, load: nodes.get(st.at || st.to).loads[i] }));
+  const loadsAt = st => (st.loads || []).map((stream, i) => ({ stream, load: nodes.get(st.at || st.to).loads[i] })).filter(x => x.stream);
   // what one commit checks: each stream it appends to, at the version it was loaded at; a read isn't checked
   function guardsAt(sc, g0, g1) {
     const own = sc.steps[g0].stream || sc.stream;
@@ -839,7 +839,7 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
     const st = sc.steps[k - 1];
     if (!st) return new Set();
     const [g0, g1] = groupAt(sc, k - 1), own = sc.steps[g0].stream || sc.stream || "stream";
-    return new Set([own, ...(st.loads || []), ...sc.steps.slice(g0, g1).map(x => x.stream || sc.stream || "stream")]);
+    return new Set([own, ...(st.loads || []).filter(Boolean), ...sc.steps.slice(g0, g1).map(x => x.stream || sc.stream || "stream")]);
   }
   // a refused precondition reads as the rule that didn't hold (a precondition is a holds() predicate);
   // anything else (a throw in .emit) keeps its message
@@ -994,7 +994,7 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
     if (!k) return setChip("");
     if (st.reject) return setChip("✕ " + refusal(st.from, st.reject), "var(--bad)");
     if (st.conflict) return setChip(`✕ ${st.conflict} moved · nothing written`, "var(--bad)");
-    if (st.loads) return setChip(`loads ${st.loads.length + 1} stream${st.loads.length ? "s" : ""}`, "var(--state)");
+    if (st.loads) { const named = st.loads.filter(Boolean).length; return setChip(`loads ${named + 1} stream${named ? "s" : ""}`, "var(--state)"); }
     if (st.blocked) return setChip("⛔ target blocked", "var(--bad)");
     if (st.wait) return setChip("⏱ " + st.wait, "var(--reaction)");
     if (st.at) return setChip(st.noop ? "wakes · no-op" : nodes.get(st.at).label, color(nodes.get(st.at)));
