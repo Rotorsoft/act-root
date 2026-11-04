@@ -5,7 +5,7 @@
  */
 import type { ZodType } from "zod";
 import type { Act } from "../act.js";
-import type { CheckEmitted, EmitOut } from "./emit.js";
+import type { Emit } from "./emit.js";
 import type {
   ActionOptions,
   ActOptions,
@@ -29,7 +29,6 @@ import type {
   Schemas,
   Snapshot,
   State,
-  Target,
   ZodTypes,
 } from "./index.js";
 import type { DEFAULT_LANE } from "./reaction.js";
@@ -383,11 +382,7 @@ export type ActionEntry<
   [P in TKey]: ZodType<TNewActions>;
 };
 
-/**
- * The `.emit(...)` step that finishes an action declaration: a handler that
- * returns the events, or an event name to pass the payload through as the
- * event data.
- */
+/** The `.emit(...)` step that finishes an action declaration. */
 type ActionEmit<
   TState extends Schema,
   TEvents extends Schemas,
@@ -398,54 +393,20 @@ type ActionEmit<
   TNewActions extends Schema,
   TLoaded extends Schemas = {},
   TRouted extends Schemas = {},
-  TDone = ActionBuilder<
+> = Emit<
+  TState,
+  TEvents,
+  TNewActions,
+  TLoaded,
+  TRouted,
+  ActionBuilder<
     TState,
     TEvents,
     TActions & { [P in TKey]: TNewActions },
     TName,
     TSnap
-  >,
-  TEventName = Exclude<keyof TEvents & string, keyof TRouted>,
-> = {
-  // The order of these four is load-bearing, so don't merge the duplicates.
-  // The first handler gives a function with no parameters its types: TypeScript
-  // fixes its return type on the first signature it meets. The name in between
-  // keeps `.emit("Event")`. When more than three signatures fail, TypeScript
-  // reports only the last one's error, at its exact place, so a mistake in a
-  // handler's list is marked on the entry; `emit-types.spec.ts` guards that.
-  /**
-   * Finishes the action with a handler, which receives `(action, snapshot,
-   * target, loaded)` and returns one or more `[EventName, data]` tuples (or
-   * `undefined`): the state's own events, and the events listed on its loads.
-   */
-  <const TOut extends EmitOut<TEvents & TRouted>>(
-    handler: EmitHandler<TState, TEvents, TNewActions, TLoaded, TRouted, TOut>
-  ): TDone;
-  /**
-   * Finishes the action by passing the payload through as the data of an event
-   * declared in `.emits()` that no load lists.
-   */
-  (event_name: TEventName): TDone;
-  (event_name: TEventName): TDone;
-  <const TOut extends EmitOut<TEvents & TRouted>>(
-    handler: EmitHandler<TState, TEvents, TNewActions, TLoaded, TRouted, TOut>
-  ): TDone;
-};
-
-/** A handler whose returned list is checked by {@link CheckEmitted}. */
-type EmitHandler<
-  TState extends Schema,
-  TEvents extends Schemas,
-  TNewActions extends Schema,
-  TLoaded extends Schemas,
-  TRouted extends Schemas,
-  TOut,
-> = (
-  action: Readonly<TNewActions>,
-  snapshot: Readonly<Snapshot<TState, TEvents>>,
-  target: Target,
-  loaded: Readonly<TLoaded>
-) => CheckEmitted<TOut, TEvents, TEvents & TRouted>;
+  >
+>;
 
 /**
  * What `.loads(...)` returns when its load name is already taken by an

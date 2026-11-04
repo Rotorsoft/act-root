@@ -2075,8 +2075,8 @@ export type AuditFinding = {
  */
 import type { ZodType } from "zod";
 import type { Act } from "../act.js";
-import type { CheckEmitted, EmitOut } from "./emit.js";
-import type { ActionOptions, ActOptions, Actor, AutocloseArchiver, AutoclosePolicy, BatchHandler, CacheEntry, Committed, DeferWhen, EventRegister, FoldOptions, IAct, LaneConfig, PatchHandlers, Precondition, ReactionOptions, ReactionResolver, Schema, SchemaRegister, Schemas, Snapshot, State, Target, ZodTypes } from "./index.js";
+import type { Emit } from "./emit.js";
+import type { ActionOptions, ActOptions, Actor, AutocloseArchiver, AutoclosePolicy, BatchHandler, CacheEntry, Committed, DeferWhen, EventRegister, FoldOptions, IAct, LaneConfig, PatchHandlers, Precondition, ReactionOptions, ReactionResolver, Schema, SchemaRegister, Schemas, Snapshot, State, ZodTypes } from "./index.js";
 import type { DEFAULT_LANE } from "./reaction.js";
 /**
  * The \`.do(handler)\` step, parameterized by the builder it returns (\`TReturn\`).
@@ -2307,30 +2307,10 @@ export type StateEntry<TKey extends string = string, TState extends Schema = Sch
 export type ActionEntry<TKey extends string = string, TNewActions extends Schema = Schema> = {
     [P in TKey]: ZodType<TNewActions>;
 };
-/**
- * The \`.emit(...)\` step that finishes an action declaration: a handler that
- * returns the events, or an event name to pass the payload through as the
- * event data.
- */
-type ActionEmit<TState extends Schema, TEvents extends Schemas, TActions extends Schemas, TName extends string, TSnap extends boolean, TKey extends string, TNewActions extends Schema, TLoaded extends Schemas = {}, TRouted extends Schemas = {}, TDone = ActionBuilder<TState, TEvents, TActions & {
+/** The \`.emit(...)\` step that finishes an action declaration. */
+type ActionEmit<TState extends Schema, TEvents extends Schemas, TActions extends Schemas, TName extends string, TSnap extends boolean, TKey extends string, TNewActions extends Schema, TLoaded extends Schemas = {}, TRouted extends Schemas = {}> = Emit<TState, TEvents, TNewActions, TLoaded, TRouted, ActionBuilder<TState, TEvents, TActions & {
     [P in TKey]: TNewActions;
-}, TName, TSnap>, TEventName = Exclude<keyof TEvents & string, keyof TRouted>> = {
-    /**
-     * Finishes the action with a handler, which receives \`(action, snapshot,
-     * target, loaded)\` and returns one or more \`[EventName, data]\` tuples (or
-     * \`undefined\`): the state's own events, and the events listed on its loads.
-     */
-    <const TOut extends EmitOut<TEvents & TRouted>>(handler: EmitHandler<TState, TEvents, TNewActions, TLoaded, TRouted, TOut>): TDone;
-    /**
-     * Finishes the action by passing the payload through as the data of an event
-     * declared in \`.emits()\` that no load lists.
-     */
-    (event_name: TEventName): TDone;
-    (event_name: TEventName): TDone;
-    <const TOut extends EmitOut<TEvents & TRouted>>(handler: EmitHandler<TState, TEvents, TNewActions, TLoaded, TRouted, TOut>): TDone;
-};
-/** A handler whose returned list is checked by {@link CheckEmitted}. */
-type EmitHandler<TState extends Schema, TEvents extends Schemas, TNewActions extends Schema, TLoaded extends Schemas, TRouted extends Schemas, TOut> = (action: Readonly<TNewActions>, snapshot: Readonly<Snapshot<TState, TEvents>>, target: Target, loaded: Readonly<TLoaded>) => CheckEmitted<TOut, TEvents, TEvents & TRouted>;
+}, TName, TSnap>>;
 /**
  * What \`.loads(...)\` returns when its load name is already taken by an
  * earlier load of the action: no further step, so the chain fails to
