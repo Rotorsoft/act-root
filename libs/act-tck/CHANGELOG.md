@@ -1,3 +1,10 @@
+# [@rotorsoft/act-tck-v1.41.3](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.41.2...@rotorsoft/act-tck-v1.41.3) (2026-11-04)
+
+
+### Bug Fixes
+
+* **act-sqlite:** run the store's statements one at a time, so concurrent calls wait, not fail ([#2303](https://github.com/Rotorsoft/act-root/issues/2303)) ([29988f1](https://github.com/Rotorsoft/act-root/commit/29988f1f71c3c145e6a67d560ac03ce67cb9e741))
+
 # [@rotorsoft/act-tck-v1.41.2](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.41.1...@rotorsoft/act-tck-v1.41.2) (2026-10-30)
 
 
