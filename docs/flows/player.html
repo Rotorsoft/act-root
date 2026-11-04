@@ -671,7 +671,7 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
     (bands.some(b => b.kind === "slice") ? `<div><i class="bx" style="--k:var(--ink)"></i>Slice boundary</div>` : "");
   $("read").innerHTML = `
     <p>Time runs left to right. An <b style="color:var(--actor)">actor</b>, a person or an automation, invokes an <b style="color:var(--action)">action</b>.</p>
-    <p>The <b style="color:var(--state)">state</b> loads from the stream into the action, which checks its <b class="pre">▲ preconditions</b> one by one, in the order it declares them. The first rule that fails refuses the action. Otherwise it commits <b style="color:var(--event)">events</b>, which patch the state, whose schema can still refuse, and <b style="color:var(--projection)">projections</b> fold them into read models such as tables and caches.</p>
+    <p>The <b style="color:var(--state)">state</b> loads from the stream into the action, which checks its <b class="pre">▲ preconditions</b> one by one, in the order it declares them. The first rule that fails refuses the action. Otherwise it commits <b style="color:var(--event)">events</b>, which patch the state, and every state written checks its schema (<span style="color:var(--good)">schema ✓</span>), which can still refuse, and <b style="color:var(--projection)">projections</b> fold them into read models such as tables and caches.</p>
     <p><b style="color:var(--reaction)">Reactions</b> pick events up after the commit and act as automations: they invoke new actions or call the <b style="color:var(--external)">outside world</b>. A clock marks a reaction that waits for a timestamp.</p>
     ${bands.length ? `<p>Dashed boxes are the boundaries the builders declare. ${bands[0].kind === "slice"
       ? "A <b>slice</b> box holds the states it declares and the reactions it declares. Each state is a group of its actions and events. A state a few slices declare is drawn in each, and is still one state."
@@ -1237,7 +1237,14 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
       const f = fractionAtY(e, bar.cy);
       if (!(await travel(e, token, 0, f))) return false;
       ping(bar);
-      { const v = verdict(from.cx, bar.cy, "✓", "var(--good)"); const ok = await wait(650, token); v.remove(); if (!ok) return false; }
+      // every state the commit writes folds its events and checks its schema
+      const written = [...new Set(group.map(x => {
+        const load = (from.loads || []).find(l => l.events?.includes(x.to.id));
+        return load ? loadBar(load, from) : bar;
+      }))];
+      written.forEach(ping);
+      const marks = written.map(b => verdict(b === bar ? from.cx : b.cx, b.cy, "schema ✓", "var(--good)"));
+      { const ok = await wait(900, token); marks.forEach(v => v.remove()); if (!ok) return false; }
       // the boundary first: inside it, every stream's version is checked before anything lands
       const brace = commitBrace(group.map(x => x.to), new Set(group.map(x => x.st.stream || sc.stream)).size);
       const guards = guardsAt(sc, g0, g1);
@@ -1293,12 +1300,15 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
       if (!(await travel(e, token, 0, f))) return false;
       ping(bar);
       if (st.reject) {
-        if (!(await checklist(from.cx, bar.cy, [], st.reject, token))) return false;
+        // the state whose schema refuses, when it isn't the action's own
+        const at = st.state ? loadBar({ state: st.state }, from) : bar;
+        ping(at);
+        if (!(await checklist(st.state ? at.cx : from.cx, at.cy, [], st.reject, token))) return false;
         return refused();
       }
       {
-        const v = verdict(from.cx, bar.cy, "✓", "var(--good)");
-        const ok = await wait(650, token);
+        const v = verdict(from.cx, bar.cy, "schema ✓", "var(--good)");
+        const ok = await wait(900, token);
         v.remove();
         if (!ok) return false;
       }

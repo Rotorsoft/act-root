@@ -1751,7 +1751,8 @@
           "from": "action:AssignTicket",
           "to": "evt:TicketAssigned",
           "reject": "Too big: expected number to be <=5",
-          "say": "Folding **TicketTaken** would make 6, so **Agent's schema refuses**, and nothing lands on either stream (`ValidationError`)."
+          "say": "Folding **TicketTaken** would make 6, so **Agent's schema refuses**, and nothing lands on either stream (`ValidationError`).",
+          "state": "state:Agent"
         },
         {
           "from": "proj:agents",
