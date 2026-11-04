@@ -26,6 +26,11 @@ const ticket = () =>
     .emits({
       Moved: Move,
       Tagged: z.object({ tags: z.array(z.object({ t: z.string() })) }),
+      Open: z.object({ meta: z.unknown(), any: z.any() }),
+      Dated: z.object({
+        at: z.date(),
+        pair: z.tuple([z.number(), z.string()]),
+      }),
       Contacted: z.union([
         z.object({ kind: z.literal("a"), a: z.string() }),
         z.object({ kind: z.literal("b"), b: z.string() }),
@@ -83,6 +88,11 @@ describe("what compiles", () => {
       ["Tagged", { tags: [{ t: "x" }] }],
       ["Contacted", { kind: "a", a: "x" }],
     ]);
+    moving().emit(() => ["Open", { meta: { any: "thing" }, any: { x: 1 } }]);
+    moving().emit(() => ["Dated", { at: new Date(), pair: [1, "x"] }]);
+    moving().emit(() => {
+      throw new Error("refused");
+    });
     ticket().on({ Move }).emit("Moved");
     moving().emit("Moved");
   });
@@ -155,6 +165,14 @@ describe("a mistake is marked on the entry", () => {
       ["Moved", data],
       // @ts-expect-error `extra` isn't in the schema
       ["Tagged", { tags: [{ t: "x", extra: 1 }] }],
+    ]);
+  });
+
+  it("a wrong type inside a tuple", () => {
+    moving().emit((data) => [
+      ["Moved", data],
+      // @ts-expect-error the pair is a number and a string
+      ["Dated", { at: new Date(), pair: [1, 2] }],
     ]);
   });
 

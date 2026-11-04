@@ -2330,7 +2330,7 @@ type ActionEmit<TState extends Schema, TEvents extends Schemas, TActions extends
     <const TOut extends EmitOut<TEvents & TRouted>>(handler: EmitHandler<TState, TEvents, TNewActions, TLoaded, TRouted, TOut>): TDone;
 };
 /** A handler whose returned list is checked by {@link CheckEmitted}. */
-type EmitHandler<TState extends Schema, TEvents extends Schemas, TNewActions extends Schema, TLoaded extends Schemas, TRouted extends Schemas, TOut> = (action: Readonly<TNewActions>, snapshot: Readonly<Snapshot<TState, TEvents>>, target: Target, loaded: Readonly<TLoaded>) => TOut & CheckEmitted<TOut, TEvents, TEvents & TRouted>;
+type EmitHandler<TState extends Schema, TEvents extends Schemas, TNewActions extends Schema, TLoaded extends Schemas, TRouted extends Schemas, TOut> = (action: Readonly<TNewActions>, snapshot: Readonly<Snapshot<TState, TEvents>>, target: Target, loaded: Readonly<TLoaded>) => CheckEmitted<TOut, TEvents, TEvents & TRouted>;
 /**
  * What \`.loads(...)\` returns when its load name is already taken by an
  * earlier load of the action: no further step, so the chain fails to

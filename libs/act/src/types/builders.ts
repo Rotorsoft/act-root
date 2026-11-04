@@ -445,7 +445,7 @@ type EmitHandler<
   snapshot: Readonly<Snapshot<TState, TEvents>>,
   target: Target,
   loaded: Readonly<TLoaded>
-) => TOut & CheckEmitted<TOut, TEvents, TEvents & TRouted>;
+) => CheckEmitted<TOut, TEvents, TEvents & TRouted>;
 
 /**
  * What `.loads(...)` returns when its load name is already taken by an
