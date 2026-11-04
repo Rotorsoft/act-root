@@ -435,11 +435,11 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
     const cols = [...nodes.values()].filter(n => typeof n.col === "number").map(n => n.col);
     const minCol = Math.min(0, ...cols), maxCol = Math.max(...cols);
     // a gutter wherever a slice, or a state inside one, ends, so their boxes can pad what they hold
-    const SLICE_GAP = 28, STATE_GAP = 10;
+    const SLICE_GAP = 40, STATE_GAP = 20;
     const groupAtCol = new Map([...nodes.values()].filter(n => n.slice && n.col !== undefined).map(n => [n.col, n]));
     const shift = new Map();
     // the first box stays clear of the lane labels
-    let shifted = groupAtCol.size ? 10 : 0, last;
+    let shifted = groupAtCol.size ? 16 : 0, last;
     for (const c of [...groupAtCol.keys()].sort((a, b) => a - b)) {
       const n = groupAtCol.get(c);
       if (last) shifted += n.slice !== last.slice ? SLICE_GAP : (n.state || "") !== (last.state || "") ? STATE_GAP : 0;
@@ -507,7 +507,7 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
         if (!ms.length) continue;
         const cs = ms.map(n => n.col);
         bands.push({ id: "band:" + sl.id, kind: "slice", label: sl.label, k: "var(--ink)", ref: sl, members: new Set(ms.map(n => n.id)),
-          x0: X(Math.min(...cs)) - COL_W / 2 - 10, x1: X(Math.max(...cs)) + COL_W / 2 + 10, y0: la.y + 4, y1: foot });
+          x0: X(Math.min(...cs)) - COL_W / 2 - 14, x1: X(Math.max(...cs)) + COL_W / 2 + 14, y0: la.y + 4, y1: foot });
       }
     } else if (la && le) for (const s of stateBars) {
       const members = new Set([s.id, ...[...nodes.values()].filter(n => ["action", "event"].includes(kindOf(n)) && barAt(n.cx) === s).map(n => n.id)]);
@@ -560,8 +560,8 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
     // a state and its events read as one group
     for (const b of stateBars)
       if (b.grouped) {
-        const top = b.hasActions ? la.y + 20 : b.top - 5;
-        el("rect", { x: b.x0 - 8, y: top, width: b.x1 - b.x0 + 16, height: le.y + le.h - 6 - top, rx: 9, class: "state-group" }, gBands);
+        const top = b.hasActions ? la.y + 20 : b.top - 10;
+        el("rect", { x: b.x0 - 12, y: top, width: b.x1 - b.x0 + 24, height: le.y + le.h - 6 - top, rx: 9, class: "state-group" }, gBands);
       }
 
     let bus = 0;
