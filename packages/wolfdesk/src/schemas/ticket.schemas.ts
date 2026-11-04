@@ -149,6 +149,7 @@ export const TicketMessagingState = TicketBase;
 
 export const TicketOperationsState = TicketBase.extend({
   agentId: z.uuid().optional(),
+  resolvedById: z.uuid().optional(),
   requestId: z.uuid().optional(),
   requestedById: z.uuid().optional(),
   escalationId: z.uuid().optional(),

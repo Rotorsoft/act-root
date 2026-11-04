@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { slice, state } from "@rotorsoft/act";
-import { AgentLoad, agentStream } from "./agent-load.js";
+import { Agent, agentStream } from "./agent.js";
 import {
   CloseTicket,
   MarkTicketResolved,
@@ -57,12 +57,13 @@ export const TicketCreation = state({ Ticket: TicketCreationState })
     ];
   })
 
-  // Closing frees the agent's slot, when the ticket has an agent.
+  // A ticket holds its agent's slot until it's resolved or closed, whichever
+  // comes first, so closing frees it only when resolving hasn't.
   .on({ CloseTicket }, { maxRetries: 4 })
-  .loads(AgentLoad, (_, state) => agentStream(state.agentId), ["TicketDropped"])
+  .loads(Agent, (_, state) => agentStream(state.agentId), ["TicketDropped"])
   .requires([mustBeOpen])
   .emit((_, { state }, { actor }) =>
-    state.agentId
+    state.agentId && !state.resolvedById
       ? [
           ["TicketClosed", { closedById: actor.id }],
           ["TicketDropped", {}],
@@ -70,9 +71,17 @@ export const TicketCreation = state({ Ticket: TicketCreationState })
       : ["TicketClosed", { closedById: actor.id }]
   )
 
-  .on({ MarkTicketResolved })
+  .on({ MarkTicketResolved }, { maxRetries: 4 })
+  .loads(Agent, (_, state) => agentStream(state.agentId), ["TicketDropped"])
   .requires([mustBeOpen, mustBeUserOrAgent])
-  .emit((_, __, { actor }) => ["TicketResolved", { resolvedById: actor.id }])
+  .emit((_, { state }, { actor }) =>
+    state.agentId && !state.resolvedById
+      ? [
+          ["TicketResolved", { resolvedById: actor.id }],
+          ["TicketDropped", {}],
+        ]
+      : ["TicketResolved", { resolvedById: actor.id }]
+  )
 
   // Online close-the-books policy (the operator recipes reference this
   // declaration instead of redefining a toy ticket). A ticket retires
@@ -91,13 +100,17 @@ export const TicketCreation = state({ Ticket: TicketCreationState })
 // --- Slice ---
 // prettier-ignore
 export const TicketCreationSlice = slice()
-  .withState(AgentLoad)
+  .withState(Agent)
   .withState(TicketCreation)
   .withState(TicketOperations)
 
   .on("TicketOpened")
-  .do(async function assign(event, _stream, app) {
-    const agent = assignAgent(
+  .do(async function assign(event, _target, app) {
+    // Waiting can outlast the need: the ticket may be done, or someone may have
+    // taken it by hand.
+    const { state } = await app.load("Ticket", event.stream);
+    if (state.resolvedById || state.closedById || state.agentId) return;
+    const agent = await assignAgent(
       event.stream,
       event.data.supportCategoryId,
       event.data.priority
@@ -112,4 +125,7 @@ export const TicketCreationSlice = slice()
       { reactingTo: event }
     );
   })
+  // On its own target, since a ticket waiting for an agent mustn't hold the
+  // ticket's other reactions.
+  .to((event) => ({ target: `assign:${event.stream}`, source: event.stream }))
   .build();

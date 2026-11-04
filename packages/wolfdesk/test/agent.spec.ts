@@ -6,7 +6,7 @@ import {
 import { sandbox } from "@rotorsoft/act/test";
 import { Chance } from "chance";
 import { builder, tenantCorrelator } from "../src/bootstrap.js";
-import { AgentLoad, agentStream, MAX_OPEN_TICKETS } from "../src/ticket.js";
+import { Agent, agentStream, MAX_OPEN_TICKETS } from "../src/ticket.js";
 import { type Actions, makeActions, target } from "./actions.js";
 
 const chance = new Chance();
@@ -40,7 +40,7 @@ describe("open tickets per agent", () => {
     return t;
   };
   const load = async (agent: string) =>
-    (await app.load(AgentLoad, agentStream(agent))).state.open;
+    (await app.load(Agent, agentStream(agent))).state.open;
 
   it("an agent takes tickets up to the limit, and the next is refused, storing nothing", async () => {
     const agent = chance.guid();
@@ -61,6 +61,51 @@ describe("open tickets per agent", () => {
     expect(await load(agent)).toBe(1);
     await actions.closeTicket(t);
     expect(await load(agent)).toBe(0);
+  });
+
+  it("resolving a ticket frees its agent's slot", async () => {
+    const agent = chance.guid();
+    const t = await assigned(agent);
+    await actions.markTicketResolved(t);
+    expect(await load(agent)).toBe(0);
+  });
+
+  it("a slot is freed once: resolving twice, or resolving then closing", async () => {
+    const agent = chance.guid();
+    const held = await assigned(agent);
+    const t = await assigned(agent);
+    expect(await load(agent)).toBe(2);
+    await actions.markTicketResolved(t);
+    await actions.markTicketResolved(t);
+    expect(await load(agent)).toBe(1);
+    await actions.closeTicket(t);
+    expect(await load(agent)).toBe(1);
+    expect(
+      (await app.load("Ticket", held.stream)).state.closedById
+    ).toBeUndefined();
+  });
+
+  it("resolving a ticket with no agent touches no agent", async () => {
+    const t = await open();
+    await actions.markTicketResolved(t);
+    expect(
+      (await app.load("Ticket", t.stream)).state.resolvedById
+    ).toBeDefined();
+  });
+
+  it("a resolved ticket can't be assigned or reassigned", async () => {
+    const [agent, other] = [chance.guid(), chance.guid()];
+    const t = await open();
+    await actions.assignTicket(t, agent, new Date(), new Date());
+    await actions.escalateTicket(t);
+    await actions.markTicketResolved(t);
+    await expect(actions.assignTicket(t, other)).rejects.toThrow(
+      "Ticket must not be resolved"
+    );
+    await expect(actions.reassignTicket(t, other)).rejects.toThrow(
+      "Ticket must not be resolved"
+    );
+    expect(await load(other)).toBe(0);
   });
 
   it("closing a ticket with no agent touches no agent", async () => {

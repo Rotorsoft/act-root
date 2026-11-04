@@ -3,9 +3,9 @@ import { sandbox } from "@rotorsoft/act/test";
 import { Chance } from "chance";
 import { eq } from "drizzle-orm";
 import { builder, tenantCorrelator } from "../src/bootstrap.js";
-import { db, init_tickets_db, tickets } from "../src/drizzle/index.js";
+import { db, tickets } from "../src/drizzle/index.js";
 import { Priority } from "../src/schemas/index.js";
-import { type Actions, makeActions, target } from "./actions.js";
+import { type Actions, addDesk, makeActions, target } from "./actions.js";
 
 const chance = new Chance();
 
@@ -49,9 +49,8 @@ describe("tickets", { timeout: 30_000 }, () => {
       markTicketResolved,
       openTicket,
       requestTicketEscalation,
-    } = makeActions(app));
+    } = makeActions(app, (await addDesk(app)).category));
 
-    await init_tickets_db();
     await db.delete(tickets).catch((e) => console.error(e));
     // app.on("acked", (leases) => console.log("acked", leases));
   });

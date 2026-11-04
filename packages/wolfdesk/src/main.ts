@@ -8,8 +8,9 @@ import {
 } from "@rotorsoft/act";
 import { PostgresStore } from "@rotorsoft/act-pg";
 import { Chance } from "chance";
+import { agentStream } from "./agent.js";
 import { app } from "./bootstrap.js";
-import { db, tickets } from "./drizzle/index.js";
+import { agents, db, tickets } from "./drizzle/index.js";
 import { Priority } from "./schemas/index.js";
 
 const chance = new Chance();
@@ -28,6 +29,7 @@ async function main() {
   await store().seed();
 
   await db.delete(tickets).execute();
+  await db.delete(agents).execute();
 
   const actor: Actor = { id: randomUUID(), name: "WolfDesk" };
   // Timing automations are deferred reactions (see ticket-timers.ts).
@@ -35,6 +37,16 @@ async function main() {
     const all = await db.select().from(tickets).execute();
     console.table(all);
   });
+
+  // The desk the assign reaction picks from.
+  const supportCategoryId = randomUUID();
+  const desk = ["Ada", "Ben"].map((name) => ({ id: randomUUID(), name }));
+  for (const { id, name } of desk)
+    await app.do(
+      "AddAgent",
+      { stream: agentStream(id), actor },
+      { name, supportCategoryId }
+    );
 
   const [t1] = await app.do(
     "OpenTicket",
@@ -44,7 +56,7 @@ async function main() {
       message: chance.name(),
       productId: randomUUID(),
       priority: chance.pickone([Priority.Low, Priority.Medium, Priority.High]),
-      supportCategoryId: randomUUID(),
+      supportCategoryId,
     }
   );
 
@@ -53,7 +65,7 @@ async function main() {
     "AssignTicket",
     { stream: t1.event!.stream, actor },
     {
-      agentId: randomUUID(),
+      agentId: desk[1].id,
       reassignAfter: new Date(),
       escalateAfter: new Date(),
     }

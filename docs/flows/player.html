@@ -95,8 +95,15 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
 .txb.lost path { stroke: var(--bad); stroke-dasharray: 4 3; }
 .txb.lost rect { stroke: var(--bad); }
 .txb.lost text { fill: var(--bad); }
-.eg.load .edge { stroke: var(--k); stroke-width: 1.7; opacity: .75; }
-.eg.load .arrow { fill: var(--k); opacity: .75; }
+.state-group { fill: color-mix(in srgb, var(--state) 7%, transparent); stroke: var(--state); stroke-opacity: .5; stroke-width: 1; stroke-dasharray: 3 3; }
+.stream-tag rect { fill: var(--surface); stroke: var(--k); stroke-width: 1.2; }
+.stream-tag text { font: 600 10.5px var(--f-mono); fill: var(--k); }
+.stream-tag { animation: pop .25s ease-out; }
+.eg.load .edge { stroke: var(--k); stroke-width: 1.7; opacity: .8; }
+.eg.load .arrow { fill: var(--k); opacity: .8; }
+.eg .edge.seg { stroke: var(--k); opacity: .65; }
+.eg.emits .arrow { fill: var(--event); opacity: .65; }
+.eg .edge.ghost { stroke: none !important; }
 .log .by { display: inline-flex; align-items: center; gap: 4px; }
 .log .by svg { width: 12px; height: 12px; flex: none; }
 .empty { display: block; color: var(--muted); font: 13px var(--f-body); }
@@ -331,6 +338,17 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
   const kindOf = n => n.lane;
   // the state bar under a column: with several states, each bar spans the actions that load it
   const barAt = x => stateBars.find(b => x >= b.x0 && x <= b.x1) || stateBar;
+  // a state is drawn in every slice that declares it, so a node's bar is the one in its own slice
+  const barId = (state, slice) => `${state}@${slice}`;
+  const sliceOf = id => spec.slices?.find(s => s.id === id);
+  const barOf = n => {
+    const sl = sliceOf(n.slice);
+    if (!sl?.states?.length) return barAt(n.cx);
+    return nodes.get(barId(n.state || sl.states[0], sl.id));
+  };
+  // a load names a state; its line starts at that state's bar in the action's slice
+  const loadBar = (load, action) => nodes.get(barId(load.state, action.slice)) || nodes.get(load.state);
+  const stateLabel = id => stateNames.get(id) ?? nodes.get(id)?.label;
   const isBar = n => BARS.has(kindOf(n));
   const color = n => `var(${(KINDS[kindOf(n)] || KINDS.action).color})`;
   const svg = $("svg");
@@ -340,7 +358,7 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
     if (parent) parent.appendChild(x);
     return x;
   };
-  let nodes, edges, lanes, stateBar, stateBars = [], bands = [], gFx, stretch = 0, wide = false;
+  let nodes, edges, lanes, stateBar, stateBars = [], bands = [], gFx, stretch = 0, wide = false, stateNames = new Map(), barRows = 1;
   const byId = id => nodes.get(id) || bands.find(b => b.id === id);
   // the boundary a node sits in: actions and events in their state's box, reactions in their slice's box
   const bandOf = n => n && bands.find(b => b.members.has(n.id));
@@ -390,22 +408,64 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
   function drawMap() {
     svg.textContent = "";
     nodes = new Map(spec.nodes.map(n => [n.id, { ...n }]));
+    // a state is a group of actions and events: each state a slice declares becomes a bar over its own
+    // there; a state with none in the slice gets one column, and bars only stack where they'd overlap
+    stateNames = new Map(spec.nodes.filter(n => kindOf(n) === "state").map(n => [n.id, n.label]));
+    barRows = 1;
+    for (const sl of spec.slices || []) {
+      const own = spec.nodes.filter(n => n.slice === sl.id);
+      if (!own.length) continue;
+      const first = Math.min(...own.map(n => n.col));
+      const taken = [];
+      for (const state of sl.states || []) {
+        const members = own.filter(n => ["action", "event"].includes(n.lane) && (n.state || sl.states[0]) === state);
+        const cols = members.map(n => n.col);
+        const span = cols.length ? [Math.min(...cols), Math.max(...cols)] : [first, first];
+        let row = 0;
+        while ((taken[row] ||= []).some(([a, b]) => span[0] <= b && a <= span[1])) row++;
+        taken[row].push(span);
+        barRows = Math.max(barRows, row + 1);
+        const id = barId(state, sl.id);
+        nodes.set(id, { ...nodes.get(state), id, row, span, note: sl.notes?.[state] ?? "", grouped: cols.length > 0, hasActions: members.some(n => n.lane === "action") });
+      }
+    }
+    for (const sl of spec.slices || []) for (const state of sl.states || []) nodes.delete(state);
     const laneCount = {};
     for (const n of nodes.values()) if (n.col === undefined && !isBar(n)) n.col = (laneCount[n.lane] = (laneCount[n.lane] ?? -1) + 1);
     const cols = [...nodes.values()].filter(n => typeof n.col === "number").map(n => n.col);
     const minCol = Math.min(0, ...cols), maxCol = Math.max(...cols);
-    const X = c => LABEL_W + PAD + (c - minCol) * COL_W + COL_W / 2;
+    // a gutter wherever a slice, or a state inside one, ends, so their boxes can pad what they hold
+    const SLICE_GAP = 40, STATE_GAP = 20;
+    const groupAtCol = new Map([...nodes.values()].filter(n => n.slice && n.col !== undefined).map(n => [n.col, n]));
+    const shift = new Map();
+    // the first box stays clear of the lane labels
+    let shifted = groupAtCol.size ? 16 : 0, last;
+    for (const c of [...groupAtCol.keys()].sort((a, b) => a - b)) {
+      const n = groupAtCol.get(c);
+      if (last) shifted += n.slice !== last.slice ? SLICE_GAP : (n.state || "") !== (last.state || "") ? STATE_GAP : 0;
+      shift.set(c, shifted);
+      last = n;
+    }
+    const shiftAt = c => { let at = 0; for (const [k, v] of shift) if (k <= c) at = v; return at; };
+    const X = c => LABEL_W + PAD + (c - minCol) * COL_W + COL_W / 2 + shiftAt(c);
     const W = X(maxCol) + COL_W / 2 + PAD;
     edges = spec.edges.map((e, i) => ({ ...e, i, a: nodes.get(e.from), b: nodes.get(e.to) })).filter(e => e.a && e.b);
+    const barGap = 8, barStep = (NODE.state?.[1] || 0) + barGap;
     // one edge per loaded state: in its color when the action appends to that state's streams, muted when it only reads
     for (const n of nodes.values())
-      for (const state of new Set((n.loads || []).map(l => l.state)))
-        edges.push({ from: state, to: n.id, i: edges.length, a: nodes.get(state), b: n, load: true,
+      for (const state of new Set((n.loads || []).map(l => l.state))) {
+        const a = loadBar({ state }, n);
+        edges.push({ from: a.id, to: n.id, i: edges.length, a, b: n, load: true,
           read: !n.loads.some(l => l.state === state && l.events?.length) });
+      }
+    // bars stack in their lane: state bars by slice, projections by the row a spec gives them
+    const projRows = 1 + Math.max(0, ...[...nodes.values()].filter(n => n.lane === "projection").map(n => n.row ?? 0));
+    const rowsIn = id => (id === "state" ? barRows : id === "projection" ? projRows : 1);
+    const extraRows = l => rowsIn(l.id) - 1;
     const busRows = edges.filter(e => kindOf(e.a) === "reaction" && kindOf(e.b) === "action").length;
     const busSpace = busRows * 6 + 6;
     const present = spec.lanes.filter(l => [...nodes.values()].some(n => n.lane === l.id));
-    const H0 = TOP * 2 + present.reduce((s, l) => s + (l.height || BASE_H[l.id] || 90) + (l.id === "reaction" ? busSpace : 0), 0);
+    const H0 = TOP * 2 + present.reduce((s, l) => s + (l.height || BASE_H[l.id] || 90) + (l.id === "reaction" ? busSpace : 0) + extraRows(l) * barStep, 0);
     // never shrink the map below a readable scale: past that it scrolls sideways
     wide = W * minScale() > $("scroller").clientWidth;
     svg.style.width = wide ? `${Math.ceil(W * minScale())}px` : "";
@@ -413,7 +473,7 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
     lanes = [];
     let y = TOP;
     for (const l of present) {
-      const h = (l.height || BASE_H[l.id] || 90) * stretch + (l.id === "reaction" ? busSpace : 0);
+      const h = ((l.height || BASE_H[l.id] || 90) + extraRows(l) * barStep) * stretch + (l.id === "reaction" ? busSpace : 0);
       lanes.push({ ...l, y, h });
       y += h;
     }
@@ -424,7 +484,7 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
       const l = laneOf(n.lane);
       const [w, h] = NODE[kindOf(n)] || NODE.action;
       n.h = h;
-      n.cy = l.id === "reaction" ? l.y + Math.max(24 + h / 2, (l.h - busSpace) / 2 + 4) : l.y + l.h / 2;
+      n.cy = l.id === "reaction" ? l.y + Math.max(24 + h / 2, (l.h - busSpace) / 2 + 4) : l.y + l.h / 2 + (isBar(n) && n.row !== undefined ? (n.row - (rowsIn(l.id) - 1) / 2) * barStep : 0);
       if (isBar(n)) {
         const fed = kindOf(n) === "projection" ? edges.filter(e => e.b === n).map(e => e.a.col) : actionCols;
         const span = n.span || [Math.min(...fed), Math.max(...fed)];
@@ -447,7 +507,7 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
         if (!ms.length) continue;
         const cs = ms.map(n => n.col);
         bands.push({ id: "band:" + sl.id, kind: "slice", label: sl.label, k: "var(--ink)", ref: sl, members: new Set(ms.map(n => n.id)),
-          x0: X(Math.min(...cs)) - COL_W / 2 + 6, x1: X(Math.max(...cs)) + COL_W / 2 - 6, y0: la.y + 4, y1: foot });
+          x0: X(Math.min(...cs)) - COL_W / 2 - 14, x1: X(Math.max(...cs)) + COL_W / 2 + 14, y0: la.y + 4, y1: foot });
       }
     } else if (la && le) for (const s of stateBars) {
       const members = new Set([s.id, ...[...nodes.values()].filter(n => ["action", "event"].includes(kindOf(n)) && barAt(n.cx) === s).map(n => n.id)]);
@@ -459,7 +519,7 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
     function route(e, busIndex) {
       const { a, b } = e, ka = kindOf(a), kb = kindOf(b);
       // a load arrives beside the line the action's events leave on
-      if (e.load) { const mid = a.top - 14, x = b.cx + 18; return [[a.cx, a.top], [a.cx, mid], [x, mid], [x, b.bot]]; }
+      if (e.load) { const mid = laneOf("state").y + 6, x = b.cx + 18; return [[a.cx, a.top], [a.cx, mid], [x, mid], [x, b.bot]]; }
       if (kb === "projection") return [[a.cx, a.bot], [a.cx, b.top]];
       if (ka === "reaction" && kb === "action") {
         const pl = laneOf("reaction");
@@ -497,17 +557,34 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
       t.addEventListener("keydown", ev => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); ev.stopPropagation(); select(b); } });
     }
 
+    // a state and its events read as one group
+    for (const b of stateBars)
+      if (b.grouped) {
+        const top = b.hasActions ? la.y + 20 : b.top - 10;
+        el("rect", { x: b.x0 - 12, y: top, width: b.x1 - b.x0 + 24, height: le.y + le.h - 6 - top, rx: 9, class: "state-group" }, gBands);
+      }
+
     let bus = 0;
     for (const e of edges) {
       const pts = route(e, kindOf(e.a) === "reaction" && kindOf(e.b) === "action" ? bus++ : 0);
       const ba = bandOf(e.a), bb = bandOf(e.b);
       e.cross = !e.load && ba && bb && ba !== bb ? [ba, bb] : null;
-      const k = !e.load ? color(e.b) : e.read ? "var(--muted)" : color(e.a);
+      // blue is the action, orange the event; dotted reaches into another state
+      const k = !e.load ? color(e.b) : e.read ? "var(--muted)" : "var(--action)";
       const g = el("g", { class: "eg" + (e.cross ? " cross" : "") + (e.load ? " load" : ""), style: `--k:${k}` }, gEdges);
       e.g = g;
-      e.path = el("path", { d: rounded(pts), class: "edge" + (kindOf(e.b) === "projection" || e.dashed || e.load ? " dash" : "") }, g);
+      const emitting = kindOf(e.a) === "action" && kindOf(e.b) === "event" ? barOf(e.a) : null;
+      e.path = el("path", { d: rounded(pts), class: "edge" + (kindOf(e.b) === "projection" || e.dashed || e.load ? " dash" : "") + (emitting ? " ghost" : "") }, g);
+      if (emitting) {
+        // the action down to its state, then the state out to the event; dotted when another state owns it
+        g.classList.add("emits");
+        const foreign = (e.a.loads || []).some(l => l.events?.includes(e.b.id));
+        el("path", { d: rounded([pts[0], [pts[0][0], emitting.cy]]), class: "edge seg", style: "--k:var(--action)" }, g);
+        el("path", { d: rounded([[pts[0][0], emitting.cy], ...pts.slice(1)]), class: "edge seg" + (foreign ? " dash" : ""), style: "--k:var(--event)" }, g);
+      }
       if (kindOf(e.b) !== "projection") {
-        const [p, q] = [pts[pts.length - 2], pts[pts.length - 1]];
+        // a load's arrow points at the state it loads; its token still brings the state back
+        const [p, q] = e.load ? [pts[1], pts[0]] : [pts[pts.length - 2], pts[pts.length - 1]];
         const ang = Math.atan2(q[1] - p[1], q[0] - p[0]);
         const s = 6, tip = q;
         const p1 = [tip[0] - s * Math.cos(ang - 0.45), tip[1] - s * Math.sin(ang - 0.45)];
@@ -515,13 +592,6 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
         el("path", { d: `M${tip} L${p1} L${p2} Z`, class: "arrow" }, g);
       } else {
         e.tick = el("circle", { cx: e.a.cx, cy: e.b.top, r: 3.2, class: "tick", style: `--k:${color(e.b)}` }, gEdges);
-      }
-      if (e.timer) {
-        const [tx, ty] = [pts[0][0], (pts[0][1] + pts[1][1]) / 2];
-        const tg = el("g", { class: "timer", style: `--k:${color(e.b)}` }, g);
-        el("circle", { cx: tx, cy: ty, r: 6.5, class: "face" }, tg);
-        el("line", { x1: tx, y1: ty, x2: tx, y2: ty - 3.8 }, tg);
-        el("line", { x1: tx, y1: ty, x2: tx + 2.8, y2: ty }, tg);
       }
     }
 
@@ -563,12 +633,20 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
       }
       // ▲ the action's preconditions, with their count
       const pre = checksOf(n).length;
-      if (n.badge || pre) {
+      // the reaction is what waits, so its clock sits on its corner, clear of the lines
+      const timed = edges.some(e => e.timer && e.b === n);
+      if (timed) {
+        const tg = el("g", { class: "timer", style: `--k:${color(n)}` }, g);
+        el("circle", { cx: n.right, cy: n.top, r: 7.5, class: "face" }, tg);
+        el("line", { x1: n.right, y1: n.top, x2: n.right, y2: n.top - 4.5 }, tg);
+        el("line", { x1: n.right, y1: n.top, x2: n.right + 3.2, y2: n.top }, tg);
+      }
+      if ((n.badge && !timed) || pre) {
         const b = el("text", { x: n.right - 8, y: n.top + 12, "text-anchor": "end", class: "badge" }, g);
         const part = (text, cls) => { const t = el("tspan", cls ? { class: cls } : {}, b); t.textContent = text; };
-        if (n.badge) part(n.badge + (pre ? " " : ""));
+        if (n.badge && !timed) part(n.badge + (pre ? " " : ""));
         if (pre) part(`▲ ${pre}`, "pre");
-        if (pre) el("title", {}, b).textContent = "Checked by the state before the handler runs:\n" +
+        if (pre) el("title", {}, b).textContent = "Checked by the action before the handler runs:\n" +
           checksOf(n).map(r => `▲ ${r.t}`).join("\n");
       }
     }
@@ -588,17 +666,17 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
     .map(([k, v]) => `<div><i style="background:var(${v.color})"></i>${v.name}</div>`).join("") +
     `<div>${svgIcon("person")}Person</div><div>${svgIcon("automation")}Automation</div>` +
     `<div><span class="mono pre">▲</span>Precondition (a rule the action needs to run)</div><div><span class="mono">⏱</span>Timer (deferred)</div>` +
-    (edges.some(e => e.load) ? `<div><span class="mono" style="color:var(--state)">┄</span>Load: a state the action's decision needs</div>` : "") +
+    (edges.some(e => e.load) ? `<div><span class="mono" style="color:var(--action)">┄</span>Load: another state the action's decision needs</div><div><span class="mono" style="color:var(--event)">┄</span>An event that belongs to another state</div>` : "") +
     (bands.some(b => b.kind === "state") ? `<div><i class="bx" style="--k:var(--state)"></i>State boundary</div>` : "") +
     (bands.some(b => b.kind === "slice") ? `<div><i class="bx" style="--k:var(--ink)"></i>Slice boundary</div>` : "");
   $("read").innerHTML = `
     <p>Time runs left to right. An <b style="color:var(--actor)">actor</b>, a person or an automation, invokes an <b style="color:var(--action)">action</b>.</p>
-    <p>The <b style="color:var(--state)">state</b> loads from the stream, checks the action's <b class="pre">▲ preconditions</b> one by one, in the order the action declares them. It either refuses the action at the first rule that fails or commits <b style="color:var(--event)">events</b>. Events patch the state, and <b style="color:var(--projection)">projections</b> fold them into read models such as tables and caches.</p>
+    <p>The <b style="color:var(--state)">state</b> loads from the stream into the action, which checks its <b class="pre">▲ preconditions</b> one by one, in the order it declares them. The first rule that fails refuses the action, and so does a state its events would break. Otherwise it commits <b style="color:var(--event)">events</b>, which patch the state, and <b style="color:var(--projection)">projections</b> fold them into read models such as tables and caches.</p>
     <p><b style="color:var(--reaction)">Reactions</b> pick events up after the commit and act as automations: they invoke new actions or call the <b style="color:var(--external)">outside world</b>. A clock marks a reaction that waits for a timestamp.</p>
     ${bands.length ? `<p>Dashed boxes are the boundaries the builders declare. ${bands[0].kind === "slice"
-      ? "A <b>slice</b> box holds the actions and events of the partial states the slice declares, and the reactions it declares. Partial states of the same name still merge into one state bar."
+      ? "A <b>slice</b> box holds the states it declares and the reactions it declares. Each state is a group of its actions and events. A state a few slices declare is drawn in each, and is still one state."
       : `A <b style="color:var(--state)">state</b> box holds the actions and events of one state, with partial states of the same name merged into it.`} The boxes on the current step light up, and a token rings where it crosses from one box into another.</p>` : ""}
-    ${edges.some(e => e.load) ? `<p>A dashed <b style="color:var(--state)">load</b> line brings another state to the action, for its rules. An action appends to its own stream and to each load that lists events, in <b>one commit</b>: every stream is checked at the version it was loaded at, and all events land or none do. A load that lists no events (muted) is a read: outside the commit, and not checked.</p>` : ""}
+    ${edges.some(e => e.load) ? `<p>A dotted <b style="color:var(--action)">blue</b> line is a load: another state the action needs for its rules. A dotted <b style="color:var(--event)">orange</b> line is an event that belongs to another state. An action appends to its own stream and to each load that lists events, in <b>one commit</b>: every stream is checked at the version it was loaded at, and all events land or none do. A load that lists no events (muted) is a read: outside the commit, and not checked.</p>` : ""}
     <p>Select a box for its contract and source. Keys: space plays or pauses, arrows step.</p>
     <p>Coming from event storming? Actions are its commands, reactions its policies, and projections build its read models.</p>`;
 
@@ -659,7 +737,7 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
       ${n.file ? `<div class="file">${esc(n.file)}${n.line ? ":" + n.line : ""}</div>` : ""}
       ${n.note ? `<p class="rel">${esc(n.note)}</p>` : ""}
       ${n.description ? `<p>${esc(n.description)}</p>` : ""}
-      ${n.loads?.length ? `<p class="rel">Loads</p><ul>${n.loads.map(l => `<li>${esc(l.name || nodes.get(l.state).label)}: ${l.events?.length ? `appends ${esc(l.events.map(id => nodes.get(id).label).join(", "))}, in the action's one commit` : "read, not checked at commit"}</li>`).join("")}</ul>` : ""}
+      ${n.loads?.length ? `<p class="rel">Loads</p><ul>${n.loads.map(l => `<li>${esc(l.name || stateLabel(l.state))}: ${l.events?.length ? `appends ${esc(l.events.map(id => nodes.get(id).label).join(", "))}, in the action's one commit` : "read, not checked at commit"}</li>`).join("")}</ul>` : ""}
       ${checksOf(n).length ? `<p class="rel"><span class="pre">▲</span> Preconditions</p><ul>${checksOf(n).map(r => `<li>${esc(r.t)}</li>`).join("")}</ul>` : ""}
       ${schemaOf(n)}
       ${ins.length ? `<p class="rel">From: ${ins.map(e => link(e.a)).join(", ")}</p>` : ""}
@@ -739,13 +817,13 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
   // the state a stream belongs to: the bar over the first event the scenario writes to it
   function stateOfStream(sc, stream) {
     if (sc.initials?.[stream]?.state) return sc.initials[stream].state;
-    for (const x of sc.steps) for (const { stream: s, load } of loadsAt(x)) if (s === stream) return nodes.get(load.state).label;
+    for (const x of sc.steps) for (const { stream: s, load } of loadsAt(x)) if (s === stream) return stateLabel(load.state);
     const st = sc.steps.find(x => !x.at && !x.reject && (x.stream || sc.stream || "stream") === stream && nodes.get(x.to) && kindOf(nodes.get(x.to)) === "event");
-    if (st) return barAt(nodes.get(st.to).cx)?.label;
+    if (st) return barOf(nodes.get(st.to))?.label;
     // a stream no event reaches: the bar over the action that works on it
     const tried = sc.steps.find(x => x.stream === stream);
     const action = tried && [tried.to, tried.from, tried.at].map(id => nodes.get(id)).find(n => n && kindOf(n) === "action");
-    return action ? barAt(action.cx)?.label : undefined;
+    return action ? barOf(action)?.label : undefined;
   }
   // a stream's version as a person reads it
   const vLabel = v => v === undefined || v < 0 ? "new" : `v${v}`;
@@ -870,7 +948,7 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
     ol.parentElement.scrollTop = ol.parentElement.scrollHeight;
     // the state the scenario's own stream belongs to: the bar over its first action
     const first = sc.steps.map(x => nodes.get(x.from)).find(n => n && kindOf(n) === "action");
-    const own = first ? barAt(first.cx) : stateBar;
+    const own = first ? barOf(first) : stateBar;
     const dl = (obj, chg) => `<dl class="state">${Object.keys(obj).map(key => { const c = fresh && chg.includes(key) ? ' class="chg"' : ""; return `<dt${c}>${esc(key)}</dt><dd${c}>${esc(fmt(obj[key]))}</dd>`; }).join("")}</dl>`;
     const ownStream = sc.stream || "stream", streams = streamsOf(sc), at = streamsAt(sc, k);
     // every stream the scenario involves shows from the start, one format for all: its state, name and version
@@ -963,14 +1041,14 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
     const sc = scenarios[cur];
     for (let i = 0; i < k; i++) {
       const st = sc.steps[i];
-      for (const { load } of loadsAt(st)) findEdge(load.state, st.at || st.to).g.classList.add("trail");
+      for (const { load } of loadsAt(st)) { const n = nodes.get(st.at || st.to); findEdge(loadBar(load, n).id, n.id).g.classList.add("trail"); }
       if (st.at) { nodes.get(st.at).g.classList.add("on"); continue; }
       findEdge(st.from, st.to)?.g.classList.add("trail");
       nodes.get(st.from).g.classList.add("on");
       if (st.reject || st.blocked || st.conflict) continue;
       nodes.get(st.to).g.classList.add("on");
       if (kindOf(nodes.get(st.to)) === "event") {
-        barAt(nodes.get(st.to).cx)?.g.classList.add("on");
+        barOf(nodes.get(st.to))?.g.classList.add("on");
         edges.filter(x => x.a.id === st.to && kindOf(x.b) === "projection").forEach(x => x.g.classList.add("trail"));
       }
     }
@@ -985,11 +1063,12 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
 
   const sleep = ms => new Promise(r => setTimeout(r, ms));
   const wait = (ms, token) => sleep(ms / speed).then(() => token === run);
-  function travel(e, token, f0 = 0, f1 = 1) {
+  // `carry` is told where the token is, for what travels with it; a slower pace keeps that readable
+  function travel(e, token, f0 = 0, f1 = 1, carry) {
     return new Promise(res => {
       const len = e.path.getTotalLength();
       const dist = Math.abs(f1 - f0) * len;
-      const dur = reduce ? 0 : Math.max(320, dist / 0.42) / speed;
+      const dur = reduce ? 0 : Math.max(carry ? 1000 : 320, dist / 0.42) / speed;
       const halo = el("circle", { r: 11, class: "token-halo", style: `--k:${color(e.b)}` }, gFx);
       const dot = el("circle", { r: 5.5, class: "token", style: `--k:${color(e.b)}` }, gFx);
       const t0 = performance.now();
@@ -1000,16 +1079,11 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
         const p = e.path.getPointAtLength(len * (f0 + (f1 - f0) * ease));
         dot.setAttribute("cx", p.x); dot.setAttribute("cy", p.y);
         halo.setAttribute("cx", p.x); halo.setAttribute("cy", p.y);
+        carry?.(p);
         if (t < 1) requestAnimationFrame(frame); else { halo.remove(); dot.remove(); res(true); }
       };
       requestAnimationFrame(frame);
     });
-  }
-  function fractionAtY(e, y) {
-    const len = e.path.getTotalLength();
-    let lo = 0, hi = 1;
-    for (let i = 0; i < 24; i++) { const m = (lo + hi) / 2; if (e.path.getPointAtLength(len * m).y < y) lo = m; else hi = m; }
-    return lo;
   }
   function ping(n) { n.g.classList.remove("ping"); void n.g.getBBox(); n.g.classList.add("ping"); n.g.classList.add("on"); }
   function verdict(x, y, text, k) {
@@ -1017,6 +1091,25 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
     el("rect", { x: x + 12, y: y - 11, width: text.length * 6.8 + 14, height: 22, rx: 11 }, g);
     const t = el("text", { x: x + 19, y: y + 4 }, g); t.textContent = text;
     return g;
+  }
+  // names the stream a state or an event is working on, for as long as the step lasts
+  function streamTag(x, y, text, k = "var(--state)") {
+    const g = el("g", { class: "stream-tag", style: `--k:${k}` }, gFx);
+    const r = el("rect", { y: y - 9, height: 18, rx: 9 }, g);
+    const t = el("text", { x, y: y + 3.5, "text-anchor": "middle" }, g);
+    const set = (v, c) => {
+      const w = v.length * 6.5 + 14;
+      r.setAttribute("x", x - w / 2); r.setAttribute("width", w);
+      t.textContent = v;
+      if (c) g.style.setProperty("--k", c);
+    };
+    set(text);
+    return {
+      set, remove: () => g.remove(),
+      // rides just above (px, py), clear of the token, until it settles at its own place
+      move: (px, py) => { g.style.animation = "none"; g.style.transform = `translate(${px - x}px,${py - y - 17}px)`; },
+      settle: () => { g.style.transition = "transform .25s ease-out"; g.style.transform = ""; },
+    };
   }
   // a bracket under the events one commit wrote, so the transaction reads as one unit
   function commitBrace(targets, streams) {
@@ -1031,13 +1124,12 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
     const t = el("text", { x: cx, y: y + 16.5, "text-anchor": "middle" }, g); t.textContent = label;
     return g;
   }
-  // an action's preconditions in the order the state runs them
+  // an action's preconditions in the order it declares them
   function checksOf(n) {
     return (n.preconditions || []).map(t => ({ t, k: "pre" }));
   }
-  // the action's checks, listed in the order the state runs them: each row gets a ✓ as it passes,
-  // and a refusal stops on the failing row with ✕. A reason that is not a precondition comes from
-  // .emit(), which runs after every precondition passed, so it is the last row.
+  // a list of checks, in order: each row gets a ✓ as it passes, and a refusal stops on the failing
+  // row with ✕. A reason that is not one of the rows comes after them all, so it is the last row.
   async function checklist(x, y, rules, reject, token) {
     const rows = reject && !rules.some(r => r.t === reject) ? [...rules, { t: reject, k: "emit" }] : rules;
     const fail = reject ? rows.findIndex(r => r.t === reject) : -1;
@@ -1063,29 +1155,34 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
     g.remove();
     return ok;
   }
-  // the action's loads arrive together along their dashed lines, then a card lists every stream it
-  // holds for this decision: its own first, each with the version it came back at
+  // the action's loads arrive together along their dashed lines, and name their streams on the action
   async function showLoads(sc, st, n, k, token) {
     const loads = loadsAt(st), ver = replay(k).ver, own = st.stream || sc.stream;
-    const lines = [...new Set(loads.map(x => findEdge(x.load.state, n.id)))];
-    for (const e of lines) e.g.classList.add("live");
-    const done = await Promise.all(lines.map(e => travel(e, token)));
+    // the name of each stream travels up its path with the token, and settles above the action
+    const place = i => n.top - 12 - i * 21;
+    const tagOf = (text, i) => streamTag(n.cx, place(i), text);
+    const bar = barOf(n);
+    const rise = el("path", { d: `M${n.cx},${bar.top} L${n.cx},${n.bot}`, fill: "none" }, gFx);
+    const tags = [tagOf(`${own} · ${vLabel(ver[own])}`, 0)];
+    const paths = new Map([[{ path: rise, b: n }, [tags[0]]]]);
+    for (const { stream, load } of loads) {
+      const e = findEdge(loadBar(load, n).id, n.id);
+      const tag = tagOf(`${stream} · ${vLabel(ver[stream])}${load.events?.length ? "" : " · read"}`, tags.length);
+      tags.push(tag);
+      const key = [...paths.keys()].find(k => k === e) || e;
+      paths.set(key, [...(paths.get(key) || []), tag]);
+      e.g.classList.add("live");
+    }
+    const lines = [...paths.keys()].filter(e => e.g);
+    const go = (e, on) => travel(e, token, 0, 1, p => on.forEach((t, i) => t.move(p.x, p.y - i * 21)));
+    for (const [e, on] of paths) { const p = e.path.getPointAtLength(0); on.forEach((t, i) => t.move(p.x, p.y - i * 21)); }
+    const done = await Promise.all([...paths].map(([e, on]) => go(e, on)));
+    rise.remove();
     if (done.some(d => !d)) return false;
+    tags.forEach(t => t.settle());
     for (const e of lines) { e.g.classList.remove("live"); e.g.classList.add("trail"); ping(e.a); }
-    ping(barAt(n.cx));
-    const rows = [{ t: `${own} · ${vLabel(ver[own])}`, k: "own" }, ...loads.map(({ stream, load }) => load.events?.length
-      ? { t: `${stream} · ${vLabel(ver[stream])} · may append ${load.events.map(id => nodes.get(id).label).join(", ")}`, k: "ver" }
-      : { t: `${stream} · ${vLabel(ver[stream])} · read only`, k: "skip" })];
-    const RH = 22, w = Math.max(...rows.map(r => r.t.length)) * 7.5 + 40, h = rows.length * RH + 10;
-    const left = n.right + 14 + w > svg.viewBox.baseVal.width ? n.left - 14 - w : n.right + 14;
-    const g = el("g", { class: "checks" }, gFx);
-    el("rect", { x: left, y: n.cy - h / 2, width: w, height: h, rx: 9, class: "card" }, g);
-    rows.forEach((r, i) => {
-      const t = el("text", { x: left + 11, y: n.cy - h / 2 + 5 + RH * i + 15 }, g);
-      el("tspan", { class: r.k }, t).textContent = (r.k === "skip" ? "– " : "⊙ ");
-      el("tspan", { class: r.k === "skip" ? "skip" : "" }, t).textContent = r.t;
-    });
-    return g;
+    ping(bar);
+    return { remove: () => tags.forEach(t => t.remove()) };
   }
   function timer(n) {
     const g = el("g", { class: "timer", style: `--k:var(--reaction)` }, gFx);
@@ -1111,7 +1208,7 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
       if (st.wait) { const t = timer(n); const ok = await wait(1500, token); t.remove(); if (!ok) return false; }
       ping(n);
       const v = st.noop ? verdict(n.right - 10, n.top - 14, "no-op", "var(--muted)") : null;
-      const card = st.loads ? await showLoads(sc, st, n, step, token) : null;
+      const card = kindOf(n) === "action" && barOf(n) ? await showLoads(sc, st, n, step, token) : null;
       if (card === false) return false;
       step++;
       const ok = await wait(readTime(st), token);
@@ -1123,63 +1220,72 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
     e.g.classList.add("live");
     from.g.classList.add("on");
 
-    const bar = barAt(from.cx);
+    const bar = barOf(from);
+    let carried = null;
     const [g0, g1] = groupAt(sc, step);
     if ((g1 - g0 > 1 || st.commit !== undefined) && kindOf(from) === "action" && bar) {
       // one transaction: the checks run once, then every event of the commit lands together
       const group = sc.steps.slice(g0, g1).map(x => ({ st: x, e: findEdge(x.from, x.to), to: nodes.get(x.to) }));
-      const f = fractionAtY(e, bar.cy);
-      if (!(await travel(e, token, 0, f))) return false;
-      ping(bar);
       const rules = checksOf(from);
-      if (rules.length) { if (!(await checklist(from.cx, bar.cy, rules, undefined, token))) return false; }
-      else { const v = verdict(from.cx, bar.cy, "✓", "var(--good)"); const ok = await wait(650, token); v.remove(); if (!ok) return false; }
+      if (rules.length && !(await checklist(from.right, from.cy, rules, undefined, token))) return false;
       // the boundary first: inside it, every stream's version is checked before anything lands
       const brace = commitBrace(group.map(x => x.to), new Set(group.map(x => x.st.stream || sc.stream)).size);
       const guards = guardsAt(sc, g0, g1);
-      if (!(await checklist(from.cx, bar.cy, guards.rows, guards.fail, token))) return false;
+      if (!(await checklist(from.right, from.cy, guards.rows, guards.fail, token))) return false;
       if (st.conflict) {
         brace.classList.add("lost");
         brace.querySelector("text").textContent = "nothing written";
+        const moved = group.filter(x => (x.st.stream || sc.stream) === st.conflict).map(x => streamTag(x.to.cx, x.to.top - 12, `${st.conflict} moved`, "var(--bad)"));
         from.g.classList.add("bad");
         e.g.classList.remove("live");
         step = g1;
         renderPanels(step, true);
         const ok = await wait(readTime(st) + 600, token);
-        brace.remove();
+        brace.remove(); moved.forEach(t => t.remove());
         return ok;
       }
+      // each event carries its stream down through the state, at the version it lands at
+      ping(bar);
+      const landed = { ...replay(g0).ver };
+      const eventTags = group.map(x => {
+        const stream = x.st.stream || sc.stream;
+        landed[stream] = (landed[stream] ?? -1) + 1;
+        return { x, tag: streamTag(x.to.cx, x.to.top - 12, `${stream} · v${landed[stream]}`) };
+      });
       for (const x of group) x.e.g.classList.add("live");
-      const done = await Promise.all(group.map(x => travel(x.e, token, fractionAtY(x.e, bar.cy), 1)));
+      const done = await Promise.all(eventTags.map(({ x, tag }, i) => {
+        const p = x.e.path.getPointAtLength(0);
+        tag.move(p.x, p.y - i * 21);
+        return travel(x.e, token, 0, 1, q => tag.move(q.x, q.y - i * 21));
+      }));
       if (done.some(d => !d)) return false;
-      for (const x of group) { x.e.g.classList.remove("live"); x.e.g.classList.add("trail"); ping(x.to); barAt(x.to.cx)?.g.classList.add("on"); }
+      eventTags.forEach(t => t.tag.settle());
+      for (const x of group) { x.e.g.classList.remove("live"); x.e.g.classList.add("trail"); ping(x.to); barOf(x.to)?.g.classList.add("on"); }
       step = g1;
       renderPanels(step, true);
       const ok = await wait(readTime(st) + 600, token);
-      brace.remove();
+      brace.remove(); eventTags.forEach(t => t.tag.remove());
       return ok;
     }
     if (kindOf(from) === "action" && kindOf(to) === "event" && bar) {
-      // the action passes through the state: its checks pass one by one, or one refuses
-      const f = fractionAtY(e, bar.cy);
-      if (!(await travel(e, token, 0, f))) return false;
-      ping(bar);
+      // the action checks its preconditions one by one, and any refusal, whichever rule or schema it
+      // came from, stops it here; otherwise its event folds through the state and lands
       const rules = checksOf(from);
-      if (rules.length || st.reject) {
-        if (!(await checklist(from.cx, bar.cy, rules, st.reject, token))) return false;
-      } else {
-        const v = verdict(from.cx, bar.cy, "✓", "var(--good)");
-        const ok = await wait(650, token);
-        v.remove();
-        if (!ok) return false;
-      }
+      if ((rules.length || st.reject) && !(await checklist(from.right, from.cy, rules, st.reject, token))) return false;
       if (st.reject) {
         from.g.classList.add("bad");
         e.g.classList.remove("live"); e.g.classList.add("trail");
         step++; renderPanels(step, true);
         return wait(readTime(st), token);
       }
-      if (!(await travel(e, token, f, 1))) return false;
+      ping(bar);
+      // the event carries its stream down through the state, at the version it lands at
+      const stream = st.stream || sc.stream;
+      carried = streamTag(to.cx, to.top - 12, `${stream} · v${(replay(step).ver[stream] ?? -1) + 1}`);
+      const p = e.path.getPointAtLength(0);
+      carried.move(p.x, p.y);
+      if (!(await travel(e, token, 0, 1, q => carried.move(q.x, q.y)))) return false;
+      carried.settle();
     } else if (st.retries || st.blocked) {
       // an outbound call that fails, backs off and retries; blocked when it runs out
       const n = st.retries || 0, labels = st.backoff || [];
@@ -1218,19 +1324,19 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
 
     e.g.classList.remove("live"); e.g.classList.add("trail");
     ping(to);
-    const card = st.loads ? await showLoads(sc, st, to, step, token) : null;
+    const card = kindOf(to) === "action" && barOf(to) ? await showLoads(sc, st, to, step, token) : null;
     if (card === false) return false;
     step++;
     if (kindOf(to) === "event") {
       renderPanels(step, true);
-      barAt(to.cx)?.g.classList.add("on");
+      barOf(to)?.g.classList.add("on");
       for (const x of edges.filter(x => x.a === to && kindOf(x.b) === "projection")) {
         x.g.classList.add("live");
         travel(x, token).then(() => { x.g.classList.remove("live"); x.g.classList.add("trail"); x.tick.classList.remove("on"); void x.tick.getBBox(); x.tick.classList.add("on"); });
       }
     }
     const ok = await wait(readTime(st), token);
-    card?.remove();
+    card?.remove(); carried?.remove();
     return ok;
   }
   // resolves true when the scenario plays to the end

@@ -5,7 +5,7 @@ import {
   InvoiceCounter,
   Seats,
   SessionTimers,
-  StudentLoad,
+  Student,
 } from "./count-limits.js";
 import { Cart } from "./reads.js";
 import { Account, Copy, Member, Return, Transfer } from "./several-streams.js";
@@ -40,7 +40,7 @@ export const rules = act()
   .withState(Review)
   .withState(Reviewer)
   .withState(Seats)
-  .withState(StudentLoad)
+  .withState(Student)
   .withState(Enrollment)
   .withSlice(SessionTimers)
   .withState(InvoiceCounter)
