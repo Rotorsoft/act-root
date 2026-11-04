@@ -44,7 +44,7 @@ const traced = <P>(rule: Precondition<Board, P>): Precondition<Board, P> => ({
   description: rule.description,
   holds: (p, s, a) => {
     seen.push(rule.description);
-    return rule.holds(p, s, a);
+    return rule.holds(p, s, a, {});
   },
 });
 

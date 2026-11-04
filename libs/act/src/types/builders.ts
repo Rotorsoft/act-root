@@ -395,11 +395,21 @@ type ActionEmit<
   TSnap extends boolean,
   TKey extends string,
   TNewActions extends Schema,
+  TLoaded extends Schemas = {},
+  TRouted extends Schemas = {},
 > = {
-  /** Custom handler — receives `(action, snapshot)` and returns one
-   *  or more `[EventName, data]` tuples (or `undefined`). */
+  /** Custom handler — receives `(action, snapshot, target, loaded)` and
+   *  returns one or more `[EventName, data]` tuples (or `undefined`): the
+   *  state's own events, and the events listed on its loads. */
   (
-    handler: ActionHandler<TState, TEvents, { [P in TKey]: TNewActions }, TKey>
+    handler: ActionHandler<
+      TState,
+      TEvents,
+      { [P in TKey]: TNewActions },
+      TKey,
+      TLoaded,
+      TRouted
+    >
   ): ActionBuilder<
     TState,
     TEvents,
@@ -421,7 +431,16 @@ type ActionEmit<
 };
 
 /**
- * What follows `.on(...)`: the preconditions, then the
+ * What `.loads(...)` returns when its load name is already taken by an
+ * earlier load of the action: no further step, so the chain fails to
+ * compile. Name the loads (the fourth argument) to load a state twice.
+ */
+type DuplicateLoad<TAs extends string> = {
+  readonly error: `the action already loads "${TAs}"; name each load of the same state`;
+};
+
+/**
+ * What follows `.on(...)`: the loads, the preconditions, then the
  * `.emit(...)` that finishes the action.
  */
 type ActionRules<
@@ -432,14 +451,66 @@ type ActionRules<
   TSnap extends boolean,
   TKey extends string,
   TNewActions extends Schema,
+  TLoaded extends Schemas = {},
+  TRouted extends Schemas = {},
 > = {
   /**
+   * Loads another state the decision needs, exactly as `app.load` would,
+   * and lists the events of that state the action may emit to its stream.
+   * It can repeat, once per stream.
+   *
+   * The preconditions and `.emit` get every loaded state in a fourth
+   * argument, `loaded`, keyed by the state's name or by the load's `name`.
+   * An event listed on a load goes to that load's stream, and the action
+   * commits to every stream it emits to in one atomic step, each guarded
+   * by the version it had when loaded. A load without events is a read:
+   * its stream isn't written, and it isn't guarded.
+   *
+   * @param state - The state to load; it must be registered in the same Act.
+   * @param target - The stream to load, from the payload and the action's state.
+   * @param events - The loaded state's events the action may emit to that stream.
+   * @param name - The key of this load in `loaded`; needed to load one state twice.
+   *
+   * @example
+   * ```typescript
+   * .on({ Enroll })
+   * .loads(Seats, (data) => `course-${data.course}`, ["SeatTaken"])
+   * .requires([{ description: "a free seat", holds: (_, __, ___, { Seats }) => Seats.taken < Seats.capacity }])
+   * .emit((data) => [["Enrolled", data], ["SeatTaken", { student: data.student }]])
+   * ```
+   */
+  loads: <
+    TLState extends Schema,
+    TLEvents extends Schemas,
+    TLName extends string,
+    const TList extends Exclude<keyof TLEvents & string, keyof TRouted> = never,
+    const TAs extends string = TLName,
+  >(
+    state: State<TLState, TLEvents, any, TLName>,
+    target: (payload: Readonly<TNewActions>, state: Readonly<TState>) => string,
+    events?: readonly TList[],
+    name?: TAs
+  ) => TAs extends keyof TLoaded
+    ? DuplicateLoad<TAs>
+    : ActionRules<
+        TState,
+        TEvents,
+        TActions,
+        TName,
+        TSnap,
+        TKey,
+        TNewActions,
+        TLoaded & { [P in TAs]: TLState },
+        TRouted & { [E in TList]: TLEvents[E] }
+      >;
+  /**
    * Adds named preconditions the action requires: what the state, the
-   * actor and the payload must meet for the action to run now.
+   * actor, the payload and the loaded states must meet for the action to
+   * run now.
    *
    * They're checked in declaration order, before the handler runs. Each
-   * pairs a `description` with a `holds(payload, state, actor?)` predicate;
-   * the first that returns `false` refuses the action with
+   * pairs a `description` with a `holds(payload, state, actor, loaded)`
+   * predicate; the first that returns `false` refuses the action with
    * `PreconditionError` carrying its description. A rule that ignores the
    * payload (typed `Precondition<S, unknown>`) fits every action, so
    * declare it once and reuse it.
@@ -455,7 +526,7 @@ type ActionRules<
    * ])
    * ```
    */
-  requires: (rules: Precondition<TState, TNewActions>[]) => {
+  requires: (rules: Precondition<TState, TNewActions, Actor, TLoaded>[]) => {
     /**
      * Defines the action handler that emits events, as `.emit()` after
      * `.on()` does: a handler returning the events to emit (none is fine),
@@ -468,16 +539,18 @@ type ActionRules<
       TName,
       TSnap,
       TKey,
-      TNewActions
+      TNewActions,
+      TLoaded,
+      TRouted
     >;
   };
   /**
    * Defines the action handler that emits events.
    *
-   * The handler receives the action payload and current state snapshot,
-   * and returns the events to emit, or nothing (`undefined` or `[]`) to
-   * commit nothing. Events are applied to state via the patch handlers
-   * defined earlier.
+   * The handler receives the action payload, the current state snapshot,
+   * the target and the loaded states, and returns the events to emit, or
+   * nothing (`undefined` or `[]`) to commit nothing. Events are applied to
+   * state via the patch handlers defined earlier.
    *
    * Pass a string event name for passthrough: the action payload becomes
    * the event data directly.
@@ -493,7 +566,17 @@ type ActionRules<
    * })
    * ```
    */
-  emit: ActionEmit<TState, TEvents, TActions, TName, TSnap, TKey, TNewActions>;
+  emit: ActionEmit<
+    TState,
+    TEvents,
+    TActions,
+    TName,
+    TSnap,
+    TKey,
+    TNewActions,
+    TLoaded,
+    TRouted
+  >;
 };
 
 /**

@@ -25,6 +25,7 @@ import type {
   Actor,
   BatchHandler,
   LaneConfig,
+  Load,
   Registry,
   Schema,
   SchemaRegister,
@@ -377,6 +378,24 @@ export function act<
           for (const [name, gate] of built.handler_readers) _hr.set(name, gate);
           finalize_deprecations();
           if (built.advisory) log().warn(built.advisory);
+
+          // A load reads and writes through this Act's store, so it must name
+          // a registered state; it resolves to the merged one, partials and all.
+          for (const state of states.values()) {
+            if (!state.loads) continue;
+            const resolved: Record<string, Load[]> = {};
+            for (const [action, loads] of Object.entries(state.loads)) {
+              resolved[action] = (loads as Load[]).map((l) => {
+                const registered = states.get(l.state.name);
+                if (!registered)
+                  throw new Error(
+                    `Action "${action}" loads "${l.state.name}", which is not registered — add it via withState/withSlice before build()`
+                  );
+                return { ...l, state: registered };
+              });
+            }
+            state.loads = resolved;
+          }
 
           for (const state of states.values()) {
             if (state.disclose) _dp.set(state.name, state.disclose);
