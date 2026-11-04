@@ -873,21 +873,14 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
     const own = first ? barAt(first.cx) : stateBar;
     const dl = (obj, chg) => `<dl class="state">${Object.keys(obj).map(key => { const c = fresh && chg.includes(key) ? ' class="chg"' : ""; return `<dt${c}>${esc(key)}</dt><dd${c}>${esc(fmt(obj[key]))}</dd>`; }).join("")}</dl>`;
     const ownStream = sc.stream || "stream", streams = streamsOf(sc), at = streamsAt(sc, k);
-    if (streams.length === 1) {
-      $("state-h").textContent = `${own ? own.label : ""} state`;
-      $("state-meta").textContent = `${sc.stream || ""}${r.version !== undefined ? " · v" + r.version : ""}`;
-      $("state").innerHTML = Object.keys(r.state).length ? dl(r.state, r.changed)
-        : `<span class="empty">Empty until the first event. Every committed event patches it, and the next action is checked against it.</span>`;
-    } else {
-      // a decision that spans streams shows them all from the start, each with its own state and version
-      $("state-h").textContent = "State";
-      $("state-meta").textContent = `${streams.length} streams`;
-      $("state").innerHTML = streams.map(stream => {
-        const isOwn = stream === ownStream, obj = isOwn ? r.state : r.others.get(stream) ?? {}, v = r.ver[stream];
-        const name = isOwn && own ? own.label : stateOfStream(sc, stream) || "state";
-        return `<div class="other${at.has(stream) ? " at" : ""}" data-stream="${esc(stream)}"><div class="oh">${esc(name)} · ${esc(stream)} · ${vLabel(v)}</div>${Object.keys(obj).length ? dl(obj, r.fresh_keys.get(stream) || []) : `<span class="empty">No events yet.</span>`}</div>`;
-      }).join("");
-    }
+    // every stream the scenario involves shows from the start, one format for all: its state, name and version
+    $("state-h").textContent = "State";
+    $("state-meta").textContent = `${streams.length} stream${streams.length > 1 ? "s" : ""}`;
+    $("state").innerHTML = streams.map(stream => {
+      const isOwn = stream === ownStream, obj = isOwn ? r.state : r.others.get(stream) ?? {}, v = r.ver[stream];
+      const name = isOwn && own ? own.label : stateOfStream(sc, stream) || "state";
+      return `<div class="other${at.has(stream) ? " at" : ""}" data-stream="${esc(stream)}"><div class="oh">${esc(name)} · ${esc(stream)} · ${vLabel(v)}</div>${Object.keys(obj).length ? dl(obj, r.fresh_keys.get(stream) || []) : `<span class="empty">No events yet.</span>`}</div>`;
+    }).join("");
     nodes.forEach(n => n.g.classList.toggle("blocked", r.blocked.has(n.id)));
   }
 
