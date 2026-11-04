@@ -153,6 +153,8 @@ After a schema migration, `OrderPlaced` and `OrderPlaced_v2` both live in the re
   events still need it.
   ```
 
+  An event listed on a [`.loads`](../concepts/state-management.md#rules-across-streams-loads) is emitted just as statically, so listing a deprecated one throws the same way at build.
+
   This catches the forgotten `.emit()` call after a migration. The `app.build()` call refuses to construct the orchestrator until the static targets are fixed.
 
 - **Startup advisory** — a single info log at `app.build()` enumerates every deprecated event in scope with its current version and owning state. One line per Act, regardless of how many call sites emit the legacy name. The same data is exposed programmatically via `app.registry.deprecated_events(state_name)` for callers that want to layer their own policy on top (a CI gate, a metrics tag, a custom Logger warning).

@@ -538,6 +538,32 @@ describe("what an action may load and emit", () => {
         .loads(Seats, () => "b", ["SeatTaken" as never], "two")
     ).toThrow('Action "go" lists "SeatTaken" on two loads');
   });
+
+  test("a deprecated event listed on a load throws at build", () => {
+    const Bumped = z.object({});
+    const Counter = state({ Counter: z.object({}) })
+      .init(() => ({}))
+      .emits({ Bumped, Bumped_v2: Bumped })
+      .patch({ Bumped: () => ({}), Bumped_v2: () => ({}) })
+      .build();
+    const bump = (events: ("Bumped" | "Bumped_v2")[]) =>
+      act()
+        .withState(Counter)
+        .withState(
+          state({ Bumper: z.object({}) })
+            .init(() => ({}))
+            .emits({ Done: z.object({}) })
+            .on({ go: z.object({}) })
+            .loads(Counter, () => "counter", events)
+            .emit(() => [[events[0], {}]])
+            .build()
+        )
+        .build();
+    expect(() => bump(["Bumped"])).toThrow(
+      'Action "go" lists deprecated event "Bumped" on its load of "Counter". A newer version exists: "Bumped_v2".'
+    );
+    expect(() => bump(["Bumped_v2"])).not.toThrow();
+  });
 });
 
 describe("partial states", () => {

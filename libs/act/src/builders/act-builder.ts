@@ -394,6 +394,17 @@ export function act<
                   throw new Error(
                     `Action "${action}" loads "${l.state.name}", which is not registered — add it via withState/withSlice before build()`
                   );
+                // An event listed on a load is emitted as statically as
+                // `.emit("X")`, so a deprecated one throws the same way.
+                const deprecated = l.events.find((e) =>
+                  _de.get(registered.name)?.has(e)
+                );
+                if (deprecated)
+                  throw new Error(
+                    `Action "${action}" lists deprecated event "${deprecated}" on its load of "${registered.name}". ` +
+                      `A newer version exists: "${current_version_of(deprecated, Object.keys(registered.events))}". ` +
+                      `List the current version instead.`
+                  );
                 return { ...l, state: registered };
               });
             }
