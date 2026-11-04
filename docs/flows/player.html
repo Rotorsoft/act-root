@@ -646,7 +646,7 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
         const part = (text, cls) => { const t = el("tspan", cls ? { class: cls } : {}, b); t.textContent = text; };
         if (n.badge && !timed) part(n.badge + (pre ? " " : ""));
         if (pre) part(`▲ ${pre}`, "pre");
-        if (pre) el("title", {}, b).textContent = "Checked by the state before the handler runs:\n" +
+        if (pre) el("title", {}, b).textContent = "Checked by the action before the handler runs:\n" +
           checksOf(n).map(r => `▲ ${r.t}`).join("\n");
       }
     }
@@ -671,7 +671,7 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
     (bands.some(b => b.kind === "slice") ? `<div><i class="bx" style="--k:var(--ink)"></i>Slice boundary</div>` : "");
   $("read").innerHTML = `
     <p>Time runs left to right. An <b style="color:var(--actor)">actor</b>, a person or an automation, invokes an <b style="color:var(--action)">action</b>.</p>
-    <p>The <b style="color:var(--state)">state</b> loads from the stream, checks the action's <b class="pre">▲ preconditions</b> one by one, in the order the action declares them. It either refuses the action at the first rule that fails or commits <b style="color:var(--event)">events</b>. Events patch the state, and <b style="color:var(--projection)">projections</b> fold them into read models such as tables and caches.</p>
+    <p>The <b style="color:var(--state)">state</b> loads from the stream into the action, which checks its <b class="pre">▲ preconditions</b> one by one, in the order it declares them. The first rule that fails refuses the action. Otherwise it commits <b style="color:var(--event)">events</b>, which patch the state, whose schema can still refuse, and <b style="color:var(--projection)">projections</b> fold them into read models such as tables and caches.</p>
     <p><b style="color:var(--reaction)">Reactions</b> pick events up after the commit and act as automations: they invoke new actions or call the <b style="color:var(--external)">outside world</b>. A clock marks a reaction that waits for a timestamp.</p>
     ${bands.length ? `<p>Dashed boxes are the boundaries the builders declare. ${bands[0].kind === "slice"
       ? "A <b>slice</b> box holds the states it declares and the reactions it declares. Each state is a group of its actions and events. A state a few slices declare is drawn in each, and is still one state."
@@ -1123,13 +1123,12 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
     const t = el("text", { x: cx, y: y + 16.5, "text-anchor": "middle" }, g); t.textContent = label;
     return g;
   }
-  // an action's preconditions in the order the state runs them
+  // an action's preconditions in the order it declares them
   function checksOf(n) {
     return (n.preconditions || []).map(t => ({ t, k: "pre" }));
   }
-  // the action's checks, listed in the order the state runs them: each row gets a ✓ as it passes,
-  // and a refusal stops on the failing row with ✕. A reason that is not a precondition comes from
-  // .emit(), which runs after every precondition passed, so it is the last row.
+  // a list of checks, in order: each row gets a ✓ as it passes, and a refusal stops on the failing
+  // row with ✕. A reason that is not one of the rows comes after them all, so it is the last row.
   async function checklist(x, y, rules, reject, token) {
     const rows = reject && !rules.some(r => r.t === reject) ? [...rules, { t: reject, k: "emit" }] : rules;
     const fail = reject ? rows.findIndex(r => r.t === reject) : -1;
@@ -1155,8 +1154,7 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
     g.remove();
     return ok;
   }
-  // the action's loads arrive together along their dashed lines, then a card lists every stream it
-  // holds for this decision: its own first, each with the version it came back at
+  // the action's loads arrive together along their dashed lines, and name their streams on the action
   async function showLoads(sc, st, n, k, token) {
     const loads = loadsAt(st), ver = replay(k).ver, own = st.stream || sc.stream;
     const lines = [...new Set(loads.map(x => findEdge(loadBar(x.load, n).id, n.id)))];
@@ -1169,26 +1167,10 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
     if (done.some(d => !d)) return false;
     for (const e of lines) { e.g.classList.remove("live"); e.g.classList.add("trail"); ping(e.a); }
     ping(bar);
-    const held = new Map([[bar, [`${own} · ${vLabel(ver[own])}`]]]);
-    for (const { stream, load } of loads) {
-      const bar = loadBar(load, n);
-      held.set(bar, [...(held.get(bar) || []), `${stream} · ${vLabel(ver[stream])}`]);
-    }
-    const tags = [...held].map(([b, text]) => streamTag(b.cx, b.bot + 12, text.join("  ")));
-    if (!loads.length) return { remove: () => tags.forEach(t => t.remove()) };
-    const rows = [{ t: `${own} · ${vLabel(ver[own])}`, k: "own" }, ...loads.map(({ stream, load }) => load.events?.length
-      ? { t: `${stream} · ${vLabel(ver[stream])} · may append ${load.events.map(id => nodes.get(id).label).join(", ")}`, k: "ver" }
-      : { t: `${stream} · ${vLabel(ver[stream])} · read only`, k: "skip" })];
-    const RH = 22, w = Math.max(...rows.map(r => r.t.length)) * 7.5 + 40, h = rows.length * RH + 10;
-    const left = n.right + 14 + w > svg.viewBox.baseVal.width ? n.left - 14 - w : n.right + 14;
-    const g = el("g", { class: "checks" }, gFx);
-    el("rect", { x: left, y: n.cy - h / 2, width: w, height: h, rx: 9, class: "card" }, g);
-    rows.forEach((r, i) => {
-      const t = el("text", { x: left + 11, y: n.cy - h / 2 + 5 + RH * i + 15 }, g);
-      el("tspan", { class: r.k }, t).textContent = (r.k === "skip" ? "– " : "⊙ ");
-      el("tspan", { class: r.k === "skip" ? "skip" : "" }, t).textContent = r.t;
-    });
-    return { remove: () => { g.remove(); tags.forEach(t => t.remove()); } };
+    // the action holds every stream it loaded, its own first, each at the version it came back at
+    const held = [`${own} · ${vLabel(ver[own])}`, ...loads.map(({ stream, load }) => `${stream} · ${vLabel(ver[stream])}${load.events?.length ? "" : " · read"}`)];
+    const tags = held.map((text, i) => streamTag(n.cx, n.top - 12 - i * 21, text));
+    return { remove: () => tags.forEach(t => t.remove()) };
   }
   function timer(n) {
     const g = el("g", { class: "timer", style: `--k:var(--reaction)` }, gFx);
@@ -1231,17 +1213,17 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
     if ((g1 - g0 > 1 || st.commit !== undefined) && kindOf(from) === "action" && bar) {
       // one transaction: the checks run once, then every event of the commit lands together
       const group = sc.steps.slice(g0, g1).map(x => ({ st: x, e: findEdge(x.from, x.to), to: nodes.get(x.to) }));
+      const rules = checksOf(from);
+      if (rules.length && !(await checklist(from.right, from.cy, rules, undefined, token))) return false;
       const f = fractionAtY(e, bar.cy);
       if (!(await travel(e, token, 0, f))) return false;
       ping(bar);
-      const rules = checksOf(from);
-      if (rules.length) { if (!(await checklist(from.cx, bar.cy, rules, undefined, token))) return false; }
-      else { const v = verdict(from.cx, bar.cy, "✓", "var(--good)"); const ok = await wait(650, token); v.remove(); if (!ok) return false; }
+      { const v = verdict(from.cx, bar.cy, "✓", "var(--good)"); const ok = await wait(650, token); v.remove(); if (!ok) return false; }
       // the boundary first: inside it, every stream's version is checked before anything lands
       const brace = commitBrace(group.map(x => x.to), new Set(group.map(x => x.st.stream || sc.stream)).size);
       const eventTags = group.map(x => ({ x, tag: streamTag(x.to.cx, x.to.top - 12, x.st.stream || sc.stream) }));
       const guards = guardsAt(sc, g0, g1);
-      if (!(await checklist(from.cx, bar.cy, guards.rows, guards.fail, token))) return false;
+      if (!(await checklist(from.right, from.cy, guards.rows, guards.fail, token))) return false;
       if (st.conflict) {
         brace.classList.add("lost");
         brace.querySelector("text").textContent = "nothing written";
@@ -1272,24 +1254,30 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
       return ok;
     }
     if (kindOf(from) === "action" && kindOf(to) === "event" && bar) {
-      // the action passes through the state: its checks pass one by one, or one refuses
-      const f = fractionAtY(e, bar.cy);
-      if (!(await travel(e, token, 0, f))) return false;
-      ping(bar);
+      // the action checks its preconditions one by one, and one may refuse; its events then fold
+      // through the state, whose schema has the last word
       const rules = checksOf(from);
-      if (rules.length || st.reject) {
-        if (!(await checklist(from.cx, bar.cy, rules, st.reject, token))) return false;
-      } else {
-        const v = verdict(from.cx, bar.cy, "✓", "var(--good)");
-        const ok = await wait(650, token);
-        v.remove();
-        if (!ok) return false;
-      }
-      if (st.reject) {
+      const refused = () => {
         from.g.classList.add("bad");
         e.g.classList.remove("live"); e.g.classList.add("trail");
         step++; renderPanels(step, true);
         return wait(readTime(st), token);
+      };
+      const byRule = st.reject && rules.some(r => r.t === st.reject);
+      if (rules.length && !(await checklist(from.right, from.cy, rules, byRule ? st.reject : undefined, token))) return false;
+      if (byRule) return refused();
+      const f = fractionAtY(e, bar.cy);
+      if (!(await travel(e, token, 0, f))) return false;
+      ping(bar);
+      if (st.reject) {
+        if (!(await checklist(from.cx, bar.cy, [], st.reject, token))) return false;
+        return refused();
+      }
+      {
+        const v = verdict(from.cx, bar.cy, "✓", "var(--good)");
+        const ok = await wait(650, token);
+        v.remove();
+        if (!ok) return false;
       }
       if (!(await travel(e, token, f, 1))) return false;
     } else if (st.retries || st.blocked) {
