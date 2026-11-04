@@ -4,7 +4,8 @@ import type { ActSurface } from "./dispatch.js";
 
 /**
  * The state names a transport opens one SSE subscription for: every state
- * in the registry. Throws for a state whose events declare `sensitive(...)`
+ * with an action, and every state an action loads, since its streams change
+ * too. Throws for a state whose events declare `sensitive(...)`
  * fields: the channel caches one state per stream, folded over whichever
  * actor committed last, and serves it to every subscriber, so it would hand
  * one actor's plaintext to everyone and overwrite the owner's view with
@@ -12,8 +13,11 @@ import type { ActSurface } from "./dispatch.js";
  */
 export function sse_state_names(app: ActSurface, transport: string): string[] {
   const names = new Map<string, Readonly<Record<string, ZodType>>>();
-  for (const s of Object.values(app.registry.actions))
+  for (const s of Object.values(app.registry.actions)) {
     names.set(s.name, s.events ?? {});
+    for (const loads of Object.values(s.loads ?? {}))
+      for (const { state } of loads ?? []) names.set(state.name, state.events);
+  }
   for (const [name, events] of names) {
     const sensitive = Object.entries(events).filter(
       ([, schema]) => pii_fields(schema).length > 0

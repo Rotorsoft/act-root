@@ -224,8 +224,8 @@ export class Act<
    * event-specific payload.
    *
    * `committed` also takes a state, as a `State` or its name: the listener
-   * then hears only commits by that state's actions, with its snapshots
-   * typed from that state.
+   * then hears only commits to that state's streams, whichever action
+   * appended them, with its snapshots typed from that state.
    *
    * @example
    * ```typescript

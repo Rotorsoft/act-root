@@ -12,7 +12,7 @@ Breaking changes to anything in this list require a **major** version bump and a
 
 The fluent surfaces exported from `@rotorsoft/act`:
 
-- `state(...)` — including `.init`, `.emits`, `.patch`, `.on` (with optional `ActionOptions` second argument for per-action retry policy), `.requires` (named preconditions, RFC 2086), `.emit`, `.snap`, `.discloses` (sensitive-data epic #566 — disclosure predicate for `sensitive(...)`-marked event fields), `.autocloses` (online close-the-books epic #802 — declarative close/retention policy, including the rolling-window `keep` variant gated behind `.snap`, #1011), `.archives` (online close-the-books epic #802 — companion archiver run before truncate), `.build`
+- `state(...)` — including `.init`, `.emits`, `.patch`, `.on` (with optional `ActionOptions` second argument for per-action retry policy), `.loads` (rules across streams, RFC 2251), `.requires` (named preconditions, RFC 2086), `.emit`, `.snap`, `.discloses` (sensitive-data epic #566 — disclosure predicate for `sensitive(...)`-marked event fields), `.autocloses` (online close-the-books epic #802 — declarative close/retention policy, including the rolling-window `keep` variant gated behind `.snap`, #1011), `.archives` (online close-the-books epic #802 — companion archiver run before truncate), `.build`
 - `slice(...)` — including `.withState`, the reaction chain `.on(event)` → optional `.defer(when)` (#1091) → `.do(handler, options?)` → optional `.to(resolver | target)`, and `.build`
 - `projection(...)` / `projection(target)` — including per-event `.on({ Event: schema })` handlers with their `.to(...)` routing, the bulk `.batch(handler)` form, the state-projection `.of(...states).flush(handler, config?)` form (#1125), and `.build`
 - `act(...)` — including `.withState`, `.withSlice`, `.withProjection`, `.withActor`, `.withLane` (ACT-1103), the same reaction chain as `slice(...)` (`.on` → optional `.defer` → `.do` → optional `.to`), and `.build(options?)`
@@ -51,7 +51,7 @@ We will be explicit in release notes when this surface changes.
 
 The events emitted by the orchestrator on the public event bus (`ActLifecycleEvents` in `libs/act/src/types/act.ts`):
 
-- `committed` — events committed by an action in this process (`Snapshot[]`)
+- `committed` — events committed by an action in this process (`Snapshot[]`), fired once per stream the action appended to, its own first
 - `acked` — reactions that processed successfully (`Lease[]`)
 - `blocked` — reactions that exhausted their retry budget (`BlockedLease[]`)
 - `settled` — a drain cycle settled (`Drain`)

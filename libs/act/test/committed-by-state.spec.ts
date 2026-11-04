@@ -4,8 +4,8 @@ import { act, type Snapshot, state, ZodEmpty } from "../src/index.js";
 import { fixture } from "../src/test/index.js";
 
 /**
- * `app.on("committed", state, listener)` hears only commits by that state's
- * actions, with snapshots typed from it; the plain `committed` listener
+ * `app.on("committed", state, listener)` hears only commits to that state's
+ * streams, with snapshots typed from it; the plain `committed` listener
  * still hears every commit, typed loosely.
  */
 
