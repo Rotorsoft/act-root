@@ -372,6 +372,29 @@ describe("a race on a loaded stream", () => {
     expect((err as ConcurrencyError).stream).toBe("tr-3");
   });
 
+  test("a pinned own version refuses an action that appends only to loaded streams", async ({
+    app,
+  }) => {
+    await app.do("Enroll", at("enr-pin"), { course: "pin", student: "s" });
+    const err = await app
+      .do(
+        "Overfill",
+        { ...at("enr-pin"), expectedVersion: -1 },
+        { course: "pin", student: "t" }
+      )
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ConcurrencyError);
+    expect((err as ConcurrencyError).stream).toBe("enr-pin");
+    expect(await events("course-pin")).toEqual(["SeatTaken"]);
+    // Pinned at its real version, it lands.
+    await app.do(
+      "Overfill",
+      { ...at("enr-pin"), expectedVersion: 0 },
+      { course: "pin", student: "t" }
+    );
+    expect(await events("course-pin")).toEqual(["SeatTaken", "SeatTaken"]);
+  });
+
   test("on a read-only load lands anyway: reads aren't guarded", async ({
     app,
   }) => {
@@ -414,6 +437,20 @@ describe("what an action may load and emit", () => {
     await expect(
       app.do("Transfer", at("tr-20"), { from: "acc-x", to: "acc-x", amount: 0 })
     ).rejects.toThrow('Action "Transfer" loads stream "acc-x" twice');
+  });
+
+  test("a target that names no stream throws", async () => {
+    const Blank = state({ Blank: z.object({}) })
+      .init(() => ({}))
+      .emits({ Done: z.object({}) })
+      .on({ go: z.object({}) })
+      .loads(Seats, () => "")
+      .emit("Done")
+      .build();
+    const blank = act().withState(Seats).withState(Blank).build();
+    await expect(blank.do("go", at("blank-1"), {})).rejects.toThrow(
+      'Action "go" loads "Seats" from an empty stream name'
+    );
   });
 
   test("a target that throws commits nothing", async () => {
@@ -479,6 +516,29 @@ describe("what an action may load and emit", () => {
 });
 
 describe("partial states", () => {
+  test("each Act loads its own merge of the loaded state", async () => {
+    const SeatsExtra = state({ Seats: z.object({ extra: z.number() }) })
+      .init(() => ({ extra: 5 }))
+      .emits({ Extra: z.object({}) })
+      .build();
+    const seen: unknown[] = [];
+    const Peek = state({ Peek: z.object({}) })
+      .init(() => ({}))
+      .emits({ Peeked: z.object({}) })
+      .on({ peek: z.object({}) })
+      .loads(Seats, () => "course-peek")
+      .emit((_, __, ___, { Seats }) => {
+        seen.push(Seats);
+        return ["Peeked", {}];
+      })
+      .build();
+    const first = act().withState(Seats).withState(Peek).build();
+    // A second Act with another partial of Seats, built from the same states.
+    act().withState(Seats).withState(SeatsExtra).withState(Peek).build();
+    await first.do("peek", at("peek-1"), {});
+    expect(seen).toEqual([{ taken: 0, capacity: 2 }]);
+  });
+
   test("keep each action's loads when they merge", async () => {
     const Part = state({ Enrollment: z.object({ note: z.string() }) })
       .init(() => ({ note: "" }))

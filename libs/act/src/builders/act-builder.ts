@@ -381,7 +381,10 @@ export function act<
 
           // A load reads and writes through this Act's store, so it must name
           // a registered state; it resolves to the merged one, partials and all.
-          for (const state of states.values()) {
+          // The resolved loads go on a copy this Act owns: the state object
+          // the app passed in may be registered in other Acts, with other
+          // partials of the loaded state.
+          for (const [name, state] of states) {
             if (!state.loads) continue;
             const resolved: Record<string, Load[]> = {};
             for (const [action, loads] of Object.entries(state.loads)) {
@@ -394,7 +397,10 @@ export function act<
                 return { ...l, state: registered };
               });
             }
-            state.loads = resolved;
+            const own = { ...state, loads: resolved };
+            states.set(name, own);
+            for (const action of Object.keys(own.actions))
+              (registry.actions as Record<string, unknown>)[action] = own;
           }
 
           for (const state of states.values()) {

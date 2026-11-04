@@ -468,6 +468,10 @@ async function load_others(
 ): Promise<Pending[]> {
   const streams = loads.map((l) => l.target(payload, own.state));
   streams.forEach((stream, i) => {
+    if (typeof stream !== "string" || !stream)
+      throw new Error(
+        `Action "${action}" loads "${loads[i].name}" from an empty stream name`
+      );
     if (stream === own.stream)
       throw new Error(`Action "${action}" loads its own stream "${stream}"`);
     if (streams.indexOf(stream) !== i)
@@ -597,6 +601,19 @@ export async function action<
         });
       }
       const appends = [own, ...others].filter((p) => p.events.length);
+      // A pinned version guards the decision even when the action's own
+      // stream gets no event, so nothing is appended for the store to check.
+      if (
+        expectedVersion !== undefined &&
+        !own.events.length &&
+        snapshot.version !== expectedVersion
+      )
+        throw new ConcurrencyError(
+          stream,
+          snapshot.version,
+          [],
+          expectedVersion
+        );
 
       const meta: EventMeta = {
         correlation:
