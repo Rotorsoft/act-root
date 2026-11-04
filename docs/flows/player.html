@@ -1063,11 +1063,12 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
 
   const sleep = ms => new Promise(r => setTimeout(r, ms));
   const wait = (ms, token) => sleep(ms / speed).then(() => token === run);
-  function travel(e, token, f0 = 0, f1 = 1) {
+  // `carry` is told where the token is, for what travels with it; a slower pace keeps that readable
+  function travel(e, token, f0 = 0, f1 = 1, carry) {
     return new Promise(res => {
       const len = e.path.getTotalLength();
       const dist = Math.abs(f1 - f0) * len;
-      const dur = reduce ? 0 : Math.max(320, dist / 0.42) / speed;
+      const dur = reduce ? 0 : Math.max(carry ? 1000 : 320, dist / 0.42) / speed;
       const halo = el("circle", { r: 11, class: "token-halo", style: `--k:${color(e.b)}` }, gFx);
       const dot = el("circle", { r: 5.5, class: "token", style: `--k:${color(e.b)}` }, gFx);
       const t0 = performance.now();
@@ -1078,6 +1079,7 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
         const p = e.path.getPointAtLength(len * (f0 + (f1 - f0) * ease));
         dot.setAttribute("cx", p.x); dot.setAttribute("cy", p.y);
         halo.setAttribute("cx", p.x); halo.setAttribute("cy", p.y);
+        carry?.(p);
         if (t < 1) requestAnimationFrame(frame); else { halo.remove(); dot.remove(); res(true); }
       };
       requestAnimationFrame(frame);
@@ -1108,7 +1110,12 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
       if (c) g.style.setProperty("--k", c);
     };
     set(text);
-    return { set, remove: () => g.remove() };
+    return {
+      set, remove: () => g.remove(),
+      // rides just above (px, py), clear of the token, until it settles at its own place
+      move: (px, py) => { g.style.animation = "none"; g.style.transform = `translate(${px - x}px,${py - y - 17}px)`; },
+      settle: () => { g.style.transition = "transform .25s ease-out"; g.style.transform = ""; },
+    };
   }
   // a bracket under the events one commit wrote, so the transaction reads as one unit
   function commitBrace(targets, streams) {
@@ -1157,19 +1164,30 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
   // the action's loads arrive together along their dashed lines, and name their streams on the action
   async function showLoads(sc, st, n, k, token) {
     const loads = loadsAt(st), ver = replay(k).ver, own = st.stream || sc.stream;
-    const lines = [...new Set(loads.map(x => findEdge(loadBar(x.load, n).id, n.id)))];
-    for (const e of lines) e.g.classList.add("live");
-    // every action loads its own state, from the bar up to the action, along with any others
+    // the name of each stream travels up its path with the token, and settles above the action
+    const place = i => n.top - 12 - i * 21;
+    const tagOf = (text, i) => streamTag(n.cx, place(i), text);
     const bar = barOf(n);
     const rise = el("path", { d: `M${n.cx},${bar.top} L${n.cx},${n.bot}`, fill: "none" }, gFx);
-    const done = await Promise.all([travel({ path: rise, b: n }, token), ...lines.map(e => travel(e, token))]);
+    const tags = [tagOf(`${own} · ${vLabel(ver[own])}`, 0)];
+    const paths = new Map([[{ path: rise, b: n }, [tags[0]]]]);
+    for (const { stream, load } of loads) {
+      const e = findEdge(loadBar(load, n).id, n.id);
+      const tag = tagOf(`${stream} · ${vLabel(ver[stream])}${load.events?.length ? "" : " · read"}`, tags.length);
+      tags.push(tag);
+      const key = [...paths.keys()].find(k => k === e) || e;
+      paths.set(key, [...(paths.get(key) || []), tag]);
+      e.g.classList.add("live");
+    }
+    const lines = [...paths.keys()].filter(e => e.g);
+    const go = (e, on) => travel(e, token, 0, 1, p => on.forEach((t, i) => t.move(p.x, p.y - i * 21)));
+    for (const [e, on] of paths) { const p = e.path.getPointAtLength(0); on.forEach((t, i) => t.move(p.x, p.y - i * 21)); }
+    const done = await Promise.all([...paths].map(([e, on]) => go(e, on)));
     rise.remove();
     if (done.some(d => !d)) return false;
+    tags.forEach(t => t.settle());
     for (const e of lines) { e.g.classList.remove("live"); e.g.classList.add("trail"); ping(e.a); }
     ping(bar);
-    // the action holds every stream it loaded, its own first, each at the version it came back at
-    const held = [`${own} · ${vLabel(ver[own])}`, ...loads.map(({ stream, load }) => `${stream} · ${vLabel(ver[stream])}${load.events?.length ? "" : " · read"}`)];
-    const tags = held.map((text, i) => streamTag(n.cx, n.top - 12 - i * 21, text));
     return { remove: () => tags.forEach(t => t.remove()) };
   }
   function timer(n) {
@@ -1209,6 +1227,7 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
     from.g.classList.add("on");
 
     const bar = barOf(from);
+    let carried = null;
     const [g0, g1] = groupAt(sc, step);
     if ((g1 - g0 > 1 || st.commit !== undefined) && kindOf(from) === "action" && bar) {
       // one transaction: the checks run once, then every event of the commit lands together
@@ -1221,34 +1240,38 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
       { const v = verdict(from.cx, bar.cy, "✓", "var(--good)"); const ok = await wait(650, token); v.remove(); if (!ok) return false; }
       // the boundary first: inside it, every stream's version is checked before anything lands
       const brace = commitBrace(group.map(x => x.to), new Set(group.map(x => x.st.stream || sc.stream)).size);
-      const eventTags = group.map(x => ({ x, tag: streamTag(x.to.cx, x.to.top - 12, x.st.stream || sc.stream) }));
       const guards = guardsAt(sc, g0, g1);
       if (!(await checklist(from.right, from.cy, guards.rows, guards.fail, token))) return false;
       if (st.conflict) {
         brace.classList.add("lost");
         brace.querySelector("text").textContent = "nothing written";
-        for (const { x, tag } of eventTags) if ((x.st.stream || sc.stream) === st.conflict) tag.set(`${st.conflict} moved`, "var(--bad)");
+        const moved = group.filter(x => (x.st.stream || sc.stream) === st.conflict).map(x => streamTag(x.to.cx, x.to.top - 12, `${st.conflict} moved`, "var(--bad)"));
         from.g.classList.add("bad");
         e.g.classList.remove("live");
         step = g1;
         renderPanels(step, true);
         const ok = await wait(readTime(st) + 600, token);
-        brace.remove(); eventTags.forEach(t => t.tag.remove());
+        brace.remove(); moved.forEach(t => t.remove());
         return ok;
       }
+      // each event carries its stream down from the state, at the version it lands at
+      const landed = { ...replay(g0).ver };
+      const eventTags = group.map(x => {
+        const stream = x.st.stream || sc.stream;
+        landed[stream] = (landed[stream] ?? -1) + 1;
+        return { x, tag: streamTag(x.to.cx, x.to.top - 12, `${stream} · v${landed[stream]}`) };
+      });
       for (const x of group) x.e.g.classList.add("live");
-      const done = await Promise.all(group.map(x => travel(x.e, token, fractionAtY(x.e, bar.cy), 1)));
+      const done = await Promise.all(eventTags.map(({ x, tag }, i) => {
+        const f0 = fractionAtY(x.e, bar.cy), p = x.e.path.getPointAtLength(x.e.path.getTotalLength() * f0);
+        tag.move(p.x, p.y - i * 21);
+        return travel(x.e, token, f0, 1, q => tag.move(q.x, q.y - i * 21));
+      }));
       if (done.some(d => !d)) return false;
+      eventTags.forEach(t => t.tag.settle());
       for (const x of group) { x.e.g.classList.remove("live"); x.e.g.classList.add("trail"); ping(x.to); barOf(x.to)?.g.classList.add("on"); }
       step = g1;
       renderPanels(step, true);
-      // the version each event landed at
-      const landed = { ...replay(g0).ver };
-      for (const { x, tag } of eventTags) {
-        const stream = x.st.stream || sc.stream;
-        landed[stream] = (landed[stream] ?? -1) + 1;
-        tag.set(`${stream} · v${landed[stream]}`);
-      }
       const ok = await wait(readTime(st) + 600, token);
       brace.remove(); eventTags.forEach(t => t.tag.remove());
       return ok;
@@ -1279,7 +1302,13 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
         v.remove();
         if (!ok) return false;
       }
-      if (!(await travel(e, token, f, 1))) return false;
+      // the event carries its stream down from the state, at the version it lands at
+      const stream = st.stream || sc.stream;
+      carried = streamTag(to.cx, to.top - 12, `${stream} · v${(replay(step).ver[stream] ?? -1) + 1}`);
+      const p = e.path.getPointAtLength(e.path.getTotalLength() * f);
+      carried.move(p.x, p.y);
+      if (!(await travel(e, token, f, 1, q => carried.move(q.x, q.y)))) return false;
+      carried.settle();
     } else if (st.retries || st.blocked) {
       // an outbound call that fails, backs off and retries; blocked when it runs out
       const n = st.retries || 0, labels = st.backoff || [];
@@ -1330,7 +1359,7 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
       }
     }
     const ok = await wait(readTime(st), token);
-    card?.remove();
+    card?.remove(); carried?.remove();
     return ok;
   }
   // resolves true when the scenario plays to the end
