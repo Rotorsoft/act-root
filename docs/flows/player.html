@@ -671,7 +671,7 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
     (bands.some(b => b.kind === "slice") ? `<div><i class="bx" style="--k:var(--ink)"></i>Slice boundary</div>` : "");
   $("read").innerHTML = `
     <p>Time runs left to right. An <b style="color:var(--actor)">actor</b>, a person or an automation, invokes an <b style="color:var(--action)">action</b>.</p>
-    <p>The <b style="color:var(--state)">state</b> loads from the stream into the action, which checks its <b class="pre">▲ preconditions</b> one by one, in the order it declares them. The first rule that fails refuses the action. Otherwise it commits <b style="color:var(--event)">events</b>, which patch the state, and every state written checks its schema (<span style="color:var(--good)">schema ✓</span>), which can still refuse, and <b style="color:var(--projection)">projections</b> fold them into read models such as tables and caches.</p>
+    <p>The <b style="color:var(--state)">state</b> loads from the stream into the action, which checks its <b class="pre">▲ preconditions</b> one by one, in the order it declares them. The first rule that fails refuses the action, and so does a state its events would break. Otherwise it commits <b style="color:var(--event)">events</b>, which patch the state, and <b style="color:var(--projection)">projections</b> fold them into read models such as tables and caches.</p>
     <p><b style="color:var(--reaction)">Reactions</b> pick events up after the commit and act as automations: they invoke new actions or call the <b style="color:var(--external)">outside world</b>. A clock marks a reaction that waits for a timestamp.</p>
     ${bands.length ? `<p>Dashed boxes are the boundaries the builders declare. ${bands[0].kind === "slice"
       ? "A <b>slice</b> box holds the states it declares and the reactions it declares. Each state is a group of its actions and events. A state a few slices declare is drawn in each, and is still one state."
@@ -1085,12 +1085,6 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
       requestAnimationFrame(frame);
     });
   }
-  function fractionAtY(e, y) {
-    const len = e.path.getTotalLength();
-    let lo = 0, hi = 1;
-    for (let i = 0; i < 24; i++) { const m = (lo + hi) / 2; if (e.path.getPointAtLength(len * m).y < y) lo = m; else hi = m; }
-    return lo;
-  }
   function ping(n) { n.g.classList.remove("ping"); void n.g.getBBox(); n.g.classList.add("ping"); n.g.classList.add("on"); }
   function verdict(x, y, text, k) {
     const g = el("g", { class: "verdict", style: `--k:${k}` }, gFx);
@@ -1234,17 +1228,6 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
       const group = sc.steps.slice(g0, g1).map(x => ({ st: x, e: findEdge(x.from, x.to), to: nodes.get(x.to) }));
       const rules = checksOf(from);
       if (rules.length && !(await checklist(from.right, from.cy, rules, undefined, token))) return false;
-      const f = fractionAtY(e, bar.cy);
-      if (!(await travel(e, token, 0, f))) return false;
-      ping(bar);
-      // every state the commit writes folds its events and checks its schema
-      const written = [...new Set(group.map(x => {
-        const load = (from.loads || []).find(l => l.events?.includes(x.to.id));
-        return load ? loadBar(load, from) : bar;
-      }))];
-      written.forEach(ping);
-      const marks = written.map(b => verdict(b === bar ? from.cx : b.cx, b.cy, "schema ✓", "var(--good)"));
-      { const ok = await wait(900, token); marks.forEach(v => v.remove()); if (!ok) return false; }
       // the boundary first: inside it, every stream's version is checked before anything lands
       const brace = commitBrace(group.map(x => x.to), new Set(group.map(x => x.st.stream || sc.stream)).size);
       const guards = guardsAt(sc, g0, g1);
@@ -1261,7 +1244,8 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
         brace.remove(); moved.forEach(t => t.remove());
         return ok;
       }
-      // each event carries its stream down from the state, at the version it lands at
+      // each event carries its stream down through the state, at the version it lands at
+      ping(bar);
       const landed = { ...replay(g0).ver };
       const eventTags = group.map(x => {
         const stream = x.st.stream || sc.stream;
@@ -1270,9 +1254,9 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
       });
       for (const x of group) x.e.g.classList.add("live");
       const done = await Promise.all(eventTags.map(({ x, tag }, i) => {
-        const f0 = fractionAtY(x.e, bar.cy), p = x.e.path.getPointAtLength(x.e.path.getTotalLength() * f0);
+        const p = x.e.path.getPointAtLength(0);
         tag.move(p.x, p.y - i * 21);
-        return travel(x.e, token, f0, 1, q => tag.move(q.x, q.y - i * 21));
+        return travel(x.e, token, 0, 1, q => tag.move(q.x, q.y - i * 21));
       }));
       if (done.some(d => !d)) return false;
       eventTags.forEach(t => t.tag.settle());
@@ -1284,40 +1268,23 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
       return ok;
     }
     if (kindOf(from) === "action" && kindOf(to) === "event" && bar) {
-      // the action checks its preconditions one by one, and one may refuse; its events then fold
-      // through the state, whose schema has the last word
+      // the action checks its preconditions one by one, and any refusal, whichever rule or schema it
+      // came from, stops it here; otherwise its event folds through the state and lands
       const rules = checksOf(from);
-      const refused = () => {
+      if ((rules.length || st.reject) && !(await checklist(from.right, from.cy, rules, st.reject, token))) return false;
+      if (st.reject) {
         from.g.classList.add("bad");
         e.g.classList.remove("live"); e.g.classList.add("trail");
         step++; renderPanels(step, true);
         return wait(readTime(st), token);
-      };
-      const byRule = st.reject && rules.some(r => r.t === st.reject);
-      if (rules.length && !(await checklist(from.right, from.cy, rules, byRule ? st.reject : undefined, token))) return false;
-      if (byRule) return refused();
-      const f = fractionAtY(e, bar.cy);
-      if (!(await travel(e, token, 0, f))) return false;
+      }
       ping(bar);
-      if (st.reject) {
-        // the state whose schema refuses, when it isn't the action's own
-        const at = st.state ? loadBar({ state: st.state }, from) : bar;
-        ping(at);
-        if (!(await checklist(st.state ? at.cx : from.cx, at.cy, [], st.reject, token))) return false;
-        return refused();
-      }
-      {
-        const v = verdict(from.cx, bar.cy, "schema ✓", "var(--good)");
-        const ok = await wait(900, token);
-        v.remove();
-        if (!ok) return false;
-      }
-      // the event carries its stream down from the state, at the version it lands at
+      // the event carries its stream down through the state, at the version it lands at
       const stream = st.stream || sc.stream;
       carried = streamTag(to.cx, to.top - 12, `${stream} · v${(replay(step).ver[stream] ?? -1) + 1}`);
-      const p = e.path.getPointAtLength(e.path.getTotalLength() * f);
+      const p = e.path.getPointAtLength(0);
       carried.move(p.x, p.y);
-      if (!(await travel(e, token, f, 1, q => carried.move(q.x, q.y)))) return false;
+      if (!(await travel(e, token, 0, 1, q => carried.move(q.x, q.y)))) return false;
       carried.settle();
     } else if (st.retries || st.blocked) {
       // an outbound call that fails, backs off and retries; blocked when it runs out
