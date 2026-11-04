@@ -1,7 +1,7 @@
 {
   "title": "Rules Across Streams",
-  "subtitle": "Act 2.0: one action loads the streams its decision needs, checks each at the version it loaded, and commits its events to all of them at once, or to none.",
-  "source": "rfcs/2251-rules-across-streams.md",
+  "subtitle": "Act 2.0, from the recipes: one action loads the streams its decision needs, checks each at the version it loaded, and commits its events to all of them at once, or to none.",
+  "source": "recipes/rules-across-streams/examples",
   "lanes": [
     {
       "id": "actor",
@@ -35,7 +35,7 @@
       "lane": "actor",
       "actor": "person",
       "label": "User",
-      "col": 5
+      "col": 6.5
     },
     {
       "id": "action:Enroll",
@@ -44,58 +44,65 @@
       "col": 1,
       "preconditions": ["the course has a free seat"],
       "schema": "course: string\nstudent: string",
-      "description": ".on({ Enroll }, { maxRetries: 1 }).loads(Seats, (data) => `course-${data.course}`, [\"SeatTaken\"]). It loads the course's Seats before checking its rule, may emit SeatTaken to it, and commits Enrolled and SeatTaken together, guarded by both streams' versions.",
+      "description": ".on({ Enroll }, { maxRetries: 8 }).loads(Seats, ...).loads(Student, ...). Loads the course's Seats and the student's load before its rule, and commits to all three streams together, guarded by the versions it loaded.",
       "loads": [
         {
           "state": "state:Seats",
           "events": ["evt:SeatTaken"]
+        },
+        {
+          "state": "state:Student",
+          "events": ["evt:CourseAdded"]
         }
-      ]
+      ],
+      "file": "examples/count-limits.ts"
     },
     {
       "id": "action:Register",
       "lane": "action",
       "label": "Register",
-      "col": 4.5,
+      "col": 6.0,
       "preconditions": ["the email is free"],
-      "schema": "email: string",
+      "schema": "email: email",
       "description": ".on({ Register }).loads(Email, (data) => email(data.email), [\"EmailTaken\"]). One Email stream per address, keyed by an HMAC of it, loaded before the rule.",
       "loads": [
         {
           "state": "state:Email",
           "events": ["evt:EmailTaken"]
         }
-      ]
+      ],
+      "file": "examples/unique-values.ts"
     },
     {
       "id": "action:ChangeEmail",
       "lane": "action",
       "label": "ChangeEmail",
-      "col": 6,
-      "preconditions": ["the new email is free"],
-      "schema": "email: string",
-      "description": "Loads Email twice: the old address (may emit EmailReleased) and the new one (may emit EmailTaken). Frees the old and takes the new in one commit.",
+      "col": 7.5,
+      "preconditions": ["the user is active", "the new email is free"],
+      "schema": "email: email",
+      "description": "Loads Email twice, named current and next: frees the old address and takes the new one in one commit.",
       "loads": [
         {
           "state": "state:Email",
-          "events": ["evt:EmailReleased"],
-          "name": "old"
+          "name": "current",
+          "events": ["evt:EmailReleased"]
         },
         {
           "state": "state:Email",
-          "events": ["evt:EmailTaken"],
-          "name": "new"
+          "name": "next",
+          "events": ["evt:EmailTaken"]
         }
-      ]
+      ],
+      "file": "examples/unique-values.ts"
     },
     {
       "id": "state:Enrollment",
       "lane": "state",
       "label": "Enrollment",
       "note": "course · student",
-      "span": [0, 1.5],
-      "schema": "course: string\nstudent: string",
-      "description": "One enrollment per student and course. Enroll and Waitlist check their rules here, with the loaded Seats in hand."
+      "span": [0.5, 1.5],
+      "schema": "course: string\nstudent: string\nactive: boolean",
+      "description": "One enrollment per student and course. Enroll checks its rule here, with the loaded Seats in hand."
     },
     {
       "id": "state:Seats",
@@ -103,7 +110,7 @@
       "label": "Seats",
       "note": "taken / capacity",
       "span": [2.5, 3],
-      "schema": "taken: integer\ncapacity: integer",
+      "schema": "taken: number ≥ 0\ncapacity: number ≥ 0",
       "invariants": ["taken ≤ capacity (the course is full)"],
       "description": "One stream per course. Its schema is its invariant, checked on every fold, so no action can overfill a course, whichever action emits SeatTaken."
     },
@@ -112,8 +119,8 @@
       "lane": "state",
       "label": "User",
       "note": "email",
-      "span": [4.5, 6],
-      "schema": "email: string",
+      "span": [6.0, 7.5],
+      "schema": "emailStream: string\nactive: boolean",
       "description": "One stream per user. Register and ChangeEmail check their rules here, with the loaded Email streams in hand."
     },
     {
@@ -121,7 +128,7 @@
       "lane": "state",
       "label": "Email",
       "note": "holder",
-      "span": [7, 8],
+      "span": [8.5, 9.5],
       "schema": "holder?: string",
       "invariants": ["at most one holder"],
       "description": "One stream per email address: an ordinary state the app declares, not a hidden framework stream. A stream name can't be forgotten, so the stream is keyed by an HMAC of the address, never the address itself."
@@ -131,75 +138,81 @@
       "lane": "event",
       "label": "Enrolled",
       "col": 1,
-      "schema": "course: string\nstudent: string"
+      "schema": "course: string\nstudent: string",
+      "file": "examples/count-limits.ts"
     },
     {
       "id": "evt:SeatTaken",
       "lane": "event",
       "label": "SeatTaken",
       "col": 2.75,
-      "schema": "student: string",
-      "description": "Owned by Seats. Enroll may emit it because its .loads lists it; it commits to course-<id>."
+      "schema": "{}",
+      "description": "Owned by Seats. Enroll may emit it because its .loads lists it; it commits to course-<id>.",
+      "file": "examples/count-limits.ts"
     },
     {
       "id": "evt:Registered",
       "lane": "event",
       "label": "Registered",
-      "col": 4.5,
-      "schema": "email: string"
+      "col": 6.0,
+      "schema": "email: string\nemailStream: string",
+      "file": "examples/unique-values.ts"
     },
     {
       "id": "evt:EmailChanged",
       "lane": "event",
       "label": "EmailChanged",
-      "col": 6,
-      "schema": "email: string"
+      "col": 7.5,
+      "schema": "email: string\nemailStream: string",
+      "file": "examples/unique-values.ts"
     },
     {
       "id": "evt:EmailTaken",
       "lane": "event",
       "label": "EmailTaken",
-      "col": 7,
+      "col": 8.5,
       "schema": "user: string",
-      "description": "Owned by Email. Commits to email-<address>."
+      "description": "Owned by Email. Commits to email-<address>.",
+      "file": "examples/unique-values.ts"
     },
     {
       "id": "evt:EmailReleased",
       "lane": "event",
       "label": "EmailReleased",
-      "col": 8,
-      "schema": "",
-      "description": "Owned by Email. Frees the old address when the user changes it."
+      "col": 9.5,
+      "schema": "{}",
+      "description": "Owned by Email. Frees the old address when the user changes it.",
+      "file": "examples/unique-values.ts"
     },
     {
       "id": "actor:guest",
       "lane": "actor",
       "actor": "person",
       "label": "Guest",
-      "col": 9.5
+      "col": 11.0
     },
     {
       "id": "action:Book",
       "lane": "action",
       "label": "Book",
-      "col": 9.5,
-      "preconditions": ["the room is free at that time"],
-      "schema": "room: string\nfrom: time\nto: time",
-      "description": ".on({ Book }).loads(Room, (data) => `room-${data.room}`, [\"RoomReserved\"]). Loads the room's reservations before checking the slot.",
+      "col": 11.0,
+      "schema": "from: number\nto: number\nroom: string",
+      "description": ".on({ Book }, { maxRetries: 4 }).loads(Room, (data) => `room-${data.room}`, [\"RoomReserved\"]). No precondition: Room's schema refuses an overlap, on every fold, whichever action emits.",
       "loads": [
         {
           "state": "state:Room",
           "events": ["evt:RoomReserved"]
         }
-      ]
+      ],
+      "file": "examples/state-schemas.ts"
     },
     {
       "id": "state:Booking",
       "lane": "state",
       "label": "Booking",
       "note": "room · slot",
-      "span": [9, 10],
-      "schema": "room: string\nslot: string",
+      "span": [10.5, 11.5],
+      "schema": "from: number\nto: number\nroom: string",
       "description": "One booking per guest request."
     },
     {
@@ -207,61 +220,64 @@
       "lane": "state",
       "label": "Room",
       "note": "reserved slots",
-      "span": [11, 11.5],
-      "schema": "reserved: Slot[]",
-      "invariants": ["no two reservations overlap"],
+      "span": [12.5, 13.0],
+      "schema": "slots: {\n  from: number\n  to: number\n}[]",
+      "invariants": ["the room is double-booked"],
       "description": "One stream per room. Its schema refuses overlapping intervals on every fold."
     },
     {
       "id": "evt:Booked",
       "lane": "event",
       "label": "Booked",
-      "col": 9.5,
-      "schema": "room: string\nslot: string"
+      "col": 11.0,
+      "schema": "from: number\nto: number\nroom: string",
+      "file": "examples/state-schemas.ts"
     },
     {
       "id": "evt:RoomReserved",
       "lane": "event",
       "label": "RoomReserved",
-      "col": 11.25,
-      "schema": "slot: string",
-      "description": "Owned by Room. Book may emit it because its .loads lists it."
+      "col": 12.75,
+      "schema": "from: number\nto: number",
+      "description": "Owned by Room. Book may emit it because its .loads lists it.",
+      "file": "examples/state-schemas.ts"
     },
     {
       "id": "actor:customer",
       "lane": "actor",
       "actor": "person",
       "label": "Customer",
-      "col": 13
+      "col": 14.5
     },
     {
-      "id": "action:Transfer",
+      "id": "action:TransferMoney",
       "lane": "action",
-      "label": "Transfer",
-      "col": 13,
+      "label": "TransferMoney",
+      "col": 14.5,
       "preconditions": ["enough funds"],
-      "schema": "from: string\nto: string\namount: number",
+      "schema": "amount: number > 0\nfrom: string\nto: string",
       "description": ".loads(Account, (d) => d.from, [\"Debited\"], \"from\") and .loads(Account, (d) => d.to, [\"Credited\"], \"to\"). The same state loaded twice, each load named.",
       "loads": [
         {
           "state": "state:Account",
-          "events": ["evt:Debited"],
-          "name": "from"
+          "name": "from",
+          "events": ["evt:Debited"]
         },
         {
           "state": "state:Account",
-          "events": ["evt:Credited"],
-          "name": "to"
+          "name": "to",
+          "events": ["evt:Credited"]
         }
-      ]
+      ],
+      "file": "examples/several-streams.ts"
     },
     {
       "id": "state:Transfer",
       "lane": "state",
       "label": "Transfer",
       "note": "from · to · amount",
-      "span": [12.5, 13.5],
-      "schema": "from: string\nto: string\namount: number",
+      "span": [14.0, 15.0],
+      "schema": "amount: number > 0\nfrom: string\nto: string",
       "description": "One stream per transfer."
     },
     {
@@ -269,8 +285,8 @@
       "lane": "state",
       "label": "Account",
       "note": "balance",
-      "span": [14.5, 16],
-      "schema": "balance: number",
+      "span": [16.0, 17.5],
+      "schema": "balance: number ≥ 0",
       "invariants": ["balance ≥ 0"],
       "description": "One stream per account."
     },
@@ -278,54 +294,58 @@
       "id": "evt:Transferred",
       "lane": "event",
       "label": "Transferred",
-      "col": 13,
-      "schema": "from: string\nto: string\namount: number"
+      "col": 14.5,
+      "schema": "amount: number > 0\nfrom: string\nto: string",
+      "file": "examples/several-streams.ts"
     },
     {
       "id": "evt:Debited",
       "lane": "event",
       "label": "Debited",
-      "col": 14.75,
-      "schema": "amount: number",
-      "description": "Owned by Account. Listed on the \"from\" load."
+      "col": 16.25,
+      "schema": "amount: number > 0",
+      "description": "Owned by Account. Listed on the \"from\" load.",
+      "file": "examples/several-streams.ts"
     },
     {
       "id": "evt:Credited",
       "lane": "event",
       "label": "Credited",
-      "col": 15.75,
-      "schema": "amount: number",
-      "description": "Owned by Account. Listed on the \"to\" load."
+      "col": 17.25,
+      "schema": "amount: number > 0",
+      "description": "Owned by Account. Listed on the \"to\" load.",
+      "file": "examples/several-streams.ts"
     },
     {
       "id": "actor:shopper",
       "lane": "actor",
       "actor": "person",
       "label": "Shopper",
-      "col": 17.75
+      "col": 19.25
     },
     {
       "id": "action:ReserveItem",
       "lane": "action",
       "label": "ReserveItem",
-      "col": 17.75,
+      "col": 19.25,
       "preconditions": ["enough stock"],
-      "schema": "product: string\nqty: number",
+      "schema": "qty: number\nproduct: string\nexpiresAt: number",
       "description": ".loads(Product, (data) => data.product, [\"StockReserved\"]). Loads the product's stock before checking it.",
       "loads": [
         {
           "state": "state:Product",
           "events": ["evt:StockReserved"]
         }
-      ]
+      ],
+      "file": "examples/state-schemas.ts"
     },
     {
       "id": "state:Order",
       "lane": "state",
       "label": "Order",
       "note": "items",
-      "span": [17.25, 18.25],
-      "schema": "items: Item[]",
+      "span": [18.75, 19.75],
+      "schema": "product: string\nqty: number\nstatus: \"new\" | \"held\" | \"confirmed\" | \"expired\"",
       "description": "One stream per order."
     },
     {
@@ -333,8 +353,8 @@
       "lane": "state",
       "label": "Product",
       "note": "stock",
-      "span": [19.25, 19.75],
-      "schema": "stock: number",
+      "span": [20.75, 21.25],
+      "schema": "stock: number ≥ 0\nprice: number",
       "invariants": ["stock ≥ 0"],
       "description": "One stream per product."
     },
@@ -342,87 +362,127 @@
       "id": "evt:ItemReserved",
       "lane": "event",
       "label": "ItemReserved",
-      "col": 17.75,
-      "schema": "product: string\nqty: number"
+      "col": 19.25,
+      "schema": "qty: number\nproduct: string\nexpiresAt: number",
+      "file": "examples/state-schemas.ts"
     },
     {
       "id": "evt:StockReserved",
       "lane": "event",
       "label": "StockReserved",
-      "col": 19.5,
+      "col": 21.0,
       "schema": "qty: number",
-      "description": "Owned by Product. ReserveItem may emit it because its .loads lists it."
-    },
-    {
-      "id": "action:Waitlist",
-      "lane": "action",
-      "label": "Waitlist",
-      "col": 0,
-      "preconditions": ["the course is full"],
-      "schema": "course: string\nstudent: string",
-      "loads": [
-        {
-          "state": "state:Seats",
-          "events": []
-        }
-      ],
-      "description": ".on({ Waitlist }).loads(Seats, (data) => `course-${data.course}`). No events listed, so it's a read: the rule sees Seats, but Seats isn't part of the commit, and isn't checked when it lands."
-    },
-    {
-      "id": "evt:Waitlisted",
-      "lane": "event",
-      "label": "Waitlisted",
-      "col": 0
+      "description": "Owned by Product. ReserveItem may emit it because its .loads lists it.",
+      "file": "examples/state-schemas.ts"
     },
     {
       "id": "actor:member",
       "lane": "actor",
       "actor": "person",
       "label": "Member",
-      "col": 22
+      "col": 24.75
     },
     {
       "id": "action:Logout",
       "lane": "action",
       "label": "Logout",
-      "col": 22,
-      "schema": "user: string",
+      "col": 24.75,
+      "schema": "{}",
       "loads": [
         {
           "state": "state:UserSessions",
-          "events": ["evt:SessionEnded"]
+          "events": ["evt:SessionClosed"]
         }
       ],
-      "description": ".on({ Logout }).loads(UserSessions, (data) => `sessions-${data.user}`, [\"SessionEnded\"]). Frees a slot on the user's count in the same commit that ends the session. Freeing is an action: app.close can't append to another stream."
+      "description": ".on({ Logout }, { maxRetries: 4 }).loads(UserSessions, (_, state) => sessionsStream(state.user), [\"SessionClosed\"]). Frees a slot on the user's count in the same commit that ends the session. Freeing is an action: app.close runs none.",
+      "file": "examples/count-limits.ts",
+      "preconditions": ["the session is open"]
     },
     {
       "id": "state:Session",
       "lane": "state",
       "label": "Session",
-      "note": "user · active",
-      "span": [21.5, 22.5],
-      "description": "One stream per login."
+      "note": "user · open",
+      "span": [24.25, 25.25],
+      "description": "One stream per login.",
+      "schema": "user: string\nopen: boolean"
     },
     {
       "id": "state:UserSessions",
       "lane": "state",
       "label": "UserSessions",
       "note": "active",
-      "span": [23.5, 24.5],
-      "description": "One stream per user, counting active sessions. Its schema caps the count on every fold."
+      "span": [26.25, 27.25],
+      "description": "One stream per user, counting active sessions. Its schema caps the count at 3 on every fold.",
+      "schema": "active: number ≥ 0, ≤ 3"
     },
     {
       "id": "evt:LoggedOut",
       "lane": "event",
       "label": "LoggedOut",
-      "col": 22
+      "col": 24.75,
+      "schema": "{}",
+      "file": "examples/count-limits.ts"
     },
     {
-      "id": "evt:SessionEnded",
+      "id": "evt:SessionClosed",
       "lane": "event",
-      "label": "SessionEnded",
-      "col": 24,
-      "description": "Owned by UserSessions. Logout may emit it because its .loads lists it."
+      "label": "SessionClosed",
+      "col": 26.75,
+      "description": "Owned by UserSessions. Logout may emit it because its .loads lists it.",
+      "schema": "{}",
+      "file": "examples/count-limits.ts"
+    },
+    {
+      "id": "state:Student",
+      "lane": "state",
+      "label": "Student",
+      "note": "courses",
+      "span": [4, 5],
+      "description": "One stream per student. Its schema caps the courses at 3, whichever action emits.",
+      "schema": "courses: number ≥ 0, ≤ 3"
+    },
+    {
+      "id": "evt:CourseAdded",
+      "lane": "event",
+      "label": "CourseAdded",
+      "col": 4.5,
+      "description": "Owned by Student. Enroll may emit it because its .loads lists it.",
+      "schema": "{}",
+      "file": "examples/count-limits.ts"
+    },
+    {
+      "id": "action:AddToCart",
+      "lane": "action",
+      "label": "AddToCart",
+      "col": 22.75,
+      "description": ".on({ AddToCart }).loads(Product, (data) => data.product). No events listed, so it's a read: the rule sees the product, but its stream isn't part of the commit, and isn't checked when it lands.",
+      "schema": "product: string\nprice: number",
+      "file": "examples/reads.ts",
+      "preconditions": ["the displayed price is current"],
+      "loads": [
+        {
+          "state": "state:Product",
+          "events": []
+        }
+      ]
+    },
+    {
+      "id": "state:Cart",
+      "lane": "state",
+      "label": "Cart",
+      "note": "total",
+      "span": [22.25, 23.25],
+      "description": "One stream per cart.",
+      "schema": "total: number"
+    },
+    {
+      "id": "evt:ItemAdded",
+      "lane": "event",
+      "label": "ItemAdded",
+      "col": 22.75,
+      "schema": "product: string\nprice: number",
+      "file": "examples/reads.ts"
     }
   ],
   "edges": [
@@ -480,18 +540,18 @@
     },
     {
       "from": "actor:customer",
-      "to": "action:Transfer"
+      "to": "action:TransferMoney"
     },
     {
-      "from": "action:Transfer",
+      "from": "action:TransferMoney",
       "to": "evt:Transferred"
     },
     {
-      "from": "action:Transfer",
+      "from": "action:TransferMoney",
       "to": "evt:Debited"
     },
     {
-      "from": "action:Transfer",
+      "from": "action:TransferMoney",
       "to": "evt:Credited"
     },
     {
@@ -507,14 +567,6 @@
       "to": "evt:StockReserved"
     },
     {
-      "from": "actor:student",
-      "to": "action:Waitlist"
-    },
-    {
-      "from": "action:Waitlist",
-      "to": "evt:Waitlisted"
-    },
-    {
       "from": "actor:member",
       "to": "action:Logout"
     },
@@ -524,14 +576,26 @@
     },
     {
       "from": "action:Logout",
-      "to": "evt:SessionEnded"
+      "to": "evt:SessionClosed"
+    },
+    {
+      "from": "action:Enroll",
+      "to": "evt:CourseAdded"
+    },
+    {
+      "from": "actor:shopper",
+      "to": "action:AddToCart"
+    },
+    {
+      "from": "action:AddToCart",
+      "to": "evt:ItemAdded"
     }
   ],
   "scenarios": [
     {
-      "title": "One action, two streams",
+      "title": "One action, three streams",
       "stream": "enrollment-ann-c1",
-      "summary": "Ann enrolls in course c1. Enroll loads the course's Seats, checks its rule with both states, and commits Enrolled and SeatTaken in one step.",
+      "summary": "Ann enrolls in course c1. Enroll loads the course's Seats and her Student, checks its rule, and commits to all three streams in one step.",
       "steps": [
         {
           "at": "state:Seats",
@@ -539,18 +603,18 @@
         },
         {
           "at": "action:Enroll",
-          "say": "In Act 2.0, Enroll adds one line: `.loads(Seats, course, [\"SeatTaken\"])`, and `{ maxRetries: 1 }` so a lost race is decided again. It loads the course's Seats for its decision, and may commit **SeatTaken** to it."
+          "say": "In Act 2.0, Enroll adds `.loads(Seats, course, [\"SeatTaken\"])` and `.loads(Student, student, [\"CourseAdded\"])`. It loads them for its decision, and may commit those events to them."
         },
         {
           "from": "actor:student",
           "to": "action:Enroll",
-          "say": "**Ann** enrolls in course **c1**. Enroll loads two streams: her own enrollment, new, and through `.loads`, the course's **Seats** at v11, with 12 of 30 taken.",
-          "loads": ["course-c1"]
+          "say": "**Ann** enrolls in course **c1**. Enroll loads three streams: her own enrollment, new, the course's **Seats** at v11 with 12 of 30 taken, and her **Student**.",
+          "loads": ["course-c1", "student-ann"]
         },
         {
           "from": "action:Enroll",
           "to": "evt:Enrolled",
-          "say": "The rule \"the course has a free seat\" passes with Seats in hand. Then the commit: **each stream is checked at the version it was loaded at**, and only then do **Enrolled** and **SeatTaken** land together.",
+          "say": "The rule \"the course has a free seat\" passes with Seats in hand. Then the commit: **each stream is checked at the version it was loaded at**, and only then do **Enrolled**, **SeatTaken** and **CourseAdded** land together.",
           "data": {
             "course": "c1",
             "student": "ann"
@@ -562,12 +626,20 @@
           "to": "evt:SeatTaken",
           "stream": "course-c1",
           "say": "...and **SeatTaken** to **course-c1**, in the same commit. Both streams were checked against the versions Enroll loaded, so nothing it decided on had moved.",
-          "data": {
-            "student": "ann"
-          },
+          "data": {},
           "commit": "enroll-ann",
           "patch": {
             "taken": 13
+          }
+        },
+        {
+          "from": "action:Enroll",
+          "to": "evt:CourseAdded",
+          "stream": "student-ann",
+          "commit": "enroll-ann",
+          "data": {},
+          "patch": {
+            "courses": 1
           }
         },
         {
@@ -595,13 +667,13 @@
           "from": "actor:student",
           "to": "action:Enroll",
           "stream": "enrollment-carla-c1",
-          "loads": ["course-c1"],
+          "loads": ["course-c1", "student-carla"],
           "say": "**Carla** enrolls. Enroll loads her stream and **course-c1** at v28: 29 of 30 taken."
         },
         {
           "from": "actor:student",
           "to": "action:Enroll",
-          "loads": ["course-c1"],
+          "loads": ["course-c1", "student-bob"],
           "say": "At the same moment, **Bob** enrolls. He loads course-c1 at the same **v28**. Each rule passes, on the same last seat."
         },
         {
@@ -620,11 +692,19 @@
           "to": "evt:SeatTaken",
           "stream": "course-c1",
           "commit": "enroll-carla",
-          "data": {
-            "student": "carla"
-          },
+          "data": {},
           "patch": {
             "taken": 30
+          }
+        },
+        {
+          "from": "action:Enroll",
+          "to": "evt:CourseAdded",
+          "stream": "student-carla",
+          "commit": "enroll-carla",
+          "data": {},
+          "patch": {
+            "courses": 1
           }
         },
         {
@@ -632,7 +712,7 @@
           "to": "evt:Enrolled",
           "commit": "enroll-bob",
           "conflict": "course-c1",
-          "say": "Bob's commit expected course-c1 at v28, and it's at v29. **The whole commit fails: nothing lands on either stream**, not even on Bob's own, which didn't move (`ConcurrencyError`)."
+          "say": "Bob's commit expected course-c1 at v28, and it's at v29. **The whole commit fails: nothing lands on any stream**, not even on Bob's own, which didn't move (`ConcurrencyError`)."
         },
         {
           "from": "action:Enroll",
@@ -642,9 +722,16 @@
           "conflict": "course-c1"
         },
         {
+          "from": "action:Enroll",
+          "to": "evt:CourseAdded",
+          "stream": "student-bob",
+          "commit": "enroll-bob",
+          "conflict": "course-c1"
+        },
+        {
           "at": "action:Enroll",
-          "loads": ["course-c1"],
-          "say": "Enroll's `maxRetries: 1` runs the action again with **fresh loads**: course-c1 at v29, 30 of 30."
+          "loads": ["course-c1", "student-bob"],
+          "say": "Enroll's `maxRetries: 8` runs the action again with **fresh loads**: course-c1 at v29, 30 of 30."
         },
         {
           "from": "action:Enroll",
@@ -670,37 +757,40 @@
     },
     {
       "title": "A read isn't guarded",
-      "stream": "enrollment-dee-c1",
-      "summary": "Dee joins the waitlist of a full course. Waitlist reads Seats for its rule, but lists no events on the load, so Seats stays outside the commit.",
+      "stream": "cart-1",
+      "summary": "A customer adds an item at the price on the page. AddToCart reads the product for its rule, but lists no events on the load, so the product stays outside the commit.",
       "initials": {
-        "course-c1": {
-          "state": "Seats",
+        "product-p7": {
+          "state": "Product",
           "data": {
-            "taken": 30,
-            "capacity": 30
+            "stock": 3,
+            "price": 10
           },
-          "version": 29
+          "version": 4
         }
       },
       "steps": [
         {
-          "from": "actor:student",
-          "to": "action:Waitlist",
-          "loads": ["course-c1"],
-          "say": "**Dee** joins the waitlist. Waitlist loads her stream and reads **course-c1**: `.loads(Seats, course)`, with no events listed. That's the muted line: **a read**."
+          "from": "actor:shopper",
+          "to": "action:AddToCart",
+          "loads": ["product-p7"],
+          "say": "A shopper adds **product p-7** at the **10** they saw. AddToCart loads the cart and reads the product: `.loads(Product, (data) => data.product)`, with no events listed. That's the muted line: **a read**."
         },
         {
-          "from": "action:Waitlist",
-          "to": "evt:Waitlisted",
-          "commit": "waitlist-dee",
-          "say": "The commit covers only what it appends to: **her own stream**. Seats isn't checked, so if a seat frees up just now, Waitlisted still lands.",
+          "from": "action:AddToCart",
+          "to": "evt:ItemAdded",
+          "commit": "cart-add",
+          "say": "The rule \"the displayed price is current\" passes. The commit covers only what it appends to: **the cart**. The product isn't checked, so if the price changes right now, ItemAdded still lands.",
           "data": {
-            "course": "c1",
-            "student": "dee"
+            "product": "p-7",
+            "price": 10
+          },
+          "patch": {
+            "total": 10
           }
         },
         {
-          "at": "state:Seats",
+          "at": "state:Product",
           "say": "That's the trade: a read costs no conflicts, but guards nothing. A decision that must be refused when a stream moves appends to it."
         }
       ]
@@ -727,7 +817,11 @@
           "data": {
             "email": "ann@x.io"
           },
-          "commit": "register-ann"
+          "commit": "register-ann",
+          "patch": {
+            "emailStream": "email-7f3a",
+            "active": true
+          }
         },
         {
           "from": "action:Register",
@@ -748,14 +842,15 @@
       "title": "Taken, then changed",
       "stream": "user-77",
       "initial": {
-        "email": "ben@y.io"
+        "emailStream": "email-c41d",
+        "active": true
       },
       "summary": "Ben tries Ann's address and is refused. Then he changes to a free one: the old address is freed and the new one taken in one commit.",
       "steps": [
         {
           "from": "actor:user",
           "to": "action:ChangeEmail",
-          "say": "**Ben** tries to change his email to **ann@x.io**. ChangeEmail loads Email twice, named `old` and `new`: his own address, and Ann's, held by user-42.",
+          "say": "**Ben** tries to change his email to **ann@x.io**. ChangeEmail loads Email twice, named `current` and `next`: his own address, and Ann's, held by user-42.",
           "loads": ["email-c41d", "email-7f3a"]
         },
         {
@@ -777,7 +872,10 @@
           "data": {
             "email": "ben@z.io"
           },
-          "commit": "change-ben"
+          "commit": "change-ben",
+          "patch": {
+            "emailStream": "email-92be"
+          }
         },
         {
           "from": "action:ChangeEmail",
@@ -841,7 +939,7 @@
       "steps": [
         {
           "at": "state:Room",
-          "say": "The rule: no two bookings of a room overlap. Each **Room** has a stream of its own; each booking another. **Book** loads the room it books."
+          "say": "The rule: no two bookings of a room overlap. Each **Room** has a stream of its own, and its schema forbids overlapping slots. **Book** loads the room it books."
         },
         {
           "from": "actor:guest",
@@ -881,8 +979,8 @@
         {
           "from": "action:Book",
           "to": "evt:Booked",
-          "say": "10:30 overlaps Dana's slot, so the rule refuses Eli. Room's schema would refuse an overlap too, whichever action tried.",
-          "reject": "the room is free at that time"
+          "say": "10:30 overlaps Dana's slot. No precondition says so: **Room's schema refuses the fold**, whichever action tried, and nothing is written (`ValidationError`).",
+          "reject": "the room is double-booked"
         }
       ]
     },
@@ -909,16 +1007,16 @@
       "steps": [
         {
           "at": "state:Account",
-          "say": "The rule: a transfer debits one account and credits another, both or neither. **Transfer** loads **Account** twice, naming the loads `from` and `to`."
+          "say": "The rule: a transfer debits one account and credits another, both or neither. **TransferMoney** loads **Account** twice, naming the loads `from` and `to`."
         },
         {
           "from": "actor:customer",
-          "to": "action:Transfer",
-          "say": "Move **50** from account **A** (80) to account **B** (20). Transfer loads its own stream and Account twice, named `from` and `to`.",
+          "to": "action:TransferMoney",
+          "say": "Move **50** from account **A** (80) to account **B** (20). TransferMoney loads its own stream and Account twice, named `from` and `to`.",
           "loads": ["acct-a", "acct-b"]
         },
         {
-          "from": "action:Transfer",
+          "from": "action:TransferMoney",
           "to": "evt:Transferred",
           "commit": "t-901",
           "say": "\"Enough funds\" holds. One commit, three streams, each checked at its loaded version: **Transferred**, **Debited** to acct-a, **Credited** to acct-b. A debit without its credit can't happen.",
@@ -929,7 +1027,7 @@
           }
         },
         {
-          "from": "action:Transfer",
+          "from": "action:TransferMoney",
           "to": "evt:Debited",
           "commit": "t-901",
           "stream": "acct-a",
@@ -941,7 +1039,7 @@
           }
         },
         {
-          "from": "action:Transfer",
+          "from": "action:TransferMoney",
           "to": "evt:Credited",
           "commit": "t-901",
           "stream": "acct-b",
@@ -954,13 +1052,13 @@
         },
         {
           "from": "actor:customer",
-          "to": "action:Transfer",
+          "to": "action:TransferMoney",
           "stream": "transfer-902",
           "say": "Now move **100** from A, which holds 30.",
           "loads": ["acct-a", "acct-b"]
         },
         {
-          "from": "action:Transfer",
+          "from": "action:TransferMoney",
           "to": "evt:Transferred",
           "say": "The rule refuses it. Nothing is debited, nothing is credited.",
           "reject": "enough funds"
@@ -1034,7 +1132,7 @@
       "summary": "A user holds 3 of 3 sessions. Logging out ends the session and frees a slot in one commit, so a slot is never lost to a crash in between.",
       "initial": {
         "user": "user-42",
-        "active": true
+        "open": true
       },
       "initials": {
         "sessions-42": {
@@ -1050,35 +1148,31 @@
           "from": "actor:member",
           "to": "action:Logout",
           "loads": ["sessions-42"],
-          "say": "**Ann** logs out. Logout loads her session and **sessions-42**: 3 of 3 slots in use."
+          "say": "**Ann** logs out. Logout loads her session and **sessions-42**: 3 of 3 slots in use. The rule: \"the session is open\"."
         },
         {
           "from": "action:Logout",
           "to": "evt:LoggedOut",
           "commit": "logout",
-          "say": "One commit: **LoggedOut** ends the session, **SessionEnded** frees the slot. Both land or neither does, so there's no moment when a slot is lost.",
-          "data": {
-            "user": "user-42"
-          },
+          "say": "One commit: **LoggedOut** ends the session, **SessionClosed** frees the slot. Both land or neither does, so there's no moment when a slot is lost.",
+          "data": {},
           "patch": {
-            "active": false
+            "open": false
           }
         },
         {
           "from": "action:Logout",
-          "to": "evt:SessionEnded",
+          "to": "evt:SessionClosed",
           "commit": "logout",
           "stream": "sessions-42",
-          "data": {
-            "session": "session-5512"
-          },
+          "data": {},
           "patch": {
             "active": 2
           }
         },
         {
           "at": "state:UserSessions",
-          "say": "Freeing is an **action**, on purpose. `app.close` retires a stream without running any action, so it can't append to another stream: free the slot first, then close."
+          "say": "Freeing is an **action**, on purpose. `app.close` runs none, so it can't append to another stream: free the slot first, then close."
         }
       ]
     }
