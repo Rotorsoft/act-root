@@ -2,7 +2,7 @@ import { sandbox } from "@rotorsoft/act/test";
 import { Chance } from "chance";
 import { builder, tenantCorrelator } from "../src/bootstrap.js";
 import { assignAgent } from "../src/services/agent.js";
-import { AgentLoad, agentStream, MAX_OPEN_TICKETS } from "../src/ticket.js";
+import { Agent, agentStream, MAX_OPEN_TICKETS } from "../src/ticket.js";
 import { makeActions, target } from "./actions.js";
 
 vi.mock("../src/services/agent.js", async (original) => ({
@@ -53,10 +53,10 @@ describe("the assign reaction with a full agent", () => {
 
     expect(vi.mocked(assignAgent)).toHaveBeenCalledTimes(2);
     expect((await app.load("Ticket", t.stream)).state.agentId).toBe(free);
-    expect((await app.load(AgentLoad, agentStream(full))).state.open).toBe(
+    expect((await app.load(Agent, agentStream(full))).state.open).toBe(
       MAX_OPEN_TICKETS
     );
-    expect((await app.load(AgentLoad, agentStream(free))).state.open).toBe(1);
+    expect((await app.load(Agent, agentStream(free))).state.open).toBe(1);
     await dispose();
   });
 });

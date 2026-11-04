@@ -20,6 +20,7 @@ bootstrap.ts          → act().withSlice(Creation).withSlice(Messaging).withSli
 ticket-creation.ts    → TicketCreation state + TicketCreationSlice
 ticket-messaging.ts   → TicketMessaging state + TicketMessagingSlice
 ticket-operations.ts  → TicketOperations state + TicketOpsSlice
+agent.ts              → Agent state + AgentSlice (open tickets per agent)
 ticket-timers.ts      → TicketTimersSlice (deferred escalate / reassign / close timers)
 ticket-projections.ts → TicketProjection (read model)
 ticket-preconditions.ts  → Business rules (preconditions)
@@ -195,12 +196,12 @@ Reassignment is a recurring chain. Both `TicketEscalated` and `TicketReassigned`
 
 ### A Limit Across Streams
 
-An agent holds at most 5 open tickets. The count is a state of its own, `AgentLoad`, one stream per agent, whose schema holds the limit. Assigning, reassigning and closing a ticket load it, and the event lands in the same commit as the ticket's own:
+An agent holds at most 5 open tickets. The count is a state of its own, `Agent`, one stream per agent, whose schema holds the limit. Assigning, reassigning and closing a ticket load it, and the event lands in the same commit as the ticket's own:
 
 ```typescript no-check
 .on({ ReassignTicket }, { maxRetries: 4 })
-.loads(AgentLoad, (_, state) => agentStream(state.agentId), ["TicketDropped"], "current")
-.loads(AgentLoad, (data) => agentStream(data.agentId), ["TicketTaken"], "next")
+.loads(Agent, (_, state) => agentStream(state.agentId), ["TicketDropped"], "current")
+.loads(Agent, (data) => agentStream(data.agentId), ["TicketTaken"], "next")
 .requires([mustBeOpen, mustBeEscalated, mustBeDueForReassignment, mustNotBeAcknowledgedByAgent])
 .emit((data, { state }) =>
   state.agentId
@@ -227,6 +228,7 @@ export const app = act()
   .withSlice(TicketCreationSlice)
   .withSlice(TicketMessagingSlice)
   .withSlice(TicketOpsSlice)
+  .withSlice(AgentSlice)
   .withSlice(TicketTimersSlice)
   .withProjection(TicketProjection)
   .build();

@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { slice, state } from "@rotorsoft/act";
-import { AgentLoad, agentStream } from "./agent-load.js";
+import { Agent, agentStream } from "./agent.js";
 import {
   AssignTicket,
   EscalateTicket,
@@ -38,17 +38,12 @@ export const TicketOperations = state({ Ticket: TicketOperationsState })
 
   .on({ AssignTicket }, { maxRetries: 4 })
   .loads(
-    AgentLoad,
+    Agent,
     (_, state) => agentStream(state.agentId),
     ["TicketDropped"],
     "current"
   )
-  .loads(
-    AgentLoad,
-    (data) => agentStream(data.agentId),
-    ["TicketTaken"],
-    "next"
-  )
+  .loads(Agent, (data) => agentStream(data.agentId), ["TicketTaken"], "next")
   .requires([mustBeOpen])
   .emit((data, { state }) =>
     state.agentId
@@ -82,17 +77,12 @@ export const TicketOperations = state({ Ticket: TicketOperationsState })
   // Moves the ticket between two agents in one commit.
   .on({ ReassignTicket }, { maxRetries: 4 })
   .loads(
-    AgentLoad,
+    Agent,
     (_, state) => agentStream(state.agentId),
     ["TicketDropped"],
     "current"
   )
-  .loads(
-    AgentLoad,
-    (data) => agentStream(data.agentId),
-    ["TicketTaken"],
-    "next"
-  )
+  .loads(Agent, (data) => agentStream(data.agentId), ["TicketTaken"], "next")
   .requires([
     mustBeOpen,
     mustBeEscalated,
@@ -117,7 +107,6 @@ export const TicketOperations = state({ Ticket: TicketOperationsState })
 // --- Slice ---
 // prettier-ignore
 export const TicketOpsSlice = slice()
-  .withState(AgentLoad)
   .withState(TicketOperations)
   .on("TicketEscalationRequested")
   .do(async function escalate(event, _stream, app) {

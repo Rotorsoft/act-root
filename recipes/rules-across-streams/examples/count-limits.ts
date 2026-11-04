@@ -34,8 +34,8 @@ export const Seats = state({
   .build();
 
 /** This limit never moves, so the schema holds it whichever action emits. */
-export const StudentLoad = state({
-  StudentLoad: z.object({ courses: z.number().min(0).max(3) }),
+export const Student = state({
+  Student: z.object({ courses: z.number().min(0).max(3) }),
 })
   .init(() => ({ courses: 0 }))
   .emits({ CourseAdded: ZodEmpty, CourseDropped: ZodEmpty })
@@ -61,7 +61,7 @@ export const Enrollment = state({
   })
   .on({ Enroll }, { maxRetries: 8 })
   .loads(Seats, (data) => courseStream(data.course), ["SeatTaken"])
-  .loads(StudentLoad, (data) => studentStream(data.student), ["CourseAdded"])
+  .loads(Student, (data) => studentStream(data.student), ["CourseAdded"])
   .requires([
     {
       description: "the course has a free seat",
@@ -75,9 +75,7 @@ export const Enrollment = state({
   ])
   .on({ Drop: ZodEmpty }, { maxRetries: 8 })
   .loads(Seats, (_, state) => courseStream(state.course), ["SeatFreed"])
-  .loads(StudentLoad, (_, state) => studentStream(state.student), [
-    "CourseDropped",
-  ])
+  .loads(Student, (_, state) => studentStream(state.student), ["CourseDropped"])
   .requires([
     {
       description: "the student is enrolled",

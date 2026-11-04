@@ -13,7 +13,7 @@ Rules that span streams, each as a small state: one action loads the states its 
 | | A token redeemed once | [`unique-values.ts`](examples/unique-values.ts) | a precondition over `Token` |
 | | One review per customer per product | [`unique-values.ts`](examples/unique-values.ts) | a precondition over `Review` |
 | A count limit | Course capacity, which can be lowered | [`count-limits.ts`](examples/count-limits.ts) | a precondition over `Seats` |
-| | A student's maximum courses | [`count-limits.ts`](examples/count-limits.ts) | the `StudentLoad` schema |
+| | A student's maximum courses | [`count-limits.ts`](examples/count-limits.ts) | the `Student` schema |
 | | Sessions per user, freed at logout or by a timer | [`count-limits.ts`](examples/count-limits.ts) | the `UserSessions` schema |
 | | Gapless invoice numbers | [`count-limits.ts`](examples/count-limits.ts) | the version check on `InvoiceCounter` |
 | Another state's schema | Room booking, no overlap | [`state-schemas.ts`](examples/state-schemas.ts) | the `Room` schema |

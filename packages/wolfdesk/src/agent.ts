@@ -1,4 +1,4 @@
-import { state, ZodEmpty } from "@rotorsoft/act";
+import { slice, state, ZodEmpty } from "@rotorsoft/act";
 import { z } from "zod";
 
 export const MAX_OPEN_TICKETS = 5;
@@ -8,8 +8,8 @@ export const MAX_OPEN_TICKETS = 5;
  * the limit, whichever action takes a ticket, and a lost race fails the whole
  * commit, so the action's retry sees the new count.
  */
-export const AgentLoad = state({
-  AgentLoad: z.object({ open: z.number().min(0).max(MAX_OPEN_TICKETS) }),
+export const Agent = state({
+  Agent: z.object({ open: z.number().min(0).max(MAX_OPEN_TICKETS) }),
 })
   .init(() => ({ open: 0 }))
   .emits({ TicketTaken: ZodEmpty, TicketDropped: ZodEmpty })
@@ -25,3 +25,6 @@ export const AgentLoad = state({
  */
 export const agentStream = (agentId?: string) =>
   `agent-${agentId ?? "unassigned"}`;
+
+// --- Slice ---
+export const AgentSlice = slice().withState(Agent).build();

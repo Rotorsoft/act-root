@@ -5,7 +5,7 @@ import {
   InvoiceCounter,
   Seats,
   Session,
-  StudentLoad,
+  Student,
   sessionsStream,
   studentStream,
 } from "./index.js";
@@ -68,9 +68,9 @@ describe("course capacity", () => {
     await app.do("Enroll", at("e-1"), enroll("s1"));
     await app.do("Drop", at("e-1"), {});
     expect((await app.load(Seats, courseStream("c1"))).state.taken).toBe(0);
-    expect(
-      (await app.load(StudentLoad, studentStream("s1"))).state.courses
-    ).toBe(0);
+    expect((await app.load(Student, studentStream("s1"))).state.courses).toBe(
+      0
+    );
     await expect(app.do("Drop", at("e-1"), {})).rejects.toThrow(
       "the student is enrolled"
     );

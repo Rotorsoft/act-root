@@ -180,9 +180,9 @@ The scenarios are four patterns. Each scenario ships as a test; the guide and `r
 | A unique value | ★ User email: register, change (two loads of `Email`), deactivate, erase | `Email` at `email-<value>`: `EmailTaken`, `EmailReleased` |
 | | Vehicle plate never reissued | `Plate` at `plate-<value>`: `PlateTaken`; scrapping emits nothing to it |
 | | Idempotency or opt-in token; one review per customer per product | `Token` at `token-<id>`, or `Review` at `review-<customer>-<product>` |
-| A count limit | ★ Course capacity, student max courses | `Seats` at `course-<id>`: `SeatTaken`; `StudentLoad` at `student-<id>`: `CourseAdded` |
+| A count limit | ★ Course capacity, student max courses | `Seats` at `course-<id>`: `SeatTaken`; `Student` at `student-<id>`: `CourseAdded` |
 | | Sessions per user, released on timeout | `UserSessions` at `sessions-<user>`: `SessionOpened`; a deferred reaction emits `SessionClosed` |
-| | Wolfdesk: 5 open tickets per agent | `AgentLoad` at `agent-<id>`: `TicketTaken`, `TicketDropped`; a reassign loads two agents |
+| | Wolfdesk: 5 open tickets per agent | `Agent` at `agent-<id>`: `TicketTaken`, `TicketDropped`; a reassign loads two agents |
 | | Gapless invoice numbers | `InvoiceCounter` at `invoices`: `NumberIssued` |
 | Another state's schema | ★ Room booking, no overlap | `Room` at `room-<id>`: `RoomReserved`; `Room`'s schema forbids overlapping intervals |
 | | Invoice payments | `Invoice` at `invoice-<id>`: `PaymentApplied`; the schema keeps paid ≤ amount |

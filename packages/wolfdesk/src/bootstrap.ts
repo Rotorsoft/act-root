@@ -1,5 +1,6 @@
 import { act, type Correlator } from "@rotorsoft/act";
 import {
+  AgentSlice,
   TicketCreationSlice,
   TicketMessagingSlice,
   TicketOpsSlice,
@@ -42,6 +43,7 @@ export const builder = act()
   .withSlice(TicketCreationSlice)
   .withSlice(TicketMessagingSlice)
   .withSlice(TicketOpsSlice)
+  .withSlice(AgentSlice)
   .withSlice(TicketTimersSlice)
   .withSlice(TicketWebhooksSlice)
   .withProjection(TicketProjection);

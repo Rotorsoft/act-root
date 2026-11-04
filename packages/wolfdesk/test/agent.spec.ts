@@ -6,7 +6,7 @@ import {
 import { sandbox } from "@rotorsoft/act/test";
 import { Chance } from "chance";
 import { builder, tenantCorrelator } from "../src/bootstrap.js";
-import { AgentLoad, agentStream, MAX_OPEN_TICKETS } from "../src/ticket.js";
+import { Agent, agentStream, MAX_OPEN_TICKETS } from "../src/ticket.js";
 import { type Actions, makeActions, target } from "./actions.js";
 
 const chance = new Chance();
@@ -40,7 +40,7 @@ describe("open tickets per agent", () => {
     return t;
   };
   const load = async (agent: string) =>
-    (await app.load(AgentLoad, agentStream(agent))).state.open;
+    (await app.load(Agent, agentStream(agent))).state.open;
 
   it("an agent takes tickets up to the limit, and the next is refused, storing nothing", async () => {
     const agent = chance.guid();

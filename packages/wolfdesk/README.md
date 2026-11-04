@@ -15,7 +15,7 @@ A larger Act example — a help-desk ticketing system adapted from *Learning Dom
 - **Standalone projection** — `TicketProjection` writes a denormalized read model into a Drizzle/SQLite `tickets` table
 - **Deferred-reaction timers** — escalate, reassign, and close-on-inactivity run as `.defer`-based reactions that sleep until each ticket's deadline and act when they wake, with no polling loop and no read-model scan
 - **Every business rule declared** — preconditions in `.requires`, on the state and actor (`mustBeOpen`, `mustBeUser`, the escalation and reassignment rules) and on the payload (`messageExists`, `mustBeReceiver`), shared across slices
-- **A limit across streams** — `AgentLoad` caps an agent at 5 open tickets; assign, reassign and close load it and commit with the ticket (`src/agent-load.ts`)
+- **A limit across streams** — `Agent` caps an agent at 5 open tickets; assign, reassign and close load it and commit with the ticket (`src/agent.ts`)
 - **Correlation tracing** — the demo prints causation chains across reactions
 - **PostgreSQL event store** — uses `@rotorsoft/act-pg` for events, SQLite (libSQL via Drizzle) for the read model
 
@@ -46,6 +46,7 @@ packages/wolfdesk/
 │   ├── ticket-creation.ts       # TicketCreation partial + TicketCreationSlice (Open / Close / Resolve + auto-assign reaction)
 │   ├── ticket-messaging.ts      # TicketMessaging partial + TicketMessagingSlice (Add/Deliver/Ack + delivery reaction)
 │   ├── ticket-operations.ts     # TicketOperations partial + TicketOpsSlice (Assign / Escalate / Reassign + escalate reaction)
+│   ├── agent.ts                 # Agent state + AgentSlice: open tickets per agent
 │   ├── ticket-preconditions.ts  # The business rules (preconditions)
 │   ├── ticket-projections.ts    # TicketProjection — Drizzle/SQLite read model updater
 │   ├── bootstrap.ts             # Composes act() with the slices + the projection
@@ -59,6 +60,8 @@ packages/wolfdesk/
     ├── actions.ts               # Helpers for action dispatch in tests
     ├── ticket.spec.ts           # Single-ticket happy paths
     ├── tickets.spec.ts          # Multi-ticket scenarios + projection asserts + deferred timers
+    ├── agent.spec.ts            # The limit, moves, races
+    ├── agent-assign.spec.ts     # The assign reaction's retry with a full agent
     └── preconditions.spec.ts    # Every rule's refusal
 ```
 
