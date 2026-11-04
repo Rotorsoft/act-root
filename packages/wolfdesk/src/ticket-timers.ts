@@ -29,7 +29,13 @@ const SYS = { id: randomUUID(), name: "ticket-timers" };
  */
 async function reassign_if_due(stream: string, app: IAct) {
   const { state } = await app.load("Ticket", stream);
-  if (state.closedById || !state.escalationId || !state.reassignAfter) return;
+  if (
+    state.closedById ||
+    state.resolvedById ||
+    !state.escalationId ||
+    !state.reassignAfter
+  )
+    return;
   const acked = Object.values(
     state.messages as Record<string, { wasRead?: boolean; from: string }>
   ).some((m) => m.wasRead && m.from === state.userId);

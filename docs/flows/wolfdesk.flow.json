@@ -129,7 +129,7 @@
       "id": "action:AssignTicket",
       "lane": "action",
       "label": "AssignTicket",
-      "preconditions": ["Ticket must be open"],
+      "preconditions": ["Ticket must be open", "Ticket must not be resolved"],
       "file": "packages/wolfdesk/src/ticket-operations.ts",
       "col": 6,
       "slice": "slice:TicketOps",
@@ -271,6 +271,7 @@
       "label": "ReassignTicket",
       "preconditions": [
         "Ticket must be open",
+        "Ticket must not be resolved",
         "Cannot reassign without escalation",
         "Cannot reassign before due date",
         "Cannot reassign after agent acknowledged"
@@ -312,7 +313,13 @@
       "file": "packages/wolfdesk/src/ticket-creation.ts",
       "col": 1,
       "slice": "slice:TicketCreation",
-      "schema": "{}"
+      "schema": "{}",
+      "loads": [
+        {
+          "state": "state:Agent",
+          "events": ["evt:TicketDropped"]
+        }
+      ]
     },
     {
       "id": "evt:TicketResolved",
@@ -491,7 +498,7 @@
       "lane": "event",
       "label": "TicketDropped",
       "col": 11,
-      "description": "Owned by Agent. A reassign, an assign to a new agent, and a close emit it, when the ticket has an agent.",
+      "description": "Owned by Agent. A reassign, an assign to a new agent, a resolve and a close emit it, when the ticket holds a slot. A ticket frees its slot once.",
       "schema": "{}",
       "file": "src/agent.ts",
       "slice": "slice:Agent"
@@ -701,6 +708,10 @@
     {
       "from": "actor:agent",
       "to": "action:AssignTicket"
+    },
+    {
+      "from": "action:MarkTicketResolved",
+      "to": "evt:TicketDropped"
     }
   ],
   "scenarios": [
@@ -920,17 +931,29 @@
         {
           "from": "actor:agent",
           "to": "action:MarkTicketResolved",
-          "say": "**Ada** marks the ticket resolved."
+          "say": "**Ada** marks the ticket resolved.",
+          "loads": ["agent-ada"]
         },
         {
           "from": "action:MarkTicketResolved",
           "to": "evt:TicketResolved",
-          "say": "**TicketResolved** commits and the tickets projection row shows the ticket resolved.",
+          "say": "One commit: **TicketResolved** and **TicketDropped**, which frees Ada's slot. A later close frees nothing, so the slot is freed once. The tickets projection row shows the ticket resolved.",
           "data": {
             "resolvedById": "ada"
           },
           "patch": {
             "resolvedById": "ada"
+          },
+          "commit": "resolve"
+        },
+        {
+          "from": "action:MarkTicketResolved",
+          "to": "evt:TicketDropped",
+          "stream": "agent-ada",
+          "commit": "resolve",
+          "data": {},
+          "patch": {
+            "open": 2
           }
         }
       ],

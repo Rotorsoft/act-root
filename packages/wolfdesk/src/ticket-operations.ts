@@ -20,6 +20,7 @@ import {
   mustBeUser,
   mustNotBeAcknowledgedByAgent,
   mustNotBeEscalated,
+  mustNotBeResolved,
 } from "./ticket-preconditions.js";
 
 // --- State ---
@@ -44,7 +45,7 @@ export const TicketOperations = state({ Ticket: TicketOperationsState })
     "current"
   )
   .loads(Agent, (data) => agentStream(data.agentId), ["TicketTaken"], "next")
-  .requires([mustBeOpen])
+  .requires([mustBeOpen, mustNotBeResolved])
   .emit((data, { state }) =>
     state.agentId
       ? [
@@ -85,6 +86,7 @@ export const TicketOperations = state({ Ticket: TicketOperationsState })
   .loads(Agent, (data) => agentStream(data.agentId), ["TicketTaken"], "next")
   .requires([
     mustBeOpen,
+    mustNotBeResolved,
     mustBeEscalated,
     mustBeDueForReassignment,
     mustNotBeAcknowledgedByAgent,

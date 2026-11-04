@@ -196,7 +196,7 @@ Reassignment is a recurring chain. Both `TicketEscalated` and `TicketReassigned`
 
 ### A Limit Across Streams
 
-An agent holds at most 5 open tickets. The count is a state of its own, `Agent`, one stream per agent, whose schema holds the limit. Assigning, reassigning and closing a ticket load it, and the event lands in the same commit as the ticket's own:
+An agent holds at most 5 open tickets. The count is a state of its own, `Agent`, one stream per agent, whose schema holds the limit. Assigning, reassigning, resolving and closing a ticket load it, and the event lands in the same commit as the ticket's own:
 
 ```typescript no-check
 .on({ ReassignTicket }, { maxRetries: 4 })
@@ -217,7 +217,7 @@ An agent holds at most 5 open tickets. The count is a state of its own, `Agent`,
 )
 ```
 
-A load always names a stream, so a ticket with no agent names a placeholder and emits nothing to it, which makes that load a read. When the agent is full, the assign reaction fails, and its retry (10 seconds later, by default) asks `assignAgent` for another agent. If every attempt finds a full agent, the ticket's reaction stream blocks after 4 tries, and `app.unblock` resumes it. A resolved ticket holds its slot until it closes. [Rules across streams](rules.md) has the pattern on its own.
+A load always names a stream, so a ticket with no agent names a placeholder and emits nothing to it, which makes that load a read. When the agent is full, the assign reaction fails, and its retry (10 seconds later, by default) asks `assignAgent` for another agent. If every attempt finds a full agent, the ticket's reaction stream blocks after 4 tries, and `app.unblock` resumes it. A ticket holds its slot until it's resolved or closed, whichever comes first, and frees it once, so a resolved ticket retired by `.autocloses` doesn't keep one. A resolved ticket can't be assigned or reassigned. [Rules across streams](rules.md) has the pattern on its own.
 
 ### Composition
 

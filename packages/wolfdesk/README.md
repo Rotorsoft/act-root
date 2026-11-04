@@ -15,7 +15,7 @@ A larger Act example — a help-desk ticketing system adapted from *Learning Dom
 - **Standalone projection** — `TicketProjection` writes a denormalized read model into a Drizzle/SQLite `tickets` table
 - **Deferred-reaction timers** — escalate, reassign, and close-on-inactivity run as `.defer`-based reactions that sleep until each ticket's deadline and act when they wake, with no polling loop and no read-model scan
 - **Every business rule declared** — preconditions in `.requires`, on the state and actor (`mustBeOpen`, `mustBeUser`, the escalation and reassignment rules) and on the payload (`messageExists`, `mustBeReceiver`), shared across slices
-- **A limit across streams** — `Agent` caps an agent at 5 open tickets; assign, reassign and close load it and commit with the ticket (`src/agent.ts`)
+- **A limit across streams** — `Agent` caps an agent at 5 open tickets; assign, reassign, resolve and close load it and commit with the ticket (`src/agent.ts`)
 - **Correlation tracing** — the demo prints causation chains across reactions
 - **PostgreSQL event store** — uses `@rotorsoft/act-pg` for events, SQLite (libSQL via Drizzle) for the read model
 

@@ -57,12 +57,13 @@ export const TicketCreation = state({ Ticket: TicketCreationState })
     ];
   })
 
-  // Closing frees the agent's slot, when the ticket has an agent.
+  // A ticket holds its agent's slot until it's resolved or closed, whichever
+  // comes first, so closing frees it only when resolving hasn't.
   .on({ CloseTicket }, { maxRetries: 4 })
   .loads(Agent, (_, state) => agentStream(state.agentId), ["TicketDropped"])
   .requires([mustBeOpen])
   .emit((_, { state }, { actor }) =>
-    state.agentId
+    state.agentId && !state.resolvedById
       ? [
           ["TicketClosed", { closedById: actor.id }],
           ["TicketDropped", {}],
@@ -70,9 +71,17 @@ export const TicketCreation = state({ Ticket: TicketCreationState })
       : ["TicketClosed", { closedById: actor.id }]
   )
 
-  .on({ MarkTicketResolved })
+  .on({ MarkTicketResolved }, { maxRetries: 4 })
+  .loads(Agent, (_, state) => agentStream(state.agentId), ["TicketDropped"])
   .requires([mustBeOpen, mustBeUserOrAgent])
-  .emit((_, __, { actor }) => ["TicketResolved", { resolvedById: actor.id }])
+  .emit((_, { state }, { actor }) =>
+    state.agentId && !state.resolvedById
+      ? [
+          ["TicketResolved", { resolvedById: actor.id }],
+          ["TicketDropped", {}],
+        ]
+      : ["TicketResolved", { resolvedById: actor.id }]
+  )
 
   // Online close-the-books policy (the operator recipes reference this
   // declaration instead of redefining a toy ticket). A ticket retires
@@ -96,6 +105,9 @@ export const TicketCreationSlice = slice()
 
   .on("TicketOpened")
   .do(async function assign(event, _stream, app) {
+    // Resolved before this ran: there's nothing left to assign.
+    const { state } = await app.load("Ticket", event.stream);
+    if (state.resolvedById) return;
     const agent = assignAgent(
       event.stream,
       event.data.supportCategoryId,
