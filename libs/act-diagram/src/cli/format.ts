@@ -6,6 +6,13 @@
  * so test snapshots can drop ANSI escapes if needed.
  */
 
+import {
+  appending_loads,
+  commit_summary,
+  load_label,
+  load_of,
+  read_loads,
+} from "../client/lib/loads.js";
 import type { DomainModel } from "../client/types/index.js";
 import {
   amber,
@@ -64,21 +71,26 @@ export const find_actions_emitting = (
 ): Array<{
   state: string;
   action: string;
+  /** The loaded state whose stream gets the event, when not the action's own. */
+  appends_to?: string;
   file?: string;
   line?: number;
 }> => {
   const out: Array<{
     state: string;
     action: string;
+    appends_to?: string;
     file?: string;
     line?: number;
   }> = [];
   for (const st of model.states) {
     for (const act of st.actions) {
       if (act.emits.includes(event_name)) {
+        const load = load_of(act, event_name);
         out.push({
           state: st.name,
           action: act.name,
+          ...(load ? { appends_to: load_label(load) } : {}),
           file: st.file,
           line: act.line,
         });
@@ -178,8 +190,9 @@ export function format_event(idx: ContractIndex, entry: IndexEntry): string {
   if (producers.length > 0) {
     lines.push("  producers:");
     for (const p of producers) {
+      const stream = p.appends_to ? `, to the ${p.appends_to} stream` : "";
       lines.push(
-        `    - ${pink(p.action)}  ${dim(`(on ${p.state})`)}${file_note(p.file, p.line)}`
+        `    - ${pink(p.action)}  ${dim(`(on ${p.state}${stream})`)}${file_note(p.file, p.line)}`
       );
     }
   } else {
@@ -222,6 +235,17 @@ export function format_action(idx: ContractIndex, entry: IndexEntry): string {
       `  in:      ${dim(loc(state_file, action?.line ?? entry.line))}`
     );
   if (action) {
+    if (action.loads?.length) {
+      lines.push("  loads:");
+      for (const l of appending_loads(action))
+        lines.push(
+          `    - ${amber(load_label(l))}: appends ${l.events.map((e) => orange(e)).join(", ")}`
+        );
+      for (const l of read_loads(action))
+        lines.push(
+          `    - ${amber(load_label(l))}: ${dim("read, not guarded")}`
+        );
+    }
     const preconditions = action.preconditions ?? [];
     if (preconditions.length) {
       lines.push("  preconditions:");
@@ -229,10 +253,20 @@ export function format_action(idx: ContractIndex, entry: IndexEntry): string {
     }
     if (action.emits.length > 0) {
       lines.push("  emits:");
-      for (const e of action.emits) lines.push(`    - ${orange(e)}`);
+      for (const e of action.emits) {
+        const load = load_of(action, e);
+        const to = load ? ` ${dim(`to the ${load_label(load)} stream`)}` : "";
+        lines.push(`    - ${orange(e)}${to}`);
+      }
     } else {
       lines.push(`  emits:   ${dim("(none)")}`);
     }
+    // `commit_summary` needs the owner; a found action always has one.
+    const commit = commit_summary(action, owner_name as string);
+    if (commit)
+      lines.push(
+        `  commit:  ${commit}, ${dim("each guarded by its version at load: all land or none do")}`
+      );
   }
   return lines.join("\n");
 }
@@ -266,7 +300,10 @@ export function format_state(idx: ContractIndex, entry: IndexEntry): string {
     for (const { node, file } of actions) {
       const emits = node.emits.length > 0 ? ` → ${node.emits.join(", ")}` : "";
       const where = show_file && file ? `  ${dim(loc(file, node.line))}` : "";
-      lines.push(`    - ${pink(node.name)}${emits}${where}`);
+      const loads = node.loads?.length
+        ? `  ${dim(`loads ${node.loads.map(load_label).join(", ")}`)}`
+        : "";
+      lines.push(`    - ${pink(node.name)}${emits}${loads}${where}`);
     }
   }
   const events = partials.flatMap((s) =>
@@ -278,6 +315,28 @@ export function format_state(idx: ContractIndex, entry: IndexEntry): string {
       const schema = node.schema ? `  ${dim(node.schema)}` : "";
       const where = show_file && file ? `  ${dim(loc(file, node.line))}` : "";
       lines.push(`    - ${orange(node.name)}${schema}${where}`);
+      // Who else appends to this state's streams, through a load.
+      for (const p of find_actions_emitting(idx.model, node.name))
+        if (p.appends_to && p.state !== entry.name)
+          lines.push(
+            `        ${dim(`also emitted by ${p.state}.${p.action}`)}`
+          );
+    }
+  }
+  const loaded_by = idx.model.states.flatMap((s) =>
+    s.actions.flatMap((a) =>
+      (a.loads ?? [])
+        .filter((l) => l.state === entry.name)
+        .map((l) => ({ state: s.name, action: a.name, load: l }))
+    )
+  );
+  if (loaded_by.length > 0) {
+    lines.push("  loaded by:");
+    for (const { state, action, load } of loaded_by) {
+      const what = load.events.length
+        ? `appends ${load.events.map((e) => orange(e)).join(", ")}`
+        : dim("read, not guarded");
+      lines.push(`    - ${pink(action)} ${dim(`(on ${state})`)}: ${what}`);
     }
   }
   return lines.join("\n");

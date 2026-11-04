@@ -4,7 +4,19 @@
  * Extracted from Diagram.tsx so rendering rules can be unit-tested
  * without React or DOM dependencies.
  */
-import type { ActionNode, DomainModel, StateNode } from "../types/index.js";
+import type {
+  ActionNode,
+  DomainModel,
+  LoadNode,
+  StateNode,
+} from "../types/index.js";
+import {
+  appending_loads,
+  commit_summary,
+  load_label,
+  load_of,
+  read_loads,
+} from "./loads.js";
 
 /** The preconditions guarding an action, or undefined when none. */
 function rules_of(action: ActionNode): string[] | undefined {
@@ -21,7 +33,9 @@ export const W = 100,
   SLICE_PAD = 24,
   SLICE_INNER = 16,
   SLICE_GAP = 20,
-  MARGIN = 30;
+  MARGIN = 30,
+  COMMIT_PAD = 3,
+  COMMIT_GUTTER = 11;
 
 const COLORS = {
   action: { bg: "#1e40af", border: "#3b82f6", text: "#93c5fd" },
@@ -49,8 +63,26 @@ export type N = {
   emits?: string[];
   /** Events this projection handles — shown in projection-node tooltips. */
   handles?: string[];
+  /** A small line on the box: an action's loads, or the loaded stream an event goes to. */
+  note?: string;
+  /** Each `.loads` of this action, as "Seats → SeatTaken" or "Seats (read)". */
+  loads?: string[];
+  /** The action's commit across streams, when it has one. */
+  commit?: string;
+  /** Actions outside this event's state that append it, through a load. */
+  outside?: string[];
+  /** Actions that load this state: "Enrollment.Enroll". */
+  loaded_by?: string[];
 };
 export type E = { from: Pos; to: Pos; color: string; dash?: boolean };
+/** The events of one commit across streams, drawn as one unit. */
+export type CommitBox = {
+  label: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+};
 export type Box = {
   label: string;
   x: number;
@@ -63,6 +95,7 @@ export type Layout = {
   ns: N[];
   es: E[];
   boxes: Box[];
+  commits: CommitBox[];
   minX: number;
   minY: number;
   width: number;
@@ -276,10 +309,117 @@ function place_chain(
 }
 
 // ── Layout computation ───────────────────────────────────────────────
+// ── Loads and commits across streams ─────────────────────────────────
+
+/** An event's row in the event column: an event two actions emit has a row for each. */
+const row_key = (action: string, event: string) => `${action}|${event}`;
+
+/** The note under an event an action appends to a loaded stream: "→ Seats". */
+function stream_note(
+  st: StateNode,
+  action_name: string,
+  event: string
+): string | undefined {
+  const action = st.actions.find((a) => a.name === action_name);
+  const load = action && load_of(action, event);
+  return load && `→ ${load.name}`;
+}
+
+/** What an action's box and tooltip say about its loads and commit. */
+function load_notes(
+  action: ActionNode,
+  owner: string
+): Pick<N, "note" | "loads" | "commit"> {
+  if (!action.loads?.length) return {};
+  const names = (loads: LoadNode[]) => loads.map((l) => l.name).join(", ");
+  const appending = appending_loads(action);
+  const reads = read_loads(action);
+  const commit = commit_summary(action, owner);
+  return {
+    note: [
+      ...(appending.length ? [`loads ${names(appending)}`] : []),
+      ...(reads.length ? [`reads ${names(reads)}`] : []),
+    ].join(" · "),
+    loads: action.loads.map((l) =>
+      l.events.length
+        ? `${load_label(l)} → ${l.events.join(", ")}`
+        : `${load_label(l)} (read, not guarded)`
+    ),
+    ...(commit ? { commit } : {}),
+  };
+}
+
+/** A box around an action's events, when they land in one commit across streams. */
+function push_commit(
+  commits: CommitBox[],
+  action: ActionNode,
+  owner: string,
+  event_col_x: number,
+  row_y: (event: string) => number | undefined
+) {
+  if (!commit_summary(action, owner)) return;
+  const ys = action.emits.map(row_y).filter((y) => y !== undefined);
+  if (ys.length < 2) return;
+  const top = Math.min(...ys);
+  const bottom = Math.max(...ys) + H;
+  commits.push({
+    label: "one commit",
+    x: event_col_x - COMMIT_GUTTER,
+    y: top - COMMIT_PAD,
+    w: W + COMMIT_GUTTER + COMMIT_PAD,
+    h: bottom - top + COMMIT_PAD * 2,
+  });
+}
+
+/**
+ * An edge from each loaded state to the action that loads it, run once every
+ * node has its final position: yellow when the action appends to that state's
+ * streams, gray when it only reads them. Also fills the "who else" tooltips.
+ */
+function connect_loads(view_model: DomainModel, ns: N[], es: E[]) {
+  const outside = new Map<string, string[]>();
+  const loaded_by = new Map<string, string[]>();
+  for (const s of view_model.states)
+    for (const a of s.actions)
+      for (const l of a.loads ?? []) {
+        const who = `${s.name}.${a.name}`;
+        loaded_by.set(l.state, [...(loaded_by.get(l.state) ?? []), who]);
+        for (const e of l.events)
+          outside.set(e, [...(outside.get(e) ?? []), who]);
+      }
+  for (const n of ns) {
+    if (n.type === "event" && outside.has(n.label))
+      n.outside = outside.get(n.label);
+    if (n.type === "state" && loaded_by.has(n.label))
+      n.loaded_by = [...new Set(loaded_by.get(n.label))];
+  }
+  for (const s of view_model.states)
+    for (const a of s.actions) {
+      // Every action of a state in the view has a box.
+      const to = ns.find((n) => n.type === "action" && n.label === a.name)!;
+      // One edge per loaded state, even when the action loads it twice.
+      for (const state of new Set((a.loads ?? []).map((l) => l.state))) {
+        const from = ns.find((n) => n.type === "state" && n.label === state);
+        // A loaded state outside this view has no box to draw from.
+        if (!from) continue;
+        const appends = a.loads!.some(
+          (l) => l.state === state && l.events.length
+        );
+        es.push({
+          from: { x: from.pos.x, y: from.pos.y + STATE_H / 2 },
+          to: { x: to.pos.x + W, y: to.pos.y + H / 2 },
+          color: appends ? COLORS.state.border : "#a1a1aa",
+          dash: true,
+        });
+      }
+    }
+}
+
 export function compute_layout(view_model: DomainModel): Layout {
   const ns: N[] = [];
   const es: E[] = [];
   const boxes: Box[] = [];
+  const commits: CommitBox[] = [];
   const sv = new Map<string, StateNode>();
   for (const s of view_model.states) {
     sv.set(s.varName, s);
@@ -401,6 +541,7 @@ export function compute_layout(view_model: DomainModel): Layout {
     let slice_right_x = cx;
     const slice_node_start = ns.length;
     const slice_edge_start = es.length;
+    const slice_commit_start = commits.length;
 
     // Build event→reactions lookup within this slice (supports multiple per event)
     const slice_reactions_by_event = new Map<string, typeof slice.reactions>();
@@ -512,17 +653,19 @@ export function compute_layout(view_model: DomainModel): Layout {
 
       for (let ei = 0; ei < measured_events.length; ei++) {
         const { event_name: en, action_name, chains } = measured_events[ei];
+        const appended_to = stream_note(st, action_name, en);
         ns.push({
           key: `e:${en}:${slice.name}:${action_name}`,
           pos: { x: event_col_x, y: evtY },
           type: "event",
           label: en,
+          ...(appended_to ? { note: appended_to } : {}),
           file: event_file_map.get(en) ?? st.file,
           projections: event_projections.get(en),
           reactions: event_reactions.get(en),
           schema: event_schemas.get(en),
         });
-        event_y_map.set(en, evtY);
+        event_y_map.set(row_key(action_name, en), evtY);
 
         // Place all reaction chains for this event — each aligns with
         // the event when possible, pushed down by watermark when
@@ -609,9 +752,10 @@ export function compute_layout(view_model: DomainModel): Layout {
           guards: rules_of(action),
           file: action_file_map.get(action.name) ?? st.file,
           emits: action.emits,
+          ...load_notes(action, st.name),
         });
         for (const en of action.emits) {
-          const ey = event_y_map.get(en)!;
+          const ey = event_y_map.get(row_key(action.name, en))!;
           es.push({
             from: { x: cx + W, y: actY + H / 2 },
             to: { x: event_col_x, y: ey + H / 2 },
@@ -619,6 +763,9 @@ export function compute_layout(view_model: DomainModel): Layout {
             dash: false,
           });
         }
+        push_commit(commits, action, st.name, event_col_x, (en) =>
+          event_y_map.get(row_key(action.name, en))
+        );
         actY += H + GAP / 2;
         action_idx++;
       }
@@ -687,6 +834,9 @@ export function compute_layout(view_model: DomainModel): Layout {
       es[ei].from.y += dy;
       es[ei].to.y += dy;
     }
+    for (let ci = slice_commit_start; ci < commits.length; ci++) {
+      commits[ci].y += dy;
+    }
     boxes.push({
       label: slice.name,
       x: sx - GAP / 2,
@@ -737,16 +887,18 @@ export function compute_layout(view_model: DomainModel): Layout {
     const event_y_map = new Map<string, number>();
     for (const action of st.actions) {
       for (const en of action.emits) {
+        const appended_to = stream_note(st, action.name, en);
         ns.push({
           key: `e:${en}:standalone`,
           pos: { x: event_col_x, y: evtY },
           type: "event",
           label: en,
+          ...(appended_to ? { note: appended_to } : {}),
           projections: event_projections.get(en),
           reactions: event_reactions.get(en),
           schema: event_schemas.get(en),
         });
-        event_y_map.set(en, evtY);
+        event_y_map.set(row_key(action.name, en), evtY);
         evtY += H + GAP / 2;
       }
     }
@@ -761,7 +913,6 @@ export function compute_layout(view_model: DomainModel): Layout {
         reactions: event_reactions.get(en),
         schema: event_schemas.get(en),
       });
-      event_y_map.set(en, evtY);
       evtY += H + GAP / 2;
     }
 
@@ -786,9 +937,10 @@ export function compute_layout(view_model: DomainModel): Layout {
         sub: rules_of(action) ? "guarded" : undefined,
         guards: rules_of(action),
         emits: action.emits,
+        ...load_notes(action, st.name),
       });
       for (const en of action.emits) {
-        const ey = event_y_map.get(en)!;
+        const ey = event_y_map.get(row_key(action.name, en))!;
         es.push({
           from: { x: cx + W, y: actY + H / 2 },
           to: { x: event_col_x, y: ey + H / 2 },
@@ -796,6 +948,9 @@ export function compute_layout(view_model: DomainModel): Layout {
           dash: false,
         });
       }
+      push_commit(commits, action, st.name, event_col_x, (en) =>
+        event_y_map.get(row_key(action.name, en))
+      );
       actY += H + GAP / 2;
       aIdx++;
     }
@@ -839,6 +994,8 @@ export function compute_layout(view_model: DomainModel): Layout {
     }
   }
 
+  connect_loads(view_model, ns, es);
+
   let minX = 0,
     minY = 0,
     maxX = 0,
@@ -862,6 +1019,7 @@ export function compute_layout(view_model: DomainModel): Layout {
     ns,
     es,
     boxes,
+    commits,
     // Content bounds (used by viewBox to frame the diagram)
     minX: minX - MARGIN,
     minY: minY - MARGIN,
