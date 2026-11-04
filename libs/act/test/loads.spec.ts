@@ -5,6 +5,7 @@ import {
   type Committed,
   ConcurrencyError,
   InMemoryStore,
+  type Precondition,
   PreconditionError,
   type Schemas,
   type Snapshot,
@@ -534,6 +535,15 @@ describe("types", () => {
           holds: (_, __, ___, { Other }) => !!Other,
         },
       ]);
+    // A shared rule that ignores the payload and the loads still fits.
+    const positive: Precondition<{ n: number }, unknown> = {
+      description: "n is positive",
+      holds: (_, state) => state.n > 0,
+    };
+    base()
+      .loads(Seats, () => "a")
+      .requires([positive])
+      .emit("Done");
     base()
       .loads(Seats, () => "a")
       // @ts-expect-error an event no load lists

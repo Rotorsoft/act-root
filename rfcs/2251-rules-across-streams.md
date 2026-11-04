@@ -3,7 +3,7 @@
 - **Issue:** #2251
 - **Author:** Claude, for rotorsoft
 - **Created:** 2026-10-31
-- **Revised:** 2026-11-01 (replaces the first design, merged in #2252); 2026-11-03 (a load without events is a read, no chained targets, no act-crypto helper, a loaded state is registered in this Act, teaching by pattern: #2285, #2289–#2293)
+- **Revised:** 2026-11-01 (replaces the first design, merged in #2252); 2026-11-03 (a load without events is a read, no chained targets, no act-crypto helper, a loaded state is registered in this Act, teaching by pattern: #2285, #2289–#2293); 2026-11-03 (`commit(appends, meta)`, and `.loads` is positional: #2304, #2255)
 - **Ships in:** 2.0 (the `Store.commit` signature changes)
 
 ## Motivation
@@ -165,7 +165,7 @@ No write rests on stale context: every stream the action writes is unchanged sin
 Every new piece is typed from the states it names, end to end, and a type-level test fails to compile when any of these widens:
 
 - **`.loads`:** a `State` carries its name as a literal type, so each load adds `{ [name]: thatState }` to the action's `loaded` type. `events` accepts only the loaded state's event names. A load name is a literal too, so a duplicate fails to compile.
-- **Preconditions:** `holds(payload, state, actor, loaded)`, the fourth parameter optional, so a shared `Precondition<S, unknown>` still fits every action.
+- **Preconditions:** `holds(payload, state, actor, loaded)`. The type declares `actor` and `loaded` as parameters (not optional ones, so a rule can destructure `loaded`), and a shared `Precondition<S, unknown>` that leaves them out still fits every action.
 - **`.emit`:** `(payload, snapshot, target, loaded)`, and its return type is the state's own events plus every event listed on its loads, each with its own payload type. An event listed on no load fails to compile; an event listed on two loads of one action fails to compile.
 - **`app.do` and act-http:** unchanged return types. A generated tRPC or Hono mutation still returns its action's snapshots, typed; the other streams' commits reach typed state-scoped `committed` listeners.
 
@@ -297,5 +297,5 @@ The scaffold skill generates `.loads` and the uniqueness or capacity states when
 
 ## Open questions
 
-1. **`.loads`' signature.** Positional (`State, target, events?, name?`) or an options object for the optional parts (`.loads(Account, (d) => d.from, { emits: ["Debited"], as: "from" })`).
+1. ~~**`.loads`' signature.**~~ Settled (2026-11-03): positional, `.loads(State, target, events?, name?)`, simpler to write. Both shapes keep the load's name in the type when it's written inline; an options object held in a variable widens it to `string`, a positional name in a `const` doesn't.
 2. **Hot-resource splitting:** a recipe in 2.0; does it ever need surface?
