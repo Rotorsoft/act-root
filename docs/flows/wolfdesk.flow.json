@@ -60,7 +60,7 @@
       "registers": ["Agent", "TicketOperations"],
       "file": "packages/wolfdesk/src/ticket-operations.ts",
       "line": 96,
-      "description": "Assigns, escalates and reassigns tickets, and escalates when a customer asks for it."
+      "description": "Assigns, escalates and reassigns tickets, and escalates when a customer asks for it. It also holds the Agent state, the count of open tickets per agent, which the creation slice registers too."
     },
     {
       "id": "slice:TicketTimers",
@@ -472,7 +472,7 @@
       "label": "Agent",
       "note": "open tickets",
       "span": [10, 11],
-      "description": "One stream per agent, at most 5 open tickets, held by its schema whichever action takes a ticket. Declared on its own and registered by the creation and operations slices, whose actions load it. A ticket with no agent names agent-unassigned and emits nothing to it, so that load is a read.",
+      "description": "One stream per agent, at most 5 open tickets, held by its schema whichever action takes a ticket. Registered by the operations slice, drawn here, and by the creation slice, whose close and resolve load it too. A ticket with no agent names agent-unassigned and emits nothing to it, so that load is a read.",
       "schema": "open: number ≥ 0, ≤ 5"
     },
     {
@@ -482,7 +482,8 @@
       "col": 10,
       "description": "Owned by Agent. An assign or a reassign may emit it because its .loads lists it.",
       "schema": "{}",
-      "file": "src/agent.ts"
+      "file": "src/agent.ts",
+      "slice": "slice:TicketOps"
     },
     {
       "id": "evt:TicketDropped",
@@ -491,7 +492,8 @@
       "col": 11,
       "description": "Owned by Agent. A reassign, an assign to a new agent, a resolve and a close emit it, when the ticket holds a slot. A ticket frees its slot once.",
       "schema": "{}",
-      "file": "src/agent.ts"
+      "file": "src/agent.ts",
+      "slice": "slice:TicketOps"
     }
   ],
   "edges": [
