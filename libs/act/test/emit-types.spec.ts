@@ -43,6 +43,36 @@ const moving = () =>
     .loads(AgentLoad, (d) => `a-${d.agent}`, ["Taken"], "next");
 
 describe("what compiles", () => {
+  it("types a load as possibly missing only when its target can skip it", () => {
+    ticket()
+      .on({ Move })
+      .loads(AgentLoad, (_, s) => s.agent && `a-${s.agent}`, ["Dropped"], "old")
+      .loads(AgentLoad, (d) => `a-${d.agent}`, ["Taken"], "next")
+      .requires([
+        {
+          description: "typed in rules",
+          holds: (_, __, ___, loaded) => {
+            expectTypeOf(loaded.old).toEqualTypeOf<
+              { open: number } | undefined
+            >();
+            expectTypeOf(loaded.next).toEqualTypeOf<{ open: number }>();
+            // @ts-expect-error a load that can be skipped may be missing
+            return loaded.old.open < loaded.next.open;
+          },
+        },
+      ])
+      .emit((data, _, __, { old }) =>
+        old?.open === 0
+          ? [
+              ["Moved", data],
+              ["Taken", { at: 1 }],
+            ]
+          : ["Moved", data]
+      )
+      .build();
+    expect(true).toBe(true);
+  });
+
   it("types the handler's arguments", () => {
     moving().emit((data, { state }, { stream }, { current, next }) => {
       expectTypeOf(data).toEqualTypeOf<Readonly<{ agent: string }>>();

@@ -15,6 +15,7 @@ import {
   state,
   store,
   ValidationError,
+  ZodEmpty,
 } from "../src/index.js";
 import { fixture } from "../src/test/index.js";
 
@@ -447,7 +448,85 @@ describe("what an action may load and emit", () => {
     );
   });
 
-  test("a target that names no stream refuses", async () => {
+  test("a target returning undefined skips the load, and its events are dropped", async () => {
+    let seen: unknown = "not called";
+    const Maybe = state({ Maybe: z.object({ note: z.string() }) })
+      .init(() => ({ note: "" }))
+      .emits({ Noted: z.object({ seat: z.string().optional() }) })
+      .patch({ Noted: ({ data }) => ({ note: data.seat ?? "none" }) })
+      .on({ Note: z.object({ course: z.string().optional() }) })
+      .loads(Seats, (data) => data.course && `course-${data.course}`, [
+        "SeatTaken",
+      ])
+      .requires([
+        {
+          description: "sees the skipped load",
+          holds: (_, __, ___, { Seats: s }) => {
+            seen = s;
+            return true;
+          },
+        },
+      ])
+      .emit((_, __, ___, { Seats: s }) => [
+        ["Noted", { seat: s?.taken.toString() }],
+        ["SeatTaken", { student: "x" }],
+      ])
+      .build();
+    const app = act().withState(Seats).withState(Maybe).build();
+    const actor = { id: "a", name: "a" };
+
+    const [snap] = await app.do("Note", { stream: "n1", actor }, {});
+    expect(seen).toBeUndefined();
+    expect(snap.state.note).toBe("none");
+    const events: string[] = [];
+    await app.query({ stream: "n1", stream_exact: true }, (e) =>
+      events.push(`${e.stream}:${e.name}`)
+    );
+    expect(events).toEqual(["n1:Noted"]);
+
+    await app.do("Note", { stream: "n2", actor }, { course: "c9" });
+    expect(seen).toEqual((await app.load(Seats, "never-written")).state);
+    expect((await app.load(Seats, "course-c9")).state.taken).toBe(1);
+  });
+
+  test("two skipped loads don't count as one stream loaded twice", async () => {
+    const Both = state({ Both: z.object({ n: z.number() }) })
+      .init(() => ({ n: 0 }))
+      .emits({ Done: ZodEmpty })
+      .patch({ Done: (_, s) => ({ n: s.n + 1 }) })
+      .on({ Do: ZodEmpty })
+      .loads(Seats, () => undefined, [], "a")
+      .loads(Seats, () => undefined, [], "b")
+      .emit("Done")
+      .build();
+    const app = act().withState(Seats).withState(Both).build();
+    const [snap] = await app.do(
+      "Do",
+      {
+        stream: "b1",
+        actor: { id: "a", name: "a" },
+      },
+      {}
+    );
+    expect(snap.state.n).toBe(1);
+  });
+
+  test("a target returning neither a name nor undefined refuses", async () => {
+    const Bad = state({ Bad: z.object({ n: z.number() }) })
+      .init(() => ({ n: 0 }))
+      .emits({ Done: ZodEmpty })
+      .patch({ Done: () => ({}) })
+      .on({ Do: ZodEmpty })
+      .loads(Seats, () => null as unknown as undefined)
+      .emit("Done")
+      .build();
+    const app = act().withState(Seats).withState(Bad).build();
+    await expect(
+      app.do("Do", { stream: "x", actor: { id: "a", name: "a" } }, {})
+    ).rejects.toBeInstanceOf(PreconditionError);
+  });
+
+  test("a target with an empty name refuses", async () => {
     const Blank = state({ Blank: z.object({}) })
       .init(() => ({}))
       .emits({ Done: z.object({}) })

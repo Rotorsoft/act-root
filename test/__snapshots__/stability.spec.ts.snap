@@ -1135,7 +1135,7 @@ export type Snapshot<TState extends Schema, TEvents extends Schemas> = {
  * @template TPayload - The action payload, or the part of it the rule reads.
  * @template TActor - Actor type extending base Actor.
  */
-export type Precondition<TState extends Schema, TPayload, TActor extends Actor = Actor, TLoaded extends Schemas = {}> = {
+export type Precondition<TState extends Schema, TPayload, TActor extends Actor = Actor, TLoaded extends Record<string, Schema | undefined> = {}> = {
     description: string;
     holds: (payload: Readonly<TPayload>, state: Readonly<TState>, actor: TActor | undefined, loaded: Readonly<TLoaded>) => boolean;
 };
@@ -1151,8 +1151,11 @@ export type Precondition<TState extends Schema, TPayload, TActor extends Actor =
 export type Load = {
     /** The loaded state; after build, the one registered under its name. */
     readonly state: State<any, any, any>;
-    /** The stream to load, from the payload and the action's state. */
-    readonly target: (payload: any, state: any) => string;
+    /**
+     * The stream to load, from the payload and the action's state; \`undefined\`
+     * skips this load.
+     */
+    readonly target: (payload: any, state: any) => string | undefined;
     /** The loaded state's events the action may emit to that stream. */
     readonly events: readonly string[];
     /** The key of this load in \`loaded\`: the load's name, or the state's. */
@@ -1216,7 +1219,7 @@ export type PassthroughPatchHandler = ((event: {
  * @template TActions - Action schemas.
  * @template TKey - Action name.
  */
-export type ActionHandler<TState extends Schema, TEvents extends Schemas, TActions extends Schemas, TKey extends keyof TActions, TLoaded extends Schemas = {}, TRouted extends Schemas = {}> = (action: Readonly<TActions[TKey]>, snapshot: Readonly<Snapshot<TState, TEvents>>, target: Target, loaded: Readonly<TLoaded>) => Emitted<TEvents & TRouted> | readonly Emitted<TEvents & TRouted>[] | undefined;
+export type ActionHandler<TState extends Schema, TEvents extends Schemas, TActions extends Schemas, TKey extends keyof TActions, TLoaded extends Record<string, Schema | undefined> = {}, TRouted extends Schemas = {}> = (action: Readonly<TActions[TKey]>, snapshot: Readonly<Snapshot<TState, TEvents>>, target: Target, loaded: Readonly<TLoaded>) => Emitted<TEvents & TRouted> | readonly Emitted<TEvents & TRouted>[] | undefined;
 /**
  * Maps action names to their handlers.
  * @template TState - State schema.
@@ -2319,7 +2322,7 @@ type DuplicateLoad<TAs extends string> = {
  * What follows \`.on(...)\`: the loads, the preconditions, then the
  * \`.emit(...)\` that finishes the action.
  */
-type ActionRules<TState extends Schema, TEvents extends Schemas, TActions extends Schemas, TName extends string, TSnap extends boolean, TKey extends string, TNewActions extends Schema, TLoaded extends Schemas = {}, TRouted extends Schemas = {}> = {
+type ActionRules<TState extends Schema, TEvents extends Schemas, TActions extends Schemas, TName extends string, TSnap extends boolean, TKey extends string, TNewActions extends Schema, TLoaded extends Record<string, Schema | undefined> = {}, TRouted extends Schemas = {}> = {
     /**
      * Loads another state the decision needs, exactly as \`app.load\` would,
      * and lists the events of that state the action may emit to its stream.
@@ -2332,8 +2335,12 @@ type ActionRules<TState extends Schema, TEvents extends Schemas, TActions extend
      * by the version it had when loaded. A load without events is a read:
      * nothing is appended to its stream, and it isn't guarded.
      *
+     * A target that can return \`undefined\` makes the load optional: when it does,
+     * nothing is loaded, \`loaded\` holds \`undefined\` for it (and is typed so), and
+     * \`.emit\`'s events listed on it are dropped.
+     *
      * @param state - The state to load; it must be registered in the same Act.
-     * @param target - The stream to load, from the payload and the action's state.
+     * @param target - The stream to load, from the payload and the action's state; \`undefined\` skips the load.
      * @param events - The loaded state's events the action may emit to that stream.
      * @param name - The key of this load in \`loaded\`; needed to load one state twice.
      *
@@ -2345,8 +2352,8 @@ type ActionRules<TState extends Schema, TEvents extends Schemas, TActions extend
      * .emit((data) => [["Enrolled", data], ["SeatTaken", { student: data.student }]])
      * \`\`\`
      */
-    loads: <TLState extends Schema, TLEvents extends Schemas, TLName extends string, const TList extends Exclude<keyof TLEvents & string, keyof TRouted> = never, const TAs extends string = TLName>(state: State<TLState, TLEvents, any, TLName> & (TAs extends keyof TLoaded ? DuplicateLoad<TAs> : unknown), target: (payload: Readonly<TNewActions>, state: Readonly<TState>) => string, events?: readonly TList[], name?: TAs) => TAs extends keyof TLoaded ? DuplicateLoad<TAs> : ActionRules<TState, TEvents, TActions, TName, TSnap, TKey, TNewActions, TLoaded & {
-        [P in TAs]: TLState;
+    loads: <TLState extends Schema, TLEvents extends Schemas, TLName extends string, const TList extends Exclude<keyof TLEvents & string, keyof TRouted> = never, const TAs extends string = TLName, TStream extends string | undefined = string>(state: State<TLState, TLEvents, any, TLName> & (TAs extends keyof TLoaded ? DuplicateLoad<TAs> : unknown), target: (payload: Readonly<TNewActions>, state: Readonly<TState>) => TStream, events?: readonly TList[], name?: TAs) => TAs extends keyof TLoaded ? DuplicateLoad<TAs> : ActionRules<TState, TEvents, TActions, TName, TSnap, TKey, TNewActions, TLoaded & {
+        [P in TAs]: undefined extends TStream ? TLState | undefined : TLState;
     }, TRouted & {
         [E in TList]: TLEvents[E];
     }>;

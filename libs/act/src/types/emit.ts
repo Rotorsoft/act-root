@@ -69,7 +69,7 @@ type EmitHandler<
   TState extends Schema,
   TEvents extends Schemas,
   TAction extends Schema,
-  TLoaded extends Schemas,
+  TLoaded extends Record<string, Schema | undefined>,
   TRouted extends Schemas,
   TOut,
 > = (
@@ -98,7 +98,7 @@ type Emit<
   TState extends Schema,
   TEvents extends Schemas,
   TAction extends Schema,
-  TLoaded extends Schemas,
+  TLoaded extends Record<string, Schema | undefined>,
   TRouted extends Schemas,
   TDone,
 > = {
@@ -130,7 +130,7 @@ export type ActionEmit<
   TSnap extends boolean,
   TKey extends string,
   TNewActions extends Schema,
-  TLoaded extends Schemas = {},
+  TLoaded extends Record<string, Schema | undefined> = {},
   TRouted extends Schemas = {},
 > = Emit<
   TState,

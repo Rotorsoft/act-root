@@ -40,24 +40,17 @@ export const TicketOperations = state({ Ticket: TicketOperationsState })
   .on({ AssignTicket }, { maxRetries: 4 })
   .loads(
     Agent,
-    (_, state) => agentStream(state.agentId),
+    (_, state) => state.agentId && agentStream(state.agentId),
     ["TicketDropped"],
     "current"
   )
   .loads(Agent, (data) => agentStream(data.agentId), ["TicketTaken"], "next")
   .requires([mustBeOpen, mustNotBeResolved])
-  .emit((data, { state }) =>
-    state.agentId
-      ? [
-          ["TicketAssigned", data],
-          ["TicketDropped", {}],
-          ["TicketTaken", {}],
-        ]
-      : [
-          ["TicketAssigned", data],
-          ["TicketTaken", {}],
-        ]
-  )
+  .emit((data) => [
+    ["TicketAssigned", data],
+    ["TicketDropped", {}],
+    ["TicketTaken", {}],
+  ])
 
   .on({ RequestTicketEscalation })
   .requires([mustBeOpen, mustBeUser, mustBeDueForEscalation])
@@ -79,7 +72,7 @@ export const TicketOperations = state({ Ticket: TicketOperationsState })
   .on({ ReassignTicket }, { maxRetries: 4 })
   .loads(
     Agent,
-    (_, state) => agentStream(state.agentId),
+    (_, state) => state.agentId && agentStream(state.agentId),
     ["TicketDropped"],
     "current"
   )
@@ -91,18 +84,11 @@ export const TicketOperations = state({ Ticket: TicketOperationsState })
     mustBeDueForReassignment,
     mustNotBeAcknowledgedByAgent,
   ])
-  .emit((data, { state }) =>
-    state.agentId
-      ? [
-          ["TicketReassigned", data],
-          ["TicketDropped", {}],
-          ["TicketTaken", {}],
-        ]
-      : [
-          ["TicketReassigned", data],
-          ["TicketTaken", {}],
-        ]
-  )
+  .emit((data) => [
+    ["TicketReassigned", data],
+    ["TicketDropped", {}],
+    ["TicketTaken", {}],
+  ])
 
   .build();
 

@@ -19,6 +19,12 @@ import {
   mustNotBeOpen,
 } from "./ticket-preconditions.js";
 
+// A ticket holds its agent's slot until it's resolved or closed, whichever comes
+// first. With no slot to free there's no agent to load, and TicketDropped is
+// dropped from the commit.
+const slotHolder = (state: { agentId?: string; resolvedById?: string }) =>
+  state.agentId && !state.resolvedById ? agentStream(state.agentId) : undefined;
+
 // --- State ---
 export const TicketCreation = state({ Ticket: TicketCreationState })
   .init(() => ({
@@ -57,31 +63,21 @@ export const TicketCreation = state({ Ticket: TicketCreationState })
     ];
   })
 
-  // A ticket holds its agent's slot until it's resolved or closed, whichever
-  // comes first, so closing frees it only when resolving hasn't.
   .on({ CloseTicket }, { maxRetries: 4 })
-  .loads(Agent, (_, state) => agentStream(state.agentId), ["TicketDropped"])
+  .loads(Agent, (_, state) => slotHolder(state), ["TicketDropped"])
   .requires([mustBeOpen])
-  .emit((_, { state }, { actor }) =>
-    state.agentId && !state.resolvedById
-      ? [
-          ["TicketClosed", { closedById: actor.id }],
-          ["TicketDropped", {}],
-        ]
-      : ["TicketClosed", { closedById: actor.id }]
-  )
+  .emit((_, __, { actor }) => [
+    ["TicketClosed", { closedById: actor.id }],
+    ["TicketDropped", {}],
+  ])
 
   .on({ MarkTicketResolved }, { maxRetries: 4 })
-  .loads(Agent, (_, state) => agentStream(state.agentId), ["TicketDropped"])
+  .loads(Agent, (_, state) => slotHolder(state), ["TicketDropped"])
   .requires([mustBeOpen, mustBeUserOrAgent])
-  .emit((_, { state }, { actor }) =>
-    state.agentId && !state.resolvedById
-      ? [
-          ["TicketResolved", { resolvedById: actor.id }],
-          ["TicketDropped", {}],
-        ]
-      : ["TicketResolved", { resolvedById: actor.id }]
-  )
+  .emit((_, __, { actor }) => [
+    ["TicketResolved", { resolvedById: actor.id }],
+    ["TicketDropped", {}],
+  ])
 
   // Online close-the-books policy (the operator recipes reference this
   // declaration instead of redefining a toy ticket). A ticket retires
