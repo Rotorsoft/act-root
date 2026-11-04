@@ -280,6 +280,16 @@ const API_ERROR_RESPONSE: OpenAPIResponse = {
   },
 };
 
+/** An error response with its own description, over the shared envelope. */
+const error_response = (description: string): OpenAPIResponse => ({
+  description,
+  content: {
+    "application/json": {
+      schema: { $ref: "#/components/schemas/ApiError" },
+    },
+  },
+});
+
 /**
  * Server URL refinement: OpenAPI permits `{variable}` template syntax
  * inside server URLs, so we substitute each capture with `x` before
@@ -522,9 +532,13 @@ function build_operation(
         },
       },
       "400": { $ref: "#/components/responses/ApiError" },
-      "409": { $ref: "#/components/responses/ApiError" },
+      "409": error_response(
+        "A precondition refused the action, and `detail` names the action and the rule (`PRECONDITION`); or an idempotency key was reused (`CONFLICT`). Nothing was committed."
+      ),
       "410": { $ref: "#/components/responses/ApiError" },
-      "412": { $ref: "#/components/responses/ApiError" },
+      "412": error_response(
+        "A stream the action appends to moved since it was loaded, or a pinned expected version is stale (`CONCURRENCY`), and `detail` names the stream. Nothing was committed on any stream."
+      ),
       "422": { $ref: "#/components/responses/ApiError" },
       "500": { $ref: "#/components/responses/ApiError" },
       ...(options.idempotency

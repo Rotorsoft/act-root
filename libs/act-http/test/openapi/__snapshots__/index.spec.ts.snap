@@ -455,13 +455,27 @@ exports[`openapi(app, options) — doc emitter > stable surface (snapshot) 1`] =
             "$ref": "#/components/responses/ApiError",
           },
           "409": {
-            "$ref": "#/components/responses/ApiError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError",
+                },
+              },
+            },
+            "description": "A precondition refused the action, and \`detail\` names the action and the rule (\`PRECONDITION\`); or an idempotency key was reused (\`CONFLICT\`). Nothing was committed.",
           },
           "410": {
             "$ref": "#/components/responses/ApiError",
           },
           "412": {
-            "$ref": "#/components/responses/ApiError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError",
+                },
+              },
+            },
+            "description": "A stream the action appends to moved since it was loaded, or a pinned expected version is stale (\`CONCURRENCY\`), and \`detail\` names the stream. Nothing was committed on any stream.",
           },
           "422": {
             "$ref": "#/components/responses/ApiError",
@@ -535,13 +549,27 @@ exports[`openapi(app, options) — doc emitter > stable surface (snapshot) 1`] =
             "$ref": "#/components/responses/ApiError",
           },
           "409": {
-            "$ref": "#/components/responses/ApiError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError",
+                },
+              },
+            },
+            "description": "A precondition refused the action, and \`detail\` names the action and the rule (\`PRECONDITION\`); or an idempotency key was reused (\`CONFLICT\`). Nothing was committed.",
           },
           "410": {
             "$ref": "#/components/responses/ApiError",
           },
           "412": {
-            "$ref": "#/components/responses/ApiError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError",
+                },
+              },
+            },
+            "description": "A stream the action appends to moved since it was loaded, or a pinned expected version is stale (\`CONCURRENCY\`), and \`detail\` names the stream. Nothing was committed on any stream.",
           },
           "422": {
             "$ref": "#/components/responses/ApiError",
@@ -616,13 +644,27 @@ exports[`openapi(app, options) — doc emitter > stable surface (snapshot) 1`] =
             "$ref": "#/components/responses/ApiError",
           },
           "409": {
-            "$ref": "#/components/responses/ApiError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError",
+                },
+              },
+            },
+            "description": "A precondition refused the action, and \`detail\` names the action and the rule (\`PRECONDITION\`); or an idempotency key was reused (\`CONFLICT\`). Nothing was committed.",
           },
           "410": {
             "$ref": "#/components/responses/ApiError",
           },
           "412": {
-            "$ref": "#/components/responses/ApiError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError",
+                },
+              },
+            },
+            "description": "A stream the action appends to moved since it was loaded, or a pinned expected version is stale (\`CONCURRENCY\`), and \`detail\` names the stream. Nothing was committed on any stream.",
           },
           "422": {
             "$ref": "#/components/responses/ApiError",

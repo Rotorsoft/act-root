@@ -108,10 +108,19 @@ describe("openapi(app, options) — doc emitter", () => {
   }) => {
     const doc = openapi(app, base_options());
     const responses = doc.paths["/api/actions/PressKey"]?.post?.responses;
-    for (const code of ["400", "409", "410", "412", "422", "500"]) {
-      const ref = responses?.[code] as { $ref?: string };
-      expect(ref.$ref).toBe("#/components/responses/ApiError");
-    }
+    for (const code of ["400", "410", "422", "500"])
+      expect(responses?.[code]).toEqual({
+        $ref: "#/components/responses/ApiError",
+      });
+    // These two say what happened, over the same envelope.
+    for (const code of ["409", "412"])
+      expect(responses?.[code]).toMatchObject({
+        content: {
+          "application/json": {
+            schema: { $ref: "#/components/schemas/ApiError" },
+          },
+        },
+      });
     const success = responses?.["200"] as {
       description: string;
       content: { "application/json": { schema: { $ref: string } } };
