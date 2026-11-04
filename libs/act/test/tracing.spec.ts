@@ -218,13 +218,16 @@ describe("tracing", () => {
         .emits({ Routed: ZodEmpty })
         .on({ route: ZodEmpty })
         .loads(Tally, () => "tally-1", ["Tallied"])
-        .emit(() => [["Tallied", {}]])
+        .emit(() => [
+          ["Routed", {}],
+          ["Tallied", {}],
+        ])
         .build();
       const { action } = build_es(withLevel("trace"));
       await action(Router, "route", target("r-1"), {});
       expect(traceSpy).toHaveBeenCalledWith(
-        [{}],
-        expect.stringContaining("tally-1.Tallied")
+        [{}, {}],
+        expect.stringContaining("r-1.Routed, tally-1.Tallied")
       );
     });
 

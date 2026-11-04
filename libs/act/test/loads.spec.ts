@@ -60,8 +60,15 @@ const Enrollment = state({ Enrollment: Enroll })
     ["Enrolled", data],
     ["SeatTaken", { student: data.student }],
   ])
-  // No precondition, and nothing to its own stream: the schema refuses.
+  // No precondition: the schema refuses.
   .on({ Overfill: Enroll })
+  .loads(Seats, course, ["SeatTaken"])
+  .emit((data) => [
+    ["Enrolled", data],
+    ["SeatTaken", { student: data.student }],
+  ])
+  // Nothing to its own stream: refused at the call.
+  .on({ Grab: Enroll })
   .loads(Seats, course, ["SeatTaken"])
   .emit((data) => [["SeatTaken", { student: data.student }]])
   // A read: the stream isn't written, so it isn't guarded.
@@ -205,22 +212,16 @@ describe("an action that loads another stream", () => {
     expect(await events("course-c3")).toHaveLength(2);
   });
 
-  test("emitting only to a loaded stream returns its own loaded snapshot", async ({
+  test("an action that appends only to loaded streams throws, storing nothing", async ({
     app,
   }) => {
-    const enrollments = vi.fn();
-    const seats = vi.fn();
-    app.on("committed", Enrollment, enrollments);
-    app.on("committed", Seats, seats);
-    const [own] = await app.do("Overfill", at("enr-4"), {
-      course: "c4",
-      student: "s",
-    });
-    expect(own.patch).toBeUndefined();
-    expect(own.version).toBe(-1);
-    expect(await events("course-c4")).toEqual(["SeatTaken"]);
-    expect(enrollments).not.toHaveBeenCalled();
-    expect(seats).toHaveBeenCalledTimes(1);
+    await expect(
+      app.do("Grab", at("enr-4"), { course: "c4", student: "s" })
+    ).rejects.toThrow(
+      'Action "Grab" appends only to the streams it loads; it must append an event to its own stream too'
+    );
+    expect(await events("course-c4")).toEqual([]);
+    expect(await events("enr-4")).toEqual([]);
   });
 
   test("the owner's own action and an outside emitter both fold, told apart by causation", async ({
@@ -373,29 +374,6 @@ describe("a race on a loaded stream", () => {
       )
       .catch((e: unknown) => e);
     expect((err as ConcurrencyError).stream).toBe("tr-3");
-  });
-
-  test("a pinned own version refuses an action that appends only to loaded streams", async ({
-    app,
-  }) => {
-    await app.do("Enroll", at("enr-pin"), { course: "pin", student: "s" });
-    const err = await app
-      .do(
-        "Overfill",
-        { ...at("enr-pin"), expectedVersion: -1 },
-        { course: "pin", student: "t" }
-      )
-      .catch((e: unknown) => e);
-    expect(err).toBeInstanceOf(ConcurrencyError);
-    expect((err as ConcurrencyError).stream).toBe("enr-pin");
-    expect(await events("course-pin")).toEqual(["SeatTaken"]);
-    // Pinned at its real version, it lands.
-    await app.do(
-      "Overfill",
-      { ...at("enr-pin"), expectedVersion: 0 },
-      { course: "pin", student: "t" }
-    );
-    expect(await events("course-pin")).toEqual(["SeatTaken", "SeatTaken"]);
   });
 
   test("on a read-only load lands anyway: reads aren't guarded", async ({

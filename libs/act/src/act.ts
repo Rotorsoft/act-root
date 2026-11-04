@@ -735,18 +735,17 @@ export class Act<
         payload,
         do_options
       );
-      // A loaded snapshot has no `patch`: an action that emits nothing
-      // returns only that, so nothing committed, nothing to wake or announce.
+      // An action that emits nothing returns the loaded snapshot, which has
+      // no `patch`: nothing committed, so nothing to wake or announce.
       // Snapshots of the streams its loads appended to follow its own.
+      if (!snapshots[0].patch) return snapshots;
       const me = this.registry.actions[action];
-      const committed = snapshots.filter((s) => s.patch);
-      if (!committed.length) return snapshots;
       // A local commit runs its reactions the way a remote one does.
-      this._wake(committed.map((s) => s.event!.name as string));
+      this._wake(snapshots.map((s) => s.event!.name as string));
       // `committed` fires once per stream appended to, its own first, so a
       // listener always gets one stream's snapshots, as without loads.
-      const by_stream = new Map<string, typeof committed>();
-      for (const s of committed) {
+      const by_stream = new Map<string, typeof snapshots>();
+      for (const s of snapshots) {
         const of_stream = by_stream.get(s.event!.stream);
         if (of_stream) of_stream.push(s);
         else by_stream.set(s.event!.stream, [s]);
@@ -761,9 +760,7 @@ export class Act<
         this.emit("committed", of_stream);
         this._notify(`committed:${owner.name}`, of_stream);
       }
-      return snapshots.filter(
-        (s) => !s.patch || s.event!.stream === target.stream
-      );
+      return snapshots.filter((s) => s.event!.stream === target.stream);
     });
   }
 

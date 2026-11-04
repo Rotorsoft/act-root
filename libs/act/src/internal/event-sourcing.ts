@@ -505,8 +505,7 @@ async function load_others(
  * re-runs from `load` within the action's `maxRetries`; any other error
  * rethrows.
  *
- * Returns the snapshots of every stream appended to, the action's own first; an
- * action whose own stream gets no event returns its loaded snapshot first.
+ * Returns the snapshots of every stream appended to, the action's own first.
  */
 export async function action<
   TState extends Schema,
@@ -600,20 +599,13 @@ export async function action<
           data: validate(name as string, data, to.state.events[name]),
         });
       }
-      const appends = [own, ...others].filter((p) => p.events.length);
-      // A pinned version guards the decision even when the action's own
-      // stream gets no event, so nothing is appended for the store to check.
-      if (
-        expectedVersion !== undefined &&
-        !own.events.length &&
-        snapshot.version !== expectedVersion
-      )
-        throw new ConcurrencyError(
-          stream,
-          snapshot.version,
-          [],
-          expectedVersion
+      // The action's own stream records the decision, so an action that
+      // appends to other streams appends to its own too.
+      if (!own.events.length)
+        throw new Error(
+          `Action "${action as string}" appends only to the streams it loads; it must append an event to its own stream too`
         );
+      const appends = [own, ...others].filter((p) => p.events.length);
 
       const meta: EventMeta = {
         correlation:
@@ -732,9 +724,7 @@ export async function action<
         snapshots.push(...appended);
       }
 
-      return (
-        own.events.length ? snapshots : [snapshot, ...snapshots]
-      ) as Snapshot<TState, TEvents>[];
+      return snapshots as Snapshot<TState, TEvents>[];
     } catch (error) {
       if (!(error instanceof ConcurrencyError)) throw error;
       // A caller-pinned version would conflict again on every retry.

@@ -222,16 +222,15 @@ export function build_es(
     action: traced(
       bound_action,
       (snapshots) => {
-        // A loaded snapshot (no event for its stream) has no `patch`; each
-        // event is named with the stream it was appended to.
-        const committed = snapshots.filter((s) => s.patch);
-        if (committed.length)
+        // A loaded snapshot (the action emitted nothing) has no `patch`;
+        // each event is named with the stream it was appended to.
+        if (snapshots[0].patch)
           logger.trace(
-            committed.map((s) => s.event!.data),
+            snapshots.map((s) => s.event!.data),
             es_caption(
               "committed",
               C_ORANGE,
-              committed
+              snapshots
                 .map((s) => `${s.event!.stream}.${s.event!.name}`)
                 .join(", ")
             )
