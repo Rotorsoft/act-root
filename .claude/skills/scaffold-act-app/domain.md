@@ -160,7 +160,7 @@ export const User = state({ User: z.object({ email: z.string() }) })
 
 **Rules the generated code must keep:**
 
-- **Every action appends to its own stream too.** An action whose events all go to loaded streams throws when called, and a static `.emit("X")` of a listed event doesn't compile. A change to one stream alone belongs on that stream's state.
+- **Every action appends to its own stream too.** An action whose events all go to loaded streams doesn't compile, and neither does a static `.emit("X")` of a listed event. A change to one stream alone belongs on that stream's state.
 - **A load with no events is a read.** It isn't guarded, so the commit lands even if that stream moved. If the decision must be refused when it moves, list an event and append to it.
 - **Each event goes to one stream.** List it on one load of the action. A target that names no stream, the action's own stream, or a stream another load names refuses with `PreconditionError` before any rule runs, so a transfer to the same account or a change to the address it already has is a 409 for the client.
 - **Register every loaded state in the same Act**, with `.withState(...)` in a slice or the app, or `build()` throws. A commit is atomic only inside one store.

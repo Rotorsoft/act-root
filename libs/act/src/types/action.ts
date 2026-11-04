@@ -505,7 +505,10 @@ export type ActionHandler<
   snapshot: Readonly<Snapshot<TState, TEvents>>,
   target: Target,
   loaded: Readonly<TLoaded>
-) => Emitted<TEvents & TRouted> | Emitted<TEvents & TRouted>[] | undefined;
+) =>
+  | Emitted<TEvents & TRouted>
+  | readonly Emitted<TEvents & TRouted>[]
+  | undefined;
 
 /**
  * Maps action names to their handlers.

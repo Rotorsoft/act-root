@@ -39,6 +39,8 @@ const Counter = state({ Counter: z.object({ count: z.number() }) })
   - `snapshot` — the current state snapshot (`{ state, version, event, ... }`)
   - `target` — the dispatch target (`{ stream, actor }`), useful when the actor or stream id needs to flow into the event
 
+The editor checks what a handler returns, with nothing extra to write: a misspelled event, a wrong or missing field, and a field the schema doesn't declare are each marked on the entry, at any depth. A mistake inside a ternary marks the ternary, and one in a function with a `{ }` body marks the function, because TypeScript looks no further. `const list = [...]; return list;` loses the tuple types, so return the list directly.
+
 ### Partial States
 
 Multiple states sharing the same name merge automatically when composed in slices or the act orchestrator:
@@ -237,7 +239,7 @@ export const app = act().withState(Seats).withState(Enrollment).build();
 - **`target(payload, state)`** returns the stream to load, from the payload and the action's own state. A target naming a stream with no events loads the initial state. A target that names no stream, the action's own stream or another load's stream refuses the action with `PreconditionError`, because a target often comes from the caller's input: a transfer from an account to itself is a refusal, not a crash. A load of a closed stream refuses with `StreamClosedError`.
 - **Routing.** An event listed on a load goes to that load's stream; the state's own events go to its own stream. Each event is listed on at most one load of an action, so `.emit` never says where an event goes. An event no load lists, or one that isn't the loaded state's, fails to compile and throws. Listing a [deprecated](../architecture/event-schema-evolution.md) event throws at build, as a static `.emit` of one does.
 - **`loaded`,** the fourth argument of `holds` and of `.emit`, holds each loaded state, keyed by the state's name, or by the load's name when it has one. Loading one state twice needs a name for each load: `.loads(Account, (d) => d.from, ["Debited"], "from").loads(Account, (d) => d.to, ["Credited"], "to")`.
-- **The action appends to its own stream too.** Its own stream records the decision, so an action that appends only to the streams it loads throws, and nothing is stored (a static `.emit` of an event a load lists fails to compile and throws at build); a change to one stream alone belongs on that stream's state. A pinned `expectedVersion` guards the action's own stream: a stale pin refuses with `ConcurrencyError`, and is never retried.
+- **The action appends to its own stream too.** Its own stream records the decision, so an action that appends only to the streams it loads fails to compile, and throws if it gets past the compiler, storing nothing; a change to one stream alone belongs on that stream's state. A pinned `expectedVersion` guards the action's own stream: a stale pin refuses with `ConcurrencyError`, and is never retried.
 - **A load without events is a read.** The decision sees the state, but nothing is appended to its stream, so it isn't guarded: the commit lands even if that stream moved. A decision that must be refused when a stream moves appends to it.
 - **The loaded state's schema guards every fold,** whichever action emits into it, and each event's `meta.causation.action` names the action that emitted it, so an owner's own `SeatTaken` and one from `Enroll` are told apart.
 - **What `app.do` returns** is its own stream's snapshots, typed as without loads. `committed` fires once for each stream the action appended to, its own first, so a listener always gets one stream's snapshots; a state-scoped listener (`app.on("committed", Seats, ...)`) hears its own state's streams, and the reactions of every stream appended to wake.
@@ -254,6 +256,7 @@ Act 1.x called the rules in `.given([...])` invariants, typed `Invariant` and re
 - Catch `PreconditionError` instead of `InvariantError`; `Errors.InvariantError` (`ERR_INVARIANT`) is gone, and act-http no longer has the `INVARIANT` code.
 - A direct call to a rule's `holds` passes all four arguments, `holds(payload, state, actor, loaded)` (`{}` when the action loads nothing), and a direct call to an action handler in `state.on` passes `loaded` as its fourth argument. A rule written with fewer parameters still fits, so `.requires([...])` needs no change.
 - Remove `validateFoldedState` from `act().build(...)`: invariants are the state's schema, checked before every commit, and the option was already ignored.
+- `.emit` now checks what a handler returns, so a field its event's schema doesn't declare fails to compile; it used to be dropped silently. Remove it or add it to the schema. An `.emit` inside a generic helper, where the event's type isn't known yet, may need the name form, `.emit("Event")`.
 - A state field cleared with `null` in a patch must be `.optional()` or `.nullish()`. `null` deletes the key, so a `.nullable()` field, which requires the key, refuses every action after the one that cleared it (since 1.35).
 
 ## Snapshots

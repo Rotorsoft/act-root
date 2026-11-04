@@ -259,6 +259,7 @@ The scaffold skill generates `.loads` and the uniqueness or capacity states when
 - a load of the action's own stream, or two loads naming one stream, refuses with `PreconditionError` at the call: a target often comes from the caller's input;
 - a state loaded twice without names throws at build; a duplicate load name fails to compile;
 - an event listed on a load that doesn't belong to the loaded state, an event listed on two loads, and an emitted event of another state that no load lists all fail to compile and throw at build (or at the call, for a dynamic emit);
+- an action whose events all go to loaded streams fails to compile, and throws at the call;
 - a target function that throws commits nothing;
 - an action whose events all go to loaded streams throws, storing nothing;
 - a precondition over a loaded state refuses with `PreconditionError`; a loaded state's schema refuses its folded state with `ValidationError`; either way nothing commits;

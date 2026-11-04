@@ -4600,7 +4600,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           .emits({ Happened })
           .patch({ Happened: (_, s) => ({ n: s.n + 1 }) })
           .on({ Do: Happened })
-          .emit((p) => ["Happened", p])
+          .emit("Happened")
           .build();
       };
       /** An app over a fresh instance; `read` returns the stream's first payload. */
