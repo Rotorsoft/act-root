@@ -42,7 +42,7 @@ const sidebars: SidebarsConfig = {
     {
       type: "category",
       label: "Examples",
-      items: ["examples/calculator", "examples/wolfdesk"],
+      items: ["examples/calculator", "examples/wolfdesk", "examples/rules"],
     },
     {
       type: "category",

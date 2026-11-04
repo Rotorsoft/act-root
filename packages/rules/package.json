@@ -1,0 +1,21 @@
+{
+  "name": "@act/rules",
+  "version": "0.1.0",
+  "description": "Rules across streams: every scenario of RFC 2251 as a state",
+  "author": "rotorsoft",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "LOG_LEVEL=error tsx src/main.ts",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@rotorsoft/act": ">=1.35.2",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "tsx": "^4.23.15"
+  }
+}

@@ -39,6 +39,7 @@ pnpm monorepo with two main sections:
 - **`/packages`** — example applications
   - `calculator` — simple state machine; rebuild and close demos
   - `wolfdesk` — complex ticketing (from "Learning Domain-Driven Design")
+  - `rules` — rules across streams: every scenario of RFC 2251 as a state, with tests
   - `server`, `client` — tRPC + React example
   - `inspector` — `@rotorsoft/act-inspector`, an observatory to inspect, query and visualize the events in an Act store
 
@@ -56,6 +57,7 @@ pnpm scrub            # remove all node_modules + build artifacts
 
 pnpm dev:calculator   # run examples
 pnpm dev:wolfdesk
+pnpm dev:rules        # rules across streams: a scripted tour
 pnpm dev:http         # multi-transport demo (trpc + hono rest + openapi) — server + client concurrently
 
 vitest                                                # watch mode (from the REPO ROOT)
