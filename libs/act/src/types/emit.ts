@@ -77,7 +77,12 @@ type EmitHandler<
   snapshot: Readonly<Snapshot<TState, TEvents>>,
   target: Target,
   loaded: Readonly<TLoaded>
-) => CheckEmitted<TOut, TEvents, TEvents & TRouted>;
+) => CheckEmitted<
+  TOut,
+  // A listed event goes to the loaded stream, even when this state declares it.
+  Omit<TEvents, keyof TRouted>,
+  TEvents & TRouted
+>;
 
 /**
  * `.emit`, finishing an action and returning `TDone`.

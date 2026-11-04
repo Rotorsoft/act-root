@@ -193,6 +193,27 @@ describe("a mistake a list can't place on one entry", () => {
     moving().emit(() => ["Taken", { at: 1 }]);
   });
 
+  it("a state loading its own type, emitting only the listed event", () => {
+    const Account = state({ Account: z.object({ n: z.number() }) })
+      .init(() => ({ n: 0 }))
+      .emits({ Moved: Move, Noted: ZodEmpty })
+      .build();
+    const self = () =>
+      state({ Account: z.object({ n: z.number() }) })
+        .init(() => ({ n: 0 }))
+        .emits({ Moved: Move, Noted: ZodEmpty })
+        .on({ Go: Move })
+        .loads(Account, (d) => d.agent, ["Moved"]);
+    // @ts-expect-error the load gets `Moved`, so nothing goes to its own stream
+    self().emit((d) => [["Moved", d]]);
+    // @ts-expect-error the load gets `Moved`, so nothing goes to its own stream
+    self().emit((d) => ["Moved", d]);
+    self().emit((d) => [
+      ["Noted", {}],
+      ["Moved", d],
+    ]);
+  });
+
   it("a mistake in one branch marks the whole ternary", () => {
     moving().emit((data, { state }) =>
       // @ts-expect-error `at` is a number
@@ -218,6 +239,34 @@ describe("a mistake a list can't place on one entry", () => {
           ["Taken", { at: "x" }],
         ];
       return [["Moved", data]];
+    });
+  });
+});
+
+describe("what a handler returns", () => {
+  it("refuses anything that isn't events", () => {
+    // @ts-expect-error not an event
+    moving().emit(() => 42);
+    // @ts-expect-error not an event
+    moving().emit(() => null);
+    // @ts-expect-error handlers aren't async
+    moving().emit(async (d) => ["Moved", d]);
+    // @ts-expect-error a tuple is a name and its data
+    moving().emit(() => ["Moved"]);
+    // @ts-expect-error a tuple is a name and its data
+    moving().emit((d) => ["Moved", d, 1]);
+  });
+
+  it("refuses a function that forgets to return", () => {
+    // @ts-expect-error return the events, or `undefined` to commit nothing
+    moving().emit(() => {
+      void 0;
+    });
+  });
+
+  it("takes a function that returns on only some paths", () => {
+    moving().emit((d) => {
+      if (d.agent) return [["Moved", d]];
     });
   });
 });
