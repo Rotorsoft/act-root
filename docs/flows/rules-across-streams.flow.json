@@ -1,8 +1,7 @@
 {
   "title": "Rules Across Streams",
-  "subtitle": "A design preview of Act 2.0 (RFC 2251): one action loads the streams its decision needs, and commits its events to all of them at once.",
+  "subtitle": "Act 2.0: one action loads the streams its decision needs, checks each at the version it loaded, and commits its events to all of them at once, or to none.",
   "source": "rfcs/2251-rules-across-streams.md",
-  "preview": "RFC 2251",
   "lanes": [
     {
       "id": "actor",
@@ -20,7 +19,7 @@
     {
       "id": "event",
       "label": "Events",
-      "sub": "several streams, one commit"
+      "sub": "across streams"
     }
   ],
   "nodes": [
@@ -45,7 +44,13 @@
       "col": 1,
       "preconditions": ["the course has a free seat"],
       "schema": "course: string\nstudent: string",
-      "description": ".on({ Enroll }, { maxRetries: 1 }).loads(Seats, (data) => `course-${data.course}`, [\"SeatTaken\"]). It loads the course's Seats before checking its rule, may emit SeatTaken to it, and commits Enrolled and SeatTaken together, guarded by both streams' versions."
+      "description": ".on({ Enroll }, { maxRetries: 1 }).loads(Seats, (data) => `course-${data.course}`, [\"SeatTaken\"]). It loads the course's Seats before checking its rule, may emit SeatTaken to it, and commits Enrolled and SeatTaken together, guarded by both streams' versions.",
+      "loads": [
+        {
+          "state": "state:Seats",
+          "events": ["evt:SeatTaken"]
+        }
+      ]
     },
     {
       "id": "action:Register",
@@ -54,7 +59,13 @@
       "col": 4.5,
       "preconditions": ["the email is free"],
       "schema": "email: string",
-      "description": ".on({ Register }).loads(Email, (data) => email(data.email), [\"EmailTaken\"]). One Email stream per address, loaded before the rule."
+      "description": ".on({ Register }).loads(Email, (data) => email(data.email), [\"EmailTaken\"]). One Email stream per address, keyed by an HMAC of it, loaded before the rule.",
+      "loads": [
+        {
+          "state": "state:Email",
+          "events": ["evt:EmailTaken"]
+        }
+      ]
     },
     {
       "id": "action:ChangeEmail",
@@ -63,16 +74,28 @@
       "col": 6,
       "preconditions": ["the new email is free"],
       "schema": "email: string",
-      "description": "Loads Email twice: the old address (may emit EmailReleased) and the new one (may emit EmailTaken). Frees the old and takes the new in one commit."
+      "description": "Loads Email twice: the old address (may emit EmailReleased) and the new one (may emit EmailTaken). Frees the old and takes the new in one commit.",
+      "loads": [
+        {
+          "state": "state:Email",
+          "events": ["evt:EmailReleased"],
+          "name": "old"
+        },
+        {
+          "state": "state:Email",
+          "events": ["evt:EmailTaken"],
+          "name": "new"
+        }
+      ]
     },
     {
       "id": "state:Enrollment",
       "lane": "state",
       "label": "Enrollment",
       "note": "course · student",
-      "span": [0.5, 1.5],
+      "span": [0, 1.5],
       "schema": "course: string\nstudent: string",
-      "description": "One enrollment per student and course. Enroll checks its rule here, with the loaded Seats in hand."
+      "description": "One enrollment per student and course. Enroll and Waitlist check their rules here, with the loaded Seats in hand."
     },
     {
       "id": "state:Seats",
@@ -101,7 +124,7 @@
       "span": [7, 8],
       "schema": "holder?: string",
       "invariants": ["at most one holder"],
-      "description": "One stream per email address: an ordinary state the app declares, not a hidden framework stream."
+      "description": "One stream per email address: an ordinary state the app declares, not a hidden framework stream. A stream name can't be forgotten, so the stream is keyed by an HMAC of the address, never the address itself."
     },
     {
       "id": "evt:Enrolled",
@@ -162,7 +185,13 @@
       "col": 9.5,
       "preconditions": ["the room is free at that time"],
       "schema": "room: string\nfrom: time\nto: time",
-      "description": ".on({ Book }).loads(Room, (data) => `room-${data.room}`, [\"RoomReserved\"]). Loads the room's reservations before checking the slot."
+      "description": ".on({ Book }).loads(Room, (data) => `room-${data.room}`, [\"RoomReserved\"]). Loads the room's reservations before checking the slot.",
+      "loads": [
+        {
+          "state": "state:Room",
+          "events": ["evt:RoomReserved"]
+        }
+      ]
     },
     {
       "id": "state:Booking",
@@ -212,7 +241,19 @@
       "col": 13,
       "preconditions": ["enough funds"],
       "schema": "from: string\nto: string\namount: number",
-      "description": ".loads(Account, (d) => d.from, [\"Debited\"], \"from\") and .loads(Account, (d) => d.to, [\"Credited\"], \"to\"). The same state loaded twice, each load named."
+      "description": ".loads(Account, (d) => d.from, [\"Debited\"], \"from\") and .loads(Account, (d) => d.to, [\"Credited\"], \"to\"). The same state loaded twice, each load named.",
+      "loads": [
+        {
+          "state": "state:Account",
+          "events": ["evt:Debited"],
+          "name": "from"
+        },
+        {
+          "state": "state:Account",
+          "events": ["evt:Credited"],
+          "name": "to"
+        }
+      ]
     },
     {
       "id": "state:Transfer",
@@ -270,7 +311,13 @@
       "col": 17.75,
       "preconditions": ["enough stock"],
       "schema": "product: string\nqty: number",
-      "description": ".loads(Product, (data) => data.product, [\"StockReserved\"]). Loads the product's stock before checking it."
+      "description": ".loads(Product, (data) => data.product, [\"StockReserved\"]). Loads the product's stock before checking it.",
+      "loads": [
+        {
+          "state": "state:Product",
+          "events": ["evt:StockReserved"]
+        }
+      ]
     },
     {
       "id": "state:Order",
@@ -305,6 +352,77 @@
       "col": 19.5,
       "schema": "qty: number",
       "description": "Owned by Product. ReserveItem may emit it because its .loads lists it."
+    },
+    {
+      "id": "action:Waitlist",
+      "lane": "action",
+      "label": "Waitlist",
+      "col": 0,
+      "preconditions": ["the course is full"],
+      "schema": "course: string\nstudent: string",
+      "loads": [
+        {
+          "state": "state:Seats",
+          "events": []
+        }
+      ],
+      "description": ".on({ Waitlist }).loads(Seats, (data) => `course-${data.course}`). No events listed, so it's a read: the rule sees Seats, but Seats isn't part of the commit, and isn't checked when it lands."
+    },
+    {
+      "id": "evt:Waitlisted",
+      "lane": "event",
+      "label": "Waitlisted",
+      "col": 0
+    },
+    {
+      "id": "actor:member",
+      "lane": "actor",
+      "actor": "person",
+      "label": "Member",
+      "col": 22
+    },
+    {
+      "id": "action:Logout",
+      "lane": "action",
+      "label": "Logout",
+      "col": 22,
+      "schema": "user: string",
+      "loads": [
+        {
+          "state": "state:UserSessions",
+          "events": ["evt:SessionEnded"]
+        }
+      ],
+      "description": ".on({ Logout }).loads(UserSessions, (data) => `sessions-${data.user}`, [\"SessionEnded\"]). Frees a slot on the user's count in the same commit that ends the session. Freeing is an action: app.close can't append to another stream."
+    },
+    {
+      "id": "state:Session",
+      "lane": "state",
+      "label": "Session",
+      "note": "user · active",
+      "span": [21.5, 22.5],
+      "description": "One stream per login."
+    },
+    {
+      "id": "state:UserSessions",
+      "lane": "state",
+      "label": "UserSessions",
+      "note": "active",
+      "span": [23.5, 24.5],
+      "description": "One stream per user, counting active sessions. Its schema caps the count on every fold."
+    },
+    {
+      "id": "evt:LoggedOut",
+      "lane": "event",
+      "label": "LoggedOut",
+      "col": 22
+    },
+    {
+      "id": "evt:SessionEnded",
+      "lane": "event",
+      "label": "SessionEnded",
+      "col": 24,
+      "description": "Owned by UserSessions. Logout may emit it because its .loads lists it."
     }
   ],
   "edges": [
@@ -387,6 +505,26 @@
     {
       "from": "action:ReserveItem",
       "to": "evt:StockReserved"
+    },
+    {
+      "from": "actor:student",
+      "to": "action:Waitlist"
+    },
+    {
+      "from": "action:Waitlist",
+      "to": "evt:Waitlisted"
+    },
+    {
+      "from": "actor:member",
+      "to": "action:Logout"
+    },
+    {
+      "from": "action:Logout",
+      "to": "evt:LoggedOut"
+    },
+    {
+      "from": "action:Logout",
+      "to": "evt:SessionEnded"
     }
   ],
   "scenarios": [
@@ -406,12 +544,13 @@
         {
           "from": "actor:student",
           "to": "action:Enroll",
-          "say": "**Ann** enrolls in course **c1**. Enroll loads her enrollment stream and, through `.loads`, the course's **Seats** (12 of 30 taken)."
+          "say": "**Ann** enrolls in course **c1**. Enroll loads two streams: her own enrollment, new, and through `.loads`, the course's **Seats** at v11, with 12 of 30 taken.",
+          "loads": ["course-c1"]
         },
         {
           "from": "action:Enroll",
           "to": "evt:Enrolled",
-          "say": "The rule \"the course has a free seat\" passes with Seats in hand. One commit appends **Enrolled** to Ann's stream and **SeatTaken** to **course-c1**, each guarded by the version Enroll loaded.",
+          "say": "The rule \"the course has a free seat\" passes with Seats in hand. Then the commit: **each stream is checked at the version it was loaded at**, and only then do **Enrolled** and **SeatTaken** land together.",
           "data": {
             "course": "c1",
             "student": "ann"
@@ -450,52 +589,72 @@
     {
       "title": "The last seat",
       "stream": "enrollment-bob-c1",
-      "summary": "Carla and Bob try for the last seat at the same moment. One commit wins; the other's version check fails, its retry reloads Seats, and the rule refuses.",
+      "summary": "Carla and Bob try for the last seat at the same moment. Both load the course at the same version. Carla's commit lands. Bob's version check fails, so nothing of his is written; his retry reloads Seats, and the rule refuses.",
       "steps": [
         {
           "from": "actor:student",
           "to": "action:Enroll",
           "stream": "enrollment-carla-c1",
-          "say": "**Carla** and **Bob** enroll at the same moment. Both load course-c1 at **29 of 30**."
+          "loads": ["course-c1"],
+          "say": "**Carla** enrolls. Enroll loads her stream and **course-c1** at v28: 29 of 30 taken."
+        },
+        {
+          "from": "actor:student",
+          "to": "action:Enroll",
+          "loads": ["course-c1"],
+          "say": "At the same moment, **Bob** enrolls. He loads course-c1 at the same **v28**. Each rule passes, on the same last seat."
         },
         {
           "from": "action:Enroll",
           "to": "evt:Enrolled",
           "stream": "enrollment-carla-c1",
-          "say": "Carla's commit lands first: **Enrolled** to her stream and **SeatTaken** to course-c1, together. The course is now **30 of 30**.",
+          "commit": "enroll-carla",
+          "say": "Carla's commit lands first: both versions still match, so **Enrolled** and **SeatTaken** land together. The course moves to v29, **30 of 30**.",
           "data": {
             "course": "c1",
             "student": "carla"
-          },
-          "commit": "enroll-carla"
+          }
         },
         {
           "from": "action:Enroll",
           "to": "evt:SeatTaken",
           "stream": "course-c1",
-          "say": "...and **SeatTaken** to course-c1. The course is now **30 of 30**.",
+          "commit": "enroll-carla",
           "data": {
             "student": "carla"
           },
-          "commit": "enroll-carla",
           "patch": {
             "taken": 30
           }
         },
         {
-          "from": "actor:student",
-          "to": "action:Enroll",
-          "say": "Bob's commit expected course-c1 at the version he loaded. It moved, so **nothing of his was written** (`ConcurrencyError`), and Enroll's `maxRetries: 1` reloads both streams."
+          "from": "action:Enroll",
+          "to": "evt:Enrolled",
+          "commit": "enroll-bob",
+          "conflict": "course-c1",
+          "say": "Bob's commit expected course-c1 at v28, and it's at v29. **The whole commit fails: nothing lands on either stream**, not even on Bob's own, which didn't move (`ConcurrencyError`)."
+        },
+        {
+          "from": "action:Enroll",
+          "to": "evt:SeatTaken",
+          "stream": "course-c1",
+          "commit": "enroll-bob",
+          "conflict": "course-c1"
+        },
+        {
+          "at": "action:Enroll",
+          "loads": ["course-c1"],
+          "say": "Enroll's `maxRetries: 1` runs the action again with **fresh loads**: course-c1 at v29, 30 of 30."
         },
         {
           "from": "action:Enroll",
           "to": "evt:Enrolled",
-          "say": "With Seats reloaded at 30 of 30, the rule refuses Bob. The course can't be overfilled.",
-          "reject": "the course has a free seat"
+          "reject": "the course has a free seat",
+          "say": "Now the rule sees the truth, and refuses Bob. A refusal he can act on, instead of an overfilled course."
         },
         {
           "at": "state:Seats",
-          "say": "Seats' schema says **taken ≤ capacity**, and it's checked on every write. So no action can overfill a course, whichever action emits SeatTaken."
+          "say": "Seats' schema says **taken ≤ capacity**, and it's checked on every fold. So no action can overfill a course, whichever action emits SeatTaken."
         }
       ],
       "initials": {
@@ -510,23 +669,61 @@
       }
     },
     {
+      "title": "A read isn't guarded",
+      "stream": "enrollment-dee-c1",
+      "summary": "Dee joins the waitlist of a full course. Waitlist reads Seats for its rule, but lists no events on the load, so Seats stays outside the commit.",
+      "initials": {
+        "course-c1": {
+          "state": "Seats",
+          "data": {
+            "taken": 30,
+            "capacity": 30
+          },
+          "version": 29
+        }
+      },
+      "steps": [
+        {
+          "from": "actor:student",
+          "to": "action:Waitlist",
+          "loads": ["course-c1"],
+          "say": "**Dee** joins the waitlist. Waitlist loads her stream and reads **course-c1**: `.loads(Seats, course)`, with no events listed. That's the muted line: **a read**."
+        },
+        {
+          "from": "action:Waitlist",
+          "to": "evt:Waitlisted",
+          "commit": "waitlist-dee",
+          "say": "The commit covers only what it appends to: **her own stream**. Seats isn't checked, so if a seat frees up just now, Waitlisted still lands.",
+          "data": {
+            "course": "c1",
+            "student": "dee"
+          }
+        },
+        {
+          "at": "state:Seats",
+          "say": "That's the trade: a read costs no conflicts, but guards nothing. A decision that must be refused when a stream moves appends to it."
+        }
+      ]
+    },
+    {
       "title": "A unique email",
       "stream": "user-42",
       "summary": "Each email address is an ordinary Email state of its own. Registering loads it and takes it in the same commit as the user's own event.",
       "steps": [
         {
           "at": "state:Email",
-          "say": "Uniqueness is just another state: one **Email** stream per address, recording who holds it. No unique index outside the store, no saga."
+          "say": "Uniqueness is just another state: one **Email** stream per address, recording who holds it. No unique index outside the store, no saga. A stream name can't be forgotten, so it's keyed by an **HMAC of the address** (`email-7f3a`), never the address."
         },
         {
           "from": "actor:user",
           "to": "action:Register",
-          "say": "**Ann** registers with **ann@x.io**. Register loads the Email stream for that address: no holder."
+          "say": "**Ann** registers with **ann@x.io**. Register loads her own stream and the Email stream for that address: new, no holder.",
+          "loads": ["email-7f3a"]
         },
         {
           "from": "action:Register",
           "to": "evt:Registered",
-          "say": "The rule \"the email is free\" passes. One commit appends **Registered** to user-42 and **EmailTaken** to **email-ann@x.io**.",
+          "say": "The rule \"the email is free\" passes. One commit, both streams checked: **Registered** to user-42 and **EmailTaken** to **email-7f3a**.",
           "data": {
             "email": "ann@x.io"
           },
@@ -535,8 +732,8 @@
         {
           "from": "action:Register",
           "to": "evt:EmailTaken",
-          "stream": "email-ann@x.io",
-          "say": "...and **EmailTaken** to **email-ann@x.io**, in the same commit.",
+          "stream": "email-7f3a",
+          "say": "...and **EmailTaken** to **email-7f3a**, in the same commit.",
           "data": {
             "user": "user-42"
           },
@@ -558,7 +755,8 @@
         {
           "from": "actor:user",
           "to": "action:ChangeEmail",
-          "say": "**Ben** tries to change his email to **ann@x.io**. ChangeEmail loads both Email streams: his old one, and ann@x.io, held by user-42."
+          "say": "**Ben** tries to change his email to **ann@x.io**. ChangeEmail loads Email twice, named `old` and `new`: his own address, and Ann's, held by user-42.",
+          "loads": ["email-c41d", "email-7f3a"]
         },
         {
           "from": "action:ChangeEmail",
@@ -569,7 +767,8 @@
         {
           "from": "actor:user",
           "to": "action:ChangeEmail",
-          "say": "Ben picks **ben@z.io** instead. Both Email streams load again: the new one has no holder."
+          "say": "Ben picks **ben@z.io** instead. Both load again, and the new one is free.",
+          "loads": ["email-c41d", "email-92be"]
         },
         {
           "from": "action:ChangeEmail",
@@ -583,7 +782,7 @@
         {
           "from": "action:ChangeEmail",
           "to": "evt:EmailReleased",
-          "stream": "email-ben@y.io",
+          "stream": "email-c41d",
           "say": "...**EmailReleased** frees **ben@y.io**...",
           "data": {},
           "commit": "change-ben",
@@ -594,7 +793,7 @@
         {
           "from": "action:ChangeEmail",
           "to": "evt:EmailTaken",
-          "stream": "email-ben@z.io",
+          "stream": "email-92be",
           "say": "...and **EmailTaken** takes **ben@z.io**. Three streams, one commit, each guarded by the version it was loaded at.",
           "data": {
             "user": "user-77"
@@ -610,14 +809,14 @@
         }
       ],
       "initials": {
-        "email-ben@y.io": {
+        "email-c41d": {
           "state": "Email",
           "data": {
             "holder": "user-77"
           },
           "version": 0
         },
-        "email-ann@x.io": {
+        "email-7f3a": {
           "state": "Email",
           "data": {
             "holder": "user-42"
@@ -647,7 +846,8 @@
         {
           "from": "actor:guest",
           "to": "action:Book",
-          "say": "**Dana** books room **R1** from 10:00 to 11:00. Book loads room-r1: 9:00–10:00 is taken."
+          "say": "**Dana** books room **R1** from 10:00 to 11:00. Book loads room-r1: 9:00–10:00 is taken.",
+          "loads": ["room-r1"]
         },
         {
           "from": "action:Book",
@@ -675,7 +875,8 @@
           "from": "actor:guest",
           "to": "action:Book",
           "stream": "booking-eli",
-          "say": "**Eli** asks for room R1 from **10:30** to 11:30. Book loads room-r1 again."
+          "say": "**Eli** asks for room R1 from **10:30** to 11:30. Book loads room-r1 again.",
+          "loads": ["room-r1"]
         },
         {
           "from": "action:Book",
@@ -713,13 +914,14 @@
         {
           "from": "actor:customer",
           "to": "action:Transfer",
-          "say": "Move **50** from account **A** (80) to account **B** (20). Transfer loads both accounts."
+          "say": "Move **50** from account **A** (80) to account **B** (20). Transfer loads its own stream and Account twice, named `from` and `to`.",
+          "loads": ["acct-a", "acct-b"]
         },
         {
           "from": "action:Transfer",
           "to": "evt:Transferred",
           "commit": "t-901",
-          "say": "\"Enough funds\" holds. One commit appends to three streams: **Transferred**, **Debited** to acct-a, **Credited** to acct-b.",
+          "say": "\"Enough funds\" holds. One commit, three streams, each checked at its loaded version: **Transferred**, **Debited** to acct-a, **Credited** to acct-b. A debit without its credit can't happen.",
           "data": {
             "from": "acct-a",
             "to": "acct-b",
@@ -754,7 +956,8 @@
           "from": "actor:customer",
           "to": "action:Transfer",
           "stream": "transfer-902",
-          "say": "Now move **100** from A, which holds 30."
+          "say": "Now move **100** from A, which holds 30.",
+          "loads": ["acct-a", "acct-b"]
         },
         {
           "from": "action:Transfer",
@@ -785,7 +988,8 @@
         {
           "from": "actor:shopper",
           "to": "action:ReserveItem",
-          "say": "An order reserves **2** of product **p-7**, which has **3** in stock."
+          "say": "An order reserves **2** of product **p-7**, which has **3** in stock.",
+          "loads": ["product-p7"]
         },
         {
           "from": "action:ReserveItem",
@@ -813,13 +1017,68 @@
           "from": "actor:shopper",
           "to": "action:ReserveItem",
           "stream": "order-56",
-          "say": "Another order asks for **2**. Product p-7 loads with **1** left."
+          "say": "Another order asks for **2**. Product p-7 loads with **1** left.",
+          "loads": ["product-p7"]
         },
         {
           "from": "action:ReserveItem",
           "to": "evt:ItemReserved",
           "say": "The rule refuses it, and Product's schema (stock ≥ 0) would too. Had the stock moved since the load, nothing would have been written either.",
           "reject": "enough stock"
+        }
+      ]
+    },
+    {
+      "title": "Freed at logout",
+      "stream": "session-5512",
+      "summary": "A user holds 3 of 3 sessions. Logging out ends the session and frees a slot in one commit, so a slot is never lost to a crash in between.",
+      "initial": {
+        "user": "user-42",
+        "active": true
+      },
+      "initials": {
+        "sessions-42": {
+          "state": "UserSessions",
+          "data": {
+            "active": 3
+          },
+          "version": 8
+        }
+      },
+      "steps": [
+        {
+          "from": "actor:member",
+          "to": "action:Logout",
+          "loads": ["sessions-42"],
+          "say": "**Ann** logs out. Logout loads her session and **sessions-42**: 3 of 3 slots in use."
+        },
+        {
+          "from": "action:Logout",
+          "to": "evt:LoggedOut",
+          "commit": "logout",
+          "say": "One commit: **LoggedOut** ends the session, **SessionEnded** frees the slot. Both land or neither does, so there's no moment when a slot is lost.",
+          "data": {
+            "user": "user-42"
+          },
+          "patch": {
+            "active": false
+          }
+        },
+        {
+          "from": "action:Logout",
+          "to": "evt:SessionEnded",
+          "commit": "logout",
+          "stream": "sessions-42",
+          "data": {
+            "session": "session-5512"
+          },
+          "patch": {
+            "active": 2
+          }
+        },
+        {
+          "at": "state:UserSessions",
+          "say": "Freeing is an **action**, on purpose. `app.close` retires a stream without running any action, so it can't append to another stream: free the slot first, then close."
         }
       ]
     }
