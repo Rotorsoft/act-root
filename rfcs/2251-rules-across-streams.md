@@ -135,7 +135,7 @@ A limit is the same pattern with a count, like `Seats`. What a framework helper 
 1. **Load** the action's own stream (state and version), then every `.loads` target at once; a target function sees the payload and the action's state.
 2. **Check the preconditions** with the action's state and every state it loaded (the fourth argument, `loaded`, keyed by state name, or by the load's name when it has one).
 3. **Run `.emit` and route each event:** an event of the action's own state goes to its stream; an event listed on a load goes to that load's stream. Fold each event onto its stream's state, and check every folded state against its schema.
-4. **Commit once,** `commit(writes)`, with each stream's expected version set to the version it had **when it was loaded**. A loaded stream that receives no event is not written, so it isn't guarded.
+4. **Commit once,** `commit(appends)`, with each stream's expected version set to the version it had **when it was loaded**. A loaded stream that receives no event gets no append, so it isn't guarded.
 5. **The store checks every version in one atomic step.** If any stream moved since its load, nothing is written and the commit throws `ConcurrencyError`; `maxRetries` reruns the sequence from step 1 with fresh loads. An explicit `expectedVersion` from the caller applies to the action's own stream and is never retried.
 
 No write rests on stale context: every stream the action writes is unchanged since it was loaded, or nothing commits. A stream that was only read can move in between; see Trade-offs. A load served from the cache is safe for the same reason; a cached version that's behind fails the check, and the retry reloads.
@@ -144,7 +144,7 @@ No write rests on stale context: every stream the action writes is unchanged sin
 
 ### `Store` port (breaking for adapters; 2.0)
 
-- `commit(writes, meta)` replaces `commit(stream, msgs, meta, expectedVersion?)`. `writes` is `readonly { stream: string; msgs: Message[]; expectedVersion?: number }[]`, each stream at most once, each with at least one message. All writes land or none do; each `expectedVersion` is checked against its own stream, and a stale one throws `ConcurrencyError` naming that stream. A write with no messages is refused. It returns the committed events of every write, in order.
+- `commit(appends, meta)` replaces `commit(stream, msgs, meta, expectedVersion?)`. `appends` is `readonly Append[]`, each `{ stream, msgs, expectedVersion? }`, each stream at most once, each with at least one message. All appends land or none do; each `expectedVersion` is checked against its own stream, and a stale one throws `ConcurrencyError` naming that stream. An append with no messages is refused. It returns the committed events of every append, in order.
 - Adapters do the inserts for several streams inside the transaction they already open; the existing unique `(stream, version)` index catches a race on any of them, since every write inserts a row. No new table, column or index.
 
 ### Builders (additive)
@@ -252,7 +252,7 @@ The scaffold skill generates `.loads` and the uniqueness or capacity states when
 - a write with no messages is refused;
 - a write with no `expectedVersion` beside guarded ones;
 - creating streams (`-1`) and appending to existing ones in one commit;
-- ids are assigned in order across the writes and become visible in that order;
+- ids are assigned in order across the appends and become visible in that order;
 - two connections racing on a shared stream: exactly one wins; on disjoint streams: both win.
 
 **Core (`.loads` and routed events):**
@@ -292,7 +292,7 @@ The scaffold skill generates `.loads` and the uniqueness or capacity states when
 
 ## Stability / charter impact
 
-- **Breaking, for adapters and direct `Store` callers:** `commit(writes, meta)`. A migration note shows the one-write form; the TCK shows what an adapter adds. Ships in 2.0 with a `BREAKING CHANGE:` footer.
+- **Breaking, for adapters and direct `Store` callers:** `commit(appends, meta)`. A migration note shows the one-append form; the TCK shows what an adapter adds. Ships in 2.0 with a `BREAKING CHANGE:` footer.
 - **Additive, for apps:** `.loads`, the fourth `loaded` argument, and events emitted to loaded streams. An app that uses none of them behaves as today.
 
 ## Open questions

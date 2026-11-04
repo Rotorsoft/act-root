@@ -54,7 +54,7 @@ describe("PostgresStore", () => {
   });
 
   describe("commit", () => {
-    it("returns [] for no writes, without touching the database", async () => {
+    it("returns [] for no appends, without touching the database", async () => {
       const connect = vi.spyOn(pg.Pool.prototype, "connect");
       await expect(
         store.commit([], { correlation: "c", causation: {} })

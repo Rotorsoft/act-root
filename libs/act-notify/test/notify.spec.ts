@@ -141,7 +141,7 @@ describe("withBroker", () => {
     ).resolves.toHaveLength(1);
   });
 
-  it("skips the publish when a commit has no writes", async () => {
+  it("skips the publish when a commit has no appends", async () => {
     const broker = new LoopbackBroker();
     let published = 0;
     broker.subscribe(() => published++);
@@ -150,7 +150,7 @@ describe("withBroker", () => {
     expect(published).toBe(0);
   });
 
-  it("publishes one notification per stream a commit writes", async () => {
+  it("publishes one notification per stream a commit appends to", async () => {
     const broker = new LoopbackBroker();
     const seen: { stream: string; events: number }[] = [];
     broker.subscribe(({ notification }) =>

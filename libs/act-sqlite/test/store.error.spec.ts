@@ -225,8 +225,8 @@ describe("SqliteStore error paths", () => {
 
   describe("commit across streams, failing part-way", () => {
     // A real DB whose transactions run every statement except the ones
-    // `fail` picks, so the first write's rows are inserted before the
-    // second write's insert fails.
+    // `fail` picks, so the first append's rows are inserted before the
+    // second append's insert fails.
     async function store_failing(fail: (stmt: Stmt) => unknown) {
       const real = new SqliteStore({ url: tmp_db_url() });
       await real.seed();
@@ -254,17 +254,17 @@ describe("SqliteStore error paths", () => {
       typeof stmt !== "string" &&
       stmt.sql.startsWith("INSERT INTO events") &&
       stmt.args?.[0] === stream;
-    const writes = [
+    const appends = [
       { stream: "first", msgs: [{ name: "E", data: {} }] },
       { stream: "second", msgs: [{ name: "E", data: {} }] },
     ];
     const meta = { correlation: "", causation: {} };
 
-    it("rolls back the first write when the second write's insert fails", async () => {
+    it("rolls back the first append when the second append's insert fails", async () => {
       const real = await store_failing(
         (stmt) => inserts_into(stmt, "second") && new Error("disk full")
       );
-      const err = await real.commit(writes, meta).catch((e) => e);
+      const err = await real.commit(appends, meta).catch((e) => e);
       expect(err).toBeInstanceOf(StoreError);
       expect((err.cause as Error).message).toBe("disk full");
       const stored: unknown[] = [];
@@ -280,7 +280,7 @@ describe("SqliteStore error paths", () => {
       const real = await store_failing(
         (stmt) => inserts_into(stmt, "second") && collision
       );
-      const err = await real.commit(writes, meta).catch((e) => e);
+      const err = await real.commit(appends, meta).catch((e) => e);
       expect(err).toBeInstanceOf(ConcurrencyError);
       expect((err as ConcurrencyError).stream).toBe("second");
       const stored: unknown[] = [];

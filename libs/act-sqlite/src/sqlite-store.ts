@@ -5,6 +5,7 @@ import {
   type Transaction,
 } from "@libsql/client";
 import type {
+  Append,
   BlockedLease,
   Committed,
   EventMeta,
@@ -19,7 +20,6 @@ import type {
   StreamFilter,
   StreamPosition,
   StreamStats,
-  StreamWrite,
   SubscribeInput,
   SubscribeResult,
 } from "@rotorsoft/act";
@@ -105,14 +105,14 @@ export interface SqliteConfig {
  * by "no such table: events" on readback.
  * @internal
  */
-// A commit names each stream once, and every write carries events.
-function check_writes<E extends Schemas>(writes: readonly StreamWrite<E>[]) {
+// A commit names each stream once, and every append carries events.
+function check_appends<E extends Schemas>(appends: readonly Append<E>[]) {
   const seen = new Set<string>();
-  for (const { stream, msgs } of writes) {
+  for (const { stream, msgs } of appends) {
     if (!msgs.length)
-      throw new Error(`commit: the write to "${stream}" has no events`);
+      throw new Error(`commit: the append to "${stream}" has no events`);
     if (seen.has(stream))
-      throw new Error(`commit: stream "${stream}" is written twice`);
+      throw new Error(`commit: stream "${stream}" is named twice`);
     seen.add(stream);
   }
 }
@@ -597,23 +597,23 @@ export class SqliteStore implements Store {
     await this._serial(async () => this.client.close());
   }
 
-  // --- commit: one transaction across every write ---
+  // --- commit: one transaction across every append ---
   async commit<E extends Schemas>(
-    writes: readonly StreamWrite<E>[],
+    appends: readonly Append<E>[],
     meta: EventMeta
   ): Promise<Committed<E, keyof E>[]> {
-    check_writes(writes);
-    if (!writes.length) return [];
+    check_appends(appends);
+    if (!appends.length) return [];
     return this._serial(async () => {
       const tx = await this.client.transaction("write");
-      // The write being inserted and its head, so the catch can name the
+      // The append being inserted and its head, so the catch can name the
       // stream a (stream, version) unique collision hit.
-      let writing = writes[0];
+      let appending = appends[0];
       let head = -1;
       try {
         // Every head is read and checked before anything is inserted.
         const heads = new Map<string, number>();
-        for (const { stream, msgs, expectedVersion } of writes) {
+        for (const { stream, msgs, expectedVersion } of appends) {
           const row = await tx.execute({
             sql: "SELECT COALESCE(MAX(version), -1) as v FROM events WHERE stream = ?",
             args: [stream],
@@ -634,16 +634,16 @@ export class SqliteStore implements Store {
 
         const now = new Date().toISOString();
         const committed: Committed<E, keyof E>[] = [];
-        for (const write of writes) {
-          writing = write;
-          head = heads.get(write.stream)!;
+        for (const append of appends) {
+          appending = append;
+          head = heads.get(append.stream)!;
           let version = head + 1;
-          for (const { name, data, pii } of write.msgs) {
+          for (const { name, data, pii } of append.msgs) {
             const pii_for_write = await this._stringify_pii_for_write(pii);
             const result = await tx.execute({
               sql: "INSERT INTO events (stream, version, name, data, meta, created, pii) VALUES (?, ?, ?, ?, ?, ?, ?)",
               args: [
-                write.stream,
+                append.stream,
                 version,
                 name as string,
                 JSON.stringify(data),
@@ -654,7 +654,7 @@ export class SqliteStore implements Store {
             });
             committed.push({
               id: Number(result.lastInsertRowid),
-              stream: write.stream,
+              stream: append.stream,
               version,
               created: new Date(now),
               name,
@@ -680,10 +680,10 @@ export class SqliteStore implements Store {
         if (e instanceof ConcurrencyError) throw e;
         if (is_unique_violation(e))
           throw new ConcurrencyError(
-            writing.stream,
+            appending.stream,
             head,
-            writing.msgs as unknown as Message<Schemas, keyof Schemas>[],
-            writing.expectedVersion ?? -1
+            appending.msgs as unknown as Message<Schemas, keyof Schemas>[],
+            appending.expectedVersion ?? -1
           );
         throw new StoreError("commit", { cause: e });
       }

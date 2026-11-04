@@ -44,7 +44,7 @@ interface Store extends Disposable, EventSource {
 
   seed(): Promise<void>;
   drop(): Promise<void>;
-  commit(writes: StreamWrite[], meta): Promise<Committed[]>; // { stream, msgs, expectedVersion? } per stream
+  commit(appends: Append[], meta): Promise<Committed[]>; // { stream, msgs, expectedVersion? } per stream
   claim(lagging, leading, by, millis, lane?): Promise<Lease[]>;
   subscribe(streams: SubscribeInput[], correlated_at?): Promise<{ subscribed; watermark; correlated_at }>;
   ack(leases): Promise<Lease[]>;
