@@ -108,7 +108,9 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
 .state .chg { animation: chg 1.6s ease-out; }
 .state dd.chg { color: var(--state); font-weight: 500; }
 @keyframes chg { from { background: color-mix(in srgb, var(--state) 22%, transparent); } to { background: transparent; } }
-.other { margin-top: 12px; padding-top: 8px; border-top: 1px dashed var(--line); }
+.other { margin-top: 12px; padding: 8px 0 0 10px; border-top: 1px dashed var(--line); border-left: 2px solid transparent; }
+.other:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
+.other.at { border-left-color: var(--state); }
 .other .oh { font: 600 10.5px var(--f-mono); color: var(--state); margin-bottom: 4px; overflow-wrap: anywhere; }
 .read { margin-top: 12px; border-top: 1px solid color-mix(in srgb, var(--line) 70%, transparent); padding-top: 8px; }
 .read summary { cursor: pointer; font: 600 11.5px var(--f-body); text-transform: uppercase; letter-spacing: .08em; color: var(--muted); padding: 2px 0 6px; }
@@ -737,8 +739,13 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
   // the state a stream belongs to: the bar over the first event the scenario writes to it
   function stateOfStream(sc, stream) {
     if (sc.initials?.[stream]?.state) return sc.initials[stream].state;
+    for (const x of sc.steps) for (const { stream: s, load } of loadsAt(x)) if (s === stream) return nodes.get(load.state).label;
     const st = sc.steps.find(x => !x.at && !x.reject && (x.stream || sc.stream || "stream") === stream && nodes.get(x.to) && kindOf(nodes.get(x.to)) === "event");
-    return st ? barAt(nodes.get(st.to).cx)?.label : undefined;
+    if (st) return barAt(nodes.get(st.to).cx)?.label;
+    // a stream no event reaches: the bar over the action that works on it
+    const tried = sc.steps.find(x => x.stream === stream);
+    const action = tried && [tried.to, tried.from, tried.at].map(id => nodes.get(id)).find(n => n && kindOf(n) === "action");
+    return action ? barAt(action.cx)?.label : undefined;
   }
   // a stream's version as a person reads it
   const vLabel = v => v === undefined || v < 0 ? "new" : `v${v}`;
@@ -757,6 +764,18 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
     if (fail) fail.t = `${lost}: loaded at ${vLabel(then[lost])}, now ${vLabel(now[lost])}`;
     const reads = at >= 0 ? loadsAt(sc.steps[at]).filter(x => !x.load.events?.length).map(x => ({ t: `${x.stream} not checked (read)`, k: "skip" })) : [];
     return { rows: [...rows, ...reads], fail: fail?.t };
+  }
+  // every stream the scenario holds or writes, its own first
+  function streamsOf(sc) {
+    const own = sc.stream || "stream";
+    return [...new Set([own, ...Object.keys(sc.initials ?? {}), ...sc.steps.flatMap(x => [...(x.stream ? [x.stream] : []), ...(x.loads || [])])])];
+  }
+  // the streams step k-1 works on: what it loads, or what its commit appends to, with the action's own
+  function streamsAt(sc, k) {
+    const st = sc.steps[k - 1];
+    if (!st) return new Set();
+    const [g0, g1] = groupAt(sc, k - 1), own = sc.steps[g0].stream || sc.stream || "stream";
+    return new Set([own, ...(st.loads || []), ...sc.steps.slice(g0, g1).map(x => x.stream || sc.stream || "stream")]);
   }
   // a refused precondition reads as the rule that didn't hold (a precondition is a holds() predicate);
   // anything else (a throw in .emit) keeps its message
@@ -852,18 +871,23 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
     // the state the scenario's own stream belongs to: the bar over its first action
     const first = sc.steps.map(x => nodes.get(x.from)).find(n => n && kindOf(n) === "action");
     const own = first ? barAt(first.cx) : stateBar;
-    $("state-h").textContent = `${own ? own.label : ""} state`;
-    $("state-meta").textContent = `${sc.stream || ""}${r.version !== undefined ? " · v" + r.version : ""}`;
-    const keys = Object.keys(r.state);
     const dl = (obj, chg) => `<dl class="state">${Object.keys(obj).map(key => { const c = fresh && chg.includes(key) ? ' class="chg"' : ""; return `<dt${c}>${esc(key)}</dt><dd${c}>${esc(fmt(obj[key]))}</dd>`; }).join("")}</dl>`;
-    // the other streams the scenario touches, each with its own state: a decision that spans streams shows them all
-    const rest = [...r.others].map(([stream, obj]) => {
-      const v = r.ver[stream];
-      return `<div class="other"><div class="oh">${esc(stateOfStream(sc, stream) || "state")} · ${esc(stream)}${v !== undefined ? " · v" + v : ""}</div>${Object.keys(obj).length ? dl(obj, r.fresh_keys.get(stream) || []) : `<span class="empty">Empty.</span>`}</div>`;
-    }).join("");
-    $("state").innerHTML = (keys.length
-      ? dl(r.state, r.changed)
-      : `<span class="empty">Empty until the first event. Every committed event patches it, and the next action is checked against it.</span>`) + rest;
+    const ownStream = sc.stream || "stream", streams = streamsOf(sc), at = streamsAt(sc, k);
+    if (streams.length === 1) {
+      $("state-h").textContent = `${own ? own.label : ""} state`;
+      $("state-meta").textContent = `${sc.stream || ""}${r.version !== undefined ? " · v" + r.version : ""}`;
+      $("state").innerHTML = Object.keys(r.state).length ? dl(r.state, r.changed)
+        : `<span class="empty">Empty until the first event. Every committed event patches it, and the next action is checked against it.</span>`;
+    } else {
+      // a decision that spans streams shows them all from the start, each with its own state and version
+      $("state-h").textContent = "State";
+      $("state-meta").textContent = `${streams.length} streams`;
+      $("state").innerHTML = streams.map(stream => {
+        const isOwn = stream === ownStream, obj = isOwn ? r.state : r.others.get(stream) ?? {}, v = r.ver[stream];
+        const name = isOwn && own ? own.label : stateOfStream(sc, stream) || "state";
+        return `<div class="other${at.has(stream) ? " at" : ""}" data-stream="${esc(stream)}"><div class="oh">${esc(name)} · ${esc(stream)} · ${vLabel(v)}</div>${Object.keys(obj).length ? dl(obj, r.fresh_keys.get(stream) || []) : `<span class="empty">No events yet.</span>`}</div>`;
+      }).join("");
+    }
     nodes.forEach(n => n.g.classList.toggle("blocked", r.blocked.has(n.id)));
   }
 
@@ -905,6 +929,8 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
     const sc = scenarios[cur], st = k ? sc.steps[groupAt(sc, k - 1)[0]] : undefined;
     follow(st);
     lightBands(st);
+    const at = streamsAt(sc, k);
+    document.querySelectorAll("#state .other").forEach(d => d.classList.toggle("at", at.has(d.dataset.stream)));
     $("count").textContent = `${String(k).padStart(2, "0")} / ${String(sc.steps.length).padStart(2, "0")}`;
     $("say").innerHTML = k === 0 ? `<b>${esc(sc.title)}.</b> ${md(sc.summary || "Press Play to walk the flow.")}` : md(st.say || "");
     $("prog").style.width = `${(k / sc.steps.length) * 100}%`;
