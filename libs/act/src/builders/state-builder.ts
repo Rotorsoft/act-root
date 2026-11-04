@@ -217,11 +217,10 @@ function action_builder<
         if (typeof handler === "string") {
           const event_name = handler;
           // Tag the synthetic function with the static event name so
-          // the act-builder can detect emissions of deprecated events
-          // at build time. Dynamic forms — where the
-          // returned event name is computed inside the user's
-          // function — can't be inspected statically; they're caught
-          // by the runtime warning in event-sourcing.ts.
+          // the act-builder can check it at build time (a deprecated
+          // event, an event a load lists). Dynamic forms compute the
+          // event name inside the user's function, so the build can't
+          // see it.
           const emit_fn = Object.assign(
             (payload: any) => [event_name, payload],
             {

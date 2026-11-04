@@ -418,9 +418,10 @@ type ActionEmit<
     TSnap
   >;
   /** Passthrough — the action payload becomes the event data
-   *  directly. Must reference an event declared in `.emits()`. */
+   *  directly. Must reference an event declared in `.emits()` that no
+   *  load lists, since the action's own stream must get it. */
   (
-    event_name: keyof TEvents & string
+    event_name: Exclude<keyof TEvents & string, keyof TRouted>
   ): ActionBuilder<
     TState,
     TEvents,

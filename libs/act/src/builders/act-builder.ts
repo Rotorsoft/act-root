@@ -408,6 +408,18 @@ export function act<
                 return { ...l, state: registered };
               });
             }
+            for (const [action, loads] of Object.entries(resolved)) {
+              const static_target = (
+                state.on[action] as { _static_emit?: string }
+              )._static_emit;
+              if (
+                static_target &&
+                loads.some((l) => l.events.includes(static_target))
+              )
+                throw new Error(
+                  `Action "${action}" statically emits "${static_target}", which its load lists, so nothing goes to its own stream; emit one of its own events too`
+                );
+            }
             const own = { ...state, loads: resolved };
             states.set(name, own);
             for (const action of Object.keys(own.actions))

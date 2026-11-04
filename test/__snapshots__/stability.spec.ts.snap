@@ -2321,8 +2321,9 @@ type ActionEmit<TState extends Schema, TEvents extends Schemas, TActions extends
         [P in TKey]: TNewActions;
     }, TName, TSnap>;
     /** Passthrough — the action payload becomes the event data
-     *  directly. Must reference an event declared in \`.emits()\`. */
-    (event_name: keyof TEvents & string): ActionBuilder<TState, TEvents, TActions & {
+     *  directly. Must reference an event declared in \`.emits()\` that no
+     *  load lists, since the action's own stream must get it. */
+    (event_name: Exclude<keyof TEvents & string, keyof TRouted>): ActionBuilder<TState, TEvents, TActions & {
         [P in TKey]: TNewActions;
     }, TName, TSnap>;
 };

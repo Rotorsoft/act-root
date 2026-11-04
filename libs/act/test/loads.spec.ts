@@ -517,6 +517,25 @@ describe("what an action may load and emit", () => {
     ).toThrow('Action "go" lists "SeatTaken" on two loads');
   });
 
+  test("a static emit of an event its load lists fails to compile and throws at build", () => {
+    const Move = z.object({ to: z.string() });
+    const Moved = state({ Moved: z.object({}) })
+      .init(() => ({}))
+      .emits({ Moved: Move })
+      .build();
+    const Mover = state({ Moved: z.object({}) })
+      .init(() => ({}))
+      .emits({ Moved: Move })
+      .on({ move: Move })
+      .loads(Moved, (d) => d.to, ["Moved"])
+      // @ts-expect-error the load gets it, so nothing goes to its own stream
+      .emit("Moved")
+      .build();
+    expect(() => act().withState(Mover).build()).toThrow(
+      'Action "move" statically emits "Moved", which its load lists, so nothing goes to its own stream; emit one of its own events too'
+    );
+  });
+
   test("a deprecated event listed on a load throws at build", () => {
     const Bumped = z.object({});
     const Counter = state({ Counter: z.object({}) })
