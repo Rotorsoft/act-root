@@ -8,6 +8,7 @@
 
 import { ConcurrencyError } from "../types/errors.js";
 import type {
+  Append,
   BlockedLease,
   Committed,
   EventMeta,
@@ -23,20 +24,19 @@ import type {
   StreamFilter,
   StreamPosition,
   StreamStats,
-  StreamWrite,
   SubscribeInput,
 } from "../types/index.js";
 import { DEFAULT_LANE, SNAP_EVENT, TOMBSTONE_EVENT } from "../types/index.js";
 import { sleep } from "../utils.js";
 
-// A commit names each stream once, and every write carries events.
-function check_writes<E extends Schemas>(writes: readonly StreamWrite<E>[]) {
+// A commit names each stream once, and every append carries events.
+function check_appends<E extends Schemas>(appends: readonly Append<E>[]) {
   const seen = new Set<string>();
-  for (const { stream, msgs } of writes) {
+  for (const { stream, msgs } of appends) {
     if (!msgs.length)
-      throw new Error(`commit: the write to "${stream}" has no events`);
+      throw new Error(`commit: the append to "${stream}" has no events`);
     if (seen.has(stream))
-      throw new Error(`commit: stream "${stream}" is written twice`);
+      throw new Error(`commit: stream "${stream}" is named twice`);
     seen.add(stream);
   }
 }
@@ -413,14 +413,14 @@ export class InMemoryStore implements Store {
   }
 
   async commit<E extends Schemas>(
-    writes: readonly StreamWrite<E>[],
+    appends: readonly Append<E>[],
     meta: EventMeta
   ) {
     await sleep();
-    check_writes(writes);
+    check_appends(appends);
     // Every version is checked before anything is appended, so a stale
-    // write leaves every stream as it was.
-    for (const { stream, msgs, expectedVersion } of writes) {
+    // append leaves every stream as it was.
+    for (const { stream, msgs, expectedVersion } of appends) {
       const current = this._stream_versions.get(stream) ?? -1;
       if (typeof expectedVersion === "number" && current !== expectedVersion)
         throw new ConcurrencyError(
@@ -431,7 +431,7 @@ export class InMemoryStore implements Store {
         );
     }
     const created = new Date();
-    return writes.flatMap(({ stream, msgs }) => {
+    return appends.flatMap(({ stream, msgs }) => {
       let version = this._stream_versions.get(stream) ?? -1;
       const committed = msgs.map(({ name, data, pii }) => {
         const c: Committed<E, keyof E> = {

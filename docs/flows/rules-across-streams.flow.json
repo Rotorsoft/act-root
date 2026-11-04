@@ -411,7 +411,7 @@
         {
           "from": "action:Enroll",
           "to": "evt:Enrolled",
-          "say": "The rule \"the course has a free seat\" passes with Seats in hand. One commit writes **Enrolled** to Ann's stream and **SeatTaken** to **course-c1**, each guarded by the version Enroll loaded.",
+          "say": "The rule \"the course has a free seat\" passes with Seats in hand. One commit appends **Enrolled** to Ann's stream and **SeatTaken** to **course-c1**, each guarded by the version Enroll loaded.",
           "data": {
             "course": "c1",
             "student": "ann"
@@ -526,7 +526,7 @@
         {
           "from": "action:Register",
           "to": "evt:Registered",
-          "say": "The rule \"the email is free\" passes. One commit writes **Registered** to user-42 and **EmailTaken** to **email-ann@x.io**.",
+          "say": "The rule \"the email is free\" passes. One commit appends **Registered** to user-42 and **EmailTaken** to **email-ann@x.io**.",
           "data": {
             "email": "ann@x.io"
           },
@@ -574,7 +574,7 @@
         {
           "from": "action:ChangeEmail",
           "to": "evt:EmailChanged",
-          "say": "One commit writes three streams: **EmailChanged** to user-77, **EmailReleased** frees **ben@y.io**, and **EmailTaken** takes **ben@z.io**, each guarded by the version it was loaded at.",
+          "say": "One commit appends to three streams: **EmailChanged** to user-77, **EmailReleased** frees **ben@y.io**, and **EmailTaken** takes **ben@z.io**, each guarded by the version it was loaded at.",
           "data": {
             "email": "ben@z.io"
           },
@@ -653,7 +653,7 @@
           "from": "action:Book",
           "to": "evt:Booked",
           "commit": "book-dana",
-          "say": "The slot is free. One commit writes **Booked** to Dana's booking and **RoomReserved** to **room-r1**.",
+          "say": "The slot is free. One commit appends **Booked** to Dana's booking and **RoomReserved** to **room-r1**.",
           "data": {
             "room": "r1",
             "slot": "10:00–11:00"
@@ -688,7 +688,7 @@
     {
       "title": "A transfer",
       "stream": "transfer-901",
-      "summary": "Moving 50 from account A to account B writes three streams in one commit. A second transfer of 100 is refused.",
+      "summary": "Moving 50 from account A to account B appends to three streams in one commit. A second transfer of 100 is refused.",
       "initials": {
         "acct-a": {
           "state": "Account",
@@ -719,7 +719,7 @@
           "from": "action:Transfer",
           "to": "evt:Transferred",
           "commit": "t-901",
-          "say": "\"Enough funds\" holds. One commit writes three streams: **Transferred**, **Debited** to acct-a, **Credited** to acct-b.",
+          "say": "\"Enough funds\" holds. One commit appends to three streams: **Transferred**, **Debited** to acct-a, **Credited** to acct-b.",
           "data": {
             "from": "acct-a",
             "to": "acct-b",
@@ -791,7 +791,7 @@
           "from": "action:ReserveItem",
           "to": "evt:ItemReserved",
           "commit": "order-55",
-          "say": "\"Enough stock\" holds. One commit writes **ItemReserved** to the order and **StockReserved** to **product-p7**.",
+          "say": "\"Enough stock\" holds. One commit appends **ItemReserved** to the order and **StockReserved** to **product-p7**.",
           "data": {
             "product": "p7",
             "qty": 2

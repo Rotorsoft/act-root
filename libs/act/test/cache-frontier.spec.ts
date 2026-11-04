@@ -8,10 +8,10 @@ import {
 } from "../src/index.js";
 import { sandbox } from "../src/test/index.js";
 import type {
+  Append,
   Committed,
   EventMeta,
   Schemas,
-  StreamWrite,
 } from "../src/types/index.js";
 
 /**
@@ -22,7 +22,7 @@ import type {
 class GatedStore extends InMemoryStore {
   gate?: Promise<void>;
   override async commit<E extends Schemas>(
-    writes: readonly StreamWrite<E>[],
+    appends: readonly Append<E>[],
     meta: EventMeta
   ): Promise<Committed<E, keyof E>[]> {
     if (this.gate) {
@@ -30,7 +30,7 @@ class GatedStore extends InMemoryStore {
       this.gate = undefined;
       await g;
     }
-    return super.commit(writes, meta);
+    return super.commit(appends, meta);
   }
 }
 

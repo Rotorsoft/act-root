@@ -357,7 +357,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
       const count = (stream: string) =>
         store.query<CounterEvents>(() => {}, { stream, stream_exact: true });
 
-      it("lands every write, each from its own head, with ids in write order", async () => {
+      it("lands every append, each from its own head, with ids in append order", async () => {
         const a = `across-a-${uid()}`;
         const b = `across-b-${uid()}`;
         await store.commit<CounterEvents>(
@@ -388,7 +388,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         );
       });
 
-      it("stores nothing when the first, a middle or the last write is stale, and names its stream", async () => {
+      it("stores nothing when the first, a middle or the last append is stale, and names its stream", async () => {
         for (const at of [0, 1, 2]) {
           const streams = [0, 1, 2].map((i) => `across-stale-${i}-${uid()}`);
           for (const stream of streams)
@@ -410,7 +410,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         }
       });
 
-      it("refuses a stream named twice and a write with no events, storing nothing", async () => {
+      it("refuses a stream named twice and an append with no events, storing nothing", async () => {
         const a = `across-twice-${uid()}`;
         const b = `across-empty-${uid()}`;
         await expect(
@@ -421,7 +421,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
             ],
             meta
           )
-        ).rejects.toThrow(`stream "${a}" is written twice`);
+        ).rejects.toThrow(`stream "${a}" is named twice`);
         await expect(
           store.commit<CounterEvents>(
             [
@@ -430,16 +430,16 @@ export const runStoreTck = (options: StoreTckOptions): void => {
             ],
             meta
           )
-        ).rejects.toThrow(`the write to "${b}" has no events`);
+        ).rejects.toThrow(`the append to "${b}" has no events`);
         expect(await count(a)).toBe(0);
         expect(await count(b)).toBe(0);
       });
 
-      it("commits nothing for no writes", async () => {
+      it("commits nothing for no appends", async () => {
         expect(await store.commit<CounterEvents>([], meta)).toEqual([]);
       });
 
-      it("lands an unguarded write beside guarded ones", async () => {
+      it("lands an unguarded append beside guarded ones", async () => {
         const a = `across-guarded-${uid()}`;
         const b = `across-free-${uid()}`;
         await store.commit<CounterEvents>(

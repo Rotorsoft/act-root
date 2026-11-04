@@ -10,10 +10,10 @@ import {
   store,
 } from "../src/index.js";
 import type {
+  Append,
   EventMeta,
   Message,
   Schemas,
-  StreamWrite,
 } from "../src/types/index.js";
 
 /**
@@ -32,12 +32,12 @@ class FlakyStore extends InMemoryStore {
   }
 
   override async commit<E extends Schemas>(
-    writes: readonly StreamWrite<E>[],
+    appends: readonly Append<E>[],
     meta: EventMeta
   ) {
     this.attempts++;
     if (this.attempts <= this.failTimes) {
-      const [{ stream, msgs, expectedVersion }] = writes;
+      const [{ stream, msgs, expectedVersion }] = appends;
       throw new ConcurrencyError(
         stream,
         -1,
@@ -45,7 +45,7 @@ class FlakyStore extends InMemoryStore {
         expectedVersion ?? -1
       );
     }
-    return super.commit<E>(writes, meta);
+    return super.commit<E>(appends, meta);
   }
 }
 
