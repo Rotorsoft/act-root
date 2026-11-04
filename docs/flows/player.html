@@ -95,8 +95,11 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
 .txb.lost path { stroke: var(--bad); stroke-dasharray: 4 3; }
 .txb.lost rect { stroke: var(--bad); }
 .txb.lost text { fill: var(--bad); }
-.eg.load .edge { stroke: var(--k); stroke-width: 1.7; opacity: .75; }
-.eg.load .arrow { fill: var(--k); opacity: .75; }
+.eg.load .edge { stroke: var(--k); stroke-width: 1.7; opacity: .8; }
+.eg.load .arrow { fill: var(--k); opacity: .8; }
+.eg .edge.seg { stroke: var(--k); opacity: .65; }
+.eg.emits .arrow { fill: var(--event); opacity: .65; }
+.eg .edge.ghost { stroke: none !important; }
 .log .by { display: inline-flex; align-items: center; gap: 4px; }
 .log .by svg { width: 12px; height: 12px; flex: none; }
 .empty { display: block; color: var(--muted); font: 13px var(--f-body); }
@@ -537,12 +540,22 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
       const pts = route(e, kindOf(e.a) === "reaction" && kindOf(e.b) === "action" ? bus++ : 0);
       const ba = bandOf(e.a), bb = bandOf(e.b);
       e.cross = !e.load && ba && bb && ba !== bb ? [ba, bb] : null;
-      const k = !e.load ? color(e.b) : e.read ? "var(--muted)" : color(e.a);
+      // blue is the action, orange the event; dotted reaches into another state
+      const k = !e.load ? color(e.b) : e.read ? "var(--muted)" : "var(--action)";
       const g = el("g", { class: "eg" + (e.cross ? " cross" : "") + (e.load ? " load" : ""), style: `--k:${k}` }, gEdges);
       e.g = g;
-      e.path = el("path", { d: rounded(pts), class: "edge" + (kindOf(e.b) === "projection" || e.dashed || e.load ? " dash" : "") }, g);
+      const emitting = kindOf(e.a) === "action" && kindOf(e.b) === "event" ? barOf(e.a) : null;
+      e.path = el("path", { d: rounded(pts), class: "edge" + (kindOf(e.b) === "projection" || e.dashed || e.load ? " dash" : "") + (emitting ? " ghost" : "") }, g);
+      if (emitting) {
+        // the action down to its state, then the state out to the event; dotted when another state owns it
+        g.classList.add("emits");
+        const foreign = (e.a.loads || []).some(l => l.events?.includes(e.b.id));
+        el("path", { d: rounded([pts[0], [pts[0][0], emitting.cy]]), class: "edge seg", style: "--k:var(--action)" }, g);
+        el("path", { d: rounded([[pts[0][0], emitting.cy], ...pts.slice(1)]), class: "edge seg" + (foreign ? " dash" : ""), style: "--k:var(--event)" }, g);
+      }
       if (kindOf(e.b) !== "projection") {
-        const [p, q] = [pts[pts.length - 2], pts[pts.length - 1]];
+        // a load's arrow points at the state it loads; its token still brings the state back
+        const [p, q] = e.load ? [pts[1], pts[0]] : [pts[pts.length - 2], pts[pts.length - 1]];
         const ang = Math.atan2(q[1] - p[1], q[0] - p[0]);
         const s = 6, tip = q;
         const p1 = [tip[0] - s * Math.cos(ang - 0.45), tip[1] - s * Math.sin(ang - 0.45)];
@@ -623,7 +636,7 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
     .map(([k, v]) => `<div><i style="background:var(${v.color})"></i>${v.name}</div>`).join("") +
     `<div>${svgIcon("person")}Person</div><div>${svgIcon("automation")}Automation</div>` +
     `<div><span class="mono pre">▲</span>Precondition (a rule the action needs to run)</div><div><span class="mono">⏱</span>Timer (deferred)</div>` +
-    (edges.some(e => e.load) ? `<div><span class="mono" style="color:var(--state)">┄</span>Load: a state the action's decision needs</div>` : "") +
+    (edges.some(e => e.load) ? `<div><span class="mono" style="color:var(--action)">┄</span>Load: another state the action's decision needs</div><div><span class="mono" style="color:var(--event)">┄</span>An event that belongs to another state</div>` : "") +
     (bands.some(b => b.kind === "state") ? `<div><i class="bx" style="--k:var(--state)"></i>State boundary</div>` : "") +
     (bands.some(b => b.kind === "slice") ? `<div><i class="bx" style="--k:var(--ink)"></i>Slice boundary</div>` : "");
   $("read").innerHTML = `
@@ -633,7 +646,7 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
     ${bands.length ? `<p>Dashed boxes are the boundaries the builders declare. ${bands[0].kind === "slice"
       ? "A <b>slice</b> box holds the states it declares, with its own actions and events, and the reactions it declares. A state a few slices declare is drawn in each, and is still one state."
       : `A <b style="color:var(--state)">state</b> box holds the actions and events of one state, with partial states of the same name merged into it.`} The boxes on the current step light up, and a token rings where it crosses from one box into another.</p>` : ""}
-    ${edges.some(e => e.load) ? `<p>A dashed <b style="color:var(--state)">load</b> line brings another state to the action, for its rules. An action appends to its own stream and to each load that lists events, in <b>one commit</b>: every stream is checked at the version it was loaded at, and all events land or none do. A load that lists no events (muted) is a read: outside the commit, and not checked.</p>` : ""}
+    ${edges.some(e => e.load) ? `<p>A dotted <b style="color:var(--action)">blue</b> line is a load: another state the action needs for its rules. A dotted <b style="color:var(--event)">orange</b> line is an event that belongs to another state. An action appends to its own stream and to each load that lists events, in <b>one commit</b>: every stream is checked at the version it was loaded at, and all events land or none do. A load that lists no events (muted) is a read: outside the commit, and not checked.</p>` : ""}
     <p>Select a box for its contract and source. Keys: space plays or pauses, arrows step.</p>
     <p>Coming from event storming? Actions are its commands, reactions its policies, and projections build its read models.</p>`;
 
