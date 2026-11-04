@@ -39,10 +39,43 @@ const Enrollment = state({ Enrollment: Enroll })
   ])
   .build();
 
-let db: Store;
-const test = fixture(act().withState(Seats).withState(Enrollment), {
-  store: () => (db = new InMemoryStore()),
+const Move = z.object({
+  student: z.string(),
+  from: z.string(),
+  to: z.string(),
 });
+const Account = state({ Account: z.object({ moved: z.number() }) })
+  .init(() => ({ moved: 0 }))
+  .emits({ Debited: z.object({}), Credited: z.object({}) })
+  .patch({
+    Debited: (_, s) => ({ moved: s.moved + 1 }),
+    Credited: (_, s) => ({ moved: s.moved + 1 }),
+  })
+  .build();
+const Transfer = state({ Transfer: Move })
+  .init(() => ({ student: "", from: "", to: "" }))
+  .emits({ Transferred: Move })
+  .on({ Transfer: Move })
+  .loads(Account, (data) => data.from, ["Debited"], "from")
+  .loads(Account, (data) => data.to, ["Credited"], "to")
+  .emit((data) => [
+    ["Transferred", data],
+    ["Debited", {}],
+    ["Credited", {}],
+  ])
+  .build();
+
+let db: Store;
+const test = fixture(
+  act()
+    .withState(Seats)
+    .withState(Enrollment)
+    .withState(Account)
+    .withState(Transfer),
+  {
+    store: () => (db = new InMemoryStore()),
+  }
+);
 const actor = { id: "a", name: "a" };
 const options = {
   actor: () => actor,
@@ -97,6 +130,21 @@ describe("hono over .loads", () => {
       code: "PRECONDITION",
       detail: "Enroll failed precondition: the course has a free seat",
     });
+  });
+
+  test("a transfer to the same account answers 409", async ({ app }) => {
+    const res = await hono(app, options).request("/api/actions/Transfer", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ student: "t-1", from: "a", to: "a" }),
+    });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({
+      error: "PreconditionError",
+      code: "PRECONDITION",
+      detail: 'Transfer failed precondition: loads stream "a" twice',
+    });
+    expect(await db.query(() => {}, { stream: "a" })).toBe(0);
   });
 
   test("a rival on the loaded stream answers 412, naming that stream", async ({

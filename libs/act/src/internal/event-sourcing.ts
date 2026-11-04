@@ -454,28 +454,26 @@ type Pending = {
 };
 
 /**
- * Loads the other streams an action's decision needs, all at once. A load
- * of the action's own stream, two loads of one stream, and a load of a
- * closed stream throw.
+ * Loads the other streams an action's decision needs, all at once. A target
+ * can name a stream from the caller's input, so one that names no stream, the
+ * action's own or another load's refuses the action, as a rule would. A load
+ * of a closed stream throws.
  */
 async function load_others(
   loads: readonly Load[],
-  action: string,
   payload: Schema,
   own: { stream: string; state: Schema },
   actor: Target["actor"],
-  patch_fn: PatchFn
+  patch_fn: PatchFn,
+  refuse: (description: string) => Error
 ): Promise<Pending[]> {
   const streams = loads.map((l) => l.target(payload, own.state));
   streams.forEach((stream, i) => {
     if (typeof stream !== "string" || !stream)
-      throw new Error(
-        `Action "${action}" loads "${loads[i].name}" from an empty stream name`
-      );
-    if (stream === own.stream)
-      throw new Error(`Action "${action}" loads its own stream "${stream}"`);
+      throw refuse(`loads "${loads[i].name}" from an empty stream name`);
+    if (stream === own.stream) throw refuse(`loads its own stream "${stream}"`);
     if (streams.indexOf(stream) !== i)
-      throw new Error(`Action "${action}" loads stream "${stream}" twice`);
+      throw refuse(`loads stream "${stream}" twice`);
   });
   return Promise.all(
     loads.map(async (l, i) => {
@@ -554,11 +552,18 @@ export async function action<
       const others = loads.length
         ? await load_others(
             loads,
-            action as string,
             validated,
             { stream, state: snapshot.state },
             target.actor,
-            patch_fn
+            patch_fn,
+            (description) =>
+              new PreconditionError(
+                action,
+                validated,
+                target,
+                snapshot,
+                description
+              )
           )
         : [];
       const loaded = Object.fromEntries(
