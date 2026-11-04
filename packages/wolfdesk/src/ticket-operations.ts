@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { slice, state } from "@rotorsoft/act";
+import { AgentLoad, agentStream } from "./agent-load.js";
 import {
   AssignTicket,
   EscalateTicket,
@@ -35,9 +36,25 @@ export const TicketOperations = state({ Ticket: TicketOperationsState })
     TicketReassigned,
   })
 
-  .on({ AssignTicket })
+  .on({ AssignTicket }, { maxRetries: 4 })
+  .loads(
+    AgentLoad,
+    (_, state) => agentStream(state.agentId),
+    ["TicketDropped"],
+    "current"
+  )
+  .loads(
+    AgentLoad,
+    (data) => agentStream(data.agentId),
+    ["TicketTaken"],
+    "next"
+  )
   .requires([mustBeOpen])
-  .emit("TicketAssigned")
+  .emit((data, { state }) => [
+    ["TicketAssigned", data],
+    ...(state.agentId ? ([["TicketDropped", {}]] as const) : []),
+    ["TicketTaken", {}],
+  ])
 
   .on({ RequestTicketEscalation })
   .requires([mustBeOpen, mustBeUser, mustBeDueForEscalation])
@@ -55,20 +72,38 @@ export const TicketOperations = state({ Ticket: TicketOperationsState })
   .requires([mustBeOpen, mustNotBeEscalated])
   .emit((data) => ["TicketEscalated", { ...data, escalationId: randomUUID() }])
 
-  .on({ ReassignTicket })
+  // Moves the ticket between two agents in one commit.
+  .on({ ReassignTicket }, { maxRetries: 4 })
+  .loads(
+    AgentLoad,
+    (_, state) => agentStream(state.agentId),
+    ["TicketDropped"],
+    "current"
+  )
+  .loads(
+    AgentLoad,
+    (data) => agentStream(data.agentId),
+    ["TicketTaken"],
+    "next"
+  )
   .requires([
     mustBeOpen,
     mustBeEscalated,
     mustBeDueForReassignment,
     mustNotBeAcknowledgedByAgent,
   ])
-  .emit("TicketReassigned")
+  .emit((data, { state }) => [
+    ["TicketReassigned", data],
+    ...(state.agentId ? ([["TicketDropped", {}]] as const) : []),
+    ["TicketTaken", {}],
+  ])
 
   .build();
 
 // --- Slice ---
 // prettier-ignore
 export const TicketOpsSlice = slice()
+  .withState(AgentLoad)
   .withState(TicketOperations)
   .on("TicketEscalationRequested")
   .do(async function escalate(event, _stream, app) {

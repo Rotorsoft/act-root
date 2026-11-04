@@ -139,6 +139,7 @@ export const TicketCreationState = TicketBase.extend({
   supportCategoryId: z.uuid(),
   priority: z.enum(Priority),
   title: z.string().min(1),
+  agentId: z.uuid().optional(),
   closedById: z.uuid().optional(),
   resolvedById: z.uuid().optional(),
   closeAfter: z.date().optional(),

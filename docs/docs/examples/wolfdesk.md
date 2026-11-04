@@ -193,6 +193,24 @@ Escalation is a one-shot that reacts to `TicketAssigned` and defers to the event
 
 Reassignment is a recurring chain. Both `TicketEscalated` and `TicketReassigned` land on the `reassign:<id>` target; because the escalation event carries no deadline, the handler reads `reassignAfter` from live state and re-arms imperatively with `throw new DeferSignal({ at: state.reassignAfter })`. Each `ReassignTicket` moves the deadline forward, so the resulting `TicketReassigned` schedules the next wait, and the loop stops once the user is answered or the ticket closes. Close-on-inactivity reacts to `TicketOpened` and defers to the open event's optional `closeAfter`, closing the ticket on waking if it's still open.
 
+### A Limit Across Streams
+
+An agent holds at most 5 open tickets. The count is a state of its own, `AgentLoad`, one stream per agent, whose schema holds the limit. Assigning, reassigning and closing a ticket load it, and the event lands in the same commit as the ticket's own:
+
+```typescript no-check
+.on({ ReassignTicket }, { maxRetries: 4 })
+.loads(AgentLoad, (_, state) => agentStream(state.agentId), ["TicketDropped"], "current")
+.loads(AgentLoad, (data) => agentStream(data.agentId), ["TicketTaken"], "next")
+.requires([mustBeOpen, mustBeEscalated, mustBeDueForReassignment, mustNotBeAcknowledgedByAgent])
+.emit((data, { state }) => [
+  ["TicketReassigned", data],
+  ...(state.agentId ? ([["TicketDropped", {}]] as const) : []),
+  ["TicketTaken", {}],
+])
+```
+
+A load always names a stream, so a ticket with no agent names a placeholder and emits nothing to it, which makes that load a read. When the agent is full, the assign reaction fails, and its retry (10 seconds later, by default) asks `assignAgent` for another agent. If every attempt finds a full agent, the ticket's reaction stream blocks after 4 tries, and `app.unblock` resumes it. A resolved ticket holds its slot until it closes. [Rules across streams](rules.md) has the pattern on its own.
+
 ### Composition
 
 Everything is wired together in `bootstrap.ts`:
