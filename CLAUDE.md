@@ -39,7 +39,6 @@ pnpm monorepo with two main sections:
 - **`/packages`** — example applications
   - `calculator` — simple state machine; rebuild and close demos
   - `wolfdesk` — complex ticketing (from "Learning Domain-Driven Design")
-  - `rules` — rules across streams: every scenario of RFC 2251 as a state, with tests
   - `server`, `client` — tRPC + React example
   - `inspector` — `@rotorsoft/act-inspector`, an observatory to inspect, query and visualize the events in an Act store
 
@@ -57,7 +56,6 @@ pnpm scrub            # remove all node_modules + build artifacts
 
 pnpm dev:calculator   # run examples
 pnpm dev:wolfdesk
-pnpm dev:rules        # rules across streams: a scripted tour
 pnpm dev:http         # multi-transport demo (trpc + hono rest + openapi) — server + client concurrently
 
 vitest                                                # watch mode (from the REPO ROOT)
@@ -138,6 +136,7 @@ When an Act application hits the edges (events table growing without bound, cool
 | RANGE-on-id (single-aggregate giants, docs only) | [recipes/scaling/partitioning/range-on-id/](recipes/scaling/partitioning/range-on-id/README.md) |
 | RANGE-on-created (bulk archival via DROP PARTITION) | [recipes/scaling/partitioning/range-on-created/](recipes/scaling/partitioning/range-on-created/README.md) |
 | Prometheus metrics via act-otel (alert rules + runnable scrape demo) | [recipes/observability/prometheus/README.md](recipes/observability/prometheus/README.md) |
+| Rules across streams: every scenario as a state with tests (unique values, limits, schemas, several streams, reads) | [recipes/rules-across-streams/README.md](recipes/rules-across-streams/README.md) |
 | Temporal / timing recipes landing (one-shot vs recurring) | [recipes/temporal/README.md](recipes/temporal/README.md) |
 | Recurring timers (tick-emits-next-tick over one-shot `.defer`) | [recipes/temporal/recurring-timers/README.md](recipes/temporal/recurring-timers/README.md) |
 

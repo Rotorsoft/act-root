@@ -8,7 +8,7 @@ import {
   StudentLoad,
   sessionsStream,
   studentStream,
-} from "../src/index.js";
+} from "./index.js";
 import { at, events, test } from "./setup.js";
 
 const enroll = (student: string, course = "c1") => ({ course, student });

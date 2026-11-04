@@ -244,7 +244,7 @@ export const app = act().withState(Seats).withState(Enrollment).build();
 - **Freeing a value is an action.** `app.close` runs no action, so it can't append to another stream. To free a value when its holder goes away, an action frees it (a logout, a deactivation), then the stream closes; closing without that keeps the value taken.
 - **One store.** A loaded state must be registered in the same Act (`act().build()` throws otherwise), so every stream of the commit lives in one store. A loaded stream loads with the caller's actor, so its sensitive fields are gated as the caller's would be.
 
-Uniqueness and limits are ordinary states: an `Email` state, one stream per value, that a registration loads and appends `EmailTaken` to; a `Seats` state with a count. Every scenario behind this design runs as a state with tests in [`packages/rules`](../examples/rules.md), and [RFC 2251](https://github.com/Rotorsoft/act-root/blob/master/rfcs/2251-rules-across-streams.md) explains the trade-offs.
+Uniqueness and limits are ordinary states: an `Email` state, one stream per value, that a registration loads and appends `EmailTaken` to; a `Seats` state with a count. Every scenario behind this design runs as a state with tests in the [rules across streams recipe](../examples/rules.md), and [RFC 2251](https://github.com/Rotorsoft/act-root/blob/master/rfcs/2251-rules-across-streams.md) explains the trade-offs.
 
 ## Upgrading from `.given` (removed in 2.0)
 

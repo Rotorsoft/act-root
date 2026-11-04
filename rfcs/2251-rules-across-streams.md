@@ -173,7 +173,7 @@ The build checks the same for plain JavaScript and dynamically built states: an 
 
 ## Scenarios
 
-The scenarios are four patterns. Each scenario ships as a test; the guide and `packages/rules` teach one per pattern (★), and Wolfdesk's agent limit is the in-app example.
+The scenarios are four patterns. Each scenario ships as a test; the guide and `recipes/rules-across-streams` teach one per pattern (★), and Wolfdesk's agent limit is the in-app example.
 
 | Pattern | Scenario | The action loads… and may emit to it… |
 |---|---|---|
@@ -238,7 +238,7 @@ The feature is only as good as the patterns people can find and run. Each patter
 
 - **The guide:** `docs/docs/guides/rules-across-streams.md`, one section per pattern with the rule in plain words, the builder code of its starred scenario, what a race does, and which trade-off it pays. It links the alternatives (reactions with compensation, sagas) for when strong consistency isn't worth it.
 - **Flow animations:** the map that already ships as a preview (`docs/flows/rules-across-streams.flow.json`), updated to the built API, with flows that play a commit landing in two streams at once, a refusal from a precondition and from a schema, and a lost race being retried; its preview label goes once 2.0 ships.
-- **An example app:** a new `packages/rules` (beside the existing examples, which stay as they are), one state per pattern with its tests. Wolfdesk gains the open-tickets-per-agent limit, added, not rewritten.
+- **A recipe:** `recipes/rules-across-streams`, one state per pattern with its tests. Wolfdesk gains the open-tickets-per-agent limit, added, not rewritten.
 - **Recipes:** filling the new streams for a rule added to existing data, and splitting a hot resource across several streams.
 
 The scaffold skill generates `.loads` and the uniqueness or capacity states when a spec states a rule across entities, and the behavior-contract page gets a row for every runtime guarantee here.

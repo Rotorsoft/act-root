@@ -1,6 +1,6 @@
 import { PreconditionError, ValidationError } from "@rotorsoft/act";
 import { describe, expect, vi } from "vitest";
-import { Bike, Invoice, Order, Product, Room } from "../src/index.js";
+import { Bike, Invoice, Order, Product, Room } from "./index.js";
 import { at, events, test } from "./setup.js";
 
 describe("room booking", () => {
