@@ -167,7 +167,7 @@ export const User = state({ User: z.object({ email: z.string() }) })
 - **Put a fixed limit in the loaded state's schema too**, so no action can break it. The precondition gives the caller a clear refusal; the schema is what holds. A limit that can be lowered stays a precondition only: with `taken <= capacity` in the schema, lowering it below the seats taken would be refused, and those enrolled should keep their seats.
 - **Reach for a reaction instead** when the other stream can catch up later, and the rule doesn't have to hold at the moment of the commit. A loaded stream every action writes to is a point of contention.
 
-Freeing a value is an action too (a logout, a deactivation): `app.close` runs no action, so free the value first, then close. `packages/rules` has every scenario as a working state with tests.
+Freeing a value is an action too (a logout, a deactivation): `app.close` runs no action, so free the value first, then close. [`recipes/rules-across-streams`](../../../recipes/rules-across-streams/README.md) has every scenario as a working state with tests.
 
 ## States
 

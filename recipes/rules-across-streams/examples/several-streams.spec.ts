@@ -1,6 +1,6 @@
 import { PreconditionError } from "@rotorsoft/act";
 import { describe, expect } from "vitest";
-import { Account, Copy, Member } from "../src/index.js";
+import { Account, Copy, Member } from "./index.js";
 import { at, events, rival_before_commit, test } from "./setup.js";
 
 const move = (from: string, to: string, amount: number) => ({

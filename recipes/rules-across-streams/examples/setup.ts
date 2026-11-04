@@ -1,6 +1,6 @@
 import { InMemoryStore, type Store } from "@rotorsoft/act";
 import { fixture } from "@rotorsoft/act/test";
-import { rules } from "../src/index.js";
+import { rules } from "./index.js";
 
 let store: Store;
 export const test = fixture(rules, {

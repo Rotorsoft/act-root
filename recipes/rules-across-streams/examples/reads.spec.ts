@@ -1,5 +1,5 @@
 import { describe, expect } from "vitest";
-import { Cart } from "../src/index.js";
+import { Cart } from "./index.js";
 import { at, events, rival_before_commit, test } from "./setup.js";
 
 describe("the displayed price", () => {

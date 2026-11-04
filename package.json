@@ -49,7 +49,6 @@
     "prepare": "simple-git-hooks",
     "dev:calculator": "pnpm -F calculator dev",
     "dev:wolfdesk": "pnpm -F wolfdesk dev",
-    "dev:rules": "pnpm -F rules dev",
     "dev:http": "concurrently -n 'server,client' -c 'cyan,yellow' 'CORS_ORIGIN=http://localhost:3000 pnpm -F server dev' 'pnpm -F client dev'",
     "dev:metrics": "bash recipes/observability/prometheus/run.sh",
     "dev:inspector": "pnpm -F @rotorsoft/act-inspector dev",

@@ -1,6 +1,6 @@
 import { PreconditionError, StreamClosedError } from "@rotorsoft/act";
 import { describe, expect } from "vitest";
-import { Email, emailStream, Plate, Review, User } from "../src/index.js";
+import { Email, emailStream, Plate, Review, User } from "./index.js";
 import { at, events, rows, test } from "./setup.js";
 
 const ANN = "ann@x.io";
