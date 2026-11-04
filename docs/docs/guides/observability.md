@@ -19,7 +19,7 @@ Register listeners with `app.on(name, listener)`. The payloads below are the act
 
 | Event | Payload | Fires when |
 |---|---|---|
-| `committed` | `Snapshot[]` — each with `state`, `event`, `version`, `patches`, `snaps` | A local `app.do()` commits events |
+| `committed` | `Snapshot[]` — each with `state`, `event`, `version`, `patches`, `snaps` | A local `app.do()` commits events: once per stream it appended to, so an action with [`.loads`](../concepts/state-management.md#rules-across-streams-loads) fires it more than once |
 | `acked` | `Lease[]` — `{ stream, source?, at, by, retry, lagging, lane? }` | A drain cycle acknowledges processed streams |
 | `blocked` | `BlockedLease[]` — a `Lease` plus `error: string` | A stream exhausts its retry budget (or a handler throws `NonRetryableError`) |
 | `settled` | `Drain` — `{ fetched, leased, acked, blocked }`, accumulated across every pass of the settle | A settle completes (reaches quiescence) |

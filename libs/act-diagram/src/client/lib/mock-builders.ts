@@ -84,12 +84,8 @@ export function mock_state(
     events: {} as Record<string, any>,
     actions: {} as Record<string, any>,
     requires: {} as Record<string, any[]>,
-    // Each action's `.loads(...)`: the loaded state's name, the events
-    // listed on it, and the load's name.
-    loads: {} as Record<
-      string,
-      { state: string; events: string[]; name: string }[]
-    >,
+    // Each action's `.loads(...)`: the events listed on it.
+    loads: {} as Record<string, { events: string[] }[]>,
     patches: new Set<string>(),
     _tag: "State" as const,
   };
@@ -107,17 +103,11 @@ export function mock_state(
         return { emit };
       };
       const loads = (
-        state?: { name?: string },
+        _state?: unknown,
         _target?: unknown,
-        events: string[] = [],
-        name?: string
+        events: string[] = []
       ) => {
-        const state_name = state?.name ?? "";
-        (info.loads[action_name] ??= []).push({
-          state: state_name,
-          events,
-          name: name ?? state_name,
-        });
+        (info.loads[action_name] ??= []).push({ events });
         return { loads, requires, emit };
       };
       return { loads, requires, emit };

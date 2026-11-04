@@ -407,8 +407,8 @@ export type Precondition<
  * to that stream. A load without events is a read: nothing is appended
  * to its stream, and it isn't guarded.
  *
- * @internal Built by the state builder; resolved to the registered state
- * by `act().build()`.
+ * Built by the state builder; resolved to the registered state by
+ * `act().build()`.
  */
 export type Load = {
   /** The loaded state; after build, the one registered under its name. */
