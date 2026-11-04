@@ -67,12 +67,16 @@ describe("PostgresStore pii_encryption", () => {
     const stream = `roundtrip-${chance.guid()}`;
 
     const committed = await store.commit(
-      stream,
       [
         {
-          name: "UserRegistered",
-          data: { plan: "gold" },
-          pii: { email: "alice@example.com", name: "Alice" },
+          stream,
+          msgs: [
+            {
+              name: "UserRegistered",
+              data: { plan: "gold" },
+              pii: { email: "alice@example.com", name: "Alice" },
+            },
+          ],
         },
       ],
       { correlation: "c1", causation: {} }
@@ -119,17 +123,21 @@ describe("PostgresStore pii_encryption", () => {
     const stream = `forget-${chance.guid()}`;
 
     await store.commit(
-      stream,
       [
         {
-          name: "UserRegistered",
-          data: {},
-          pii: { email: "bob@example.com" },
-        },
-        {
-          name: "UserUpdated",
-          data: {},
-          pii: { email: "bob+new@example.com" },
+          stream,
+          msgs: [
+            {
+              name: "UserRegistered",
+              data: {},
+              pii: { email: "bob@example.com" },
+            },
+            {
+              name: "UserUpdated",
+              data: {},
+              pii: { email: "bob+new@example.com" },
+            },
+          ],
         },
       ],
       { correlation: "c2", causation: {} }
@@ -157,7 +165,7 @@ describe("PostgresStore pii_encryption", () => {
     const store = buildStore(key);
     const stream = `none-${chance.guid()}`;
 
-    await store.commit(stream, [{ name: "Ping", data: { n: 1 } }], {
+    await store.commit([{ stream, msgs: [{ name: "Ping", data: { n: 1 } }] }], {
       correlation: "c3",
       causation: {},
     });
@@ -187,12 +195,16 @@ describe("PostgresStore pii_encryption", () => {
     const stream = `wrongkey-${chance.guid()}`;
 
     await writer.commit(
-      stream,
       [
         {
-          name: "UserRegistered",
-          data: {},
-          pii: { email: "x@example.com" },
+          stream,
+          msgs: [
+            {
+              name: "UserRegistered",
+              data: {},
+              pii: { email: "x@example.com" },
+            },
+          ],
         },
       ],
       { correlation: "c4", causation: {} }
@@ -212,12 +224,16 @@ describe("PostgresStore pii_encryption", () => {
     const stream = `tamper-${chance.guid()}`;
 
     await store.commit(
-      stream,
       [
         {
-          name: "UserRegistered",
-          data: {},
-          pii: { email: "y@example.com" },
+          stream,
+          msgs: [
+            {
+              name: "UserRegistered",
+              data: {},
+              pii: { email: "y@example.com" },
+            },
+          ],
         },
       ],
       { correlation: "c5", causation: {} }
@@ -247,10 +263,22 @@ describe("PostgresStore pii_encryption", () => {
     const stream = `declined-${chance.guid()}`;
 
     await store.commit(
-      stream,
       [
-        { name: "UserRegistered", data: { a: 1 }, pii: { email: "x@y.com" } },
-        { name: "UserRegistered", data: { a: 2 }, pii: { email: "p@q.com" } },
+        {
+          stream,
+          msgs: [
+            {
+              name: "UserRegistered",
+              data: { a: 1 },
+              pii: { email: "x@y.com" },
+            },
+            {
+              name: "UserRegistered",
+              data: { a: 2 },
+              pii: { email: "p@q.com" },
+            },
+          ],
+        },
       ],
       { correlation: "c-declined", causation: {} }
     );
@@ -294,12 +322,16 @@ describe("PostgresStore pii_encryption", () => {
     const plain = buildPlainStore();
     const stream = `mixed-${chance.guid()}`;
     await plain.commit(
-      stream,
       [
         {
-          name: "UserRegistered",
-          data: {},
-          pii: { email: "legacy@example.com" },
+          stream,
+          msgs: [
+            {
+              name: "UserRegistered",
+              data: {},
+              pii: { email: "legacy@example.com" },
+            },
+          ],
         },
       ],
       { correlation: "c6a", causation: {} }
@@ -308,12 +340,16 @@ describe("PostgresStore pii_encryption", () => {
 
     const enc = buildStore(randomBytes(32));
     await enc.commit(
-      stream,
       [
         {
-          name: "UserUpdated",
-          data: {},
-          pii: { email: "current@example.com" },
+          stream,
+          msgs: [
+            {
+              name: "UserUpdated",
+              data: {},
+              pii: { email: "current@example.com" },
+            },
+          ],
         },
       ],
       { correlation: "c6b", causation: {} }
@@ -394,14 +430,18 @@ describe("PostgresStore pii_encryption", () => {
     const when = new Date("2024-03-01T10:20:30.000Z");
 
     await store.commit(
-      stream,
       [
         {
-          name: "Probed",
-          data: { at: when },
-          pii: { born: when },
+          stream,
+          msgs: [
+            {
+              name: "Probed",
+              data: { at: when },
+              pii: { born: when },
+            },
+          ] as never,
         },
-      ] as never,
+      ],
       { correlation: chance.guid(), causation: {} }
     );
 

@@ -9,9 +9,9 @@ import {
 } from "../src/index.js";
 import { sandbox } from "../src/test/index.js";
 import type {
+  Append,
   Committed,
   EventMeta,
-  Message,
   Schemas,
 } from "../src/types/index.js";
 
@@ -19,17 +19,15 @@ import type {
 class GatedStore extends InMemoryStore {
   gate?: Promise<void>;
   override async commit<E extends Schemas>(
-    stream: string,
-    msgs: Message<E, keyof E>[],
-    meta: EventMeta,
-    expectedVersion?: number
+    appends: readonly Append<E>[],
+    meta: EventMeta
   ): Promise<Committed<E, keyof E>[]> {
     if (this.gate) {
       const g = this.gate;
       this.gate = undefined;
       await g;
     }
-    return super.commit(stream, msgs, meta, expectedVersion);
+    return super.commit(appends, meta);
   }
 }
 

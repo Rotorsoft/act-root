@@ -31,8 +31,7 @@ describe("withBroker", () => {
     const wrapped = withBroker(base, new LoopbackBroker());
     await wrapped.seed();
     const committed = await wrapped.commit(
-      "s1",
-      [{ name: "Incremented", data: { by: 1 } }],
+      [{ stream: "s1", msgs: [{ name: "Incremented", data: { by: 1 } }] }],
       meta
     );
     expect(committed).toHaveLength(1);
@@ -55,7 +54,10 @@ describe("withBroker", () => {
     const off_a = await a.notify((n) => a_seen.push(n));
     await b.notify((n) => b_seen.push(n));
 
-    await a.commit("s1", [{ name: "Incremented", data: { by: 1 } }], meta);
+    await a.commit(
+      [{ stream: "s1", msgs: [{ name: "Incremented", data: { by: 1 } }] }],
+      meta
+    );
 
     // b (remote) woke; a (origin) filtered itself out
     expect(b_seen).toEqual([
@@ -79,8 +81,7 @@ describe("withBroker", () => {
     };
     const wrapped = withBroker(new InMemoryStore(), down);
     const committed = await wrapped.commit(
-      "s1",
-      [{ name: "Incremented", data: { by: 1 } }],
+      [{ stream: "s1", msgs: [{ name: "Incremented", data: { by: 1 } }] }],
       meta
     );
     expect(committed).toHaveLength(1);
@@ -95,7 +96,10 @@ describe("withBroker", () => {
     };
     const wrapped2 = withBroker(new InMemoryStore(), weird);
     await expect(
-      wrapped2.commit("s2", [{ name: "Incremented", data: { by: 2 } }], meta)
+      wrapped2.commit(
+        [{ stream: "s2", msgs: [{ name: "Incremented", data: { by: 2 } }] }],
+        meta
+      )
     ).resolves.toHaveLength(1);
   });
 
@@ -110,8 +114,7 @@ describe("withBroker", () => {
     const wrapped = withBroker(base, hung);
     // Would hang forever if commit awaited the publish; resolves now.
     const committed = await wrapped.commit(
-      "s1",
-      [{ name: "Incremented", data: { by: 1 } }],
+      [{ stream: "s1", msgs: [{ name: "Incremented", data: { by: 1 } }] }],
       meta
     );
     expect(committed).toHaveLength(1);
@@ -131,17 +134,49 @@ describe("withBroker", () => {
     };
     const wrapped = withBroker(new InMemoryStore(), rejecting);
     await expect(
-      wrapped.commit("s1", [{ name: "Incremented", data: { by: 1 } }], meta)
+      wrapped.commit(
+        [{ stream: "s1", msgs: [{ name: "Incremented", data: { by: 1 } }] }],
+        meta
+      )
     ).resolves.toHaveLength(1);
   });
 
-  it("skips the publish when a commit lands no events", async () => {
+  it("skips the publish when a commit has no appends", async () => {
     const broker = new LoopbackBroker();
     let published = 0;
     broker.subscribe(() => published++);
     const wrapped = withBroker(new InMemoryStore(), broker);
-    await wrapped.commit("s1", [], meta);
+    await wrapped.commit([], meta);
     expect(published).toBe(0);
+  });
+
+  it("publishes one notification per stream a commit appends to", async () => {
+    const broker = new LoopbackBroker();
+    const seen: { stream: string; events: number }[] = [];
+    broker.subscribe(({ notification }) =>
+      seen.push({
+        stream: notification.stream,
+        events: notification.events.length,
+      })
+    );
+    const wrapped = withBroker(new InMemoryStore(), broker);
+    await wrapped.commit(
+      [
+        {
+          stream: "a",
+          msgs: [
+            { name: "E", data: {} },
+            { name: "E", data: {} },
+          ],
+        },
+        { stream: "b", msgs: [{ name: "E", data: {} }] },
+      ],
+      meta
+    );
+    expect(seen).toEqual([
+      { stream: "a", events: 2 },
+      { stream: "b", events: 1 },
+    ]);
   });
 
   describe("a broker that stalls or fails never holds the orchestrator up", () => {
@@ -286,8 +321,7 @@ describe("withBroker", () => {
 
       const remote = withBroker(base, broker);
       const committed = await remote.commit(
-        "s9",
-        [{ name: "Incremented", data: { by: 1 } }],
+        [{ stream: "s9", msgs: [{ name: "Incremented", data: { by: 1 } }] }],
         meta
       );
       expect(committed).toHaveLength(1);
@@ -361,8 +395,12 @@ describe("withBroker", () => {
       // a remote worker (different origin, same base store) commits
       const remote = withBroker(base, broker);
       await remote.commit(
-        "order-9",
-        [{ name: "Incremented", data: { by: 5 } }],
+        [
+          {
+            stream: "order-9",
+            msgs: [{ name: "Incremented", data: { by: 5 } }],
+          },
+        ],
         meta
       );
 

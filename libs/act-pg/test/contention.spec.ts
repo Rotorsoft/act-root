@@ -87,7 +87,7 @@ describe("pg contention — competing consumers over SKIP LOCKED", () => {
 
   /** Commit `n` events to `stream` and register it as its own source. */
   const seedStream = async (stream: string, n: number) => {
-    const committed = await control.commit(stream, batch(n), META);
+    const committed = await control.commit([{ stream, msgs: batch(n) }], META);
     await control.subscribe([{ stream, source: stream }]);
     return committed[committed.length - 1].id;
   };
@@ -232,7 +232,7 @@ describe("pg contention — competing consumers over SKIP LOCKED", () => {
   it("re-claims after induced lease expiry without losing or regressing the watermark", async () => {
     const prefix = uid("c2");
     const stream = `${prefix}-s`;
-    const committed = await control.commit(stream, batch(5), META);
+    const committed = await control.commit([{ stream, msgs: batch(5) }], META);
     await control.subscribe([{ stream, source: stream }]);
     const lastId = committed[committed.length - 1].id;
 
@@ -315,7 +315,7 @@ describe("pg contention — competing consumers over SKIP LOCKED", () => {
       // watermarks make the lagging (lowest `at`) and leading (highest `at`)
       // frontiers disjoint.
       for (let i = 0; i < S; i++) {
-        await own.commit(streams[i], batch(1), META);
+        await own.commit([{ stream: streams[i], msgs: batch(1) }], META);
         await own.subscribe([{ stream: streams[i], source: streams[i] }]);
         await setWatermark(streams[i], i); // at = 0..19, all < the event id
       }

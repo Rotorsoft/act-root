@@ -42,10 +42,13 @@ async function main() {
   // 2. snapshot at head, then load again — resumes from the snapshot.
   // The cache is invalidated in between, so this measures the snapshot
   // path, not the in-process cache hit.
-  await pgstore.commit("hot-1", [{ name: SNAP_EVENT, data: cold.state }], {
-    correlation: "evidence",
-    causation: {},
-  });
+  await pgstore.commit(
+    [{ stream: "hot-1", msgs: [{ name: SNAP_EVENT, data: cold.state }] }],
+    {
+      correlation: "evidence",
+      causation: {},
+    }
+  );
   await cache().invalidate("hot-1");
   t0 = process.hrtime.bigint();
   const warm = await app.load(Counter, "hot-1");

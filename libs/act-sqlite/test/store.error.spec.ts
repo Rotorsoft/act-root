@@ -142,10 +142,13 @@ describe("SqliteStore error paths", () => {
     async (url) => {
       const s = new SqliteStore({ url });
       await s.seed();
-      await s.commit("mem", [{ name: "E", data: { n: 1 } }], {
-        correlation: "",
-        causation: {},
-      });
+      await s.commit(
+        [{ stream: "mem", msgs: [{ name: "E", data: { n: 1 } }] }],
+        {
+          correlation: "",
+          causation: {},
+        }
+      );
       const read: unknown[] = [];
       await s.query((e) => read.push(e), { stream: "mem" });
       expect(read).toHaveLength(1);
@@ -160,7 +163,7 @@ describe("SqliteStore error paths", () => {
     // Parity with PG: a non-unique-violation driver error is wrapped in
     // StoreError('commit'), not rethrown raw.
     const err = await db
-      .commit("s", [{ name: "E", data: {} }], {
+      .commit([{ stream: "s", msgs: [{ name: "E", data: {} }] }], {
         correlation: "",
         causation: {},
       })
@@ -180,10 +183,13 @@ describe("SqliteStore error paths", () => {
     // ConcurrencyError, not the raw libsql error.
     const real = new SqliteStore({ url: tmp_db_url() });
     await real.seed();
-    await real.commit("collide", [{ name: "E", data: {} }], {
-      correlation: "",
-      causation: {},
-    });
+    await real.commit(
+      [{ stream: "collide", msgs: [{ name: "E", data: {} }] }],
+      {
+        correlation: "",
+        causation: {},
+      }
+    );
     const client = (real as unknown as { client: { transaction: unknown } })
       .client;
     const realTransaction = (
@@ -208,7 +214,7 @@ describe("SqliteStore error paths", () => {
       return tx;
     };
     const err = await real
-      .commit("collide", [{ name: "E", data: {} }], {
+      .commit([{ stream: "collide", msgs: [{ name: "E", data: {} }] }], {
         correlation: "",
         causation: {},
       })
@@ -237,10 +243,8 @@ describe("SqliteStore error paths", () => {
     };
     await expect(
       db.commit(
-        "s",
-        [{ name: "E", data: {} }],
-        { correlation: "", causation: {} },
-        0
+        [{ stream: "s", msgs: [{ name: "E", data: {} }], expectedVersion: 0 }],
+        { correlation: "", causation: {} }
       )
     ).rejects.toThrow(ConcurrencyError);
     expect(tx.rollback).toHaveBeenCalled();

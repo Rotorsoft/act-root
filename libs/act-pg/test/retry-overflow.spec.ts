@@ -43,10 +43,13 @@ describe("pg streams.retry does not overflow at the smallint ceiling", () => {
       );
 
       // Commit an event so the stream lags and is claimable.
-      const [e] = await s.commit("poison-1", [{ name: "Poison", data: {} }], {
-        correlation: "c",
-        causation: {},
-      } as never);
+      const [e] = await s.commit(
+        [{ stream: "poison-1", msgs: [{ name: "Poison", data: {} }] }],
+        {
+          correlation: "c",
+          causation: {},
+        } as never
+      );
 
       await s.subscribe([{ stream: "poison-1", correlated_at: e.id }]);
       const leases = await s.claim(10, 0, "worker", 10_000);

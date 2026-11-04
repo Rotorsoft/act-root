@@ -63,8 +63,7 @@ export const seed_stream = async (
   const out: CommittedCounterEvent[] = [];
   for (let i = 0; i < count; i++) {
     const committed = await store.commit<CounterEvents>(
-      stream,
-      [inc(1)],
+      [{ stream, msgs: [inc(1)] }],
       make_meta({ correlation, stream })
     );
     out.push(...(committed as CommittedCounterEvent[]));

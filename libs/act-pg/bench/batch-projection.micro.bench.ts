@@ -46,7 +46,7 @@ async function seedEvents(stream: string, count: number) {
       name: "Incremented" as const,
       data: { by: 1 },
     }));
-    await store().commit(stream, msgs, meta);
+    await store().commit([{ stream, msgs }], meta);
   }
 }
 

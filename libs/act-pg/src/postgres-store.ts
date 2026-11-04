@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type {
+  Append,
   BlockedLease,
   Committed,
   EventMeta,
@@ -94,6 +95,18 @@ type Config = Readonly<{
   pii_encryption?: Encryption;
 }> &
   pg.PoolConfig;
+
+// A commit names each stream once, and every append carries events.
+function check_appends<E extends Schemas>(appends: readonly Append<E>[]) {
+  const seen = new Set<string>();
+  for (const { stream, msgs } of appends) {
+    if (!msgs.length)
+      throw new Error(`commit: the append to "${stream}" has no events`);
+    if (seen.has(stream))
+      throw new Error(`commit: stream "${stream}" is named twice`);
+    seen.add(stream);
+  }
+}
 
 const SAFE_IDENTIFIER = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
 
@@ -911,14 +924,11 @@ export class PostgresStore implements Store {
   }
 
   async commit<E extends Schemas>(
-    stream: string,
-    msgs: Message<E, keyof E>[],
-    meta: EventMeta,
-    expectedVersion?: number
+    appends: readonly Append<E>[],
+    meta: EventMeta
   ) {
-    // An empty commit writes nothing, but an expectedVersion still has to be
-    // checked, as InMemory and SQLite do.
-    if (msgs.length === 0 && expectedVersion === undefined) return [];
+    check_appends(appends);
+    if (!appends.length) return [];
     // Serialize commit VISIBILITY, not just id assignment. `id` is a
     // serial: it is assigned at INSERT time but the row appears at
     // COMMIT time, and every watermark consumer (the correlate
@@ -927,89 +937,100 @@ export class PostgresStore implements Store {
     // commits to different streams can surface out of id order, and a
     // reader that acks past the higher id permanently skips the lower
     // one — the classic event-store gap problem. Same-stream commits
-    // were already serialized by the (stream, version) unique index;
-    // the advisory lock below extends the guarantee across streams.
+    // are serialized by the (stream, version) unique index; the advisory
+    // lock below extends the guarantee across streams.
     //
     // The whole commit is TWO round trips with NO client round trip
-    // inside the lock window: an unlocked head probe (its own implicit
-    // transaction — optimistic concurrency is guarded by the unique
-    // index, not the probe), then ONE autocommit statement that
-    // acquires the xact-scoped lock in a CTE, inserts the batch, and
-    // (when enabled) raises the NOTIFY — the lock is held only for
-    // server-side execution plus the implicit COMMIT, never across a
-    // client round trip. The pooled client is checked out through
-    // `_client` so acquisition failures keep their StoreError context;
-    // checkout itself is in-process, not a round trip.
+    // inside the lock window: an unlocked probe of every stream's head
+    // (its own implicit transaction — optimistic concurrency is guarded
+    // by the unique index, not the probe), then ONE autocommit statement
+    // that acquires the xact-scoped lock in a CTE, inserts every append's
+    // rows, and (when enabled) raises the NOTIFY — the lock is held only
+    // for server-side execution plus the implicit COMMIT, never across a
+    // client round trip. Every append inserts at least one row, so the
+    // index catches a race on any stream appended to. The pooled client is
+    // checked out through `_client` so acquisition failures keep their
+    // StoreError context; checkout itself is in-process, not a round trip.
     const client = await this._client("commit");
     try {
-      const last = await client.query<{ version: number }>(
-        `SELECT version FROM ${this._fqt}
-         WHERE stream=$1 ORDER BY version DESC LIMIT 1`,
-        [stream]
+      const heads = await client.query<{ stream: string; version: number }>(
+        `SELECT s.stream,
+           (SELECT version FROM ${this._fqt} WHERE stream = s.stream
+            ORDER BY version DESC LIMIT 1) AS version
+         FROM unnest($1::text[]) AS s(stream)`,
+        [appends.map((a) => a.stream)]
       );
-      let version = last.rows.at(0)?.version ?? -1;
-      if (typeof expectedVersion === "number" && version !== expectedVersion)
-        throw new ConcurrencyError(
-          stream,
-          version,
-          msgs as unknown as Message<Schemas, string>[],
-          expectedVersion
-        );
-      if (msgs.length === 0) return [];
+      const head_of = new Map(
+        heads.rows.map((r) => [r.stream, r.version ?? -1])
+      );
+      for (const { stream, msgs, expectedVersion } of appends) {
+        const head = head_of.get(stream)!;
+        if (typeof expectedVersion === "number" && head !== expectedVersion)
+          throw new ConcurrencyError(
+            stream,
+            head,
+            msgs as unknown as Message<Schemas, string>[],
+            expectedVersion
+          );
+      }
 
       // Data/pii travel as text[] and cast to jsonb in SQL — the pg driver
       // can't serialize object elements inside a jsonb[] parameter.
-      const base_version = version;
       const names: string[] = [];
       const datas: string[] = [];
       const piis: (string | null)[] = [];
       const versions: number[] = [];
-      for (const { name, data, pii } of msgs) {
-        version++;
-        names.push(name as string);
-        datas.push(JSON.stringify(data));
-        piis.push(await this._encode_pii(pii));
-        versions.push(version);
+      const streams: string[] = [];
+      for (const { stream, msgs } of appends) {
+        let version = head_of.get(stream)!;
+        for (const { name, data, pii } of msgs) {
+          names.push(name as string);
+          datas.push(JSON.stringify(data));
+          piis.push(await this._encode_pii(pii));
+          versions.push(++version);
+          streams.push(stream);
+        }
       }
 
       // The cross join on the lock CTE forces the advisory lock to be
       // acquired before any row (and therefore any serial id) is
       // produced. Single-event commits (the overwhelmingly common
       // shape) skip the unnest machinery for a leaner plan. The NOTIFY
-      // rides the same statement as a CTE: one notification per commit
-      // transaction with the full batch, delivered at the implicit
-      // COMMIT, skipped in SQL when the payload would exceed PG's cap
+      // rides the same statement as a CTE: one notification per stream
+      // written, with that stream's events, delivered at the implicit
+      // COMMIT, skipped in SQL when a payload would exceed PG's cap
       // (listeners fall back to the poll path — degraded latency,
       // never lost events), and skipped entirely when
-      // `config.notify === false` (the default). The final select LEFT
-      // JOINs the notify CTE so it is referenced (a bare SELECT CTE
-      // would otherwise be skipped) without changing row multiplicity —
-      // it yields at most one row.
-      const insert_select =
-        msgs.length === 1
-          ? `SELECT $1, $2::jsonb, $3::jsonb, $5, $4::int, $6 FROM l`
-          : `SELECT u.name, u.data::jsonb, u.pii::jsonb, $5, u.version, $6
-             FROM l, unnest($1::text[], $2::text[], $3::text[], $4::int[])
-               WITH ORDINALITY AS u(name, data, pii, version, ord)
-             ORDER BY u.ord`;
+      // `config.notify === false` (the default). The notify CTE counts the
+      // `pg_notify` calls, so it yields one row however many streams were
+      // written, and the final select LEFT JOINs it so it is referenced (a
+      // bare SELECT CTE would otherwise be skipped) without changing row
+      // multiplicity. A `count(*)` would let Postgres skip the calls.
+      const single = names.length === 1;
+      const insert_select = single
+        ? `SELECT $1, $2::jsonb, $3::jsonb, $5, $4::int, $6 FROM l`
+        : `SELECT u.name, u.data::jsonb, u.pii::jsonb, u.stream, u.version, $6
+           FROM l, unnest($1::text[], $2::text[], $3::text[], $4::int[], $5::text[])
+             WITH ORDINALITY AS u(name, data, pii, version, stream, ord)
+           ORDER BY u.ord`;
       const notify_ctes = this.config.notify
         ? `,
            payload AS (
              SELECT json_build_object(
-               'stream', $5::text,
-               'events', json_agg(json_build_object('id', ins.id, 'name', ins.name) ORDER BY ins.version),
+               'stream', ins.stream,
+               'events', json_agg(json_build_object('id', ins.id, 'name', ins.name) ORDER BY ins.id),
                'by', $9::text
              )::text AS p
-             FROM ins
+             FROM ins GROUP BY ins.stream
            ),
            n AS (
-             SELECT pg_notify($8, payload.p) FROM payload
+             SELECT count(pg_notify($8, payload.p)) AS sent FROM payload
              WHERE octet_length(payload.p) < $10
            )`
         : "";
       const final_select = this.config.notify
-        ? "SELECT ins.* FROM ins LEFT JOIN n ON true ORDER BY ins.version"
-        : "SELECT * FROM ins ORDER BY version";
+        ? "SELECT ins.* FROM ins LEFT JOIN n ON true ORDER BY ins.id"
+        : "SELECT * FROM ins ORDER BY id";
       const sql = `WITH l AS (SELECT pg_advisory_xact_lock(hashtext($7))),
         ins AS (
           INSERT INTO ${this._fqt}(name, data, pii, stream, version, meta)
@@ -1017,10 +1038,17 @@ export class PostgresStore implements Store {
           RETURNING *
         )${notify_ctes}
         ${final_select}`;
-      const base_params =
-        msgs.length === 1
-          ? [names[0], datas[0], piis[0], versions[0], stream, meta, this._fqt]
-          : [names, datas, piis, versions, stream, meta, this._fqt];
+      const base_params = single
+        ? [
+            names[0],
+            datas[0],
+            piis[0],
+            versions[0],
+            streams[0],
+            meta,
+            this._fqt,
+          ]
+        : [names, datas, piis, versions, streams, meta, this._fqt];
       const params = this.config.notify
         ? [...base_params, this._channel, this._by, NOTIFY_MAX_PAYLOAD_BYTES]
         : base_params;
@@ -1037,22 +1065,30 @@ export class PostgresStore implements Store {
       } catch (error) {
         // PG unique-violation on (stream, version) — a concurrent commit
         // beat us between the head probe and this INSERT. Surface as
-        // ConcurrencyError so callers retry on the framework signal
-        // instead of an adapter-specific error. The statement is its own
-        // transaction, so there is nothing to roll back.
+        // ConcurrencyError, naming the stream the violation's detail
+        // reports (`Key (stream, version)=(<stream>, <n>)`), so callers
+        // retry on the framework signal instead of an adapter-specific
+        // error. The statement is its own transaction, so there is
+        // nothing to roll back.
         if ((error as { code?: string })?.code === PG_UNIQUE_VIOLATION) {
+          const detail = (error as { detail?: string }).detail ?? "";
+          const hit =
+            appends.find((a) => detail.includes(`=(${a.stream}, `)) ??
+            appends[0];
           throw new ConcurrencyError(
-            stream,
-            base_version,
-            msgs as unknown as Message<Schemas, string>[],
-            expectedVersion ?? -1
+            hit.stream,
+            head_of.get(hit.stream)!,
+            hit.msgs as unknown as Message<Schemas, string>[],
+            hit.expectedVersion ?? -1
           );
         }
         if (PG_NUL_BYTE.has((error as { code?: string })?.code ?? "")) {
+          const all = appends.flatMap((a) => a.msgs);
+          const where = appends.map((a) => `"${a.stream}"`).join(", ");
           throw new ValidationError(
-            stream,
-            msgs as unknown as Readonly<unknown>,
-            `Postgres cannot store a NUL byte (\\u0000). One of the ${msgs.length} event(s) committed to "${stream}" (${msgs.map((m) => String(m.name)).join(", ")}) carries one in its name, data, meta or pii. InMemory and SQLite accept it, so this commit would have succeeded there — strip NUL bytes at the edge where the data enters. Driver: ${(error as Error).message}`
+            appends.map((a) => a.stream).join(", "),
+            all as unknown as Readonly<unknown>,
+            `Postgres cannot store a NUL byte (\\u0000). One of the ${all.length} event(s) committed to ${where} (${all.map((m) => String(m.name)).join(", ")}) carries one in its name, data, meta or pii. InMemory and SQLite accept it, so this commit would have succeeded there — strip NUL bytes at the edge where the data enters. Driver: ${(error as Error).message}`
           );
         }
         throw error;

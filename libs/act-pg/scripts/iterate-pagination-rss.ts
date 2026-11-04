@@ -46,7 +46,7 @@ async function seed(store: PostgresStore) {
       name: "Bench",
       data: { i: base + k },
     }));
-    await store.commit(STREAM, msgs, {
+    await store.commit([{ stream: STREAM, msgs }], {
       correlation: "iterate-rss",
       causation: {},
     });

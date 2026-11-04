@@ -107,10 +107,13 @@ describe("invariants", () => {
   it("loads and replays don't check", async () => {
     const app = act().withState(calc()).build();
     // An event already in the store from before the check existed.
-    await store().commit("c6", [{ name: "dividedByZero", data: {} }], {
-      correlation: "c6",
-      causation: {},
-    });
+    await store().commit(
+      [{ stream: "c6", msgs: [{ name: "dividedByZero", data: {} }] }],
+      {
+        correlation: "c6",
+        causation: {},
+      }
+    );
     const snap = await app.load("Calc", "c6");
     expect(Number.isNaN(snap.state.result)).toBe(true);
   });

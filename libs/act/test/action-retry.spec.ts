@@ -9,7 +9,12 @@ import {
   state,
   store,
 } from "../src/index.js";
-import type { EventMeta, Message, Schemas } from "../src/types/index.js";
+import type {
+  Append,
+  EventMeta,
+  Message,
+  Schemas,
+} from "../src/types/index.js";
 
 /**
  * Subclass of `InMemoryStore` that injects {@link ConcurrencyError} on
@@ -27,21 +32,20 @@ class FlakyStore extends InMemoryStore {
   }
 
   override async commit<E extends Schemas>(
-    stream: string,
-    msgs: Message<E, keyof E>[],
-    meta: EventMeta,
-    expectedVersion?: number
+    appends: readonly Append<E>[],
+    meta: EventMeta
   ) {
     this.attempts++;
     if (this.attempts <= this.failTimes) {
+      const [{ stream, msgs, expectedVersion }] = appends;
       throw new ConcurrencyError(
         stream,
         -1,
-        msgs as Message<Schemas, keyof Schemas>[],
+        msgs as unknown as Message<Schemas, keyof Schemas>[],
         expectedVersion ?? -1
       );
     }
-    return super.commit<E>(stream, msgs, meta, expectedVersion);
+    return super.commit<E>(appends, meta);
   }
 }
 

@@ -56,7 +56,10 @@ async function seed(n: number) {
     data: {},
   }));
   for (const stream of streams)
-    await store().commit(stream, events, { correlation: "", causation: {} });
+    await store().commit([{ stream, msgs: events }], {
+      correlation: "",
+      causation: {},
+    });
   await worker().correlate({ limit: n * EVENTS_PER_STREAM + 1 });
   return streams;
 }

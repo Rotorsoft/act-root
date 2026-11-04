@@ -79,8 +79,7 @@ async function commitStorm(workerId: string): Promise<WorkerResult> {
     const stream = `storm-${streamIdx}`;
     try {
       await store().commit(
-        stream,
-        [{ name: "Inc", data: { workerId, seq: i } }],
+        [{ stream, msgs: [{ name: "Inc", data: { workerId, seq: i } }] }],
         { correlation: workerId, causation: {} }
       );
       committed++;
@@ -133,10 +132,14 @@ async function sameStream(workerId: string): Promise<WorkerResult> {
         const expectedVersion =
           events.length > 0 ? events[events.length - 1].version : -1;
         await store().commit(
-          stream,
-          [{ name: "Inc", data: { workerId, seq: i } }],
-          { correlation: workerId, causation: {} },
-          expectedVersion
+          [
+            {
+              stream,
+              msgs: [{ name: "Inc", data: { workerId, seq: i } }],
+              expectedVersion,
+            },
+          ],
+          { correlation: workerId, causation: {} }
         );
         success = true;
         committed++;
@@ -185,8 +188,7 @@ async function drainCommitter(workerId: string): Promise<WorkerResult> {
     const stream = `drain-source-${streamIdx}`;
     try {
       await store().commit(
-        stream,
-        [{ name: "Inc", data: { workerId, seq: i } }],
+        [{ stream, msgs: [{ name: "Inc", data: { workerId, seq: i } }] }],
         { correlation: workerId, causation: {} }
       );
       committed++;
@@ -283,8 +285,12 @@ async function killed(workerId: string): Promise<never> {
     const stream = `storm-${i % streamPoolSize}`;
     try {
       await store().commit(
-        stream,
-        [{ name: "Inc", data: { workerId, seq: i, willDie: true } }],
+        [
+          {
+            stream,
+            msgs: [{ name: "Inc", data: { workerId, seq: i, willDie: true } }],
+          },
+        ],
         { correlation: workerId, causation: {} }
       );
       committed++;

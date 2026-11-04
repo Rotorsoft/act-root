@@ -3195,7 +3195,7 @@ export declare class InMemoryCache implements Cache {
  *
  * @category Adapters
  */
-import type { BlockedLease, Committed, EventMeta, Lease, Message, Query, QueryStatsOptions, QueryStreams, QueryStreamsResult, Schema, Schemas, Store, StreamFilter, StreamPosition, StreamStats, SubscribeInput } from "../types/index.js";
+import type { Append, BlockedLease, Committed, EventMeta, Lease, Query, QueryStatsOptions, QueryStreams, QueryStreamsResult, Schema, Schemas, Store, StreamFilter, StreamPosition, StreamStats, SubscribeInput } from "../types/index.js";
 /**
  * In-memory event store: the default when no other store is injected.
  * For development, tests and examples; all data is lost when the process
@@ -3246,7 +3246,7 @@ export declare class InMemoryStore implements Store {
     private _in_query;
     private _snap_floor;
     query<E extends Schemas>(callback: (event: Committed<E, keyof E>) => void, query?: Query): Promise<number>;
-    commit<E extends Schemas>(stream: string, msgs: Message<E, keyof E>[], meta: EventMeta, expectedVersion?: number): Promise<Committed<E, keyof E>[]>;
+    commit<E extends Schemas>(appends: readonly Append<E>[], meta: EventMeta): Promise<Committed<E, keyof E>[]>;
     claim(lagging: number, leading: number, by: string, millis: number, lane?: string): Promise<Lease[]>;
     subscribe(streams: SubscribeInput[], correlated_at?: number, correlator?: {
         key: string;
@@ -4007,6 +4007,20 @@ export type SubscribeInput = {
     readonly correlated_at?: number;
 };
 /**
+ * One append of a {@link Store.commit}: the events to append to one stream
+ * and, optionally, the version the stream must be at.
+ *
+ * @template E - Event schemas
+ */
+export type Append<E extends Schemas> = {
+    /** The stream the events go to; named at most once per commit. */
+    readonly stream: string;
+    /** The events to append, at least one. */
+    readonly msgs: readonly Message<E, keyof E>[];
+    /** The version the stream must be at; \`-1\` expects an empty stream, \`undefined\` skips the check. */
+    readonly expectedVersion?: number;
+};
+/**
  * Interface for event store implementations.
  *
  * The Store interface defines the contract for persistence adapters in Act.
@@ -4073,36 +4087,40 @@ export interface Store extends Disposable, EventSource {
      */
     drop: () => Promise<void>;
     /**
-     * Commits one or more events to a stream atomically.
+     * Appends events to one or more streams atomically: every append lands,
+     * or none does.
      *
-     * This is the core method for persisting events. It must:
-     * - Assign global sequence IDs to events
-     * - Increment the stream version
-     * - Check optimistic concurrency if expectedVersion is provided
-     * - Store events atomically (all or nothing)
-     * - Attach metadata (id, stream, version, created timestamp)
+     * Each append names its stream, its events and, optionally, the version
+     * the stream must be at. The store must:
+     * - check every \`expectedVersion\` against its own stream before
+     *   appending anything (\`-1\` expects an empty stream, \`undefined\` skips
+     *   the check), and throw {@link ConcurrencyError} naming the first
+     *   stream that moved;
+     * - refuse a stream named twice and an append with no events (a plain
+     *   \`Error\`), so a commit is never a version check alone;
+     * - assign global ids in append order, then event order, and make the
+     *   events visible in that order;
+     * - continue each stream's versions from its head, and attach \`meta\` to
+     *   every event.
+     *
+     * No appends at all commits nothing and returns \`[]\`.
      *
      * @template E - Event schemas
-     * @param stream - The stream ID to commit to
-     * @param msgs - Array of messages (events) to commit
-     * @param meta - Event metadata (correlation, causation)
-     * @param expectedVersion - Expected current version for optimistic concurrency;
-     * \`-1\` expects an empty stream, \`undefined\` skips the check
-     * @returns Array of committed events with full metadata
+     * @param appends - One {@link Append} per stream
+     * @param meta - Event metadata (correlation, causation), shared by every event
+     * @returns The committed events of every append, in append order
      *
-     * @throws {ConcurrencyError} If expectedVersion doesn't match current version
+     * @throws {ConcurrencyError} If a stream's version doesn't match its \`expectedVersion\`
      *
      * @example
      * \`\`\`typescript
      * const events = await store().commit(
-     *   "user-123",
-     *   [{ name: "UserCreated", data: { email: "user@example.com" } }],
-     *   { correlation: "req-456", causation: { action: {...} } },
-     *   -1 // Expect an empty (new) stream
+     *   [{ stream: "user-123", msgs: [{ name: "UserCreated", data: { email: "user@example.com" } }], expectedVersion: -1 }],
+     *   { correlation: "req-456", causation: { action: {...} } }
      * );
      * \`\`\`
      */
-    commit: <E extends Schemas>(stream: string, msgs: Message<E, keyof E>[], meta: EventMeta, expectedVersion?: number) => Promise<Committed<E, keyof E>[]>;
+    commit: <E extends Schemas>(appends: readonly Append<E>[], meta: EventMeta) => Promise<Committed<E, keyof E>[]>;
     /**
      * Queries events from the store with optional filtering.
      *
@@ -8913,7 +8931,7 @@ exports[`@rotorsoft/act-pg — public API stability > stable public surface for 
 export * from "./postgres-store.js";
 //# sourceMappingURL=index.d.ts.map
 // === postgres-store.d.ts ===
-import type { BlockedLease, Committed, EventMeta, Lease, Message, NotifyDisposer, Query, QueryStatsOptions, QueryStreams, QueryStreamsResult, Schema, Schemas, Store, StoreNotification, StreamFilter, StreamPosition, StreamStats, SubscribeInput, SubscribeResult } from "@rotorsoft/act";
+import type { Append, BlockedLease, Committed, EventMeta, Lease, NotifyDisposer, Query, QueryStatsOptions, QueryStreams, QueryStreamsResult, Schema, Schemas, Store, StoreNotification, StreamFilter, StreamPosition, StreamStats, SubscribeInput, SubscribeResult } from "@rotorsoft/act";
 import { type Encryption } from "@rotorsoft/act-crypto";
 import pg from "pg";
 type Config = Readonly<{
@@ -9103,7 +9121,7 @@ export declare class PostgresStore implements Store {
     seed(): Promise<void>;
     drop(): Promise<void>;
     query<E extends Schemas>(callback: (event: Committed<E, keyof E>) => void, query?: Query): Promise<number>;
-    commit<E extends Schemas>(stream: string, msgs: Message<E, keyof E>[], meta: EventMeta, expectedVersion?: number): Promise<Committed<E, keyof E>[]>;
+    commit<E extends Schemas>(appends: readonly Append<E>[], meta: EventMeta): Promise<Committed<E, keyof E>[]>;
     /** \`FOR UPDATE SKIP LOCKED\`: workers never block each other. */
     claim(lagging: number, leading: number, by: string, millis: number, lane?: string): Promise<Lease[]>;
     subscribe(streams: SubscribeInput[], correlated_at?: number, correlator?: {
@@ -9222,7 +9240,7 @@ exports[`@rotorsoft/act-sqlite — public API stability > stable public surface 
 export * from "./sqlite-store.js";
 //# sourceMappingURL=index.d.ts.map
 // === sqlite-store.d.ts ===
-import type { BlockedLease, Committed, EventMeta, Lease, Message, Query, QueryStatsOptions, QueryStreams, QueryStreamsResult, Schemas, Store, StreamFilter, StreamPosition, StreamStats, SubscribeInput, SubscribeResult } from "@rotorsoft/act";
+import type { Append, BlockedLease, Committed, EventMeta, Lease, Query, QueryStatsOptions, QueryStreams, QueryStreamsResult, Schemas, Store, StreamFilter, StreamPosition, StreamStats, SubscribeInput, SubscribeResult } from "@rotorsoft/act";
 import { type Encryption } from "@rotorsoft/act-crypto";
 /**
  * SQLite store configuration
@@ -9326,11 +9344,14 @@ export declare function streamPatternToGlob(input: string): string;
  * Provides persistent event storage using SQLite via \`@libsql/client\`.
  * All write operations use transactions for ACID guarantees.
  *
- * SQLite is a single-writer store: concurrent write transactions raise
- * \`SQLITE_BUSY\` rather than serializing transparently, so it does not
- * support competing consumers the way PostgreSQL's \`FOR UPDATE SKIP LOCKED\`
- * does (the TCK leaves \`concurrent_claim\` off for this reason). The intended
- * model is a single drain worker per database file.
+ * SQLite is a single-writer store. The store runs its statements and
+ * transactions one at a time on its one connection, so concurrent calls
+ * from one process wait their turn. A second connection to the same file
+ * (another process, another \`SqliteStore\`) still fails with \`SQLITE_BUSY\`,
+ * so it does not support competing consumers the way PostgreSQL's
+ * \`FOR UPDATE SKIP LOCKED\` does (the TCK leaves \`concurrent_claim\` off for
+ * this reason). The intended model is one store, and one drain worker, per
+ * database file.
  *
  * **\`Store.notify\` is intentionally not implemented.** The notify hook is
  * a cross-process wake-up signal that lets a horizontally-scaled Act
@@ -9356,9 +9377,12 @@ export declare class SqliteStore implements Store {
     private _parse_pii_from_read;
     seed(): Promise<void>;
     drop(): Promise<void>;
+    private _turn;
+    private _serial;
+    private _exec;
     private _tx;
     dispose(): Promise<void>;
-    commit<E extends Schemas>(stream: string, msgs: Message<E, keyof E>[], meta: EventMeta, expectedVersion?: number): Promise<Committed<E, keyof E>[]>;
+    commit<E extends Schemas>(appends: readonly Append<E>[], meta: EventMeta): Promise<Committed<E, keyof E>[]>;
     query<E extends Schemas>(callback: (event: Committed<E, keyof E>) => void, query?: Query): Promise<number>;
     subscribe(streams: SubscribeInput[], correlated_at?: number, correlator?: {
         key: string;

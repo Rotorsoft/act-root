@@ -81,7 +81,7 @@ describe("PostgresStore notify contract", () => {
       name: long_name,
       data: { i },
     }));
-    const committed = await a.commit("stream-oversize", msgs, {
+    const committed = await a.commit([{ stream: "stream-oversize", msgs }], {
       correlation: "c",
       causation: {},
     });
@@ -114,10 +114,18 @@ describe("PostgresStore notify contract", () => {
     const seen_by_b: any[] = [];
     const dispose_b = await b.notify!((n) => seen_by_b.push(n));
 
-    await a.commit("stream-under-cap", [{ name: "SmallEvent", data: {} }], {
-      correlation: "c",
-      causation: {},
-    });
+    await a.commit(
+      [
+        {
+          stream: "stream-under-cap",
+          msgs: [{ name: "SmallEvent", data: {} }],
+        },
+      ],
+      {
+        correlation: "c",
+        causation: {},
+      }
+    );
 
     await vi.waitFor(() => expect(seen_by_b).not.toHaveLength(0), {
       timeout: 1_500,

@@ -64,7 +64,7 @@ describe("pool defaults", () => {
     );
     const store = new PostgresStore({ port: 5431, table: "pool_defaults" });
     const err = await store
-      .commit("stream", [{ name: "E", data: {} }], {
+      .commit([{ stream: "stream", msgs: [{ name: "E", data: {} }] }], {
         correlation: "c",
         causation: {},
       })

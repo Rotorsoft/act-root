@@ -186,9 +186,12 @@ describe("preconditions", () => {
       // A rival takes two between this action's load and its commit.
       const commit = store.commit.bind(store);
       vi.spyOn(store, "commit").mockImplementationOnce(
-        async (stream, msgs, meta) => {
-          await commit(stream, [{ name: "Took", data: { count: 2 } }], meta);
-          throw new ConcurrencyError(stream, 0, msgs, -1);
+        async ([{ stream, msgs }], meta) => {
+          await commit(
+            [{ stream, msgs: [{ name: "Took", data: { count: 2 } }] }],
+            meta
+          );
+          throw new ConcurrencyError(stream, 0, [...msgs], -1);
         }
       );
       await expect(

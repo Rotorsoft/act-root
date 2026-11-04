@@ -122,11 +122,15 @@ describe("handler-side PII strip", () => {
     // Bypass the orchestrator's split — commit with the sensitive keys still
     // present on data. Mirrors what a misuse of the raw Store would produce.
     await store().commit(
-      "user-9",
       [
         {
-          name: "UserRegistered",
-          data: { email: "x@y.com", name: "X", plan: "free" } as any,
+          stream: "user-9",
+          msgs: [
+            {
+              name: "UserRegistered",
+              data: { email: "x@y.com", name: "X", plan: "free" } as any,
+            },
+          ],
         },
       ],
       { correlation: "test-corr", causation: {} }

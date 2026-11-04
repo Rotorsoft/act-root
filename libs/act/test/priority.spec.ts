@@ -38,8 +38,14 @@ describe("priority lanes — framework", () => {
     it("claim returns higher-priority streams first under tied watermarks", async () => {
       // Two source events so both targets have work to do.
       const meta = { correlation: "", causation: {} };
-      await store().commit("src", [{ name: "X", data: {} }], meta);
-      const [y] = await store().commit("src", [{ name: "Y", data: {} }], meta);
+      await store().commit(
+        [{ stream: "src", msgs: [{ name: "X", data: {} }] }],
+        meta
+      );
+      const [y] = await store().commit(
+        [{ stream: "src", msgs: [{ name: "Y", data: {} }] }],
+        meta
+      );
 
       await store().subscribe([
         { stream: "low", source: "src", priority: 0, correlated_at: y.id },
@@ -62,7 +68,10 @@ describe("priority lanes — framework", () => {
 
     it("default priority is 0 — behavior unchanged when no priority is set", async () => {
       const meta = { correlation: "", causation: {} };
-      const [a] = await store().commit("src", [{ name: "A", data: {} }], meta);
+      const [a] = await store().commit(
+        [{ stream: "src", msgs: [{ name: "A", data: {} }] }],
+        meta
+      );
 
       await store().subscribe([
         { stream: "later", source: "src", correlated_at: a.id },
@@ -85,8 +94,7 @@ describe("priority lanes — framework", () => {
       // never-processed low one — is claimed within a bounded window.
       const meta = { correlation: "", causation: {} };
       let [{ id: head_id }] = await store().commit(
-        "src",
-        [{ name: "X", data: {} }],
+        [{ stream: "src", msgs: [{ name: "X", data: {} }] }],
         meta
       );
       const streams = [0, 1, 2, 3, 4, 5].map((i) => `high-${i}`).concat("low");
@@ -122,8 +130,7 @@ describe("priority lanes — framework", () => {
         // ...then commit a fresh source event so every subscribed stream
         // is lagging again on the next cycle — sustained high-priority load.
         [{ id: head_id }] = await store().commit(
-          "src",
-          [{ name: "X", data: {} }],
+          [{ stream: "src", msgs: [{ name: "X", data: {} }] }],
           meta
         );
       }
@@ -191,7 +198,10 @@ describe("priority lanes — framework", () => {
       // Manually block one stream via the existing test path — claim
       // → block → prioritize.
       const meta = { correlation: "", causation: {} };
-      const [x] = await store().commit("src", [{ name: "X", data: {} }], meta);
+      const [x] = await store().commit(
+        [{ stream: "src", msgs: [{ name: "X", data: {} }] }],
+        meta
+      );
       await store().subscribe([
         { stream: "ok", source: "src", correlated_at: x.id },
         { stream: "bad", source: "src", correlated_at: x.id },
