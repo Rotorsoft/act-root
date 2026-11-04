@@ -102,7 +102,7 @@ describe(".loads on Postgres", () => {
     const { app, store } = await app_on_store();
     const heard: Snapshot<Schemas, Schemas>[][] = [];
     app.on("committed", (snapshots) => {
-      heard.push(snapshots as Snapshot<Schemas, Schemas>[]);
+      heard.push(snapshots);
     });
     const snapshots = await app.do("Enroll", at("enr-1"), seat("s1"));
     expect(snapshots.map((s) => s.event?.name)).toEqual(["Enrolled"]);

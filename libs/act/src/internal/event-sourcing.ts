@@ -588,15 +588,16 @@ export async function action<
       // An event listed on a load goes to that load's stream; the state's
       // own events go to its own stream.
       for (const [name, data] of tuples) {
-        const i = loads.findIndex((l) => l.events.includes(name as string));
+        const event = name as string;
+        const i = loads.findIndex((l) => l.events.includes(event));
         const to = i >= 0 ? others[i] : name in me.events ? own : undefined;
         if (!to)
           throw new Error(
-            `Action "${action as string}" emitted "${name as string}", which isn't an event of "${me.name}" and isn't listed on any of its loads`
+            `Action "${action as string}" emitted "${event}", which isn't an event of "${me.name}" and isn't listed on any of its loads`
           );
         to.events.push({
-          name: name as string,
-          data: validate(name as string, data, to.state.events[name]),
+          name: event,
+          data: validate(event, data, to.state.events[event]),
         });
       }
       // The action's own stream records the decision, so an action that
@@ -648,7 +649,7 @@ export async function action<
             version: p.snapshot.version + i + 1,
             created,
             meta,
-          } as Committed<Schemas, string>;
+          };
           const patch = p.state.patch[event.name](event, state);
           state = patch_fn(p.state, state, patch, event);
           patches++;
@@ -724,7 +725,7 @@ export async function action<
         snapshots.push(...appended);
       }
 
-      return snapshots as Snapshot<TState, TEvents>[];
+      return snapshots;
     } catch (error) {
       if (!(error instanceof ConcurrencyError)) throw error;
       // A caller-pinned version would conflict again on every retry.
