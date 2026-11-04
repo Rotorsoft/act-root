@@ -434,7 +434,20 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
     for (const n of nodes.values()) if (n.col === undefined && !isBar(n)) n.col = (laneCount[n.lane] = (laneCount[n.lane] ?? -1) + 1);
     const cols = [...nodes.values()].filter(n => typeof n.col === "number").map(n => n.col);
     const minCol = Math.min(0, ...cols), maxCol = Math.max(...cols);
-    const X = c => LABEL_W + PAD + (c - minCol) * COL_W + COL_W / 2;
+    // a gutter wherever a slice, or a state inside one, ends, so their boxes can pad what they hold
+    const SLICE_GAP = 28, STATE_GAP = 10;
+    const groupAtCol = new Map([...nodes.values()].filter(n => n.slice && n.col !== undefined).map(n => [n.col, n]));
+    const shift = new Map();
+    // the first box stays clear of the lane labels
+    let shifted = groupAtCol.size ? 10 : 0, last;
+    for (const c of [...groupAtCol.keys()].sort((a, b) => a - b)) {
+      const n = groupAtCol.get(c);
+      if (last) shifted += n.slice !== last.slice ? SLICE_GAP : (n.state || "") !== (last.state || "") ? STATE_GAP : 0;
+      shift.set(c, shifted);
+      last = n;
+    }
+    const shiftAt = c => { let at = 0; for (const [k, v] of shift) if (k <= c) at = v; return at; };
+    const X = c => LABEL_W + PAD + (c - minCol) * COL_W + COL_W / 2 + shiftAt(c);
     const W = X(maxCol) + COL_W / 2 + PAD;
     edges = spec.edges.map((e, i) => ({ ...e, i, a: nodes.get(e.from), b: nodes.get(e.to) })).filter(e => e.a && e.b);
     const barGap = 8, barStep = (NODE.state?.[1] || 0) + barGap;
@@ -494,7 +507,7 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
         if (!ms.length) continue;
         const cs = ms.map(n => n.col);
         bands.push({ id: "band:" + sl.id, kind: "slice", label: sl.label, k: "var(--ink)", ref: sl, members: new Set(ms.map(n => n.id)),
-          x0: X(Math.min(...cs)) - COL_W / 2 + 6, x1: X(Math.max(...cs)) + COL_W / 2 - 6, y0: la.y + 4, y1: foot });
+          x0: X(Math.min(...cs)) - COL_W / 2 - 10, x1: X(Math.max(...cs)) + COL_W / 2 + 10, y0: la.y + 4, y1: foot });
       }
     } else if (la && le) for (const s of stateBars) {
       const members = new Set([s.id, ...[...nodes.values()].filter(n => ["action", "event"].includes(kindOf(n)) && barAt(n.cx) === s).map(n => n.id)]);
@@ -548,7 +561,7 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
     for (const b of stateBars)
       if (b.grouped) {
         const top = b.hasActions ? la.y + 20 : b.top - 5;
-        el("rect", { x: b.x0 - 5, y: top, width: b.x1 - b.x0 + 10, height: le.y + le.h - 6 - top, rx: 9, class: "state-group" }, gBands);
+        el("rect", { x: b.x0 - 8, y: top, width: b.x1 - b.x0 + 16, height: le.y + le.h - 6 - top, rx: 9, class: "state-group" }, gBands);
       }
 
     let bus = 0;
@@ -581,8 +594,8 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
         e.tick = el("circle", { cx: e.a.cx, cy: e.b.top, r: 3.2, class: "tick", style: `--k:${color(e.b)}` }, gEdges);
       }
       if (e.timer) {
-        // just under the event, clear of the projection bars the line passes
-        const [tx, ty] = [pts[0][0], pts[0][1] + 16];
+        // the reaction is what waits, so the clock sits where the line reaches it
+        const [tx, ty] = [e.b.cx, e.b.top - 14];
         const tg = el("g", { class: "timer", style: `--k:${color(e.b)}` }, g);
         el("circle", { cx: tx, cy: ty, r: 6.5, class: "face" }, tg);
         el("line", { x1: tx, y1: ty, x2: tx, y2: ty - 3.8 }, tg);
@@ -1148,16 +1161,21 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
     const loads = loadsAt(st), ver = replay(k).ver, own = st.stream || sc.stream;
     const lines = [...new Set(loads.map(x => findEdge(loadBar(x.load, n).id, n.id)))];
     for (const e of lines) e.g.classList.add("live");
-    const done = await Promise.all(lines.map(e => travel(e, token)));
+    // every action loads its own state, from the bar up to the action, along with any others
+    const bar = barOf(n);
+    const rise = el("path", { d: `M${n.cx},${bar.top} L${n.cx},${n.bot}`, fill: "none" }, gFx);
+    const done = await Promise.all([travel({ path: rise, b: n }, token), ...lines.map(e => travel(e, token))]);
+    rise.remove();
     if (done.some(d => !d)) return false;
     for (const e of lines) { e.g.classList.remove("live"); e.g.classList.add("trail"); ping(e.a); }
-    ping(barOf(n));
-    const held = new Map([[barOf(n), [`${own} · ${vLabel(ver[own])}`]]]);
+    ping(bar);
+    const held = new Map([[bar, [`${own} · ${vLabel(ver[own])}`]]]);
     for (const { stream, load } of loads) {
       const bar = loadBar(load, n);
       held.set(bar, [...(held.get(bar) || []), `${stream} · ${vLabel(ver[stream])}`]);
     }
-    const tags = [...held].map(([bar, text]) => streamTag(bar.cx, bar.bot + 12, text.join("  ")));
+    const tags = [...held].map(([b, text]) => streamTag(b.cx, b.bot + 12, text.join("  ")));
+    if (!loads.length) return { remove: () => tags.forEach(t => t.remove()) };
     const rows = [{ t: `${own} · ${vLabel(ver[own])}`, k: "own" }, ...loads.map(({ stream, load }) => load.events?.length
       ? { t: `${stream} · ${vLabel(ver[stream])} · may append ${load.events.map(id => nodes.get(id).label).join(", ")}`, k: "ver" }
       : { t: `${stream} · ${vLabel(ver[stream])} · read only`, k: "skip" })];
@@ -1196,7 +1214,7 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
       if (st.wait) { const t = timer(n); const ok = await wait(1500, token); t.remove(); if (!ok) return false; }
       ping(n);
       const v = st.noop ? verdict(n.right - 10, n.top - 14, "no-op", "var(--muted)") : null;
-      const card = st.loads ? await showLoads(sc, st, n, step, token) : null;
+      const card = kindOf(n) === "action" && barOf(n) ? await showLoads(sc, st, n, step, token) : null;
       if (card === false) return false;
       step++;
       const ok = await wait(readTime(st), token);
@@ -1312,7 +1330,7 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
 
     e.g.classList.remove("live"); e.g.classList.add("trail");
     ping(to);
-    const card = st.loads ? await showLoads(sc, st, to, step, token) : null;
+    const card = kindOf(to) === "action" && barOf(to) ? await showLoads(sc, st, to, step, token) : null;
     if (card === false) return false;
     step++;
     if (kindOf(to) === "event") {
