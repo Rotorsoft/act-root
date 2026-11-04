@@ -581,7 +581,8 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
         e.tick = el("circle", { cx: e.a.cx, cy: e.b.top, r: 3.2, class: "tick", style: `--k:${color(e.b)}` }, gEdges);
       }
       if (e.timer) {
-        const [tx, ty] = [pts[0][0], (pts[0][1] + pts[1][1]) / 2];
+        // just under the event, clear of the projection bars the line passes
+        const [tx, ty] = [pts[0][0], pts[0][1] + 16];
         const tg = el("g", { class: "timer", style: `--k:${color(e.b)}` }, g);
         el("circle", { cx: tx, cy: ty, r: 6.5, class: "face" }, tg);
         el("line", { x1: tx, y1: ty, x2: tx, y2: ty - 3.8 }, tg);
