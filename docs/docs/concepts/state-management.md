@@ -123,15 +123,15 @@ An action runs only when its **preconditions** hold, and the state it leaves beh
 `app.do(...)` refuses at the first check that fails, and nothing is stored:
 
 1. **The payload** against the action's schema (`ValidationError`).
-2. **The state loads.**
-3. **The preconditions** (`.requires`): rules the state, the actor and the payload must meet (`PreconditionError`).
+2. **The state loads,** then every stream its [`.loads`](#rules-across-streams-loads) name, at once.
+3. **The preconditions** (`.requires`): rules the state, the actor, the payload and the loaded states must meet (`PreconditionError`).
 4. The handler decides the events; each is checked against its schema (`ValidationError`). A handler that returns no events ends the action here: it returns the loaded snapshot, and nothing commits, no `committed` event fires and no reaction wakes.
-5. **One fold, before the commit:** the events fold into the new state, and that state is checked once against the state's schema, its invariants (`ValidationError`).
-6. The events commit, with optimistic concurrency on the stream, and the returned snapshots carry the stored rows.
+5. **One fold, before the commit:** each event folds into its stream's state, and every state that got an event is checked once against its schema, its invariants (`ValidationError`).
+6. The events commit in one step, with optimistic concurrency on every stream they append to, and the returned snapshots carry the stored rows.
 
 ## Preconditions
 
-A precondition is declared with `.requires([...])`: a `description` and a `holds(payload, state, actor?)` predicate. One that reads only the state and the actor ignores the payload and is typed over `unknown`, so every action can use it:
+A precondition is declared with `.requires([...])`: a `description` and a `holds(payload, state, actor, loaded)` predicate (`loaded` holds the states the action [loads](#rules-across-streams-loads); a rule that doesn't read them leaves the last parameters out). One that reads only the state and the actor ignores the payload and is typed over `unknown`, so every action can use it:
 
 ```typescript no-check
 import { type Precondition } from "@rotorsoft/act";
@@ -188,6 +188,61 @@ const Board = z.object({
   lastAttack: z.object({ from: z.string(), to: z.string() }).nullish(),
 });
 ```
+
+## Rules across streams: `.loads`
+
+Some rules span streams: at most 30 students in a course, one account per email, a transfer that debits one account and credits another. An action states them with `.loads`, between `.on(...)` and `.requires(...)`: it loads another state the decision needs, exactly as `app.load` would, and lists the events of that state the action may emit to its stream.
+
+```ts
+import { act, state } from "@rotorsoft/act";
+import { z } from "zod";
+
+const SeatTaken = z.object({ student: z.string() });
+
+// An ordinary state, one stream per course. Its invariant is its schema.
+const Seats = state({
+  Seats: z
+    .object({ taken: z.number(), capacity: z.number() })
+    .refine((s) => s.taken <= s.capacity, "the course is full"),
+})
+  .init(() => ({ taken: 0, capacity: 30 }))
+  .emits({ SeatTaken })
+  .patch({ SeatTaken: (_, s) => ({ taken: s.taken + 1 }) })
+  .build();
+
+const Enroll = z.object({ course: z.string(), student: z.string() });
+
+const Enrollment = state({ Enrollment: Enroll })
+  .init(() => ({ course: "", student: "" }))
+  .emits({ Enrolled: Enroll })
+  .on({ Enroll }, { maxRetries: 1 })
+  .loads(Seats, (data) => `course-${data.course}`, ["SeatTaken"])
+  .requires([
+    {
+      description: "the course has a free seat",
+      holds: (_, __, ___, { Seats }) => Seats.taken < Seats.capacity,
+    },
+  ])
+  .emit((data) => [
+    ["Enrolled", data], // Enrollment's own event: its own stream
+    ["SeatTaken", { student: data.student }], // listed on the load: course-<id>
+  ])
+  .build();
+
+export const app = act().withState(Seats).withState(Enrollment).build();
+```
+
+`app.do("Enroll", ...)` loads the enrollment stream and `course-c1`, checks the precondition with both states, folds `Enrolled` onto the enrollment and `SeatTaken` onto the seats, checks both folded states against their schemas, and appends both events in one commit, each stream guarded by the version it had when loaded. If a seat was taken in between, the commit fails with `ConcurrencyError`, and `maxRetries` reruns the action with fresh loads, so the precondition sees the new count.
+
+- **`target(payload, state)`** returns the stream to load, from the payload and the action's own state. A target naming a stream with no events loads the initial state. A load of the action's own stream, two loads of one stream, and a load of a closed stream (`StreamClosedError`) refuse the action.
+- **Routing.** An event listed on a load goes to that load's stream; the state's own events go to its own stream. Each event is listed on at most one load of an action, so `.emit` never says where an event goes. An event no load lists, or one that isn't the loaded state's, fails to compile and throws.
+- **`loaded`,** the fourth argument of `holds` and of `.emit`, holds each loaded state, keyed by the state's name, or by the load's name when it has one. Loading one state twice needs a name for each load: `.loads(Account, (d) => d.from, ["Debited"], "from").loads(Account, (d) => d.to, ["Credited"], "to")`.
+- **A load without events is a read.** The decision sees the state, but nothing is appended to its stream, so it isn't guarded: the commit lands even if that stream moved. A decision that must be refused when a stream moves appends to it.
+- **The loaded state's schema guards every fold,** whichever action emits into it, and each event's `meta.causation.action` names the action that emitted it, so an owner's own `SeatTaken` and one from `Enroll` are told apart.
+- **What `app.do` returns** is its own stream's snapshots, typed as without loads. `committed` carries every stream the action appended to, a state-scoped listener (`app.on("committed", Seats, ...)`) hears its own state's, and the reactions of every stream appended to wake.
+- **One store.** A loaded state must be registered in the same Act (`act().build()` throws otherwise), so every stream of the commit lives in one store. A loaded stream loads with the caller's actor, so its sensitive fields are gated as the caller's would be.
+
+Uniqueness and limits are ordinary states: an `Email` state, one stream per value, that a registration loads and appends `EmailTaken` to; a `Seats` state with a count. The scenarios behind this design (room booking, payments, inventory, transfers, invoice numbers, loans, rentals) run as tests in `libs/act/test/rules-across-streams.spec.ts`, and [RFC 2251](https://github.com/Rotorsoft/act-root/blob/master/rfcs/2251-rules-across-streams.md) explains the trade-offs.
 
 ## Upgrading from `.given` (removed in 2.0)
 

@@ -10,6 +10,7 @@ import {
   type Snapshot,
   type Store,
   StreamClosedError,
+  sensitive,
   state,
   store,
   ValidationError,
@@ -541,5 +542,111 @@ describe("types", () => {
       .loads(Seats, () => "a", ["SeatTaken"])
       // @ts-expect-error a listed event with the wrong payload
       .emit(() => ["SeatTaken", { student: 1 }]);
+  });
+});
+
+describe("loads in a reaction, the cache, and sensitive fields", () => {
+  test("a lost race drops the moved stream's cache entry", async ({ app }) => {
+    await app.do("Deposit", at("acc-g"), { amount: 10 });
+    await app.do("Deposit", at("acc-h"), { amount: 1 });
+    expect((await app.load(Account, "acc-h")).cache_hit).toBe(true);
+    const commit = db.commit.bind(db);
+    vi.spyOn(db, "commit").mockImplementation(async (appends, meta) => {
+      if (appends.length === 3)
+        await commit(
+          [
+            {
+              stream: "acc-h",
+              msgs: [{ name: "Deposited", data: { amount: 1 } }],
+            },
+          ],
+          meta
+        );
+      return commit(appends, meta);
+    });
+    await expect(
+      app.do("Transfer", at("tr-g"), { from: "acc-g", to: "acc-h", amount: 5 })
+    ).rejects.toThrow(ConcurrencyError);
+    vi.restoreAllMocks();
+    const reloaded = await app.load(Account, "acc-h");
+    expect(reloaded.cache_hit).toBe(false);
+    expect(reloaded.state.balance).toBe(4);
+  });
+
+  test("a reaction's action carries correlation and causation onto every stream", async () => {
+    const Trigger = state({ Trigger: z.object({}) })
+      .init(() => ({}))
+      .emits({ Triggered: Enroll })
+      .on({ trigger: Enroll })
+      .emit("Triggered")
+      .build();
+    const app = act()
+      .withState(Seats)
+      .withState(Enrollment)
+      .withState(Trigger)
+      .on("Triggered")
+      .do(async function enroll_on_trigger(event, _stream, app) {
+        await app.do("Enroll", at(`enr-${event.data.student}`), event.data);
+      })
+      .to(() => ({ target: "enroller" }))
+      .build();
+    const [triggered] = await app.do("trigger", at("t-1"), {
+      course: "rx",
+      student: "s9",
+    });
+    await vi.waitFor(async () =>
+      expect(await events("course-rx", store())).toEqual(["SeatTaken"])
+    );
+    for (const stream of ["enr-s9", "course-rx"]) {
+      const [row] = await rows(stream, store());
+      expect(row.meta.correlation).toBe(triggered.event!.meta.correlation);
+      expect(row.meta.causation.event?.id).toBe(triggered.event!.id);
+    }
+  });
+
+  test("a loaded stream loads with the caller's actor, so its sensitive fields are gated", async () => {
+    const seen = vi.fn();
+    const Vault = state({ Vault: z.object({ owner: z.string().email() }) })
+      .init(() => ({ owner: "nobody@x.io" }))
+      .emits({
+        Claimed: z.object({ owner: sensitive(z.string()) }),
+        Touched: z.object({}),
+      })
+      .patch({ Claimed: ({ data }) => ({ owner: data.owner }) })
+      .discloses((_, actor) => actor.id === "owner")
+      .on({ Claim: z.object({ owner: z.string() }) })
+      .emit("Claimed")
+      .build();
+    const Visit = state({ Visit: z.object({}) })
+      .init(() => ({}))
+      .emits({ Visited: z.object({}) })
+      .on({ visit: z.object({}) })
+      .loads(Vault, () => "vault-1", ["Touched"])
+      .emit((_, __, ___, { Vault }) => {
+        seen(Vault.owner);
+        return [
+          ["Visited", {}],
+          ["Touched", {}],
+        ];
+      })
+      .build();
+    const app = act().withState(Vault).withState(Visit).build();
+    await app.do("Claim", at("vault-1"), { owner: "ann@x.io" });
+    // A stranger sees the marker, and the vault's schema doesn't refuse it.
+    await app.do("visit", at("visit-1"), {});
+    await app.do(
+      "visit",
+      { stream: "visit-2", actor: { id: "owner", name: "o" } },
+      {}
+    );
+    expect(seen.mock.calls.map(([owner]) => owner)).toEqual([
+      "[REDACTED]",
+      "ann@x.io",
+    ]);
+    expect(await events("vault-1", store())).toEqual([
+      "Claimed",
+      "Touched",
+      "Touched",
+    ]);
   });
 });
