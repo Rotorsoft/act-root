@@ -200,7 +200,7 @@ function action_builder<
             );
         }
         loads.push({ state, target, events, name });
-        ((internal.loads ??= {}) as Record<string, Load[]>)[action] = loads;
+        (internal.loads ??= {})[action] = loads;
         return { loads: load, requires, emit };
       }
 

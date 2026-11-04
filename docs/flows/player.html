@@ -92,6 +92,11 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
 .txb rect { fill: var(--surface); stroke: var(--event); stroke-width: 1.2; }
 .txb text { font: 600 10.5px var(--f-mono); fill: var(--event); }
 .txb { animation: pop .25s ease-out; }
+.txb.lost path { stroke: var(--bad); stroke-dasharray: 4 3; }
+.txb.lost rect { stroke: var(--bad); }
+.txb.lost text { fill: var(--bad); }
+.eg.load .edge { stroke: var(--k); stroke-width: 1.7; opacity: .75; }
+.eg.load .arrow { fill: var(--k); opacity: .75; }
 .log .by { display: inline-flex; align-items: center; gap: 4px; }
 .log .by svg { width: 12px; height: 12px; flex: none; }
 .empty { display: block; color: var(--muted); font: 13px var(--f-body); }
@@ -103,7 +108,9 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
 .state .chg { animation: chg 1.6s ease-out; }
 .state dd.chg { color: var(--state); font-weight: 500; }
 @keyframes chg { from { background: color-mix(in srgb, var(--state) 22%, transparent); } to { background: transparent; } }
-.other { margin-top: 12px; padding-top: 8px; border-top: 1px dashed var(--line); }
+.other { margin-top: 12px; padding: 8px 0 0 10px; border-top: 1px dashed var(--line); border-left: 2px solid transparent; }
+.other:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
+.other.at { border-left-color: var(--state); }
 .other .oh { font: 600 10.5px var(--f-mono); color: var(--state); margin-bottom: 4px; overflow-wrap: anywhere; }
 .read { margin-top: 12px; border-top: 1px solid color-mix(in srgb, var(--line) 70%, transparent); padding-top: 8px; }
 .read summary { cursor: pointer; font: 600 11.5px var(--f-body); text-transform: uppercase; letter-spacing: .08em; color: var(--muted); padding: 2px 0 6px; }
@@ -175,8 +182,10 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
 .verdict text { font: 600 11px var(--f-mono); fill: var(--k); }
 .verdict { animation: pop .25s ease-out; }
 .checks rect.card { fill: var(--surface); stroke: var(--state); stroke-width: 1.4; }
-.checks text { font: 500 12.5px var(--f-mono); }
+.checks text { font: 500 12.5px var(--f-mono); fill: var(--ink); }
 .checks .row { animation: pop .25s ease-out; }
+.checks .ver, .checks .own { fill: var(--state); }
+.checks .skip { fill: var(--muted); }
 .checks .pre, .node .badge .pre, .legend .pre, .read .pre, .detail .pre { fill: var(--action); color: var(--action); }
 .checks .emit { fill: var(--muted); }
 .checks .mark { fill: var(--muted); }
@@ -388,6 +397,11 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
     const X = c => LABEL_W + PAD + (c - minCol) * COL_W + COL_W / 2;
     const W = X(maxCol) + COL_W / 2 + PAD;
     edges = spec.edges.map((e, i) => ({ ...e, i, a: nodes.get(e.from), b: nodes.get(e.to) })).filter(e => e.a && e.b);
+    // one edge per loaded state: in its color when the action appends to that state's streams, muted when it only reads
+    for (const n of nodes.values())
+      for (const state of new Set((n.loads || []).map(l => l.state)))
+        edges.push({ from: state, to: n.id, i: edges.length, a: nodes.get(state), b: n, load: true,
+          read: !n.loads.some(l => l.state === state && l.events?.length) });
     const busRows = edges.filter(e => kindOf(e.a) === "reaction" && kindOf(e.b) === "action").length;
     const busSpace = busRows * 6 + 6;
     const present = spec.lanes.filter(l => [...nodes.values()].some(n => n.lane === l.id));
@@ -444,6 +458,8 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
     const inCount = {};
     function route(e, busIndex) {
       const { a, b } = e, ka = kindOf(a), kb = kindOf(b);
+      // a load arrives beside the line the action's events leave on
+      if (e.load) { const mid = a.top - 14, x = b.cx + 18; return [[a.cx, a.top], [a.cx, mid], [x, mid], [x, b.bot]]; }
       if (kb === "projection") return [[a.cx, a.bot], [a.cx, b.top]];
       if (ka === "reaction" && kb === "action") {
         const pl = laneOf("reaction");
@@ -485,10 +501,11 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
     for (const e of edges) {
       const pts = route(e, kindOf(e.a) === "reaction" && kindOf(e.b) === "action" ? bus++ : 0);
       const ba = bandOf(e.a), bb = bandOf(e.b);
-      e.cross = ba && bb && ba !== bb ? [ba, bb] : null;
-      const g = el("g", { class: "eg" + (e.cross ? " cross" : ""), style: `--k:${color(e.b)}` }, gEdges);
+      e.cross = !e.load && ba && bb && ba !== bb ? [ba, bb] : null;
+      const k = !e.load ? color(e.b) : e.read ? "var(--muted)" : color(e.a);
+      const g = el("g", { class: "eg" + (e.cross ? " cross" : "") + (e.load ? " load" : ""), style: `--k:${k}` }, gEdges);
       e.g = g;
-      e.path = el("path", { d: rounded(pts), class: "edge" + (kindOf(e.b) === "projection" || e.dashed ? " dash" : "") }, g);
+      e.path = el("path", { d: rounded(pts), class: "edge" + (kindOf(e.b) === "projection" || e.dashed || e.load ? " dash" : "") }, g);
       if (kindOf(e.b) !== "projection") {
         const [p, q] = [pts[pts.length - 2], pts[pts.length - 1]];
         const ang = Math.atan2(q[1] - p[1], q[0] - p[0]);
@@ -571,6 +588,7 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
     .map(([k, v]) => `<div><i style="background:var(${v.color})"></i>${v.name}</div>`).join("") +
     `<div>${svgIcon("person")}Person</div><div>${svgIcon("automation")}Automation</div>` +
     `<div><span class="mono pre">▲</span>Precondition (a rule the action needs to run)</div><div><span class="mono">⏱</span>Timer (deferred)</div>` +
+    (edges.some(e => e.load) ? `<div><span class="mono" style="color:var(--state)">┄</span>Load: a state the action's decision needs</div>` : "") +
     (bands.some(b => b.kind === "state") ? `<div><i class="bx" style="--k:var(--state)"></i>State boundary</div>` : "") +
     (bands.some(b => b.kind === "slice") ? `<div><i class="bx" style="--k:var(--ink)"></i>Slice boundary</div>` : "");
   $("read").innerHTML = `
@@ -580,6 +598,7 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
     ${bands.length ? `<p>Dashed boxes are the boundaries the builders declare. ${bands[0].kind === "slice"
       ? "A <b>slice</b> box holds the actions and events of the partial states the slice declares, and the reactions it declares. Partial states of the same name still merge into one state bar."
       : `A <b style="color:var(--state)">state</b> box holds the actions and events of one state, with partial states of the same name merged into it.`} The boxes on the current step light up, and a token rings where it crosses from one box into another.</p>` : ""}
+    ${edges.some(e => e.load) ? `<p>A dashed <b style="color:var(--state)">load</b> line brings another state to the action, for its rules. An action appends to its own stream and to each load that lists events, in <b>one commit</b>: every stream is checked at the version it was loaded at, and all events land or none do. A load that lists no events (muted) is a read: outside the commit, and not checked.</p>` : ""}
     <p>Select a box for its contract and source. Keys: space plays or pauses, arrows step.</p>
     <p>Coming from event storming? Actions are its commands, reactions its policies, and projections build its read models.</p>`;
 
@@ -640,6 +659,7 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
       ${n.file ? `<div class="file">${esc(n.file)}${n.line ? ":" + n.line : ""}</div>` : ""}
       ${n.note ? `<p class="rel">${esc(n.note)}</p>` : ""}
       ${n.description ? `<p>${esc(n.description)}</p>` : ""}
+      ${n.loads?.length ? `<p class="rel">Loads</p><ul>${n.loads.map(l => `<li>${esc(l.name || nodes.get(l.state).label)}: ${l.events?.length ? `appends ${esc(l.events.map(id => nodes.get(id).label).join(", "))}, in the action's one commit` : "read, not checked at commit"}</li>`).join("")}</ul>` : ""}
       ${checksOf(n).length ? `<p class="rel"><span class="pre">▲</span> Preconditions</p><ul>${checksOf(n).map(r => `<li>${esc(r.t)}</li>`).join("")}</ul>` : ""}
       ${schemaOf(n)}
       ${ins.length ? `<p class="rel">From: ${ins.map(e => link(e.a)).join(", ")}</p>` : ""}
@@ -719,8 +739,43 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
   // the state a stream belongs to: the bar over the first event the scenario writes to it
   function stateOfStream(sc, stream) {
     if (sc.initials?.[stream]?.state) return sc.initials[stream].state;
+    for (const x of sc.steps) for (const { stream: s, load } of loadsAt(x)) if (s === stream) return nodes.get(load.state).label;
     const st = sc.steps.find(x => !x.at && !x.reject && (x.stream || sc.stream || "stream") === stream && nodes.get(x.to) && kindOf(nodes.get(x.to)) === "event");
-    return st ? barAt(nodes.get(st.to).cx)?.label : undefined;
+    if (st) return barAt(nodes.get(st.to).cx)?.label;
+    // a stream no event reaches: the bar over the action that works on it
+    const tried = sc.steps.find(x => x.stream === stream);
+    const action = tried && [tried.to, tried.from, tried.at].map(id => nodes.get(id)).find(n => n && kindOf(n) === "action");
+    return action ? barAt(action.cx)?.label : undefined;
+  }
+  // a stream's version as a person reads it
+  const vLabel = v => v === undefined || v < 0 ? "new" : `v${v}`;
+  // a step's loads, in the order of the action's `.loads`: the i-th stream is the i-th load
+  const loadsAt = st => (st.loads || []).map((stream, i) => ({ stream, load: nodes.get(st.at || st.to).loads[i] }));
+  // what one commit checks: each stream it appends to, at the version it was loaded at; a read isn't checked
+  function guardsAt(sc, g0, g1) {
+    const own = sc.steps[g0].stream || sc.stream;
+    let at = g0 - 1;
+    while (at >= 0 && !(sc.steps[at].loads && (sc.steps[at].stream || sc.stream) === own)) at--;
+    const now = replay(g0).ver, then = at >= 0 ? replay(at + 1).ver : now;
+    const group = sc.steps.slice(g0, g1), streams = [...new Set(group.map(x => x.stream || sc.stream))];
+    const rows = streams.map(s => ({ s, t: `${s} still ${then[s] === undefined || then[s] < 0 ? "new" : "at " + vLabel(then[s])}`, k: "ver" }));
+    const lost = group[0].conflict;
+    const fail = lost ? rows.find(r => r.s === lost) : undefined;
+    if (fail) fail.t = `${lost}: loaded at ${vLabel(then[lost])}, now ${vLabel(now[lost])}`;
+    const reads = at >= 0 ? loadsAt(sc.steps[at]).filter(x => !x.load.events?.length).map(x => ({ t: `${x.stream} not checked (read)`, k: "skip" })) : [];
+    return { rows: [...rows, ...reads], fail: fail?.t };
+  }
+  // every stream the scenario holds or writes, its own first
+  function streamsOf(sc) {
+    const own = sc.stream || "stream";
+    return [...new Set([own, ...Object.keys(sc.initials ?? {}), ...sc.steps.flatMap(x => [...(x.stream ? [x.stream] : []), ...(x.loads || [])])])];
+  }
+  // the streams step k-1 works on: what it loads, or what its commit appends to, with the action's own
+  function streamsAt(sc, k) {
+    const st = sc.steps[k - 1];
+    if (!st) return new Set();
+    const [g0, g1] = groupAt(sc, k - 1), own = sc.steps[g0].stream || sc.stream || "stream";
+    return new Set([own, ...(st.loads || []), ...sc.steps.slice(g0, g1).map(x => x.stream || sc.stream || "stream")]);
   }
   // a refused precondition reads as the rule that didn't hold (a precondition is a holds() predicate);
   // anything else (a throw in .emit) keeps its message
@@ -761,6 +816,7 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
       if (st.at) continue;
       const n = nodes.get(st.to);
       if (st.reject) { log.push({ type: "rej", name: nodes.get(st.from).label, reason: refusal(st.from, st.reject), who: issuer(sc, i), corr: causeOf(i).corr }); continue; }
+      if (st.conflict) { if (groupAt(sc, i)[0] === i) log.push({ type: "rej", name: nodes.get(st.from).label, reason: `${st.conflict} moved since its load`, who: issuer(sc, i), corr: causeOf(i).corr }); continue; }
       if (st.blocked) { blocked.add(st.from); log.push({ type: "blk", name: st.target || nodes.get(st.from).label, reason: `blocked after ${(st.retries || 0) + 1} attempts` }); continue; }
       if (kindOf(n) !== "event") continue;
       const stream = st.stream || sc.stream || "stream";
@@ -815,18 +871,16 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
     // the state the scenario's own stream belongs to: the bar over its first action
     const first = sc.steps.map(x => nodes.get(x.from)).find(n => n && kindOf(n) === "action");
     const own = first ? barAt(first.cx) : stateBar;
-    $("state-h").textContent = `${own ? own.label : ""} state`;
-    $("state-meta").textContent = `${sc.stream || ""}${r.version !== undefined ? " · v" + r.version : ""}`;
-    const keys = Object.keys(r.state);
     const dl = (obj, chg) => `<dl class="state">${Object.keys(obj).map(key => { const c = fresh && chg.includes(key) ? ' class="chg"' : ""; return `<dt${c}>${esc(key)}</dt><dd${c}>${esc(fmt(obj[key]))}</dd>`; }).join("")}</dl>`;
-    // the other streams the scenario touches, each with its own state: a decision that spans streams shows them all
-    const rest = [...r.others].map(([stream, obj]) => {
-      const v = r.ver[stream];
-      return `<div class="other"><div class="oh">${esc(stateOfStream(sc, stream) || "state")} · ${esc(stream)}${v !== undefined ? " · v" + v : ""}</div>${Object.keys(obj).length ? dl(obj, r.fresh_keys.get(stream) || []) : `<span class="empty">Empty.</span>`}</div>`;
+    const ownStream = sc.stream || "stream", streams = streamsOf(sc), at = streamsAt(sc, k);
+    // every stream the scenario involves shows from the start, one format for all: its state, name and version
+    $("state-h").textContent = "State";
+    $("state-meta").textContent = `${streams.length} stream${streams.length > 1 ? "s" : ""}`;
+    $("state").innerHTML = streams.map(stream => {
+      const isOwn = stream === ownStream, obj = isOwn ? r.state : r.others.get(stream) ?? {}, v = r.ver[stream];
+      const name = isOwn && own ? own.label : stateOfStream(sc, stream) || "state";
+      return `<div class="other${at.has(stream) ? " at" : ""}" data-stream="${esc(stream)}"><div class="oh">${esc(name)} · ${esc(stream)} · ${vLabel(v)}</div>${Object.keys(obj).length ? dl(obj, r.fresh_keys.get(stream) || []) : `<span class="empty">No events yet.</span>`}</div>`;
     }).join("");
-    $("state").innerHTML = (keys.length
-      ? dl(r.state, r.changed)
-      : `<span class="empty">Empty until the first event. Every committed event patches it, and the next action is checked against it.</span>`) + rest;
     nodes.forEach(n => n.g.classList.toggle("blocked", r.blocked.has(n.id)));
   }
 
@@ -868,19 +922,23 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
     const sc = scenarios[cur], st = k ? sc.steps[groupAt(sc, k - 1)[0]] : undefined;
     follow(st);
     lightBands(st);
+    const at = streamsAt(sc, k);
+    document.querySelectorAll("#state .other").forEach(d => d.classList.toggle("at", at.has(d.dataset.stream)));
     $("count").textContent = `${String(k).padStart(2, "0")} / ${String(sc.steps.length).padStart(2, "0")}`;
     $("say").innerHTML = k === 0 ? `<b>${esc(sc.title)}.</b> ${md(sc.summary || "Press Play to walk the flow.")}` : md(st.say || "");
     $("prog").style.width = `${(k / sc.steps.length) * 100}%`;
     if (!k) return setChip("");
     if (st.reject) return setChip("✕ " + refusal(st.from, st.reject), "var(--bad)");
+    if (st.conflict) return setChip(`✕ ${st.conflict} moved · nothing written`, "var(--bad)");
+    if (st.loads) return setChip(`loads ${st.loads.length + 1} stream${st.loads.length ? "s" : ""}`, "var(--state)");
     if (st.blocked) return setChip("⛔ target blocked", "var(--bad)");
     if (st.wait) return setChip("⏱ " + st.wait, "var(--reaction)");
     if (st.at) return setChip(st.noop ? "wakes · no-op" : nodes.get(st.at).label, color(nodes.get(st.at)));
     const n = nodes.get(st.to), cross = findEdge(st.from, st.to)?.cross;
     const [g0, g1] = groupAt(sc, k - 1);
-    if (g1 - g0 > 1) {
+    if (g1 - g0 > 1 || st.commit !== undefined) {
       const streams = new Set(sc.steps.slice(g0, g1).map(x => x.stream || sc.stream)).size;
-      return setChip(`one commit · ${g1 - g0} events · ${streams} streams`, "var(--event)");
+      return setChip(`one commit · ${g1 - g0} event${g1 - g0 > 1 ? "s" : ""} · ${streams} stream${streams > 1 ? "s" : ""}`, "var(--event)");
     }
     if (cross) return setChip(`${cross[0].label} → ${cross[1].label}`, cross[1].k);
     setChip((KINDS[kindOf(n)]?.tag || "") + " · " + n.label, color(n));
@@ -905,10 +963,11 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
     const sc = scenarios[cur];
     for (let i = 0; i < k; i++) {
       const st = sc.steps[i];
+      for (const { load } of loadsAt(st)) findEdge(load.state, st.at || st.to).g.classList.add("trail");
       if (st.at) { nodes.get(st.at).g.classList.add("on"); continue; }
       findEdge(st.from, st.to)?.g.classList.add("trail");
       nodes.get(st.from).g.classList.add("on");
-      if (st.reject || st.blocked) continue;
+      if (st.reject || st.blocked || st.conflict) continue;
       nodes.get(st.to).g.classList.add("on");
       if (kindOf(nodes.get(st.to)) === "event") {
         barAt(nodes.get(st.to).cx)?.g.classList.add("on");
@@ -966,8 +1025,8 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
     let d = `M${x0},${y - 6} L${x0},${y} L${x1},${y} L${x1},${y - 6}`;
     for (const t of targets.slice(1, -1)) d += ` M${t.cx},${y - 6} L${t.cx},${y}`;
     el("path", { d }, g);
-    const label = `one commit · ${targets.length} events · ${streams} stream${streams > 1 ? "s" : ""}`;
-    const w = label.length * 6.6 + 14, cx = (x0 + x1) / 2;
+    const label = `one commit · ${targets.length} event${targets.length > 1 ? "s" : ""} · ${streams} stream${streams > 1 ? "s" : ""}`;
+    const w = label.length * 6.6 + 14, cx = Math.max((x0 + x1) / 2, w / 2 + 4);
     el("rect", { x: cx - w / 2, y: y + 4, width: w, height: 18, rx: 9 }, g);
     const t = el("text", { x: cx, y: y + 16.5, "text-anchor": "middle" }, g); t.textContent = label;
     return g;
@@ -982,7 +1041,7 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
   async function checklist(x, y, rules, reject, token) {
     const rows = reject && !rules.some(r => r.t === reject) ? [...rules, { t: reject, k: "emit" }] : rules;
     const fail = reject ? rows.findIndex(r => r.t === reject) : -1;
-    const ICON = { pre: "▲", emit: "·" };
+    const ICON = { pre: "▲", emit: "·", ver: "⊙", own: "⊙", skip: "–" };
     const RH = 22, w = Math.max(...rows.map(r => r.t.length)) * 7.5 + 58, h = rows.length * RH + 10;
     const left = x + 14 + w > svg.viewBox.baseVal.width ? x - 14 - w : x + 14;
     const g = el("g", { class: "checks" }, gFx);
@@ -996,13 +1055,37 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
       const lbl = el("tspan", { class: `lbl ${rows[i].k}` }, t); lbl.textContent = rows[i].t;
       if (!(ok = await wait(380, token))) break;
       r.classList.add(i === fail ? "fail" : "pass");
-      mark.textContent = i === fail ? "✕ " : "✓ ";
+      mark.textContent = i === fail ? "✕ " : rows[i].k === "skip" ? "– " : "✓ ";
       if (i === fail) break;
       ok = await wait(220, token);
     }
     if (ok) ok = await wait(reject ? 1500 : 500, token);
     g.remove();
     return ok;
+  }
+  // the action's loads arrive together along their dashed lines, then a card lists every stream it
+  // holds for this decision: its own first, each with the version it came back at
+  async function showLoads(sc, st, n, k, token) {
+    const loads = loadsAt(st), ver = replay(k).ver, own = st.stream || sc.stream;
+    const lines = [...new Set(loads.map(x => findEdge(x.load.state, n.id)))];
+    for (const e of lines) e.g.classList.add("live");
+    const done = await Promise.all(lines.map(e => travel(e, token)));
+    if (done.some(d => !d)) return false;
+    for (const e of lines) { e.g.classList.remove("live"); e.g.classList.add("trail"); ping(e.a); }
+    ping(barAt(n.cx));
+    const rows = [{ t: `${own} · ${vLabel(ver[own])}`, k: "own" }, ...loads.map(({ stream, load }) => load.events?.length
+      ? { t: `${stream} · ${vLabel(ver[stream])} · may append ${load.events.map(id => nodes.get(id).label).join(", ")}`, k: "ver" }
+      : { t: `${stream} · ${vLabel(ver[stream])} · read only`, k: "skip" })];
+    const RH = 22, w = Math.max(...rows.map(r => r.t.length)) * 7.5 + 40, h = rows.length * RH + 10;
+    const left = n.right + 14 + w > svg.viewBox.baseVal.width ? n.left - 14 - w : n.right + 14;
+    const g = el("g", { class: "checks" }, gFx);
+    el("rect", { x: left, y: n.cy - h / 2, width: w, height: h, rx: 9, class: "card" }, g);
+    rows.forEach((r, i) => {
+      const t = el("text", { x: left + 11, y: n.cy - h / 2 + 5 + RH * i + 15 }, g);
+      el("tspan", { class: r.k }, t).textContent = (r.k === "skip" ? "– " : "⊙ ");
+      el("tspan", { class: r.k === "skip" ? "skip" : "" }, t).textContent = r.t;
+    });
+    return g;
   }
   function timer(n) {
     const g = el("g", { class: "timer", style: `--k:var(--reaction)` }, gFx);
@@ -1028,9 +1111,11 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
       if (st.wait) { const t = timer(n); const ok = await wait(1500, token); t.remove(); if (!ok) return false; }
       ping(n);
       const v = st.noop ? verdict(n.right - 10, n.top - 14, "no-op", "var(--muted)") : null;
+      const card = st.loads ? await showLoads(sc, st, n, step, token) : null;
+      if (card === false) return false;
       step++;
       const ok = await wait(readTime(st), token);
-      v?.remove();
+      v?.remove(); card?.remove();
       return ok;
     }
     const e = findEdge(st.from, st.to), from = nodes.get(st.from), to = nodes.get(st.to);
@@ -1040,7 +1125,7 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
 
     const bar = barAt(from.cx);
     const [g0, g1] = groupAt(sc, step);
-    if (g1 - g0 > 1 && kindOf(from) === "action" && bar) {
+    if ((g1 - g0 > 1 || st.commit !== undefined) && kindOf(from) === "action" && bar) {
       // one transaction: the checks run once, then every event of the commit lands together
       const group = sc.steps.slice(g0, g1).map(x => ({ st: x, e: findEdge(x.from, x.to), to: nodes.get(x.to) }));
       const f = fractionAtY(e, bar.cy);
@@ -1049,11 +1134,25 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
       const rules = checksOf(from);
       if (rules.length) { if (!(await checklist(from.cx, bar.cy, rules, undefined, token))) return false; }
       else { const v = verdict(from.cx, bar.cy, "✓", "var(--good)"); const ok = await wait(650, token); v.remove(); if (!ok) return false; }
+      // the boundary first: inside it, every stream's version is checked before anything lands
+      const brace = commitBrace(group.map(x => x.to), new Set(group.map(x => x.st.stream || sc.stream)).size);
+      const guards = guardsAt(sc, g0, g1);
+      if (!(await checklist(from.cx, bar.cy, guards.rows, guards.fail, token))) return false;
+      if (st.conflict) {
+        brace.classList.add("lost");
+        brace.querySelector("text").textContent = "nothing written";
+        from.g.classList.add("bad");
+        e.g.classList.remove("live");
+        step = g1;
+        renderPanels(step, true);
+        const ok = await wait(readTime(st) + 600, token);
+        brace.remove();
+        return ok;
+      }
       for (const x of group) x.e.g.classList.add("live");
       const done = await Promise.all(group.map(x => travel(x.e, token, fractionAtY(x.e, bar.cy), 1)));
       if (done.some(d => !d)) return false;
       for (const x of group) { x.e.g.classList.remove("live"); x.e.g.classList.add("trail"); ping(x.to); barAt(x.to.cx)?.g.classList.add("on"); }
-      const brace = commitBrace(group.map(x => x.to), new Set(group.map(x => x.st.stream || sc.stream)).size);
       step = g1;
       renderPanels(step, true);
       const ok = await wait(readTime(st) + 600, token);
@@ -1119,6 +1218,8 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
 
     e.g.classList.remove("live"); e.g.classList.add("trail");
     ping(to);
+    const card = st.loads ? await showLoads(sc, st, to, step, token) : null;
+    if (card === false) return false;
     step++;
     if (kindOf(to) === "event") {
       renderPanels(step, true);
@@ -1128,7 +1229,9 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
         travel(x, token).then(() => { x.g.classList.remove("live"); x.g.classList.add("trail"); x.tick.classList.remove("on"); void x.tick.getBBox(); x.tick.classList.add("on"); });
       }
     }
-    return wait(readTime(st), token);
+    const ok = await wait(readTime(st), token);
+    card?.remove();
+    return ok;
   }
   // resolves true when the scenario plays to the end
   async function play() {

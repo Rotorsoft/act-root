@@ -40,6 +40,7 @@ The parser is best-effort. Always read the slice and state files and check each 
 - **Slices (boundaries).** Draw only the boundaries the builders declare. A slice **owns** the partial states declared in its own file (their actions and events) and the reactions it declares. Every other partial it lists in `.withState(...)` is a **reference**: its reactions call those actions, but it doesn't own them. The draft sets `slice` on owned nodes and lists `owns` and `registers` per slice, naming partials by file. Replace those with the source variable names (`TicketCreation`, `TicketOperations`). Add a short `description` for each slice. A slice that declares no partial (wolfdesk's timers and webhooks) owns only its reactions. Never invent boundaries the source doesn't declare (phases, inferred contexts). Partials of the same name still merge into one state bar, even when different slices own them. Without slices, the player draws one box per state instead.
 - **Schemas.** The draft fills `schema` on every action, event and state from the runtime Zod schema, one field per line with its constraints, and `invariants` on a state with its refinement messages. The player shows a state's schema as its invariants. Keep them; rerun the extractor and copy `schema` and `invariants` over when a schema changes.
 - **State.** Give the state bar a `note` naming the partial states merged into it and a `description`. Actions pass through it on the way to events: that is where preconditions are checked and where events patch the state. With several states (the calculator's `Calculator`, `DigitBoard`, `CalculatorResult`), add one bar per state with a `span` over the columns of the actions that load it; each action passes through the bar above its column. A bar too narrow for its `note` drops it from the map (the detail panel still shows it).
+- **Loads.** The draft sets `loads` on every action that has `.loads(...)`: the state bar, the load's name when it differs, and the events listed on it. The player draws a dashed line from each loaded state to the action, muted for a read (no events). Check each event a load lists sits under its own state's bar, not the action's.
 - **Lanes, retries, targets.** Put `.withLane`, backoff and `.to(...)` targets in the node `description` (shown when a box is selected).
 - One node per reaction. When two handlers share a name, keep separate ids.
 
@@ -73,7 +74,9 @@ Each step walks one existing edge (`from`, `to`) or stands at one node (`at`):
 - `action → event` with `"reject": "<reason>"`: the state refuses, nothing commits. Use the real precondition description or error message. While the token stands on the state bar, the player lists the action's `preconditions` and checks them one by one. A reason that matches one of them stops the list on that row with ✕, and the event stream and caption read `"<reason>" didn't hold`. Any other reason is a `throw` in `.emit(...)`, which runs only after every declared rule passed, so it shows as one more row after them. Keep the list in the order of the `.requires([...])` array (the extractor does).
 - `reaction → external` with `"retries": n` and `"backoff": ["~200 ms", ...]`: fails n times, then succeeds. Add `"blocked": true` and `"target"` when it runs out instead.
 - `{ "at": "<node>", "say": "...", "wait": "...", "noop": true }`: a timer that wakes and does nothing.
-- `"commit": "<id>"` on consecutive `action → event` steps from one action: they are one transaction. The checks run once, every token travels at once, a bracket reads "one commit · N events · M streams", and the event stream groups them. Put the whole commit's caption on its first step. The build refuses a split commit, a commit across two actions, and a commit on a refused step. A 1.x action commits to its own stream only; a commit across streams is the 2.0 design (RFC 2251), for a spec with `preview` set.
+- `"loads": ["<stream>", ...]` on the step that reaches an action (or an `at` step on it, for a retry): the stream of each of the action's loads, in the order of its `loads`. Tokens travel the dashed lines, and a card lists every stream the action holds and its version. Scenarios that load a stream set its state in `initials`, unless it's new.
+- `"commit": "<id>"` on consecutive `action → event` steps from one action: they are one transaction. The checks run once, a bracket reads "one commit · N events · M streams", a card checks each stream at the version it was loaded at (a read shows as not checked), then every token travels at once and the event stream groups them. Set `commit` on a single step too when the action has loads, so the boundary shows. Put the whole commit's caption on its first step. An event a load lists needs its loaded stream in `"stream"`. The build refuses a split commit, a commit across two actions, a commit on a refused step, and a commit that appends only to loaded streams.
+- `"conflict": "<stream>"` on every step of a commit: that stream moved since the load, so its check fails, the bracket turns red, and nothing lands on any stream (`ConcurrencyError`). Follow it with an `at` step that reloads, for `maxRetries`.
 
 The event stream shows each event's correlation and cause on its own: an actor's action starts a correlation, and a reaction's action inherits the correlation of the event that woke it. A scenario may set `"correlation": "<prefix>"` to name them.
 
@@ -133,6 +136,7 @@ It needs Chrome and ffmpeg, and runs the whole scenario in real time, so record 
     { "id": "actor:customer", "lane": "actor", "actor": "person", "label": "Customer", "col": 1.5 },
     { "id": "action:OpenTicket", "lane": "action", "label": "OpenTicket", "col": 0,
       "preconditions": ["..."], "schema": "...", "file": "src/x.ts", "line": 12,
+      "loads": [{ "state": "state:Seats", "name": "seats", "events": ["evt:SeatTaken"] }], // optional; name only when it differs from the state's
       "description": "Shown when the box is selected.", "slice": "slice:TicketCreation" },
     { "id": "state:Ticket", "lane": "state", "label": "Ticket", "note": "TicketCreation + TicketOperations",
       "schema": "status: \"open\" | \"closed\"\nclosedBy?: uuid", "invariants": ["A closed ticket has a closer"] },
@@ -152,7 +156,10 @@ It needs Chrome and ffmpeg, and runs the whole scenario in real time, so record 
         { "from": "reaction:webhook", "to": "ext:hook", "say": "...", "retries": 3, "backoff": ["~200 ms"], "blocked": true, "target": "ticket-escalation-webhooks" },
         { "at": "reaction:autoReassign", "say": "...", "wait": "deferred until reassignAfter", "noop": true },
         { "from": "action:OpenTicket", "to": "evt:TicketOpened", "say": "One commit writes both...", "commit": "c1" },
-        { "from": "action:OpenTicket", "to": "evt:TicketAssigned", "commit": "c1" }
+        { "from": "action:OpenTicket", "to": "evt:TicketAssigned", "commit": "c1" },
+        { "from": "actor:student", "to": "action:Enroll", "say": "...", "loads": ["course-c1"] },
+        { "from": "action:Enroll", "to": "evt:Enrolled", "say": "...", "commit": "c2", "conflict": "course-c1" },
+        { "from": "action:Enroll", "to": "evt:SeatTaken", "stream": "course-c1", "commit": "c2", "conflict": "course-c1" }
       ] }
   ]
 }

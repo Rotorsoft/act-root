@@ -756,10 +756,10 @@ describe("builder-surface coverage", () => {
       .emit((_: any, __: any, ___: any, { Seats }: any) => Seats.next)
       .build();
     expect(built.loads.Enroll).toEqual([
-      { events: ["SeatTaken"] },
-      { events: [] },
+      { state: "Seats", name: "Seats", events: ["SeatTaken"] },
+      { state: "Seats", name: "other", events: [] },
     ]);
-    expect(built.loads.Peek).toEqual([{ events: [] }]);
+    expect(built.loads.Peek).toEqual([{ state: "", name: "", events: [] }]);
     expect(built.actions.__emits_Enroll).toEqual(["Enrolled", "SeatTaken"]);
     expect(built.requires.Enroll).toHaveLength(1);
   });

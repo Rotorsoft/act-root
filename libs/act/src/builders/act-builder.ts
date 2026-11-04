@@ -388,7 +388,7 @@ export function act<
             if (!state.loads) continue;
             const resolved: Record<string, Load[]> = {};
             for (const [action, loads] of Object.entries(state.loads)) {
-              resolved[action] = (loads as Load[]).map((l) => {
+              resolved[action] = loads!.map((l) => {
                 const registered = states.get(l.state.name);
                 if (!registered)
                   throw new Error(

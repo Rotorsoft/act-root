@@ -4,6 +4,7 @@ export type {
   DomainModel,
   EntryPoint,
   EventNode,
+  LoadNode,
   ProjectionNode,
   ReactionNode,
   SliceNode,
