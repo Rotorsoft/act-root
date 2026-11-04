@@ -112,7 +112,7 @@ export const Order = state({
     status: z.enum(["new", "held", "confirmed", "expired"]),
   }),
 })
-  .init(() => ({ product: "", qty: 0, status: "new" as const }))
+  .init(() => ({ product: "", qty: 0, status: "new" }))
   .emits({
     ItemReserved: ReserveItem,
     OrderConfirmed: ZodEmpty,
@@ -122,10 +122,10 @@ export const Order = state({
     ItemReserved: ({ data }) => ({
       product: data.product,
       qty: data.qty,
-      status: "held" as const,
+      status: "held",
     }),
-    OrderConfirmed: () => ({ status: "confirmed" as const }),
-    HoldExpired: () => ({ status: "expired" as const }),
+    OrderConfirmed: () => ({ status: "confirmed" }),
+    HoldExpired: () => ({ status: "expired" }),
   })
   .on({ ReserveItem }, { maxRetries: 4 })
   .loads(Product, (data) => data.product, ["StockReserved"])
@@ -180,9 +180,9 @@ export const HoldTimers = slice()
 export const Bike = state({
   Bike: z.object({ status: z.enum(["free", "rented"]) }),
 })
-  .init(() => ({ status: "free" as const }))
+  .init(() => ({ status: "free" }))
   .emits({ BikeReserved: ZodEmpty })
-  .patch({ BikeReserved: () => ({ status: "rented" as const }) })
+  .patch({ BikeReserved: () => ({ status: "rented" }) })
   .build();
 
 const ReserveBike = z.object({ bike: z.string() });

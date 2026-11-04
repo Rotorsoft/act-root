@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { slice, state } from "@rotorsoft/act";
+import { AgentLoad, agentStream } from "./agent-load.js";
 import {
   CloseTicket,
   MarkTicketResolved,
@@ -56,9 +57,18 @@ export const TicketCreation = state({ Ticket: TicketCreationState })
     ];
   })
 
-  .on({ CloseTicket })
+  // Closing frees the agent's slot, when the ticket has an agent.
+  .on({ CloseTicket }, { maxRetries: 4 })
+  .loads(AgentLoad, (_, state) => agentStream(state.agentId), ["TicketDropped"])
   .requires([mustBeOpen])
-  .emit((_, __, { actor }) => ["TicketClosed", { closedById: actor.id }])
+  .emit((_, { state }, { actor }) =>
+    state.agentId
+      ? [
+          ["TicketClosed", { closedById: actor.id }],
+          ["TicketDropped", {}],
+        ]
+      : ["TicketClosed", { closedById: actor.id }]
+  )
 
   .on({ MarkTicketResolved })
   .requires([mustBeOpen, mustBeUserOrAgent])
@@ -81,6 +91,7 @@ export const TicketCreation = state({ Ticket: TicketCreationState })
 // --- Slice ---
 // prettier-ignore
 export const TicketCreationSlice = slice()
+  .withState(AgentLoad)
   .withState(TicketCreation)
   .withState(TicketOperations)
 

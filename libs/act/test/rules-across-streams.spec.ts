@@ -234,9 +234,9 @@ describe("library loans: only the borrower returns a copy", () => {
 
 describe("bike rental: a bike is rented only when it's free", () => {
   const Bike = state({ Bike: z.object({ status: z.enum(["free", "rented"]) }) })
-    .init(() => ({ status: "free" as const }))
+    .init(() => ({ status: "free" }))
     .emits({ BikeReserved: z.object({}) })
-    .patch({ BikeReserved: () => ({ status: "rented" as const }) })
+    .patch({ BikeReserved: () => ({ status: "rented" }) })
     .build();
   const Reserve = z.object({ bike: z.string() });
   const Rental = state({ Rental: Reserve })
