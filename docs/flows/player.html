@@ -593,14 +593,6 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
       } else {
         e.tick = el("circle", { cx: e.a.cx, cy: e.b.top, r: 3.2, class: "tick", style: `--k:${color(e.b)}` }, gEdges);
       }
-      if (e.timer) {
-        // the reaction is what waits, so the clock sits where the line reaches it
-        const [tx, ty] = [e.b.cx, e.b.top - 14];
-        const tg = el("g", { class: "timer", style: `--k:${color(e.b)}` }, g);
-        el("circle", { cx: tx, cy: ty, r: 6.5, class: "face" }, tg);
-        el("line", { x1: tx, y1: ty, x2: tx, y2: ty - 3.8 }, tg);
-        el("line", { x1: tx, y1: ty, x2: tx + 2.8, y2: ty }, tg);
-      }
     }
 
     for (const n of nodes.values()) {
@@ -641,10 +633,18 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
       }
       // ▲ the action's preconditions, with their count
       const pre = checksOf(n).length;
-      if (n.badge || pre) {
+      // the reaction is what waits, so its clock sits on its corner, clear of the lines
+      const timed = edges.some(e => e.timer && e.b === n);
+      if (timed) {
+        const tg = el("g", { class: "timer", style: `--k:${color(n)}` }, g);
+        el("circle", { cx: n.right, cy: n.top, r: 7.5, class: "face" }, tg);
+        el("line", { x1: n.right, y1: n.top, x2: n.right, y2: n.top - 4.5 }, tg);
+        el("line", { x1: n.right, y1: n.top, x2: n.right + 3.2, y2: n.top }, tg);
+      }
+      if ((n.badge && !timed) || pre) {
         const b = el("text", { x: n.right - 8, y: n.top + 12, "text-anchor": "end", class: "badge" }, g);
         const part = (text, cls) => { const t = el("tspan", cls ? { class: cls } : {}, b); t.textContent = text; };
-        if (n.badge) part(n.badge + (pre ? " " : ""));
+        if (n.badge && !timed) part(n.badge + (pre ? " " : ""));
         if (pre) part(`▲ ${pre}`, "pre");
         if (pre) el("title", {}, b).textContent = "Checked by the state before the handler runs:\n" +
           checksOf(n).map(r => `▲ ${r.t}`).join("\n");
