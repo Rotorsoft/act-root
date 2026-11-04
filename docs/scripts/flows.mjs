@@ -123,6 +123,7 @@ export function validate(spec) {
         const action = node_of.get(st.at ?? st.to);
         if (action?.loads?.length !== st.loads.length) problems.push(`${where}: names ${st.loads.length} loaded stream(s), one for each of its action's loads`);
       }
+      if (st.state && !node_of.has(st.state)) problems.push(`${where}: refused by unknown state ${st.state}`);
       if (st.conflict && st.commit === undefined) problems.push(`${where}: a conflict is on a commit`);
       // an event a load lists goes to that load's stream, and never to the action's own
       if (!st.reject && !st.at && load_events(st.from).includes(st.to) && (st.stream ?? s.stream) === s.stream)
