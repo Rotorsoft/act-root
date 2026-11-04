@@ -1216,7 +1216,7 @@ export type PassthroughPatchHandler = ((event: {
  * @template TActions - Action schemas.
  * @template TKey - Action name.
  */
-export type ActionHandler<TState extends Schema, TEvents extends Schemas, TActions extends Schemas, TKey extends keyof TActions, TLoaded extends Schemas = {}, TRouted extends Schemas = {}> = (action: Readonly<TActions[TKey]>, snapshot: Readonly<Snapshot<TState, TEvents>>, target: Target, loaded: Readonly<TLoaded>) => Emitted<TEvents & TRouted> | Emitted<TEvents & TRouted>[] | undefined;
+export type ActionHandler<TState extends Schema, TEvents extends Schemas, TActions extends Schemas, TKey extends keyof TActions, TLoaded extends Schemas = {}, TRouted extends Schemas = {}> = (action: Readonly<TActions[TKey]>, snapshot: Readonly<Snapshot<TState, TEvents>>, target: Target, loaded: Readonly<TLoaded>) => Emitted<TEvents & TRouted> | readonly Emitted<TEvents & TRouted>[] | undefined;
 /**
  * Maps action names to their handlers.
  * @template TState - State schema.
@@ -2075,7 +2075,8 @@ export type AuditFinding = {
  */
 import type { ZodType } from "zod";
 import type { Act } from "../act.js";
-import type { ActionHandler, ActionOptions, ActOptions, Actor, AutocloseArchiver, AutoclosePolicy, BatchHandler, CacheEntry, Committed, DeferWhen, EventRegister, FoldOptions, IAct, LaneConfig, PatchHandlers, Precondition, ReactionOptions, ReactionResolver, Schema, SchemaRegister, Schemas, Snapshot, State, ZodTypes } from "./index.js";
+import type { ActionEmit } from "./emit.js";
+import type { ActionOptions, ActOptions, Actor, AutocloseArchiver, AutoclosePolicy, BatchHandler, CacheEntry, Committed, DeferWhen, EventRegister, FoldOptions, IAct, LaneConfig, PatchHandlers, Precondition, ReactionOptions, ReactionResolver, Schema, SchemaRegister, Schemas, Snapshot, State, ZodTypes } from "./index.js";
 import type { DEFAULT_LANE } from "./reaction.js";
 /**
  * The \`.do(handler)\` step, parameterized by the builder it returns (\`TReturn\`).
@@ -2307,27 +2308,6 @@ export type ActionEntry<TKey extends string = string, TNewActions extends Schema
     [P in TKey]: ZodType<TNewActions>;
 };
 /**
- * The \`.emit(...)\` step that finishes an action declaration: a handler that
- * returns the events, or an event name to pass the payload through as the
- * event data.
- */
-type ActionEmit<TState extends Schema, TEvents extends Schemas, TActions extends Schemas, TName extends string, TSnap extends boolean, TKey extends string, TNewActions extends Schema, TLoaded extends Schemas = {}, TRouted extends Schemas = {}> = {
-    /** Custom handler — receives \`(action, snapshot, target, loaded)\` and
-     *  returns one or more \`[EventName, data]\` tuples (or \`undefined\`): the
-     *  state's own events, and the events listed on its loads. */
-    (handler: ActionHandler<TState, TEvents, {
-        [P in TKey]: TNewActions;
-    }, TKey, TLoaded, TRouted>): ActionBuilder<TState, TEvents, TActions & {
-        [P in TKey]: TNewActions;
-    }, TName, TSnap>;
-    /** Passthrough — the action payload becomes the event data
-     *  directly. Must reference an event declared in \`.emits()\` that no
-     *  load lists, since the action's own stream must get it. */
-    (event_name: Exclude<keyof TEvents & string, keyof TRouted>): ActionBuilder<TState, TEvents, TActions & {
-        [P in TKey]: TNewActions;
-    }, TName, TSnap>;
-};
-/**
  * What \`.loads(...)\` returns when its load name is already taken by an
  * earlier load of the action: no further step, so the chain fails to
  * compile. Name the loads (the fourth argument) to load a state twice.
@@ -2365,7 +2345,7 @@ type ActionRules<TState extends Schema, TEvents extends Schemas, TActions extend
      * .emit((data) => [["Enrolled", data], ["SeatTaken", { student: data.student }]])
      * \`\`\`
      */
-    loads: <TLState extends Schema, TLEvents extends Schemas, TLName extends string, const TList extends Exclude<keyof TLEvents & string, keyof TRouted> = never, const TAs extends string = TLName>(state: State<TLState, TLEvents, any, TLName>, target: (payload: Readonly<TNewActions>, state: Readonly<TState>) => string, events?: readonly TList[], name?: TAs) => TAs extends keyof TLoaded ? DuplicateLoad<TAs> : ActionRules<TState, TEvents, TActions, TName, TSnap, TKey, TNewActions, TLoaded & {
+    loads: <TLState extends Schema, TLEvents extends Schemas, TLName extends string, const TList extends Exclude<keyof TLEvents & string, keyof TRouted> = never, const TAs extends string = TLName>(state: State<TLState, TLEvents, any, TLName> & (TAs extends keyof TLoaded ? DuplicateLoad<TAs> : unknown), target: (payload: Readonly<TNewActions>, state: Readonly<TState>) => string, events?: readonly TList[], name?: TAs) => TAs extends keyof TLoaded ? DuplicateLoad<TAs> : ActionRules<TState, TEvents, TActions, TName, TSnap, TKey, TNewActions, TLoaded & {
         [P in TAs]: TLState;
     }, TRouted & {
         [E in TList]: TLEvents[E];

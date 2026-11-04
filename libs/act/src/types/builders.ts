@@ -5,8 +5,8 @@
  */
 import type { ZodType } from "zod";
 import type { Act } from "../act.js";
+import type { ActionEmit } from "./emit.js";
 import type {
-  ActionHandler,
   ActionOptions,
   ActOptions,
   Actor,
@@ -383,55 +383,6 @@ export type ActionEntry<
 };
 
 /**
- * The `.emit(...)` step that finishes an action declaration: a handler that
- * returns the events, or an event name to pass the payload through as the
- * event data.
- */
-type ActionEmit<
-  TState extends Schema,
-  TEvents extends Schemas,
-  TActions extends Schemas,
-  TName extends string,
-  TSnap extends boolean,
-  TKey extends string,
-  TNewActions extends Schema,
-  TLoaded extends Schemas = {},
-  TRouted extends Schemas = {},
-> = {
-  /** Custom handler — receives `(action, snapshot, target, loaded)` and
-   *  returns one or more `[EventName, data]` tuples (or `undefined`): the
-   *  state's own events, and the events listed on its loads. */
-  (
-    handler: ActionHandler<
-      TState,
-      TEvents,
-      { [P in TKey]: TNewActions },
-      TKey,
-      TLoaded,
-      TRouted
-    >
-  ): ActionBuilder<
-    TState,
-    TEvents,
-    TActions & { [P in TKey]: TNewActions },
-    TName,
-    TSnap
-  >;
-  /** Passthrough — the action payload becomes the event data
-   *  directly. Must reference an event declared in `.emits()` that no
-   *  load lists, since the action's own stream must get it. */
-  (
-    event_name: Exclude<keyof TEvents & string, keyof TRouted>
-  ): ActionBuilder<
-    TState,
-    TEvents,
-    TActions & { [P in TKey]: TNewActions },
-    TName,
-    TSnap
-  >;
-};
-
-/**
  * What `.loads(...)` returns when its load name is already taken by an
  * earlier load of the action: no further step, so the chain fails to
  * compile. Name the loads (the fourth argument) to load a state twice.
@@ -487,7 +438,8 @@ type ActionRules<
     const TList extends Exclude<keyof TLEvents & string, keyof TRouted> = never,
     const TAs extends string = TLName,
   >(
-    state: State<TLState, TLEvents, any, TLName>,
+    state: State<TLState, TLEvents, any, TLName> &
+      (TAs extends keyof TLoaded ? DuplicateLoad<TAs> : unknown),
     target: (payload: Readonly<TNewActions>, state: Readonly<TState>) => string,
     events?: readonly TList[],
     name?: TAs

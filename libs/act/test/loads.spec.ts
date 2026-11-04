@@ -70,6 +70,7 @@ const Enrollment = state({ Enrollment: Enroll })
   // Nothing to its own stream: refused at the call.
   .on({ Grab: Enroll })
   .loads(Seats, course, ["SeatTaken"])
+  // @ts-expect-error nothing to its own stream fails to compile
   .emit((data) => [["SeatTaken", { student: data.student }]])
   // A read: the stream isn't written, so it isn't guarded.
   .on({ Audit: Enroll })
@@ -481,7 +482,8 @@ describe("what an action may load and emit", () => {
       .emits({ Done: z.object({}) })
       .on({ go: z.object({}) })
       .loads(Seats, () => "course-s")
-      .emit(() => ["SeatTaken" as never, { student: "s" } as never])
+      // @ts-expect-error an event no load lists fails to compile
+      .emit(() => ["SeatTaken", { student: "s" }])
       .build();
     const app = act().withState(Seats).withState(Sneaky).build();
     await expect(app.do("go", at("s-1"), {})).rejects.toThrow(
@@ -556,7 +558,10 @@ describe("what an action may load and emit", () => {
             .emits({ Done: z.object({}) })
             .on({ go: z.object({}) })
             .loads(Counter, () => "counter", events)
-            .emit(() => [[events[0], {}]])
+            .emit(() => [
+              ["Done", {}],
+              [events[0], {}],
+            ])
             .build()
         )
         .build();
@@ -624,9 +629,8 @@ describe("types", () => {
     expect(() => {
       base()
         .loads(Seats, () => "a")
-        .loads(Seats, () => "b")
-        // @ts-expect-error a second unnamed load of the same state has no next step
-        .requires([]);
+        // @ts-expect-error a second unnamed load of the same state
+        .loads(Seats, () => "b");
     }).toThrow();
     expect(() => {
       base()
