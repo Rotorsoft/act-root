@@ -5,7 +5,7 @@
  */
 import type { ZodType } from "zod";
 import type { Act } from "../act.js";
-import type { Emit } from "./emit.js";
+import type { ActionEmit } from "./emit.js";
 import type {
   ActionOptions,
   ActOptions,
@@ -381,32 +381,6 @@ export type ActionEntry<
 > = {
   [P in TKey]: ZodType<TNewActions>;
 };
-
-/** The `.emit(...)` step that finishes an action declaration. */
-type ActionEmit<
-  TState extends Schema,
-  TEvents extends Schemas,
-  TActions extends Schemas,
-  TName extends string,
-  TSnap extends boolean,
-  TKey extends string,
-  TNewActions extends Schema,
-  TLoaded extends Schemas = {},
-  TRouted extends Schemas = {},
-> = Emit<
-  TState,
-  TEvents,
-  TNewActions,
-  TLoaded,
-  TRouted,
-  ActionBuilder<
-    TState,
-    TEvents,
-    TActions & { [P in TKey]: TNewActions },
-    TName,
-    TSnap
-  >
->;
 
 /**
  * What `.loads(...)` returns when its load name is already taken by an

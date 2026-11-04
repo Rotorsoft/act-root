@@ -3,6 +3,7 @@
  * doesn't check extra properties on a callback's return, so these do. Not
  * re-exported: the public surface is `.emit` itself.
  */
+import type { ActionBuilder } from "./builders.js";
 import type { Emitted, Schema, Schemas, Snapshot, Target } from "./index.js";
 
 /** What a handler may return: one event, a list of them, or nothing. */
@@ -88,7 +89,7 @@ type EmitHandler<
  * only the last one's error, at its exact place, so a mistake in a handler's
  * list is marked on the entry; `emit-types.spec.ts` guards that.
  */
-export type Emit<
+type Emit<
   TState extends Schema,
   TEvents extends Schemas,
   TAction extends Schema,
@@ -114,3 +115,29 @@ export type Emit<
     handler: EmitHandler<TState, TEvents, TAction, TLoaded, TRouted, TOut>
   ): TDone;
 };
+
+/** The `.emit(...)` step that finishes an action declaration. */
+export type ActionEmit<
+  TState extends Schema,
+  TEvents extends Schemas,
+  TActions extends Schemas,
+  TName extends string,
+  TSnap extends boolean,
+  TKey extends string,
+  TNewActions extends Schema,
+  TLoaded extends Schemas = {},
+  TRouted extends Schemas = {},
+> = Emit<
+  TState,
+  TEvents,
+  TNewActions,
+  TLoaded,
+  TRouted,
+  ActionBuilder<
+    TState,
+    TEvents,
+    TActions & { [P in TKey]: TNewActions },
+    TName,
+    TSnap
+  >
+>;
