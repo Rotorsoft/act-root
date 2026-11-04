@@ -42,7 +42,12 @@
       "registers": ["Agent", "TicketCreation", "TicketOperations"],
       "file": "packages/wolfdesk/src/ticket-creation.ts",
       "line": 80,
-      "description": "Opens, resolves and closes tickets, and assigns an agent when a ticket opens."
+      "description": "Opens, resolves and closes tickets, and assigns an agent when a ticket opens.",
+      "states": ["state:Ticket", "state:Agent"],
+      "notes": {
+        "state:Ticket": "TicketCreation + TicketOperations",
+        "state:Agent": "open tickets"
+      }
     },
     {
       "id": "slice:TicketMessaging",
@@ -51,7 +56,11 @@
       "registers": ["TicketMessaging"],
       "file": "packages/wolfdesk/src/ticket-messaging.ts",
       "line": 76,
-      "description": "Adds, delivers and acknowledges messages, and delivers each new message through the notification service."
+      "description": "Adds, delivers and acknowledges messages, and delivers each new message through the notification service.",
+      "states": ["state:Ticket"],
+      "notes": {
+        "state:Ticket": "TicketMessaging"
+      }
     },
     {
       "id": "slice:TicketOps",
@@ -60,7 +69,12 @@
       "registers": ["Agent", "TicketOperations"],
       "file": "packages/wolfdesk/src/ticket-operations.ts",
       "line": 96,
-      "description": "Assigns, escalates and reassigns tickets, and escalates when a customer asks for it. It also holds the Agent state, the count of open tickets per agent, which the creation slice registers too."
+      "description": "Assigns, escalates and reassigns tickets, and escalates when a customer asks for it.",
+      "states": ["state:Ticket", "state:Agent"],
+      "notes": {
+        "state:Ticket": "TicketOperations",
+        "state:Agent": "open tickets"
+      }
     },
     {
       "id": "slice:TicketTimers",
@@ -69,7 +83,11 @@
       "registers": ["TicketCreation", "TicketOperations"],
       "file": "packages/wolfdesk/src/ticket-timers.ts",
       "line": 44,
-      "description": "Declares no partial state of its own: four deferred reactions that call actions owned by other slices."
+      "description": "Declares no partial state of its own: four deferred reactions that call actions owned by other slices.",
+      "states": ["state:Ticket"],
+      "notes": {
+        "state:Ticket": "TicketCreation + TicketOperations"
+      }
     },
     {
       "id": "slice:TicketWebhooks",
@@ -78,7 +96,11 @@
       "registers": ["TicketOperations"],
       "file": "packages/wolfdesk/src/ticket-webhooks.ts",
       "line": 37,
-      "description": "Declares no partial state of its own: one reaction that posts each escalation to an incident endpoint."
+      "description": "Declares no partial state of its own: one reaction that posts each escalation to an incident endpoint.",
+      "states": ["state:Ticket"],
+      "notes": {
+        "state:Ticket": "TicketOperations"
+      }
     }
   ],
   "nodes": [
@@ -87,7 +109,7 @@
       "lane": "actor",
       "actor": "person",
       "label": "Customer",
-      "col": 4.5,
+      "col": 5.5,
       "description": "Opens tickets, writes messages, reads replies, asks for escalation. Owns the ticket (the mustBeUser precondition)."
     },
     {
@@ -123,14 +145,14 @@
       "label": "AssignTicket",
       "preconditions": ["Ticket must be open", "Ticket must not be resolved"],
       "file": "packages/wolfdesk/src/ticket-operations.ts",
-      "col": 6,
+      "col": 7,
       "slice": "slice:TicketOps",
       "schema": "agentId: uuid\nreassignAfter: date\nescalateAfter: date",
       "loads": [
         {
           "state": "state:Agent",
           "name": "current",
-          "events": ["evt:TicketDropped"]
+          "events": ["evt:TicketDropped:ops"]
         },
         {
           "state": "state:Agent",
@@ -145,7 +167,7 @@
       "label": "TicketAssigned",
       "schema": "agentId: uuid\nreassignAfter: date\nescalateAfter: date",
       "file": "packages/wolfdesk/src/ticket-operations.ts",
-      "col": 6,
+      "col": 7,
       "slice": "slice:TicketOps"
     },
     {
@@ -157,7 +179,7 @@
         "Must be owner or assigned agent"
       ],
       "file": "packages/wolfdesk/src/ticket-messaging.ts",
-      "col": 3,
+      "col": 4,
       "slice": "slice:TicketMessaging",
       "schema": "to: uuid\nbody: string ≥ 1 chars\nattachments: Record<string, {\n  url: uri\n}>"
     },
@@ -167,7 +189,7 @@
       "label": "MessageAdded",
       "schema": "to: uuid\nbody: string ≥ 1 chars\nattachments: Record<string, {\n  url: uri\n}>\nfrom: uuid\nmessageId: uuid",
       "file": "packages/wolfdesk/src/ticket-messaging.ts",
-      "col": 3,
+      "col": 4,
       "slice": "slice:TicketMessaging"
     },
     {
@@ -176,7 +198,7 @@
       "label": "MarkMessageDelivered",
       "preconditions": ["Ticket must be open", "Message must exist"],
       "file": "packages/wolfdesk/src/ticket-messaging.ts",
-      "col": 4,
+      "col": 5,
       "slice": "slice:TicketMessaging",
       "schema": "messageId: uuid"
     },
@@ -186,7 +208,7 @@
       "label": "MessageDelivered",
       "schema": "messageId: uuid",
       "file": "packages/wolfdesk/src/ticket-messaging.ts",
-      "col": 4,
+      "col": 5,
       "slice": "slice:TicketMessaging"
     },
     {
@@ -199,7 +221,7 @@
         "Must be receiver to ack"
       ],
       "file": "packages/wolfdesk/src/ticket-messaging.ts",
-      "col": 5,
+      "col": 6,
       "slice": "slice:TicketMessaging",
       "schema": "messageId: uuid"
     },
@@ -209,7 +231,7 @@
       "label": "MessageRead",
       "schema": "messageId: uuid",
       "file": "packages/wolfdesk/src/ticket-messaging.ts",
-      "col": 5,
+      "col": 6,
       "slice": "slice:TicketMessaging"
     },
     {
@@ -222,7 +244,7 @@
         "Cannot escalate before due date"
       ],
       "file": "packages/wolfdesk/src/ticket-operations.ts",
-      "col": 7,
+      "col": 8,
       "slice": "slice:TicketOps",
       "schema": "{}"
     },
@@ -232,7 +254,7 @@
       "label": "TicketEscalationRequested",
       "schema": "requestId: uuid\nrequestedById: uuid",
       "file": "packages/wolfdesk/src/ticket-operations.ts",
-      "col": 7,
+      "col": 8,
       "slice": "slice:TicketOps"
     },
     {
@@ -244,7 +266,7 @@
         "Cannot escalate more than once"
       ],
       "file": "packages/wolfdesk/src/ticket-operations.ts",
-      "col": 8,
+      "col": 9,
       "slice": "slice:TicketOps",
       "schema": "requestId: uuid\nrequestedById: uuid"
     },
@@ -254,7 +276,7 @@
       "label": "TicketEscalated",
       "schema": "requestId: uuid\nrequestedById: uuid\nescalationId: uuid",
       "file": "packages/wolfdesk/src/ticket-operations.ts",
-      "col": 8,
+      "col": 9,
       "slice": "slice:TicketOps"
     },
     {
@@ -269,14 +291,14 @@
         "Cannot reassign after agent acknowledged"
       ],
       "file": "packages/wolfdesk/src/ticket-operations.ts",
-      "col": 9,
+      "col": 10,
       "slice": "slice:TicketOps",
       "schema": "agentId: uuid\nreassignAfter: date\nescalateAfter: date",
       "loads": [
         {
           "state": "state:Agent",
           "name": "current",
-          "events": ["evt:TicketDropped"]
+          "events": ["evt:TicketDropped:ops"]
         },
         {
           "state": "state:Agent",
@@ -291,7 +313,7 @@
       "label": "TicketReassigned",
       "schema": "agentId: uuid\nreassignAfter: date\nescalateAfter: date",
       "file": "packages/wolfdesk/src/ticket-operations.ts",
-      "col": 9,
+      "col": 10,
       "slice": "slice:TicketOps"
     },
     {
@@ -309,7 +331,7 @@
       "loads": [
         {
           "state": "state:Agent",
-          "events": ["evt:TicketDropped"]
+          "events": ["evt:TicketDropped:creation"]
         }
       ]
     },
@@ -334,7 +356,7 @@
       "loads": [
         {
           "state": "state:Agent",
-          "events": ["evt:TicketDropped"]
+          "events": ["evt:TicketDropped:creation"]
         }
       ]
     },
@@ -351,11 +373,9 @@
       "id": "state:Ticket",
       "lane": "state",
       "label": "Ticket",
-      "note": "TicketCreation + TicketOperations + TicketMessaging, merged at build",
       "file": "packages/wolfdesk/src/ticket.ts",
-      "description": "One Ticket state assembled from three partial states. Each action loads it from the stream (cache or snapshot plus events), checks its preconditions against it, and commits events that patch it. Optimistic concurrency on the stream version.",
-      "schema": "productId: uuid\nuserId: uuid\nmessages: Record<string, {\n  messageId: uuid\n  body: string ≥ 1 chars\n  from: uuid\n  to?: uuid\n  wasDelivered?: boolean\n  wasRead?: boolean\n  attachments: Record<string, {\n    url: uri\n  }>\n}>\nagentId?: uuid\nrequestId?: uuid\nrequestedById?: uuid\nescalationId?: uuid\nreassignAfter?: date\nescalateAfter?: date\nsupportCategoryId: uuid\npriority: \"Low\" | \"Medium\" | \"High\"\ntitle: string ≥ 1 chars\nclosedById?: uuid\nresolvedById?: uuid\ncloseAfter?: date",
-      "span": [0, 9]
+      "description": "One state, merged at build from the partials TicketCreation, TicketOperations and TicketMessaging, and drawn in every slice that declares a partial of it.",
+      "schema": "productId: uuid\nuserId: uuid\nmessages: Record<string, {\n  messageId: uuid\n  body: string ≥ 1 chars\n  from: uuid\n  to?: uuid\n  wasDelivered?: boolean\n  wasRead?: boolean\n  attachments: Record<string, {\n    url: uri\n  }>\n}>\nagentId?: uuid\nrequestId?: uuid\nrequestedById?: uuid\nescalationId?: uuid\nreassignAfter?: date\nescalateAfter?: date\nsupportCategoryId: uuid\npriority: \"Low\" | \"Medium\" | \"High\"\ntitle: string ≥ 1 chars\nclosedById?: uuid\nresolvedById?: uuid\ncloseAfter?: date"
     },
     {
       "id": "proj:tickets",
@@ -363,7 +383,7 @@
       "label": "tickets",
       "file": "packages/wolfdesk/src/ticket-projections.ts",
       "note": "Drizzle table, one row per ticket",
-      "span": [0, 9],
+      "span": [0, 10],
       "description": "Projection folded from the full Ticket state and flushed in batches as upserts keyed on the stream."
     },
     {
@@ -380,7 +400,7 @@
       "id": "reaction:autoClose",
       "lane": "reaction",
       "label": "autoClose",
-      "col": 12,
+      "col": 13,
       "file": "packages/wolfdesk/src/ticket-timers.ts",
       "description": "Throws a DeferSignal until the ticket's closeAfter, then closes the ticket if nobody closed it first. Runs on its own target close:<ticket>.",
       "badge": "⏱",
@@ -391,7 +411,7 @@
       "id": "reaction:autoEscalate",
       "lane": "reaction",
       "label": "autoEscalate",
-      "col": 13,
+      "col": 14,
       "file": "packages/wolfdesk/src/ticket-timers.ts",
       "description": "`.defer`red to escalateAfter on TicketAssigned. Escalates if the ticket is still open and not escalated. Target escalate:<ticket>.",
       "badge": "⏱",
@@ -402,7 +422,7 @@
       "id": "reaction:deliver",
       "lane": "reaction",
       "label": "deliver",
-      "col": 3,
+      "col": 4,
       "file": "packages/wolfdesk/src/ticket-messaging.ts",
       "description": "Sends the message through the notification service, then marks it delivered. Up to 5 retries with exponential backoff and jitter.",
       "as": "deliver reaction",
@@ -412,7 +432,7 @@
       "id": "reaction:escalate",
       "lane": "reaction",
       "label": "escalate",
-      "col": 7,
+      "col": 8,
       "file": "packages/wolfdesk/src/ticket-operations.ts",
       "description": "Turns an escalation request into EscalateTicket.",
       "as": "escalate reaction",
@@ -422,7 +442,7 @@
       "id": "reaction:autoReassign",
       "lane": "reaction",
       "label": "autoReassign",
-      "col": 14,
+      "col": 15,
       "file": "packages/wolfdesk/src/ticket-timers.ts",
       "description": "Defers to reassignAfter, then reassigns the ticket unless an agent has read one of the customer's messages or the ticket is closed. Target reassign:<ticket>.",
       "badge": "⏱",
@@ -433,7 +453,7 @@
       "id": "reaction:webhook",
       "lane": "reaction",
       "label": "escalation webhook",
-      "col": 16,
+      "col": 17,
       "file": "packages/wolfdesk/src/ticket-webhooks.ts",
       "description": "webhook() from @rotorsoft/act-http on its own webhooks lane: 30 s lease, 2 s timeout, 3 retries with exponential backoff, Idempotency-Key, optional HMAC signing. All tickets share one target, ticket-escalation-webhooks.",
       "as": "webhooks lane",
@@ -443,7 +463,7 @@
       "id": "reaction:autoReassignAgain",
       "lane": "reaction",
       "label": "autoReassignAgain",
-      "col": 15,
+      "col": 16,
       "file": "packages/wolfdesk/src/ticket-timers.ts",
       "description": "Each TicketReassigned pushes reassignAfter forward and re-arms the same check. The chain stops once an agent reads a customer message.",
       "badge": "⏱",
@@ -454,7 +474,7 @@
       "id": "ext:notify",
       "lane": "external",
       "label": "Notification service",
-      "col": 3,
+      "col": 4,
       "file": "packages/wolfdesk/src/services/notification.ts",
       "description": "deliverMessage(): the outbound channel. In development it fails the first WOLFDESK_DELIVERY_FAILS attempts per message so the backoff shows."
     },
@@ -462,7 +482,7 @@
       "id": "ext:hook",
       "lane": "external",
       "label": "Incident endpoint",
-      "col": 16,
+      "col": 17,
       "file": "packages/server/src/webhook-receiver.ts",
       "description": "WOLFDESK_ESCALATION_WEBHOOK. The demo receiver verifies the signature and dedupes on the Idempotency-Key, so retries are safe."
     },
@@ -470,30 +490,41 @@
       "id": "state:Agent",
       "lane": "state",
       "label": "Agent",
-      "note": "open tickets",
-      "span": [10, 11],
-      "description": "One stream per agent, at most 5 open tickets, held by its schema whichever action takes a ticket. Registered by the operations slice, drawn here, and by the creation slice, whose close and resolve load it too. A ticket with no agent names agent-unassigned and emits nothing to it, so that load is a read.",
+      "description": "One stream per agent, at most 5 open tickets, held by its schema whichever action takes a ticket. Declared by the creation and operations slices, whose actions load it: it's one state, drawn in each. A ticket with no agent names agent-unassigned and emits nothing to it, so that load is a read.",
       "schema": "open: number ≥ 0, ≤ 5"
     },
     {
       "id": "evt:TicketTaken",
       "lane": "event",
       "label": "TicketTaken",
-      "col": 10,
+      "col": 11,
       "description": "Owned by Agent. An assign or a reassign may emit it because its .loads lists it.",
       "schema": "{}",
       "file": "src/agent.ts",
-      "slice": "slice:TicketOps"
+      "slice": "slice:TicketOps",
+      "state": "state:Agent"
     },
     {
-      "id": "evt:TicketDropped",
+      "id": "evt:TicketDropped:ops",
       "lane": "event",
       "label": "TicketDropped",
-      "col": 11,
-      "description": "Owned by Agent. A reassign, an assign to a new agent, a resolve and a close emit it, when the ticket holds a slot. A ticket frees its slot once.",
+      "col": 12,
+      "description": "Owned by Agent. A reassign, or an assign to a new agent, frees the old agent's slot.",
       "schema": "{}",
       "file": "src/agent.ts",
-      "slice": "slice:TicketOps"
+      "slice": "slice:TicketOps",
+      "state": "state:Agent"
+    },
+    {
+      "id": "evt:TicketDropped:creation",
+      "lane": "event",
+      "label": "TicketDropped",
+      "col": 3,
+      "description": "Owned by Agent. A resolve or a close frees the slot, when the ticket still holds one. A ticket frees its slot once.",
+      "schema": "{}",
+      "file": "src/agent.ts",
+      "slice": "slice:TicketCreation",
+      "state": "state:Agent"
     }
   ],
   "edges": [
@@ -683,7 +714,7 @@
     },
     {
       "from": "action:AssignTicket",
-      "to": "evt:TicketDropped"
+      "to": "evt:TicketDropped:ops"
     },
     {
       "from": "action:ReassignTicket",
@@ -691,11 +722,11 @@
     },
     {
       "from": "action:ReassignTicket",
-      "to": "evt:TicketDropped"
+      "to": "evt:TicketDropped:ops"
     },
     {
       "from": "action:CloseTicket",
-      "to": "evt:TicketDropped"
+      "to": "evt:TicketDropped:creation"
     },
     {
       "from": "actor:agent",
@@ -703,7 +734,7 @@
     },
     {
       "from": "action:MarkTicketResolved",
-      "to": "evt:TicketDropped"
+      "to": "evt:TicketDropped:creation"
     }
   ],
   "scenarios": [
@@ -940,7 +971,7 @@
         },
         {
           "from": "action:MarkTicketResolved",
-          "to": "evt:TicketDropped",
+          "to": "evt:TicketDropped:creation",
           "stream": "agent-ada",
           "commit": "resolve",
           "data": {},
@@ -1063,7 +1094,7 @@
         {
           "from": "action:ReassignTicket",
           "commit": "to-grace",
-          "to": "evt:TicketDropped",
+          "to": "evt:TicketDropped:ops",
           "stream": "agent-ada",
           "data": {},
           "patch": {
@@ -1109,7 +1140,7 @@
         {
           "from": "action:ReassignTicket",
           "commit": "to-hugo",
-          "to": "evt:TicketDropped",
+          "to": "evt:TicketDropped:ops",
           "stream": "agent-grace",
           "data": {},
           "patch": {
@@ -1314,7 +1345,7 @@
         {
           "from": "action:CloseTicket",
           "commit": "close",
-          "to": "evt:TicketDropped",
+          "to": "evt:TicketDropped:creation",
           "stream": "agent-ada",
           "data": {},
           "patch": {
@@ -1547,7 +1578,7 @@
         {
           "from": "action:CloseTicket",
           "commit": "close",
-          "to": "evt:TicketDropped",
+          "to": "evt:TicketDropped:creation",
           "stream": "agent-ada",
           "data": {},
           "patch": {
@@ -1696,7 +1727,7 @@
         },
         {
           "from": "action:AssignTicket",
-          "to": "evt:TicketDropped",
+          "to": "evt:TicketDropped:ops",
           "commit": "to-cleo",
           "stream": "agent-ben",
           "data": {},

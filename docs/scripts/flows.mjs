@@ -93,6 +93,18 @@ export function validate(spec) {
       if (prev && prev.commit === st.commit && prev.from !== st.from) problems.push(`scenario "${s.title}" step ${i + 1}: one commit comes from one action`);
     });
   }
+  // a slice lists the states it declares; each is drawn in it, with its own actions and events
+  for (const sl of spec.slices ?? []) {
+    for (const st of sl.states ?? [])
+      if ((spec.nodes ?? []).find((n) => n.id === st)?.lane !== "state") problems.push(`slice ${sl.id} declares ${st}, which isn't a state bar`);
+  }
+  for (const n of spec.nodes ?? []) {
+    const sl = (spec.slices ?? []).find((s) => s.id === n.slice);
+    if (!sl?.states) continue;
+    if (n.state && !sl.states.includes(n.state)) problems.push(`node ${n.id} says its state is ${n.state}, which slice ${sl.id} doesn't declare`);
+    for (const l of n.loads ?? [])
+      if (!sl.states.includes(l.state)) problems.push(`node ${n.id} loads ${l.state}, which slice ${sl.id} doesn't declare`);
+  }
   // a load names a state, and lists only events its action has an edge to
   const node_of = new Map((spec.nodes ?? []).map((n) => [n.id, n]));
   for (const n of spec.nodes ?? []) {
