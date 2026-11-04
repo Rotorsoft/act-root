@@ -462,9 +462,9 @@ type ActionRules<
    * The preconditions and `.emit` get every loaded state in a fourth
    * argument, `loaded`, keyed by the state's name or by the load's `name`.
    * An event listed on a load goes to that load's stream, and the action
-   * commits to every stream it emits to in one atomic step, each guarded
+   * appends to every stream it emits to in one atomic commit, each guarded
    * by the version it had when loaded. A load without events is a read:
-   * its stream isn't written, and it isn't guarded.
+   * nothing is appended to its stream, and it isn't guarded.
    *
    * @param state - The state to load; it must be registered in the same Act.
    * @param target - The stream to load, from the payload and the action's state.

@@ -175,7 +175,7 @@ const NOTIFY_COMMITS = 1; // events per notify run (one round-trip)
 const HOT_WRITERS = 8; // concurrent commits on the hot shared stream
 
 /** One event to each of n fresh streams, in one commit. */
-const streamWrites = (n: number) => {
+const streamAppends = (n: number) => {
   const id = Math.random();
   return Array.from({ length: n }, (_, i) => ({
     stream: `multi-${id}-${i}`,
@@ -183,7 +183,7 @@ const streamWrites = (n: number) => {
   }));
 };
 
-/** Writes a fresh stream and the shared "hot" stream, retrying a lost race. */
+/** Appends to a fresh stream and the shared "hot" stream, retrying a lost race. */
 async function commitWithRetry() {
   const own = { stream: `own-${Math.random()}`, msgs: incMsgs(1) };
   for (;;) {
@@ -230,14 +230,14 @@ const scenarios: Scenario[] = [
   {
     // Two- and three-stream commits — one event per stream, all or none.
     // Next to "commit: single event", they price each extra stream: one
-    // more head read and one more row in the same write.
+    // more head read and one more row in the same commit.
     name: "commit: 2 streams",
     batchSize: 2,
     async setup() {
       await resetStore();
     },
     async run() {
-      await store().commit(streamWrites(2), meta);
+      await store().commit(streamAppends(2), meta);
     },
   },
   {
@@ -247,14 +247,14 @@ const scenarios: Scenario[] = [
       await resetStore();
     },
     async run() {
-      await store().commit(streamWrites(3), meta);
+      await store().commit(streamAppends(3), meta);
     },
   },
   {
-    // A hot shared stream: HOT_WRITERS commits at once, each writing its
-    // own stream and the same shared one, retried on ConcurrencyError
+    // A hot shared stream: HOT_WRITERS commits at once, each appending to
+    // its own stream and the same shared one, retried on ConcurrencyError
     // until every one lands. Prices the contention a counter or a
-    // uniqueness stream sees when many actions write it together.
+    // uniqueness stream sees when many actions append to it together.
     name: `commit: hot shared stream (${HOT_WRITERS} writers)`,
     batchSize: HOT_WRITERS,
     async setup() {

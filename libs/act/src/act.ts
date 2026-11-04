@@ -737,7 +737,7 @@ export class Act<
       );
       // A loaded snapshot has no `patch`: an action that emits nothing
       // returns only that, so nothing committed, nothing to wake or announce.
-      // Snapshots of the streams its loads wrote follow its own.
+      // Snapshots of the streams its loads appended to follow its own.
       const me = this.registry.actions[action];
       const committed = snapshots.filter((s) => s.patch);
       if (!committed.length) return snapshots;

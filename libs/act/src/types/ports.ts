@@ -495,12 +495,12 @@ export type SubscribeInput = {
 };
 
 /**
- * One stream's part of a {@link Store.commit}: the events to append and,
- * optionally, the version the stream must be at.
+ * One append of a {@link Store.commit}: the events to append to one stream
+ * and, optionally, the version the stream must be at.
  *
  * @template E - Event schemas
  */
-export type StreamWrite<E extends Schemas> = {
+export type Append<E extends Schemas> = {
   /** The stream the events go to; named at most once per commit. */
   readonly stream: string;
   /** The events to append, at least one. */
@@ -577,27 +577,28 @@ export interface Store extends Disposable, EventSource {
   drop: () => Promise<void>;
 
   /**
-   * Commits events to one or more streams atomically: every write lands,
+   * Appends events to one or more streams atomically: every append lands,
    * or none does.
    *
-   * Each write names its stream, its events and, optionally, the version
+   * Each append names its stream, its events and, optionally, the version
    * the stream must be at. The store must:
-   * - check every `expectedVersion` against its own stream before writing
-   *   anything (`-1` expects an empty stream, `undefined` skips the check),
-   *   and throw {@link ConcurrencyError} naming the first stream that moved;
-   * - refuse a stream named twice and a write with no events (a plain
+   * - check every `expectedVersion` against its own stream before
+   *   appending anything (`-1` expects an empty stream, `undefined` skips
+   *   the check), and throw {@link ConcurrencyError} naming the first
+   *   stream that moved;
+   * - refuse a stream named twice and an append with no events (a plain
    *   `Error`), so a commit is never a version check alone;
-   * - assign global ids in write order, then event order, and make the
+   * - assign global ids in append order, then event order, and make the
    *   events visible in that order;
    * - continue each stream's versions from its head, and attach `meta` to
    *   every event.
    *
-   * No writes at all commits nothing and returns `[]`.
+   * No appends at all commits nothing and returns `[]`.
    *
    * @template E - Event schemas
-   * @param writes - One {@link StreamWrite} per stream
+   * @param appends - One {@link Append} per stream
    * @param meta - Event metadata (correlation, causation), shared by every event
-   * @returns The committed events of every write, in write order
+   * @returns The committed events of every append, in append order
    *
    * @throws {ConcurrencyError} If a stream's version doesn't match its `expectedVersion`
    *
@@ -610,7 +611,7 @@ export interface Store extends Disposable, EventSource {
    * ```
    */
   commit: <E extends Schemas>(
-    writes: readonly StreamWrite<E>[],
+    appends: readonly Append<E>[],
     meta: EventMeta
   ) => Promise<Committed<E, keyof E>[]>;
 

@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type {
+  Append,
   BlockedLease,
   Committed,
   EventMeta,
@@ -18,7 +19,6 @@ import type {
   StreamFilter,
   StreamPosition,
   StreamStats,
-  StreamWrite,
   SubscribeInput,
   SubscribeResult,
 } from "@rotorsoft/act";
@@ -96,14 +96,14 @@ type Config = Readonly<{
 }> &
   pg.PoolConfig;
 
-// A commit names each stream once, and every write carries events.
-function check_writes<E extends Schemas>(writes: readonly StreamWrite<E>[]) {
+// A commit names each stream once, and every append carries events.
+function check_appends<E extends Schemas>(appends: readonly Append<E>[]) {
   const seen = new Set<string>();
-  for (const { stream, msgs } of writes) {
+  for (const { stream, msgs } of appends) {
     if (!msgs.length)
-      throw new Error(`commit: the write to "${stream}" has no events`);
+      throw new Error(`commit: the append to "${stream}" has no events`);
     if (seen.has(stream))
-      throw new Error(`commit: stream "${stream}" is written twice`);
+      throw new Error(`commit: stream "${stream}" is named twice`);
     seen.add(stream);
   }
 }
@@ -924,11 +924,11 @@ export class PostgresStore implements Store {
   }
 
   async commit<E extends Schemas>(
-    writes: readonly StreamWrite<E>[],
+    appends: readonly Append<E>[],
     meta: EventMeta
   ) {
-    check_writes(writes);
-    if (!writes.length) return [];
+    check_appends(appends);
+    if (!appends.length) return [];
     // Serialize commit VISIBILITY, not just id assignment. `id` is a
     // serial: it is assigned at INSERT time but the row appears at
     // COMMIT time, and every watermark consumer (the correlate
@@ -944,11 +944,11 @@ export class PostgresStore implements Store {
     // inside the lock window: an unlocked probe of every stream's head
     // (its own implicit transaction — optimistic concurrency is guarded
     // by the unique index, not the probe), then ONE autocommit statement
-    // that acquires the xact-scoped lock in a CTE, inserts every write's
+    // that acquires the xact-scoped lock in a CTE, inserts every append's
     // rows, and (when enabled) raises the NOTIFY — the lock is held only
     // for server-side execution plus the implicit COMMIT, never across a
-    // client round trip. Every write inserts at least one row, so the
-    // index catches a race on any stream written. The pooled client is
+    // client round trip. Every append inserts at least one row, so the
+    // index catches a race on any stream appended to. The pooled client is
     // checked out through `_client` so acquisition failures keep their
     // StoreError context; checkout itself is in-process, not a round trip.
     const client = await this._client("commit");
@@ -958,12 +958,12 @@ export class PostgresStore implements Store {
            (SELECT version FROM ${this._fqt} WHERE stream = s.stream
             ORDER BY version DESC LIMIT 1) AS version
          FROM unnest($1::text[]) AS s(stream)`,
-        [writes.map((w) => w.stream)]
+        [appends.map((a) => a.stream)]
       );
       const head_of = new Map(
         heads.rows.map((r) => [r.stream, r.version ?? -1])
       );
-      for (const { stream, msgs, expectedVersion } of writes) {
+      for (const { stream, msgs, expectedVersion } of appends) {
         const head = head_of.get(stream)!;
         if (typeof expectedVersion === "number" && head !== expectedVersion)
           throw new ConcurrencyError(
@@ -981,7 +981,7 @@ export class PostgresStore implements Store {
       const piis: (string | null)[] = [];
       const versions: number[] = [];
       const streams: string[] = [];
-      for (const { stream, msgs } of writes) {
+      for (const { stream, msgs } of appends) {
         let version = head_of.get(stream)!;
         for (const { name, data, pii } of msgs) {
           names.push(name as string);
@@ -1073,7 +1073,8 @@ export class PostgresStore implements Store {
         if ((error as { code?: string })?.code === PG_UNIQUE_VIOLATION) {
           const detail = (error as { detail?: string }).detail ?? "";
           const hit =
-            writes.find((w) => detail.includes(`=(${w.stream}, `)) ?? writes[0];
+            appends.find((a) => detail.includes(`=(${a.stream}, `)) ??
+            appends[0];
           throw new ConcurrencyError(
             hit.stream,
             head_of.get(hit.stream)!,
@@ -1082,10 +1083,10 @@ export class PostgresStore implements Store {
           );
         }
         if (PG_NUL_BYTE.has((error as { code?: string })?.code ?? "")) {
-          const all = writes.flatMap((w) => w.msgs);
-          const where = writes.map((w) => `"${w.stream}"`).join(", ");
+          const all = appends.flatMap((a) => a.msgs);
+          const where = appends.map((a) => `"${a.stream}"`).join(", ");
           throw new ValidationError(
-            writes.map((w) => w.stream).join(", "),
+            appends.map((a) => a.stream).join(", "),
             all as unknown as Readonly<unknown>,
             `Postgres cannot store a NUL byte (\\u0000). One of the ${all.length} event(s) committed to ${where} (${all.map((m) => String(m.name)).join(", ")}) carries one in its name, data, meta or pii. InMemory and SQLite accept it, so this commit would have succeeded there — strip NUL bytes at the edge where the data enters. Driver: ${(error as Error).message}`
           );

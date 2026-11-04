@@ -365,7 +365,7 @@ compares it against the checked-in `perf-baseline.json`.
 | `commit: single event` | single-row durable write (INSERT + version bump + notify, one round trip) |
 | `commit: 50-event batch` | multi-row INSERT — guards against a per-event round-trip regression |
 | `commit: 2 streams`, `commit: 3 streams` | one event to each of 2 or 3 streams in one commit — prices each extra stream (one more head in the probe, one more row in the INSERT) |
-| `commit: hot shared stream (8 writers)` | 8 commits at once, each writing its own stream and one shared stream, retried on `ConcurrencyError` until all land |
+| `commit: hot shared stream (8 writers)` | 8 commits at once, each appending to its own stream and one shared stream, retried on `ConcurrencyError` until all land |
 | `load: cold replay over snapshot floor` | the **#1024 path** — cold `load()` must read only the snapshot + tail, not the whole stream |
 | `drain: correlate+drain 50 events` | `claim()` (FOR UPDATE SKIP LOCKED) + replay query + `ack()` competing-consumer loop |
 | `query_stats: page of 50 (count+names)` | the DISTINCT ON / CTE plan stays indexed as the streams table grows |

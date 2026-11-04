@@ -12,12 +12,12 @@
  */
 import { randomUUID } from "node:crypto";
 import type {
+  Append,
   Committed,
   EventMeta,
   Schemas,
   Store,
   StoreNotification,
-  StreamWrite,
 } from "@rotorsoft/act";
 import { log } from "@rotorsoft/act";
 
@@ -93,12 +93,12 @@ export function withBroker<S extends Store>(
   const origin = randomUUID();
 
   const commit = async <E extends Schemas>(
-    writes: readonly StreamWrite<E>[],
+    appends: readonly Append<E>[],
     meta: EventMeta
   ): Promise<Committed<E, keyof E>[]> => {
-    const committed = await store.commit(writes, meta);
-    // One notification per stream written, as a store's own notify sends.
-    for (const { stream } of writes) {
+    const committed = await store.commit(appends, meta);
+    // One notification per stream appended to, as a store's own notify sends.
+    for (const { stream } of appends) {
       const events = committed
         .filter((e) => e.stream === stream)
         .map(({ id, name }) => ({ id, name: name as string }));

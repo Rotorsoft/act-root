@@ -444,8 +444,8 @@ export async function load<
   };
 }
 
-/** One stream an action may write: its own, or one of its loads'. */
-type Write = {
+/** A stream an action may append to (its own, or one of its loads'), with the events it emits there. */
+type Pending = {
   readonly state: State<any, any, any>;
   readonly stream: string;
   readonly snapshot: Snapshot<any, any>;
@@ -465,7 +465,7 @@ async function load_others(
   own: { stream: string; state: Schema },
   actor: Target["actor"],
   patch_fn: PatchFn
-): Promise<Write[]> {
+): Promise<Pending[]> {
   const streams = loads.map((l) => l.target(payload, own.state));
   streams.forEach((stream, i) => {
     if (stream === own.stream)
@@ -496,12 +496,12 @@ async function load_others(
 
 /**
  * Validates, checks preconditions, folds, checks the invariants and commits.
- * An action with loads commits to every stream it emits to in one step,
+ * An action with loads appends to every stream it emits to in one commit,
  * each guarded by its version at load. On {@link ConcurrencyError} it
  * re-runs from `load` within the action's `maxRetries`; any other error
  * rethrows.
  *
- * Returns the snapshots of every stream written, the action's own first; an
+ * Returns the snapshots of every stream appended to, the action's own first; an
  * action whose own stream gets no event returns its loaded snapshot first.
  */
 export async function action<
@@ -541,7 +541,7 @@ export async function action<
         throw new StreamClosedError(stream);
       // `version`, not `event`: on a warm hit `event` is undefined. A new
       // stream expects -1, so two callers creating it can't both commit.
-      const own: Write = {
+      const own: Pending = {
         state: me,
         stream,
         snapshot,
@@ -559,7 +559,7 @@ export async function action<
           )
         : [];
       const loaded = Object.fromEntries(
-        others.map((w, i) => [loads[i].name, w.snapshot.state])
+        others.map((p, i) => [loads[i].name, p.snapshot.state])
       );
 
       // Preconditions in declaration order: the first that fails refuses
@@ -586,17 +586,17 @@ export async function action<
       // own events go to its own stream.
       for (const [name, data] of tuples) {
         const i = loads.findIndex((l) => l.events.includes(name as string));
-        const write = i >= 0 ? others[i] : name in me.events ? own : undefined;
-        if (!write)
+        const to = i >= 0 ? others[i] : name in me.events ? own : undefined;
+        if (!to)
           throw new Error(
             `Action "${action as string}" emitted "${name as string}", which isn't an event of "${me.name}" and isn't listed on any of its loads`
           );
-        write.events.push({
+        to.events.push({
           name: name as string,
-          data: validate(name as string, data, write.state.events[name]),
+          data: validate(name as string, data, to.state.events[name]),
         });
       }
-      const writes = [own, ...others].filter((w) => w.events.length);
+      const appends = [own, ...others].filter((p) => p.events.length);
 
       const meta: EventMeta = {
         correlation:
@@ -629,29 +629,29 @@ export async function action<
       // data and the next version; the store assigns `id` and `created`, so
       // they get placeholders here (`-1`, the commit time).
       const created = new Date();
-      const folds = writes.map((w) => {
-        let { state, patches } = w.snapshot;
-        const folded = w.events.map((e, i) => {
+      const folds = appends.map((p) => {
+        let { state, patches } = p.snapshot;
+        const folded = p.events.map((e, i) => {
           const event = {
             ...e,
             id: -1,
-            stream: w.stream,
-            version: w.snapshot.version + i + 1,
+            stream: p.stream,
+            version: p.snapshot.version + i + 1,
             created,
             meta,
           } as Committed<Schemas, string>;
-          const patch = w.state.patch[event.name](event, state);
-          state = patch_fn(w.state, state, patch, event);
+          const patch = p.state.patch[event.name](event, state);
+          state = patch_fn(p.state, state, patch, event);
           patches++;
           return { state, patch, patches };
         });
         // Once per stream, on the state the action leaves: invariants hold
         // between actions, not between one action's events.
         check_invariants(
-          `${w.state.name}.${action as string}`,
+          `${p.state.name}.${action as string}`,
           state,
-          w.state.state,
-          w.state.pii_aware
+          p.state.state,
+          p.state.pii_aware
         );
         return folded;
       });
@@ -659,13 +659,13 @@ export async function action<
       let committed: Committed<Schemas, keyof Schemas>[];
       try {
         committed = await store().commit<Schemas>(
-          writes.map((w) => ({
-            stream: w.stream,
-            msgs: w.events.map((e) => w.state.message(e)) as Message<
+          appends.map((p) => ({
+            stream: p.stream,
+            msgs: p.events.map((e) => p.state.message(e)) as Message<
               Schemas,
               string
             >[],
-            expectedVersion: w.expected,
+            expectedVersion: p.expected,
           })),
           meta
         );
@@ -675,16 +675,16 @@ export async function action<
         throw error;
       }
 
-      // The stored rows come back in write order, then event order, with
+      // The stored rows come back in append order, then event order, with
       // the real `id` and `created`; the states are already folded. The
       // caller sent the plaintext, so no view/gate round-trip.
       let row = 0;
       const snapshots: Snapshot<any, any>[] = [];
-      for (const [w, write] of writes.entries()) {
-        const { snapshot: base, state: owner } = write;
-        const written = write.events.map((e, i) => {
+      for (const [a, append] of appends.entries()) {
+        const { snapshot: base, state: owner } = append;
+        const appended = append.events.map((e, i) => {
           const stored = committed[row++];
-          const fold = folds[w][i];
+          const fold = folds[a][i];
           return {
             event: { ...stored, data: e.data },
             state: fold.state,
@@ -697,22 +697,22 @@ export async function action<
             replayed: base.replayed,
           };
         });
-        const last = written.at(-1)!;
+        const last = appended.at(-1)!;
 
         // Awaited, so the cache holds the post-snap checkpoint for the next caller.
         const snap_event = owner.snap?.(last) ? await snap(last) : undefined;
 
         // Sensitive states depend on the actor, so they aren't cached.
         if (!owner.pii_aware)
-          void cache_put(write.stream, {
-            stream: write.stream,
+          void cache_put(append.stream, {
+            stream: append.stream,
             state: last.state,
             version: snap_event?.version ?? last.event.version,
             event_id: snap_event?.id ?? last.event.id,
             patches: snap_event ? 0 : last.patches,
             snaps: snap_event ? last.snaps + 1 : last.snaps,
           });
-        snapshots.push(...written);
+        snapshots.push(...appended);
       }
 
       return (

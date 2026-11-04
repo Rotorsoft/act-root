@@ -1,11 +1,11 @@
 /**
  * A commit across streams that fails part-way stores nothing.
  *
- * Every write's rows go into one INSERT, so a failure on any write's row
- * aborts them all. These cases fail the second of two writes on a real
+ * Every append's rows go into one INSERT, so a failure on any append's row
+ * aborts them all. These cases fail the second of two appends on a real
  * Postgres, after the head probe passed: a concurrent commit that takes
  * its version first, and a NUL byte only Postgres refuses. Each one must
- * leave the first write unstored and name the stream that failed.
+ * leave the first append unstored and name the stream that failed.
  *
  * Requires Postgres on :5431 — same contract as every other act-pg spec.
  */
@@ -27,7 +27,7 @@ const PG = {
 const META: EventMeta = { correlation: "across", causation: {} };
 const ev = (data: Record<string, unknown> = {}) => [{ name: "E", data }];
 
-describe("pg commit across streams — failing part-way", () => {
+describe("commit across streams, failing part-way", () => {
   let store: PostgresStore;
   let rival: PostgresStore;
 
@@ -96,7 +96,7 @@ describe("pg commit across streams — failing part-way", () => {
     expect(await stored("race-second")).toHaveLength(1);
   });
 
-  it("stores nothing when only the second write carries a NUL byte", async () => {
+  it("stores nothing when only the second append carries a NUL byte", async () => {
     const err = await store
       .commit(
         [

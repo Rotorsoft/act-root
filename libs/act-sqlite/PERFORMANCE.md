@@ -81,7 +81,7 @@ design and does not implement `Store.notify`.
 | `commit: single event` | single-row durable write (WAL append, one transaction) |
 | `commit: 50-event batch` | multi-row INSERT — guards against a per-event statement-prep regression |
 | `commit: 2 streams`, `commit: 3 streams` | one event to each of 2 or 3 streams in one transaction — prices each extra stream (one more head read, one more INSERT) |
-| `commit: hot shared stream (8 writers)` | 8 commits at once, each writing its own stream and one shared stream; the store runs them one at a time, so none is refused |
+| `commit: hot shared stream (8 writers)` | 8 commits at once, each appending to its own stream and one shared stream; the store runs them one at a time, so none is refused |
 | `load: cold replay over snapshot floor` | the **#1024 path** — cold `load()` must read only the snapshot + tail, not the whole stream |
 | `drain: correlate+drain 50 events` | `claim()` + replay query + `ack()` loop |
 | `query_stats: page of 50 (count+names)` | the ROW_NUMBER window / CTE plan stays indexed as the streams table grows |

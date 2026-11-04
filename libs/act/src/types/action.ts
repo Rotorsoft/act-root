@@ -404,8 +404,8 @@ export type Precondition<
 /**
  * One `.loads(...)` of an action: another state the decision needs, at the
  * stream `target` names, and the events of that state the action may emit
- * to that stream. A load without events is a read: its stream isn't
- * written or guarded.
+ * to that stream. A load without events is a read: nothing is appended
+ * to its stream, and it isn't guarded.
  *
  * @internal Built by the state builder; resolved to the registered state
  * by `act().build()`.
