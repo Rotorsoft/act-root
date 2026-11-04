@@ -401,16 +401,25 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
   function drawMap() {
     svg.textContent = "";
     nodes = new Map(spec.nodes.map(n => [n.id, { ...n }]));
-    // each state a slice declares becomes a bar of that slice, one row per state
+    // each state a slice declares becomes a bar of that slice, over that state's events there;
+    // a state with no events in the slice gets one column, and bars only stack where they'd overlap
     stateNames = new Map(spec.nodes.filter(n => kindOf(n) === "state").map(n => [n.id, n.label]));
-    barRows = Math.max(1, ...(spec.slices || []).map(sl => sl.states?.length || 0));
+    barRows = 1;
     for (const sl of spec.slices || []) {
-      const cols = spec.nodes.filter(n => n.slice === sl.id).map(n => n.col);
-      if (!cols.length) continue;
-      (sl.states || []).forEach((state, row) => {
+      const own = spec.nodes.filter(n => n.slice === sl.id);
+      if (!own.length) continue;
+      const first = Math.min(...own.map(n => n.col));
+      const taken = [];
+      for (const state of sl.states || []) {
+        const cols = own.filter(n => n.lane === "event" && (n.state || sl.states[0]) === state).map(n => n.col);
+        const span = cols.length ? [Math.min(...cols), Math.max(...cols)] : [first, first];
+        let row = 0;
+        while ((taken[row] ||= []).some(([a, b]) => span[0] <= b && a <= span[1])) row++;
+        taken[row].push(span);
+        barRows = Math.max(barRows, row + 1);
         const id = barId(state, sl.id);
-        nodes.set(id, { ...nodes.get(state), id, row, span: [Math.min(...cols), Math.max(...cols)], note: sl.notes?.[state] ?? "" });
-      });
+        nodes.set(id, { ...nodes.get(state), id, row, span, note: sl.notes?.[state] ?? "" });
+      }
     }
     for (const sl of spec.slices || []) for (const state of sl.states || []) nodes.delete(state);
     const laneCount = {};

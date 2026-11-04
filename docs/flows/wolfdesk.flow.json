@@ -45,8 +45,7 @@
       "description": "Opens, resolves and closes tickets, and assigns an agent when a ticket opens.",
       "states": ["state:Ticket", "state:Agent"],
       "notes": {
-        "state:Ticket": "TicketCreation + TicketOperations",
-        "state:Agent": "open tickets"
+        "state:Ticket": "TicketCreation + TicketOperations"
       }
     },
     {
@@ -72,8 +71,7 @@
       "description": "Assigns, escalates and reassigns tickets, and escalates when a customer asks for it.",
       "states": ["state:Ticket", "state:Agent"],
       "notes": {
-        "state:Ticket": "TicketOperations",
-        "state:Agent": "open tickets"
+        "state:Ticket": "TicketOperations"
       }
     },
     {
