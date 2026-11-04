@@ -9,6 +9,8 @@ Every rule that spans streams, each as a small state: unique values, count limit
 
 **Source:** [recipes/rules-across-streams/](https://github.com/rotorsoft/act-root/tree/master/recipes/rules-across-streams)
 
+**The guide:** [Rules across streams](../guides/rules-across-streams.md) explains each pattern, what a race does and what it costs.
+
 **See it animated:** [Rules across streams](pathname:///flows/rules-across-streams.html) plays a commit across streams, a lost race, a read and a release.
 
 ## The patterns

@@ -108,7 +108,9 @@ const Email = state({ Email: z.object({ holder: z.string().optional() }) })
   })
   .build();
 
-const email = (value: string) => `email-${value.trim().toLowerCase()}`;
+// A stream name can't be forgotten, so it holds an HMAC of the address, never the address.
+const email = (value: string) =>
+  `email-${createHmac("sha256", key).update(value.trim().toLowerCase()).digest("hex")}`;
 
 const User = state({ User: UserSchema })
   // ...
@@ -226,7 +228,7 @@ The scenarios are four patterns. Each scenario ships as a test; the guide and `r
 - **Event ownership.** Each event still belongs to one state and folds only onto that state's streams. An action emits another state's events only to a stream it loaded and only those its load lists.
 - **Cache and snapshots.** Each stream is cached and snapshotted as today.
 - **Close, windowed close, archives.** Each stream's lifecycle is its own. Freeing a value on close is the closing action loading the value's stream and emitting the release.
-- **`forget` and sensitive fields.** A stream id is not forgettable, so a stream keyed by a sensitive value (an email) uses an HMAC of it with an operator-held key (`createHmac` from `node:crypto`; the guide shows the three lines and why the key never rotates without refilling the value streams, #2258). A loaded stream loads with the caller's actor, so its sensitive fields are gated as the caller's would be.
+- **`forget` and sensitive fields.** A stream id is not forgettable, so a stream keyed by a sensitive value (an email) uses an HMAC of it with an operator-held key (`createHmac` from `node:crypto`; [`sensitive-data.md`](../docs/docs/guides/sensitive-data.md#what-the-framework-does-not-do) shows the line and why the key never rotates without refilling the value streams). A loaded stream loads with the caller's actor, so its sensitive fields are gated as the caller's would be.
 - **Reactions, lanes, defer.** Every committed event is correlated as today, so `SeatTaken` reaches `Seats`' reactions; a reaction's `app.do` can load and emit across streams too.
 - **Partial states.** `.loads` belongs to its action.
 - **Time travel.** `load(..., { asOf })` never runs `.loads`.

@@ -43,6 +43,12 @@ The drain machinery gives this its failure semantics for free. The compensation 
 
 The one thing forward recovery does not give you is automatic ordering of the undo. A rollback stack guarantees the reverse order of the forward steps; forward recovery gives you whatever order your reactions fire in. In practice this is rarely a real constraint, because compensations are usually independent (release the inventory, refund the card, void the shipment — none depends on the others), and where there is a true dependency you model it as a chain of reactions, each waiting on the event the previous one emits. The ordering you need becomes explicit in the event graph instead of implicit in a framework's unwinding loop.
 
+### When a commit is the better answer
+
+Forward recovery used to be the only answer to a rule across streams. Since 2.0 an action can [load the other states](../guides/rules-across-streams.md) its decision needs and append to all of them in one commit, so a rule that must never be broken, even for a moment, no longer needs a window and an undo. Compensation still fits when a step leaves the store, takes time, or can be undone as a normal business event. The [guide](../guides/rules-across-streams.md#when-a-reaction-is-the-better-choice) says when each fits.
+
+We chose commits across streams over tags. Dynamic Consistency Boundaries tag events and refuse an append when a tagged query changed. That's more general, but it adds tags to every adapter, conditions the store must evaluate, and decision models that fold events other states own. Versions on streams are what every store already checks, and every scenario we found can be written with streams ([RFC 2251](https://github.com/Rotorsoft/act-root/blob/master/rfcs/2251-rules-across-streams.md)).
+
 ## Schema evolution — versioned names for live reads, archiver transform for bulk rewrite
 
 The peer pattern is the upcaster chain. Axon and Marten let you register a function that transforms an old payload shape into the new one transparently at read time, so a reducer only ever sees the latest version of an event. Add a field, register an upcaster that supplies its default, and every historical event appears to have always had the field. The reducer stays blissfully unaware that version 1 ever existed.

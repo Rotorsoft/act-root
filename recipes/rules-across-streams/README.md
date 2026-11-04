@@ -24,7 +24,16 @@ Rules that span streams, each as a small state: one action loads the states its 
 | | Library loans | [`several-streams.ts`](examples/several-streams.ts) | a precondition over `Copy` |
 | A read | The displayed price | [`reads.ts`](examples/reads.ts) | a precondition, not guarded |
 
-Each has tests in [`examples/`](examples/) that play its rule, its refusal, and its race where it has one. See [Rules across streams](https://rotorsoft.github.io/act-root/docs/concepts/state-management#rules-across-streams-loads) for how `.loads` works.
+Each has tests in [`examples/`](examples/) that play its rule, its refusal, and its race where it has one. [The guide](https://rotorsoft.github.io/act-root/docs/guides/rules-across-streams) explains each pattern, what a race does and what it costs. See [Rules across streams](https://rotorsoft.github.io/act-root/docs/concepts/state-management#rules-across-streams-loads) for how `.loads` works.
+
+## Operating these rules
+
+Both run as their headers say, and have tests.
+
+| Recipe | When | Source |
+|---|---|---|
+| Fill the new streams | A rule is added to existing data. Safe to run again, and reports duplicates | [`fill-streams.ts`](examples/fill-streams.ts) |
+| Split a hot resource | One count is a measured bottleneck | [`split-hot-stream.ts`](examples/split-hot-stream.ts) |
 
 ## Choosing where a rule goes
 
