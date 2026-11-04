@@ -1,6 +1,13 @@
 import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
 import type { Priority } from "../schemas/index.js";
 
+export const agents = sqliteTable("agents", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  supportCategoryId: text("support_category_id").notNull(),
+  open: integer("open").notNull(),
+});
+
 export const tickets = sqliteTable("tickets", {
   id: text("id").primaryKey(),
   productId: text("product_id").notNull(),

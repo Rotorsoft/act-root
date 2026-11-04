@@ -42,7 +42,11 @@ async function reassign_if_due(stream: string, app: IAct) {
   if (acked) return;
   if (Date.now() < state.reassignAfter.getTime())
     throw new DeferSignal({ at: state.reassignAfter });
-  await app.do("ReassignTicket", { stream, actor: SYS }, reassignAgent(stream));
+  await app.do(
+    "ReassignTicket",
+    { stream, actor: SYS },
+    await reassignAgent(stream, state.supportCategoryId, state.agentId)
+  );
 }
 
 // --- Slice -------------------------------------------------------------------

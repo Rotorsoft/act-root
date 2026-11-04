@@ -20,12 +20,12 @@ bootstrap.ts          → act().withSlice(Creation).withSlice(Messaging).withSli
 ticket-creation.ts    → TicketCreation state + TicketCreationSlice
 ticket-messaging.ts   → TicketMessaging state + TicketMessagingSlice
 ticket-operations.ts  → TicketOperations state + TicketOpsSlice
-agent.ts              → Agent state (open tickets per agent), registered by the slices that load it
+agent.ts              → Agent state (the desk, open tickets per agent), its slice, and the slices that load it
 ticket-timers.ts      → TicketTimersSlice (deferred escalate / reassign / close timers)
 ticket-projections.ts → TicketProjection (read model)
 ticket-preconditions.ts  → Business rules (preconditions)
 schemas/              → Zod schemas for actions, events, state
-services/             → External service stubs (agent assignment, notifications)
+services/             → Picking an agent from the agents table, notification stub
 ```
 
 ## Patterns Demonstrated
@@ -63,7 +63,7 @@ export const TicketCreationSlice = slice()
   .withState(TicketOperations)    // included so the reaction can dispatch AssignTicket
   .on("TicketOpened")
     .do(async function assign(event, _stream, app) {
-      const agent = assignAgent(
+      const agent = await assignAgent(
         event.stream,
         event.data.supportCategoryId,
         event.data.priority,
@@ -217,7 +217,15 @@ An agent holds at most 5 open tickets. The count is a state of its own, `Agent`,
 )
 ```
 
-A load always names a stream, so a ticket with no agent names a placeholder and emits nothing to it, which makes that load a read. When the agent is full, the assign reaction fails, and its retry (10 seconds later, by default) asks `assignAgent` for another agent. If every attempt finds a full agent, the ticket's reaction stream blocks after 4 tries, and `app.unblock` resumes it. A ticket holds its slot until it's resolved or closed, whichever comes first, and frees it once, so a resolved ticket retired by `.autocloses` doesn't keep one. A resolved ticket can't be assigned or reassigned. [Rules across streams](rules.md) has the pattern on its own.
+A load always names a stream, so a ticket with no agent names a placeholder and emits nothing to it, which makes that load a read. When a pick finds a full agent, the assign reaction fails, and its retry (10 seconds later, by default) asks `assignAgent` for another agent. If every attempt finds a full agent, the ticket's reaction stream blocks after 4 tries, and `app.unblock` resumes it. A ticket holds its slot until it's resolved or closed, whichever comes first, and frees it once, so a resolved ticket retired by `.autocloses` doesn't keep one. A resolved ticket can't be assigned or reassigned. [Rules across streams](rules.md) has the pattern on its own.
+
+### Picking an Agent
+
+`AddAgent` puts an agent on the desk, in one support category, and `AgentProjection` keeps an `agents` table with each agent's open tickets. The assign and reassign reactions ask that table for the agent with the fewest open tickets in the ticket's category.
+
+The table only suggests. It can lag an agent's stream, and two tickets can pick the same last slot, so the commit decides: the loser's load sees the real count, `Agent`'s schema refuses it, and the reaction's retry picks again from a table that has caught up.
+
+When nobody is free, nothing has failed, so the reaction throws a `DeferSignal` and looks again in a minute. The ticket waits, unassigned, without blocking anything, because the reaction runs on its own target. It stops looking if the ticket is closed, resolved or assigned by hand meanwhile.
 
 ### Composition
 

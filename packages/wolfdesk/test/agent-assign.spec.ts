@@ -44,8 +44,8 @@ describe("the assign reaction with a full agent", () => {
       { correlation: "seed", causation: {} }
     );
     vi.mocked(assignAgent)
-      .mockReturnValue(agent(free))
-      .mockReturnValueOnce(agent(full));
+      .mockResolvedValue(agent(free))
+      .mockResolvedValueOnce(agent(full));
 
     const t = target();
     await makeActions(app).openTicket(t, "new", "help");
@@ -93,7 +93,7 @@ describe("the assign reaction with a full agent", () => {
     const actions = makeActions(app);
     const agent = chance.guid();
     const past = new Date(Date.now() - 1_000);
-    vi.mocked(assignAgent).mockReturnValue({
+    vi.mocked(assignAgent).mockResolvedValue({
       agentId: agent,
       escalateAfter: new Date(Date.now() + 3_600_000),
       reassignAfter: past,

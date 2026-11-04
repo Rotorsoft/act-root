@@ -105,11 +105,12 @@ export const TicketCreationSlice = slice()
   .withState(TicketOperations)
 
   .on("TicketOpened")
-  .do(async function assign(event, _stream, app) {
-    // Resolved before this ran: there's nothing left to assign.
+  .do(async function assign(event, _target, app) {
+    // Waiting can outlast the need: the ticket may be done, or someone may have
+    // taken it by hand.
     const { state } = await app.load("Ticket", event.stream);
-    if (state.resolvedById) return;
-    const agent = assignAgent(
+    if (state.resolvedById || state.closedById || state.agentId) return;
+    const agent = await assignAgent(
       event.stream,
       event.data.supportCategoryId,
       event.data.priority
@@ -124,4 +125,7 @@ export const TicketCreationSlice = slice()
       { reactingTo: event }
     );
   })
+  // On its own target, since a ticket waiting for an agent mustn't hold the
+  // ticket's other reactions.
+  .to((event) => ({ target: `assign:${event.stream}`, source: event.stream }))
   .build();

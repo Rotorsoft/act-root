@@ -1,6 +1,12 @@
 // Shared preconditions
 
-export { Agent, agentStream, MAX_OPEN_TICKETS } from "./agent.js";
+export {
+  Agent,
+  AgentSlice,
+  agentOfStream,
+  agentStream,
+  MAX_OPEN_TICKETS,
+} from "./agent.js";
 // Partial state definitions and slices
 export { TicketCreation, TicketCreationSlice } from "./ticket-creation.js";
 export { TicketMessaging, TicketMessagingSlice } from "./ticket-messaging.js";
@@ -11,7 +17,7 @@ export {
   mustBeUserOrAgent,
 } from "./ticket-preconditions.js";
 // List projection (folds the full Ticket state)
-export { TicketProjection } from "./ticket-projections.js";
+export { AgentProjection, TicketProjection } from "./ticket-projections.js";
 // Timing automations (deferred reactions)
 export { TicketTimersSlice } from "./ticket-timers.js";
 export { TicketWebhooksSlice } from "./ticket-webhooks.js";

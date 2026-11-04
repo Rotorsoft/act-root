@@ -445,10 +445,14 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
         edges.push({ from: a.id, to: n.id, i: edges.length, a, b: n, load: true,
           read: !n.loads.some(l => l.state === state && l.events?.length) });
       }
+    // bars stack in their lane: state bars by slice, projections by the row a spec gives them
+    const projRows = 1 + Math.max(0, ...[...nodes.values()].filter(n => n.lane === "projection").map(n => n.row ?? 0));
+    const rowsIn = id => (id === "state" ? barRows : id === "projection" ? projRows : 1);
+    const extraRows = l => rowsIn(l.id) - 1;
     const busRows = edges.filter(e => kindOf(e.a) === "reaction" && kindOf(e.b) === "action").length;
     const busSpace = busRows * 6 + 6;
     const present = spec.lanes.filter(l => [...nodes.values()].some(n => n.lane === l.id));
-    const H0 = TOP * 2 + present.reduce((s, l) => s + (l.height || BASE_H[l.id] || 90) + (l.id === "reaction" ? busSpace : 0) + (l.id === "state" ? (barRows - 1) * barStep : 0), 0);
+    const H0 = TOP * 2 + present.reduce((s, l) => s + (l.height || BASE_H[l.id] || 90) + (l.id === "reaction" ? busSpace : 0) + extraRows(l) * barStep, 0);
     // never shrink the map below a readable scale: past that it scrolls sideways
     wide = W * minScale() > $("scroller").clientWidth;
     svg.style.width = wide ? `${Math.ceil(W * minScale())}px` : "";
@@ -456,7 +460,7 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
     lanes = [];
     let y = TOP;
     for (const l of present) {
-      const h = ((l.height || BASE_H[l.id] || 90) + (l.id === "state" ? (barRows - 1) * barStep : 0)) * stretch + (l.id === "reaction" ? busSpace : 0);
+      const h = ((l.height || BASE_H[l.id] || 90) + extraRows(l) * barStep) * stretch + (l.id === "reaction" ? busSpace : 0);
       lanes.push({ ...l, y, h });
       y += h;
     }
@@ -467,7 +471,7 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
       const l = laneOf(n.lane);
       const [w, h] = NODE[kindOf(n)] || NODE.action;
       n.h = h;
-      n.cy = l.id === "reaction" ? l.y + Math.max(24 + h / 2, (l.h - busSpace) / 2 + 4) : l.y + l.h / 2 + (isBar(n) && n.row !== undefined ? (n.row - (barRows - 1) / 2) * barStep : 0);
+      n.cy = l.id === "reaction" ? l.y + Math.max(24 + h / 2, (l.h - busSpace) / 2 + 4) : l.y + l.h / 2 + (isBar(n) && n.row !== undefined ? (n.row - (rowsIn(l.id) - 1) / 2) * barStep : 0);
       if (isBar(n)) {
         const fed = kindOf(n) === "projection" ? edges.filter(e => e.b === n).map(e => e.a.col) : actionCols;
         const span = n.span || [Math.min(...fed), Math.max(...fed)];
