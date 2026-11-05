@@ -575,13 +575,20 @@ export class SqliteStore implements Store {
     return this._serial(() => this.client.execute(stmt));
   }
 
+  // Opens a write transaction: a BEGIN that fails is a {@link StoreError} too.
+  private _begin(operation: string) {
+    return this.client.transaction("write").catch((e: unknown) => {
+      throw new StoreError(operation, { cause: e });
+    });
+  }
+
   // One write transaction, in its turn: any failure rolls back and throws a {@link StoreError} naming the operation.
   private _tx<T>(
     operation: string,
     work: (tx: Transaction) => Promise<T>
   ): Promise<T> {
     return this._serial(async () => {
-      const tx = await this.client.transaction("write");
+      const tx = await this._begin(operation);
       try {
         const result = await work(tx);
         await tx.commit();
@@ -605,7 +612,7 @@ export class SqliteStore implements Store {
     check_appends(appends);
     if (!appends.length) return [];
     return this._serial(async () => {
-      const tx = await this.client.transaction("write");
+      const tx = await this._begin("commit");
       // The append being inserted and its head, so the catch can name the
       // stream a (stream, version) unique collision hit.
       let appending = appends[0];

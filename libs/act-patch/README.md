@@ -179,7 +179,7 @@ Act Patch matches or beats Merge Patch on small objects and dominates on wide/la
 
 ## Compatibility
 
-- **Node**: >=22.23.3
+- **Node**: >=22.23.4
 - **Browser**: ✓ — no `process`, `Buffer`, or other Node globals
 - **Runtime deps**: none
 - **Module formats**: ESM + CJS, fully tree-shakeable (`sideEffects: false`)

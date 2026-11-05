@@ -205,7 +205,7 @@ Top-level fields are AND-combined. Two reasons that's the right default:
 1. The **cooldown-after-terminal** pattern is universal. Close *after* `Resolved`, *after* `Delivered`, *after* a deletion request — all of these read as `is X AND after N` in English, and that's the matching semantics in the schema.
 2. The conditions inside a typical primary policy are conjunctive ("the ticket must be Resolved *and* aged enough"), not disjunctive.
 
-For pure-OR backstops or for mixing both shapes, use the optional `or: {...}` block. The policy fires when **either** the top-level AND group matches **or** any field inside `or` matches:
+For pure-OR backstops or for mixing both shapes, use the optional `or: {...}` block. The policy fires when **either** the top-level AND group matches **or** any field inside `or` matches. An idle stream wakes at each `after` in turn, so a later backstop still fires. A close runs no action, so compensate first if the stream holds something on another one:
 
 ```ts no-check
 .autocloses({

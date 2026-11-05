@@ -252,11 +252,11 @@ Uniqueness and limits are ordinary states: an `Email` state, one stream per valu
 
 Act 1.x called the rules in `.given([...])` invariants, typed `Invariant` and refused with `InvariantError`. That was the wrong word: every one of them guards one action and is false at some point in a normal lifecycle, so each was a precondition, and the real invariants of a domain were written nowhere. 1.35 deprecated them, and 2.0 removes them:
 
-- Write `.given([rule])` as `.requires([rule])`, with `valid: (state, actor) => ...` becoming `holds: (_, state, actor) => ...`, and type a shared rule `Precondition<S, unknown>` instead of `Invariant<S>`.
+- Write `.given([rule])` as `.requires([rule])`, merging it with any `.requires` on the same action, with `valid: (state, actor) => ...` becoming `holds: (_, state, actor) => ...`, and type a shared rule `Precondition<S, unknown>` instead of `Invariant<S>`.
 - Catch `PreconditionError` instead of `InvariantError`; `Errors.InvariantError` (`ERR_INVARIANT`) is gone, and act-http no longer has the `INVARIANT` code.
 - A direct call to a rule's `holds` passes all four arguments, `holds(payload, state, actor, loaded)` (`{}` when the action loads nothing), and a direct call to an action handler in `state.on` passes `loaded` as its fourth argument. A rule written with fewer parameters still fits, so `.requires([...])` needs no change.
-- Remove `validateFoldedState` from `act().build(...)`: invariants are the state's schema, checked before every commit, and the option was already ignored.
-- `.emit` now checks what a handler returns, so a field its event's schema doesn't declare fails to compile; it used to be dropped silently. Remove it or add it to the schema. A handler that never returns anything fails to compile too: return `undefined` to commit nothing. An `.emit` inside a generic helper, where the event's type isn't known yet, may need the name form, `.emit("Event")`.
+- Remove `validateFoldedState` from `act().build(...)`: invariants are the state's schema, checked before every commit, and the option has been ignored since 1.35.
+- `.emit` now checks what a handler returns, so a field its event's schema doesn't declare fails to compile; it used to be dropped silently. Remove it or add it to the schema. A handler with no return value (`() => {}`) fails to compile too: return `undefined` to commit nothing. An `.emit` inside a generic helper, where the event's type isn't known yet, may need the name form, `.emit("Event")`.
 - A state field cleared with `null` in a patch must be `.optional()` or `.nullish()`. `null` deletes the key, so a `.nullable()` field, which requires the key, refuses every action after the one that cleared it (since 1.35).
 
 ## Snapshots
@@ -439,7 +439,7 @@ const snapshot = await app.load(Counter, "counter1");
 
 ### Snapshot shape
 
-Both `app.do()` (returns one snapshot per emitted event) and `app.load()` (returns one snapshot for the latest replayed state) yield objects of this shape:
+Both `app.do()` (returns one snapshot per event on its own stream) and `app.load()` (returns one snapshot for the latest replayed state) yield objects of this shape:
 
 ```typescript no-check
 type Snapshot<TState> = {

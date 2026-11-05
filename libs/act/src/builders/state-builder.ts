@@ -7,6 +7,7 @@
 import type { ZodType } from "zod";
 import {
   compile_autoclose_policy,
+  policy_after_windows,
   policy_keep_days,
   policy_min_after_days,
 } from "../internal/autoclose-policy.js";
@@ -294,14 +295,13 @@ function action_builder<
         );
       }
       // Replace on every call — matches snap / discloses state-level
-      // semantics. Compile to the predicate the reaction evaluates, and
-      // cache the policy's min `after` window so the reaction knows whether
-      // to park on a due-time or wait for the next event; `keep` resolves
-      // to the rolling-window width the reaction prunes against.
+      // semantics. Compile to the predicate the reaction evaluates; `keep`
+      // resolves to the rolling-window width the reaction prunes against.
       internal.autoclose = compile_autoclose_policy(
         policy
       ) as AutoclosePredicate<TEvents>;
       internal.autoclose_after_days = policy_min_after_days(policy);
+      internal.autoclose_after_windows = policy_after_windows(policy);
       internal.autoclose_keep_days = policy_keep_days(policy);
       return builder;
     },

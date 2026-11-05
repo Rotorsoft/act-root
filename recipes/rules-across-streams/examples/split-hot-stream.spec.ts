@@ -41,6 +41,13 @@ describe("splitting a hot resource", () => {
     expect(await taken(app, "s3")).toBe(SHARDS);
   });
 
+  test("a buyer who has a slot can't take another", async ({ app }) => {
+    await open(app, "s5", SHARDS * 2);
+    expect(await claim(app, "s5", "twice")).toBe(true);
+    expect(await claim(app, "s5", "twice")).toBe(false);
+    expect(await taken(app, "s5")).toBe(1);
+  });
+
   test("it's sold out only when every stream is full", async ({ app }) => {
     await open(app, "s4", 1);
     expect(await claim(app, "s4", "first")).toBe(true);

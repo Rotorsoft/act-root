@@ -953,16 +953,17 @@ export class PostgresStore implements Store {
     // StoreError context; checkout itself is in-process, not a round trip.
     const client = await this._client("commit");
     try {
-      const heads = await client.query<{ stream: string; version: number }>(
-        `SELECT s.stream,
-           (SELECT version FROM ${this._fqt} WHERE stream = s.stream
-            ORDER BY version DESC LIMIT 1) AS version
-         FROM unnest($1::text[]) AS s(stream)`,
-        [appends.map((a) => a.stream)]
-      );
-      const head_of = new Map(
-        heads.rows.map((r) => [r.stream, r.version ?? -1])
-      );
+      const probe = async () => {
+        const heads = await client.query<{ stream: string; version: number }>(
+          `SELECT s.stream,
+             (SELECT version FROM ${this._fqt} WHERE stream = s.stream
+              ORDER BY version DESC LIMIT 1) AS version
+           FROM unnest($1::text[]) AS s(stream)`,
+          [appends.map((a) => a.stream)]
+        );
+        return new Map(heads.rows.map((r) => [r.stream, r.version ?? -1]));
+      };
+      const head_of = await probe();
       for (const { stream, msgs, expectedVersion } of appends) {
         const head = head_of.get(stream)!;
         if (typeof expectedVersion === "number" && head !== expectedVersion)
@@ -1006,12 +1007,25 @@ export class PostgresStore implements Store {
       // written, and the final select LEFT JOINs it so it is referenced (a
       // bare SELECT CTE would otherwise be skipped) without changing row
       // multiplicity. A `count(*)` would let Postgres skip the calls.
+      //
+      // The index catches a rival at the same version, but not a head that
+      // moved backwards: a full close deletes the rows that would collide
+      // and writes its tombstone at version 0. So the statement also checks
+      // that every head is still what the probe saw, and inserts nothing if
+      // one moved. A statement already waiting on the lock when a close
+      // commits keeps its older snapshot and still gets through; closing
+      // that needs a database function or the lock across a round trip.
+      const unmoved = `NOT EXISTS (
+          SELECT 1 FROM unnest($8::text[], $9::int[]) AS h(stream, head)
+          WHERE COALESCE((SELECT e.version FROM ${this._fqt} e WHERE e.stream = h.stream
+            ORDER BY e.version DESC LIMIT 1), -1) <> h.head)`;
       const single = names.length === 1;
       const insert_select = single
-        ? `SELECT $1, $2::jsonb, $3::jsonb, $5, $4::int, $6 FROM l`
+        ? `SELECT $1, $2::jsonb, $3::jsonb, $5, $4::int, $6 FROM l WHERE ${unmoved}`
         : `SELECT u.name, u.data::jsonb, u.pii::jsonb, u.stream, u.version, $6
            FROM l, unnest($1::text[], $2::text[], $3::text[], $4::int[], $5::text[])
              WITH ORDINALITY AS u(name, data, pii, version, stream, ord)
+           WHERE ${unmoved}
            ORDER BY u.ord`;
       const notify_ctes = this.config.notify
         ? `,
@@ -1019,13 +1033,13 @@ export class PostgresStore implements Store {
              SELECT json_build_object(
                'stream', ins.stream,
                'events', json_agg(json_build_object('id', ins.id, 'name', ins.name) ORDER BY ins.id),
-               'by', $9::text
+               'by', $11::text
              )::text AS p
              FROM ins GROUP BY ins.stream
            ),
            n AS (
-             SELECT count(pg_notify($8, payload.p)) AS sent FROM payload
-             WHERE octet_length(payload.p) < $10
+             SELECT count(pg_notify($10, payload.p)) AS sent FROM payload
+             WHERE octet_length(payload.p) < $12
            )`
         : "";
       const final_select = this.config.notify
@@ -1038,6 +1052,8 @@ export class PostgresStore implements Store {
           RETURNING *
         )${notify_ctes}
         ${final_select}`;
+      const unique_streams = [...head_of.keys()];
+      const guard = [unique_streams, unique_streams.map((s) => head_of.get(s))];
       const base_params = single
         ? [
             names[0],
@@ -1047,14 +1063,27 @@ export class PostgresStore implements Store {
             streams[0],
             meta,
             this._fqt,
+            ...guard,
           ]
-        : [names, datas, piis, versions, streams, meta, this._fqt];
+        : [names, datas, piis, versions, streams, meta, this._fqt, ...guard];
       const params = this.config.notify
         ? [...base_params, this._channel, this._by, NOTIFY_MAX_PAYLOAD_BYTES]
         : base_params;
 
       try {
         const { rows } = await client.query<Committed<E, keyof E>>(sql, params);
+        if (!rows.length) {
+          const now = await probe();
+          const hit =
+            appends.find((a) => now.get(a.stream) !== head_of.get(a.stream)) ??
+            appends[0];
+          throw new ConcurrencyError(
+            hit.stream,
+            now.get(hit.stream)!,
+            hit.msgs as unknown as Message<Schemas, string>[],
+            hit.expectedVersion ?? -1
+          );
+        }
         // Decrypt before handing back to the caller — the committed
         // event the framework returns must carry the cleartext payload
         // (the reducer chain runs against `event.pii`). The encrypted
@@ -1072,9 +1101,8 @@ export class PostgresStore implements Store {
         // nothing to roll back.
         if ((error as { code?: string })?.code === PG_UNIQUE_VIOLATION) {
           const detail = (error as { detail?: string }).detail ?? "";
-          const hit =
-            appends.find((a) => detail.includes(`=(${a.stream}, `)) ??
-            appends[0];
+          const key = /=\((.*), \d+\)/s.exec(detail)?.[1];
+          const hit = appends.find((a) => a.stream === key) ?? appends[0];
           throw new ConcurrencyError(
             hit.stream,
             head_of.get(hit.stream)!,
@@ -1082,21 +1110,23 @@ export class PostgresStore implements Store {
             hit.expectedVersion ?? -1
           );
         }
-        if (PG_NUL_BYTE.has((error as { code?: string })?.code ?? "")) {
-          const all = appends.flatMap((a) => a.msgs);
-          const where = appends.map((a) => `"${a.stream}"`).join(", ");
-          throw new ValidationError(
-            appends.map((a) => a.stream).join(", "),
-            all as unknown as Readonly<unknown>,
-            `Postgres cannot store a NUL byte (\\u0000). One of the ${all.length} event(s) committed to ${where} (${all.map((m) => String(m.name)).join(", ")}) carries one in its name, data, meta or pii. InMemory and SQLite accept it, so this commit would have succeeded there — strip NUL bytes at the edge where the data enters. Driver: ${(error as Error).message}`
-          );
-        }
         throw error;
       }
     } catch (error) {
-      // Every other driver error is a StoreError, per the port contract.
+      // The head probe and the insert both reach here with a NUL byte: a
+      // stream name carries one to the probe first.
       if (error instanceof ConcurrencyError || error instanceof ValidationError)
         throw error;
+      if (PG_NUL_BYTE.has((error as { code?: string })?.code ?? "")) {
+        const all = appends.flatMap((a) => a.msgs);
+        const where = appends.map((a) => `"${a.stream}"`).join(", ");
+        throw new ValidationError(
+          appends.map((a) => a.stream).join(", "),
+          all as unknown as Readonly<unknown>,
+          `Postgres cannot store a NUL byte (\\u0000). One of the ${all.length} event(s) committed to ${where} (${all.map((m) => String(m.name)).join(", ")}) carries one in its name, data, meta or pii. InMemory and SQLite accept it, so this commit would have succeeded there — strip NUL bytes at the edge where the data enters. Driver: ${(error as Error).message}`
+        );
+      }
+      // Every other driver error is a StoreError, per the port contract.
       throw new StoreError("commit", { cause: error });
     } finally {
       client.release();
@@ -1264,6 +1294,11 @@ export class PostgresStore implements Store {
     return this._tx("subscribe", async (client) => {
       let subscribed = 0;
       if (streams.length) {
+        // Every worker takes these rows in the same order, or two of them
+        // subscribing to the same streams wait on each other and deadlock.
+        const ordered = JSON.stringify(
+          [...streams].sort((a, b) => (a.stream < b.stream ? -1 : 1))
+        );
         // Two statements, because `subscribed` means "newly registered
         // streams" and not "rows touched":
         //  1. INSERT ... ON CONFLICT DO NOTHING — rowCount = inserts.
@@ -1282,7 +1317,7 @@ export class PostgresStore implements Store {
           FROM jsonb_array_elements($1::jsonb) AS s
           ON CONFLICT (stream) DO NOTHING
           `,
-          [JSON.stringify(streams)]
+          [ordered]
         );
         subscribed = inserted ?? 0;
         // Priority keeps the max (the highest-priority registered
@@ -1313,7 +1348,7 @@ export class PostgresStore implements Store {
                      AND (t.correlated_at IS NULL
                           OR t.correlated_at < (s->>'correlated_at')::int)))
           `,
-          [JSON.stringify(streams)]
+          [ordered]
         );
       }
       // The correlate checkpoint is written by its own producer, in the call

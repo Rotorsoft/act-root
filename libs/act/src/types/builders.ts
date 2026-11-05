@@ -395,6 +395,15 @@ type DuplicateLoad<TAs extends string> = {
  * What follows `.on(...)`: the loads, the preconditions, then the
  * `.emit(...)` that finishes the action.
  */
+/** A name only known at runtime can't be compared, so it's never a duplicate. */
+type IsDuplicate<TAs extends string, TLoaded> = string extends TAs
+  ? false
+  : string extends keyof TLoaded
+    ? false
+    : TAs extends keyof TLoaded
+      ? true
+      : false;
+
 type ActionRules<
   TState extends Schema,
   TEvents extends Schemas,
@@ -444,14 +453,14 @@ type ActionRules<
     TStream extends string | undefined = string,
   >(
     state: State<TLState, TLEvents, any, TLName> &
-      (TAs extends keyof TLoaded ? DuplicateLoad<TAs> : unknown),
+      (IsDuplicate<TAs, TLoaded> extends true ? DuplicateLoad<TAs> : unknown),
     target: (
       payload: Readonly<TNewActions>,
       state: Readonly<TState>
     ) => TStream,
     events?: readonly TList[],
     name?: TAs
-  ) => TAs extends keyof TLoaded
+  ) => IsDuplicate<TAs, TLoaded> extends true
     ? DuplicateLoad<TAs>
     : ActionRules<
         TState,
@@ -489,7 +498,9 @@ type ActionRules<
    * ])
    * ```
    */
-  requires: (rules: Precondition<TState, TNewActions, Actor, TLoaded>[]) => {
+  requires: <TRuleActor extends Actor = Actor>(
+    rules: readonly Precondition<TState, TNewActions, TRuleActor, TLoaded>[]
+  ) => {
     /**
      * Defines the action handler that emits events, as `.emit()` after
      * `.on()` does: a handler returning the events to emit (none is fine),

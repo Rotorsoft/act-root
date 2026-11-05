@@ -136,10 +136,10 @@ export type TruncateResult = Map<
  * Payload delivered by {@link Store.notify} when a **different process**
  * commits one or more events to the same backing store.
  *
- * Notifications are emitted **per commit transaction**, not per event —
- * a single commit of N events produces one notification carrying all N
- * `events`. This matches transactional semantics, minimizes wire wakeups,
- * and lets handlers reason about atomic batches.
+ * Notifications are emitted **per stream a commit appends to**, not per event —
+ * a commit of N events to one stream produces one notification carrying all N
+ * `events`, and a commit across streams one for each, with that stream's events.
+ * This minimizes wire wakeups and lets handlers reason about atomic batches.
  *
  * Stores that implement `notify` self-filter their own commits — handlers
  * receive notifications only for cross-process activity. This is the signal

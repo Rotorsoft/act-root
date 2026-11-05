@@ -131,6 +131,10 @@ export const Order = state({
   .loads(Product, (data) => data.product, ["StockReserved"])
   .requires([
     {
+      description: "the order is new",
+      holds: (_, state) => state.status === "new",
+    },
+    {
       description: "enough stock",
       holds: (data, _, __, { Product }) => Product.stock >= data.qty,
     },

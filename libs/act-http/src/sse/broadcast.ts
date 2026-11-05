@@ -178,7 +178,7 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
      */
     onSubscriberError?: (error: unknown, streamId: string) => void;
     /**
-     * Deprecated alias of `cacheSize` — removal in the next major. When
+     * Deprecated alias of `cacheSize` — removal in a later major. When
      * both are given, `cacheSize` wins.
      * @deprecated use `cacheSize`
      */
@@ -336,7 +336,7 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
     return this.state_cache.get(streamId);
   }
 
-  /** @deprecated use `overlay` — removal in the next major */
+  /** @deprecated use `overlay` — removal in a later major */
   publish_overlay(
     streamId: string,
     overlay_patch: Partial<S>
@@ -344,12 +344,12 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
     return this.overlay(streamId, overlay_patch);
   }
 
-  /** @deprecated use `subscriberCount` — removal in the next major */
+  /** @deprecated use `subscriberCount` — removal in a later major */
   get_subscriber_count(streamId: string): number {
     return this.subscriberCount(streamId);
   }
 
-  /** @deprecated use `state` — removal in the next major */
+  /** @deprecated use `state` — removal in a later major */
   get_state(streamId: string): S | undefined {
     return this.state(streamId);
   }

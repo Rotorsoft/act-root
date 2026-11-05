@@ -42,6 +42,41 @@ describe("autoclose as a synthesized reaction", () => {
     await dispose()();
   });
 
+  it("keeps a later `or.after` backstop once the earlier `after` has passed", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const closed: CloseResult[] = [];
+      const app = act()
+        .withState(
+          ticket({
+            is: "Resolved",
+            after: { days: 90 },
+            or: { after: { days: 365 } },
+          })
+        )
+        .build({ autoSettle: false });
+      app.on("closed", (r) => closed.push(r));
+      const pump = async (i: number) => {
+        // An unrelated commit arms the drain, as live traffic does.
+        await app.do("open", { stream: `noise-${i}`, actor }, {});
+        await app.correlate();
+        await app.drain({ leaseMillis: 1 });
+      };
+      const DAY = 86_400_000;
+      await app.do("open", { stream: "idle", actor }, {});
+      await pump(0);
+      vi.setSystemTime(Date.now() + 91 * DAY);
+      await pump(1);
+      expect(closed.filter((r) => r.truncated.has("idle"))).toEqual([]);
+      vi.setSystemTime(Date.now() + 280 * DAY);
+      await pump(2);
+      await pump(3);
+      expect(closed.some((r) => r.truncated.has("idle"))).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("closes immediately on the terminal event for an `is` policy", async () => {
     const closed: CloseResult[] = [];
     const app = act()

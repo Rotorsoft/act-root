@@ -613,3 +613,13 @@ Filed:
 **Fixed:** #2015 → #2024, #2016 + #2017 → #2025, #2018 → #2031, #2019 → #2026, #2020 → #2029, #2021 → #2027, #2022 → #2028, #2023 → #2030.
 
 **Noted, not filed:** act-pg `drop()` on a non-public schema runs `DROP SCHEMA … CASCADE` and takes sibling stores' tables with it. That's intended per `scope-isolation.spec.ts`, but `Store.drop`'s doc says only "Drops all data from the store" (docs gap). PG `query_streams` runs two `client.query` calls concurrently on one client via `Promise.all`; pg already warns this is deprecated and will be removed in pg@9 (latent break on upgrade).
+
+## 2.0 release audit (2026-11-05)
+
+Five lenses over `git diff origin/master...origin/v2`: multi-stream store seams, `.loads` at runtime, types and tools, docs against behavior, and the 1.x to 2.0 upgrade path. The upgrade lens was new, and found the worst defect: run the old published packages against the new core with real installs.
+
+**Confirmed:** #2318 (act-pg, a stalled commit reopens a closed stream), #2319 (`or.after` backstop never fires on an idle stream), #2320 (act-pg subscribes deadlock in different orders), #2321 (act-sqlite, raw error on a failed BEGIN), #2322 (act-pg, NUL in a stream name), #2323 (declarations fail with `skipLibCheck: false`), #2324 (act-notify 0.3 on act 2 sends plaintext PII), #2325 (TCK passes non-atomic adapters), #2326 (`Exact` on `z.json()`), #2327 (`.map` lists and the name form skip checks), #2328 (`.requires` shapes), #2329 (act-pg names the wrong stream), #2330 (example leaks), #2331 (flow validator), #2332 (act-pino and act-otel not released).
+
+**Ruled out, don't re-sweep:** the `.loads` core under real races on Postgres and SQLite, with separate caches and with snapshots on a loaded state; 1.37.5 data opened by 2.0; a rolling deploy of 1.x and 2.0 workers on one Postgres table; rollback to 1.x with 2.0 multi-stream events; a mismatched act-pg or act-sqlite writes 0 rows (a store never writes garbage, only a wrapper leaks); act-otel counts each event once under per-stream `committed`.
+
+**Patterns:** a head-then-insert check relies on the unique index, and a delete that reseeds removes the row it would have collided with. A time gate parked as "the minimum" loses every later branch of an OR. A check that inspects tuples says nothing about arrays. A TCK block that only counts what it can see on the shared stream can't prove atomicity.

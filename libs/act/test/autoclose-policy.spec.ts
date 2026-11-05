@@ -12,6 +12,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { act, state, ZodEmpty } from "../src/index.js";
+import { policy_after_windows } from "../src/internal/autoclose-policy.js";
 
 const make_ticket = () =>
   state({ Ticket: z.object({ open: z.boolean() }) })
@@ -330,5 +331,18 @@ describe(".autocloses({...}) — declarator + registry", () => {
       })
       .build();
     expect(Ticket.autoclose).toBeTypeOf("function");
+  });
+});
+
+describe("policy_after_windows", () => {
+  it("lists every after window of a policy", () => {
+    expect(
+      policy_after_windows({
+        is: "Done",
+        after: { days: 90 },
+        or: { after: { days: 365 } },
+      })
+    ).toEqual([90, 365]);
+    expect(policy_after_windows({ is: "Done" })).toEqual([]);
   });
 });

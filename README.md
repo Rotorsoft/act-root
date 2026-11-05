@@ -68,6 +68,19 @@ console.log(snap.state); // { count: 5 }
 
 Next, [`hello.ts`](packages/calculator/src/hello.ts) adds a reaction to this counter (`pnpm -F calculator dev:hello`).
 
+## Rules across streams
+
+A rule that spans streams, such as a unique email or a limited number of seats, needs no saga. An action loads the other stream with `.loads`, decides, and commits to every stream at once: all of it lands or none of it does.
+
+```ts no-check
+.on({ Enroll })
+.loads(Seats, (data) => `course-${data.course}`, ["SeatTaken"])
+.requires([{ description: "a free seat", holds: (_, __, ___, { Seats }) => Seats.taken < Seats.capacity }])
+.emit((data) => [["Enrolled", data], ["SeatTaken", {}]])
+```
+
+Every pattern, what a race does and what it costs: [Rules across streams](docs/docs/guides/rules-across-streams.md).
+
 ## What's in the box
 
 | | |

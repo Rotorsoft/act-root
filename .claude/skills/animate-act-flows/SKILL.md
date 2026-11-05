@@ -115,7 +115,7 @@ It needs Chrome and ffmpeg, and runs the whole scenario in real time, so record 
   "title": "WolfDesk Ticket Flows",       // page name, 2-4 words
   "subtitle": "One sentence on what the map shows.",
   "source": "packages/wolfdesk/src",
-  "preview": "RFC 2251",                  // only for a design not built yet: a "Design preview" badge
+  "preview": "RFC 1234",                  // only for a design not built yet: a "Design preview" badge
   "colWidth": 142,                         // optional
   "lanes": [                               // top to bottom; empty lanes are dropped
     { "id": "actor", "label": "Actors" },

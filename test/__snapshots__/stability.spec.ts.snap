@@ -19,7 +19,8 @@ import type { Actor, Schema, SchemaRegister, Schemas } from "../types/index.js";
  * @see {@link state} for defining states
  * @see {@link slice} for defining slices
  */
-export declare function act<TSchemaReg extends SchemaRegister<TActions> = {}, TEvents extends Schemas = {}, TActions extends Schemas = {}, TStateMap extends Record<string, Schema> = {}, TActor extends Actor = Actor>(): ActBuilder<TSchemaReg, TEvents, TActions, TStateMap, TActor>;
+export declare function act(): ActBuilder<{}, {}, {}, {}, Actor>;
+export declare function act<TSchemaReg extends SchemaRegister<TActions>, TEvents extends Schemas = {}, TActions extends Schemas = {}, TStateMap extends Record<string, Schema> = {}, TActor extends Actor = Actor>(): ActBuilder<TSchemaReg, TEvents, TActions, TStateMap, TActor>;
 //# sourceMappingURL=act-builder.d.ts.map
 // === act.d.ts ===
 import { type ActLifecycleEvents, type ActOptions } from "./types/act.js";
@@ -146,7 +147,7 @@ export declare class Act<TSchemaReg extends SchemaRegister<TActions>, TEvents ex
      * Executes an action: validates the payload, loads the state, checks its
      * preconditions, runs the handler, folds the events it emits, checks the
      * state's invariants (its schema) on the result, and commits them with
-     * optimistic concurrency on the stream. The reactions to those events
+     * optimistic concurrency on every stream it appends to. The reactions to those events
      * settle on their own (unless \`autoSettle: false\`).
      *
      * @template TKey - Action name from registered actions
@@ -156,7 +157,8 @@ export declare class Act<TSchemaReg extends SchemaRegister<TActions>, TEvents ex
      * @param options - Per-call dispatch options ({@link DoOptions}) —
      *   \`reactingTo\` to thread correlation, \`correlator\` to override the
      *   framework or orchestrator-level correlator for this call only.
-     * @returns Array of snapshots for all affected states (usually one)
+     * @returns The snapshots of the action's own stream, one per event appended
+     *   to it; the loaded snapshot alone when the action commits nothing
      *
      * @throws {ValidationError} If the payload doesn't match the action schema,
      *   or the state the action leaves breaks the state schema
@@ -1134,6 +1136,7 @@ export type Snapshot<TState extends Schema, TEvents extends Schemas> = {
  * @template TState - State schema.
  * @template TPayload - The action payload, or the part of it the rule reads.
  * @template TActor - Actor type extending base Actor.
+ * @template TLoaded - The states the action loads, read in \`holds\`' fourth argument.
  */
 export type Precondition<TState extends Schema, TPayload, TActor extends Actor = Actor, TLoaded extends Record<string, Schema | undefined> = {}> = {
     description: string;
@@ -1462,13 +1465,17 @@ export type State<TState extends Schema, TEvents extends Schemas, TActions exten
     /**
      * The smallest \`after\` window (in days) of the \`.autocloses({...})\`
      * policy, or \`undefined\` when the policy has no time component.
-     * The synthesized autoclose reaction uses it to defer its
-     * re-check to \`head.created\` plus this many days; a policy without an
-     * \`after\` waits for the next event instead of parking on a due-time.
      * Set alongside \`autoclose\` by the builder. Day-denominated — the
      * close surface never speaks in ms/seconds/minutes.
      */
     autoclose_after_days?: number;
+    /**
+     * Every \`after\` window (in days) of the \`.autocloses({...})\` policy. The
+     * synthesized autoclose reaction defers its re-check to \`head.created\` plus
+     * the earliest one still ahead; a policy without one waits for the next event
+     * instead of parking on a due-time. Set alongside \`autoclose\` by the builder.
+     */
+    autoclose_after_windows?: readonly number[];
     /**
      * The rolling-window width (in days) of the \`.autocloses({ keep })\`
      * policy, or \`undefined\` when the policy declares no rolling window.
@@ -2322,6 +2329,8 @@ type DuplicateLoad<TAs extends string> = {
  * What follows \`.on(...)\`: the loads, the preconditions, then the
  * \`.emit(...)\` that finishes the action.
  */
+/** A name only known at runtime can't be compared, so it's never a duplicate. */
+type IsDuplicate<TAs extends string, TLoaded> = string extends TAs ? false : string extends keyof TLoaded ? false : TAs extends keyof TLoaded ? true : false;
 type ActionRules<TState extends Schema, TEvents extends Schemas, TActions extends Schemas, TName extends string, TSnap extends boolean, TKey extends string, TNewActions extends Schema, TLoaded extends Record<string, Schema | undefined> = {}, TRouted extends Schemas = {}> = {
     /**
      * Loads another state the decision needs, exactly as \`app.load\` would,
@@ -2352,7 +2361,7 @@ type ActionRules<TState extends Schema, TEvents extends Schemas, TActions extend
      * .emit((data) => [["Enrolled", data], ["SeatTaken", { student: data.student }]])
      * \`\`\`
      */
-    loads: <TLState extends Schema, TLEvents extends Schemas, TLName extends string, const TList extends Exclude<keyof TLEvents & string, keyof TRouted> = never, const TAs extends string = TLName, TStream extends string | undefined = string>(state: State<TLState, TLEvents, any, TLName> & (TAs extends keyof TLoaded ? DuplicateLoad<TAs> : unknown), target: (payload: Readonly<TNewActions>, state: Readonly<TState>) => TStream, events?: readonly TList[], name?: TAs) => TAs extends keyof TLoaded ? DuplicateLoad<TAs> : ActionRules<TState, TEvents, TActions, TName, TSnap, TKey, TNewActions, TLoaded & {
+    loads: <TLState extends Schema, TLEvents extends Schemas, TLName extends string, const TList extends Exclude<keyof TLEvents & string, keyof TRouted> = never, const TAs extends string = TLName, TStream extends string | undefined = string>(state: State<TLState, TLEvents, any, TLName> & (IsDuplicate<TAs, TLoaded> extends true ? DuplicateLoad<TAs> : unknown), target: (payload: Readonly<TNewActions>, state: Readonly<TState>) => TStream, events?: readonly TList[], name?: TAs) => IsDuplicate<TAs, TLoaded> extends true ? DuplicateLoad<TAs> : ActionRules<TState, TEvents, TActions, TName, TSnap, TKey, TNewActions, TLoaded & {
         [P in TAs]: undefined extends TStream ? TLState | undefined : TLState;
     }, TRouted & {
         [E in TList]: TLEvents[E];
@@ -2380,7 +2389,7 @@ type ActionRules<TState extends Schema, TEvents extends Schemas, TActions extend
      * ])
      * \`\`\`
      */
-    requires: (rules: Precondition<TState, TNewActions, Actor, TLoaded>[]) => {
+    requires: <TRuleActor extends Actor = Actor>(rules: readonly Precondition<TState, TNewActions, TRuleActor, TLoaded>[]) => {
         /**
          * Defines the action handler that emits events, as \`.emit()\` after
          * \`.on()\` does: a handler returning the events to emit (none is fine),
@@ -3719,10 +3728,10 @@ export type TruncateResult = Map<string, {
  * Payload delivered by {@link Store.notify} when a **different process**
  * commits one or more events to the same backing store.
  *
- * Notifications are emitted **per commit transaction**, not per event —
- * a single commit of N events produces one notification carrying all N
- * \`events\`. This matches transactional semantics, minimizes wire wakeups,
- * and lets handlers reason about atomic batches.
+ * Notifications are emitted **per stream a commit appends to**, not per event —
+ * a commit of N events to one stream produces one notification carrying all N
+ * \`events\`, and a commit across streams one for each, with that stream's events.
+ * This minimizes wire wakeups and lets handlers reason about atomic batches.
  *
  * Stores that implement \`notify\` self-filter their own commits — handlers
  * receive notifications only for cross-process activity. This is the signal
@@ -5723,7 +5732,8 @@ import type { Actor, Schema, SchemaRegister, Schemas } from "../types/index.js";
  * @see {@link SliceBuilder} for builder methods
  * @see {@link Slice} for the output type
  */
-export declare function slice<TSchemaReg extends SchemaRegister<TActions> = {}, TEvents extends Schemas = {}, TActions extends Schemas = {}, TStateMap extends Record<string, Schema> = {}, TActor extends Actor = Actor>(): SliceBuilder<TSchemaReg, TEvents, TActions, TStateMap, TActor>;
+export declare function slice(): SliceBuilder<{}, {}, {}, {}, Actor>;
+export declare function slice<TSchemaReg extends SchemaRegister<TActions>, TEvents extends Schemas = {}, TActions extends Schemas = {}, TStateMap extends Record<string, Schema> = {}, TActor extends Actor = Actor>(): SliceBuilder<TSchemaReg, TEvents, TActions, TStateMap, TActor>;
 //# sourceMappingURL=slice-builder.d.ts.map
 // === state-builder.d.ts ===
 import type { StateBuilder, StateEntry } from "../types/builders.js";
@@ -7447,7 +7457,7 @@ export declare class BroadcastChannel<S extends BroadcastState = BroadcastState>
          */
         onSubscriberError?: (error: unknown, streamId: string) => void;
         /**
-         * Deprecated alias of \`cacheSize\` — removal in the next major. When
+         * Deprecated alias of \`cacheSize\` — removal in a later major. When
          * both are given, \`cacheSize\` wins.
          * @deprecated use \`cacheSize\`
          */
@@ -7481,11 +7491,11 @@ export declare class BroadcastChannel<S extends BroadcastState = BroadcastState>
     subscriberCount(streamId: string): number;
     /** Get the cached state for a stream (for reconnects / initial SSE yield). */
     state(streamId: string): S | undefined;
-    /** @deprecated use \`overlay\` — removal in the next major */
+    /** @deprecated use \`overlay\` — removal in a later major */
     publish_overlay(streamId: string, overlay_patch: Partial<S>): PatchMessage<S> | undefined;
-    /** @deprecated use \`subscriberCount\` — removal in the next major */
+    /** @deprecated use \`subscriberCount\` — removal in a later major */
     get_subscriber_count(streamId: string): number;
-    /** @deprecated use \`state\` — removal in the next major */
+    /** @deprecated use \`state\` — removal in a later major */
     get_state(streamId: string): S | undefined;
     /** Direct access to the state cache (for app-specific reads like presence). */
     get cache(): StateCache<S>;
@@ -7571,9 +7581,9 @@ export declare class PresenceTracker {
     online(streamId: string): Set<string>;
     /** Check if a specific identity is online for a stream. */
     isOnline(streamId: string, identity_id: string): boolean;
-    /** @deprecated use \`online\` — removal in the next major */
+    /** @deprecated use \`online\` — removal in a later major */
     get_online(streamId: string): Set<string>;
-    /** @deprecated use \`isOnline\` — removal in the next major */
+    /** @deprecated use \`isOnline\` — removal in a later major */
     is_online(streamId: string, identity_id: string): boolean;
 }
 //# sourceMappingURL=presence.d.ts.map
@@ -9434,6 +9444,7 @@ export declare class SqliteStore implements Store {
     private _turn;
     private _serial;
     private _exec;
+    private _begin;
     private _tx;
     dispose(): Promise<void>;
     commit<E extends Schemas>(appends: readonly Append<E>[], meta: EventMeta): Promise<Committed<E, keyof E>[]>;
@@ -10156,7 +10167,7 @@ export type StoreCapabilities = {
      * the cross-instance conformance cases: a listener receives commits
      * from a *sibling* instance produced by the same \`factory\`, never its
      * own commits (the port's self-filtering MUST), and exactly one
-     * notification per commit transaction carrying the full event batch.
+     * notification per stream a commit appends to, carrying that stream's events.
      * Requires the \`factory\` to produce instances sharing one backing
      * store — e.g. two PostgresStores on the same schema/table, or two
      * \`withBroker\` decorators on one broker. True cross-*process*
@@ -10322,7 +10333,7 @@ export type StoreTckOptions = {
  * - \`query_streams\` — filters, exact-match, pagination, blocked
  * - \`notify\` (capability-gated) — cross-instance delivery, self-filtering
  *   (an instance never receives its own commits), one notification per
- *   commit transaction with the full event batch
+ *   stream a commit appends to, with that stream's events
  *
  * Tests namespace their streams with a per-test {@link uid} so the
  * suite is parallel-safe against a shared backing store (e.g., a real
