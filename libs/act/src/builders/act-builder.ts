@@ -73,9 +73,16 @@ function register_batch_handler(
  * @see {@link state} for defining states
  * @see {@link slice} for defining slices
  */
+export function act(): ActBuilder<{}, {}, {}, {}, Actor>;
 export function act<
-  // @ts-expect-error empty schema
-  TSchemaReg extends SchemaRegister<TActions> = {},
+  TSchemaReg extends SchemaRegister<TActions>,
+  TEvents extends Schemas = {},
+  TActions extends Schemas = {},
+  TStateMap extends Record<string, Schema> = {},
+  TActor extends Actor = Actor,
+>(): ActBuilder<TSchemaReg, TEvents, TActions, TStateMap, TActor>;
+export function act<
+  TSchemaReg extends SchemaRegister<TActions>,
   TEvents extends Schemas = {},
   TActions extends Schemas = {},
   TStateMap extends Record<string, Schema> = {},

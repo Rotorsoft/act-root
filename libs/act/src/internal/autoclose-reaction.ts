@@ -65,7 +65,7 @@ export function synthesize_autoclose_reactions<
   for (const st of states.values()) {
     const predicate = st.autoclose;
     if (!predicate) continue;
-    const after_days = st.autoclose_after_days;
+    const after_windows = st.autoclose_after_windows!;
     const keep_days = st.autoclose_keep_days;
     const archiver = st.archive;
     const reaction: Reaction<TEvents> = {
@@ -145,12 +145,12 @@ export function synthesize_autoclose_reactions<
             });
         }
         // Not eligible yet: park on the earliest derivable due-time — the
-        // day the terminate cooldown opens and/or the day the oldest
+        // day a terminate cooldown opens and/or the day the oldest
         // domain event ages out of the rolling window. Neither → wait for
         // the next event to re-trigger (e.g. a `reaches` threshold).
         const dues: Date[] = [];
-        if (after_days !== undefined)
-          dues.push(days_after(head.created, after_days));
+        for (const days of after_windows)
+          dues.push(days_after(head.created, days));
         if (keep_days !== undefined)
           dues.push(days_after(entry.tail!.created, keep_days));
         // Only defer to a FUTURE due-time. A due already in the past (the
