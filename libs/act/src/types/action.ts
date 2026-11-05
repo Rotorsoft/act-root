@@ -795,13 +795,17 @@ export type State<
   /**
    * The smallest `after` window (in days) of the `.autocloses({...})`
    * policy, or `undefined` when the policy has no time component.
-   * The synthesized autoclose reaction uses it to defer its
-   * re-check to `head.created` plus this many days; a policy without an
-   * `after` waits for the next event instead of parking on a due-time.
    * Set alongside `autoclose` by the builder. Day-denominated — the
    * close surface never speaks in ms/seconds/minutes.
    */
   autoclose_after_days?: number;
+  /**
+   * Every `after` window (in days) of the `.autocloses({...})` policy. The
+   * synthesized autoclose reaction defers its re-check to `head.created` plus
+   * the earliest one still ahead; a policy without one waits for the next event
+   * instead of parking on a due-time. Set alongside `autoclose` by the builder.
+   */
+  autoclose_after_windows?: readonly number[];
   /**
    * The rolling-window width (in days) of the `.autocloses({ keep })`
    * policy, or `undefined` when the policy declares no rolling window.

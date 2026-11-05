@@ -194,6 +194,10 @@ Pinned in the TCK unless the citation names an adapter.
 | A `claim` locks only its own candidates, so disjoint workers both get their slice | [Concurrency model](concurrency-model.md#stream-leasing--the-readers-exclusivity-primitive) | act-pg `contention.spec.ts` → "locks only the claimed candidates, not the whole eligible frontier" |
 | `notify` never delivers an instance's own commits | [Cross-process reactions](cross-process-reactions.md#self-filter--a-clean-cross-process-semantic) | `store-tck.ts` → notify : "does not deliver an instance's own commits (self-filtering)" |
 | `notify` delivers one notification per commit, with the whole batch | `Store.notify` doc | `store-tck.ts` → notify : "delivers one notification per commit transaction carrying the full event batch" |
+| A commit that stalled across a full close is refused, and the stream stays closed | [Close cycle](./close-cycle.md) | act-pg `close-race.spec.ts` → "refuses a commit that stalled across a full close, and the stream stays closed" |
+| An `or.after` backstop still fires on an idle stream after an earlier `after` has passed | [Close policies](../guides/close-policies.md) | `autoclose-reaction.spec.ts` → "keeps a later `or.after` backstop once the earlier `after` has passed" |
+| Subscribing to the same streams in different orders doesn't deadlock on Postgres | [Writing a store](../guides/writing-a-store.md) | act-pg `commit-across-streams.spec.ts` → "subscribing in different orders doesn't deadlock" |
+| A failed BEGIN on SQLite is a `StoreError`, on a commit, a write and a restore | [Writing a store](../guides/writing-a-store.md) | act-sqlite `store.error.spec.ts` → "wraps a BEGIN that fails, on a commit, a write and a restore" |
 | An adapter built from its defaults either refuses to construct or keeps what it commits | `StoreTckOptions.default_factory` doc | `store-tck.ts` → "either refuses to construct or round-trips a commit" |
 | `SqliteStore` needs a `url` and maps every in-memory spelling to a shared cache | act-sqlite README | act-sqlite `store.error.spec.ts` → "rejects a blank or non-string url: %o", "normalizes the in-memory url %s to shared cache" |
 

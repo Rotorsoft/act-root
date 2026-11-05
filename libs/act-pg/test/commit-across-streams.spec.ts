@@ -110,6 +110,84 @@ describe("commit across streams, failing part-way", () => {
     expect(await stored("nul-first")).toEqual([]);
   });
 
+  // Fails or answers the commit's INSERT without running it.
+  function at_insert(answer: () => Promise<unknown>) {
+    const checkout = (
+      store as unknown as { _client: (op: string) => Promise<PoolClient> }
+    )._client.bind(store);
+    vi.spyOn(
+      store as unknown as { _client: (op: string) => Promise<PoolClient> },
+      "_client"
+    ).mockImplementation(async (op) => {
+      const client = await checkout(op);
+      const query = client.query.bind(client) as (
+        ...args: unknown[]
+      ) => Promise<unknown>;
+      (client as unknown as { query: unknown }).query = (...args: unknown[]) =>
+        String(args[0]).startsWith("WITH l AS") ? answer() : query(...args);
+      return client;
+    });
+  }
+
+  it("names the whole stream when one stream's name starts another's", async () => {
+    at_insert(() =>
+      Promise.reject(
+        Object.assign(new Error("duplicate key"), {
+          code: "23505",
+          detail: "Key (stream, version)=(x, 1, 0) already exists.",
+        })
+      )
+    );
+    const err = await store
+      .commit(
+        [
+          { stream: "x", msgs: ev() },
+          { stream: "x, 1", msgs: ev() },
+        ],
+        META
+      )
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ConcurrencyError);
+    expect((err as ConcurrencyError).stream).toBe("x, 1");
+  });
+
+  it("names the first stream when a violation doesn't say which", async () => {
+    at_insert(() =>
+      Promise.reject(Object.assign(new Error("duplicate"), { code: "23505" }))
+    );
+    const err = await store
+      .commit([{ stream: "unnamed", msgs: ev() }], META)
+      .catch((e: unknown) => e);
+    expect((err as ConcurrencyError).stream).toBe("unnamed");
+  });
+
+  it("names the first stream when no head has moved by the time it looks again", async () => {
+    at_insert(() => Promise.resolve({ rows: [] }));
+    const err = await store
+      .commit(
+        [
+          { stream: "still-a", msgs: ev() },
+          { stream: "still-b", msgs: ev() },
+        ],
+        META
+      )
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ConcurrencyError);
+    expect((err as ConcurrencyError).stream).toBe("still-a");
+  });
+
+  it("subscribing in different orders doesn't deadlock", async () => {
+    for (let round = 0; round < 4; round++) {
+      const streams = Array.from({ length: 40 }, (_, i) => ({
+        stream: `order-${round}-${i}`,
+      }));
+      await Promise.all([
+        store.subscribe(streams),
+        rival.subscribe([...streams].reverse()),
+      ]);
+    }
+  });
+
   it("stores nothing when the connection fails at the INSERT", async () => {
     before_insert(() => Promise.reject(new Error("connection reset")));
     const err = await store

@@ -550,7 +550,7 @@ export class CorrelateCycle<
       log().warn(
         `Could not hand back the correlation lease during shutdown; it expires on its own within ${CORRELATION_LEASE_MS}ms and correlation resumes normally after that. ` +
           "On a single-writer store this usually means another connection holds the database. " +
-          `Cause: ${String(error)}`
+          `Cause: ${String((error as Error).cause ?? error)}`
       );
     }
   }
