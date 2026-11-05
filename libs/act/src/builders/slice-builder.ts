@@ -41,9 +41,16 @@ import { register_state } from "./merge.js";
  * @see {@link SliceBuilder} for builder methods
  * @see {@link Slice} for the output type
  */
+export function slice(): SliceBuilder<{}, {}, {}, {}, Actor>;
 export function slice<
-  // @ts-expect-error empty schema
-  TSchemaReg extends SchemaRegister<TActions> = {},
+  TSchemaReg extends SchemaRegister<TActions>,
+  TEvents extends Schemas = {},
+  TActions extends Schemas = {},
+  TStateMap extends Record<string, Schema> = {},
+  TActor extends Actor = Actor,
+>(): SliceBuilder<TSchemaReg, TEvents, TActions, TStateMap, TActor>;
+export function slice<
+  TSchemaReg extends SchemaRegister<TActions>,
   TEvents extends Schemas = {},
   TActions extends Schemas = {},
   TStateMap extends Record<string, Schema> = {},

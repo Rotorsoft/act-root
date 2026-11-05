@@ -50,6 +50,14 @@ describe("NUL bytes are refused by Postgres, legibly", () => {
     expect(details).toContain("unsupported Unicode escape sequence");
   });
 
+  it("translates a NUL in a stream name, which the head check reaches first", async () => {
+    const err = await store
+      .commit(`nul${NUL}stream`, [{ name: "Noted", data: {} }], meta)
+      .catch((e) => e as Error);
+
+    expect(err).toBeInstanceOf(ValidationError);
+  });
+
   it("translates the text column's refusal too (22021)", async () => {
     // `name` is text, so this trips the UTF-8 decoder rather than the jsonb
     // parser — a different SQLSTATE for the same user mistake.

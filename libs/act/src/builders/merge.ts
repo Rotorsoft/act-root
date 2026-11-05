@@ -155,7 +155,10 @@ function autoclose_of(
   state: State<any, any, any>
 ): Pick<
   State<any, any, any>,
-  "autoclose" | "autoclose_after_days" | "autoclose_keep_days"
+  | "autoclose"
+  | "autoclose_after_days"
+  | "autoclose_after_windows"
+  | "autoclose_keep_days"
 > {
   pick_declared(
     existing.autoclose,
@@ -167,6 +170,7 @@ function autoclose_of(
   return {
     autoclose: owner.autoclose,
     autoclose_after_days: owner.autoclose_after_days,
+    autoclose_after_windows: owner.autoclose_after_windows,
     autoclose_keep_days: owner.autoclose_keep_days,
   };
 }

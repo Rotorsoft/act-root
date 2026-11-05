@@ -167,13 +167,8 @@ function compile_reaches(
  * the top-level `after` and the `or.after` block — or `undefined` when
  * the policy has no time component.
  *
- * The synthesized autoclose reaction uses this to decide how to
- * wait: a policy with an `after` defers its re-check to `head.created`
- * plus this many days (the earliest its time gate could open); a policy
- * without one (`is` / `reaches` only) has no time gate, so the reaction
- * just waits for the next event to re-trigger rather than parking on a
- * due-time. Conservative — the min across branches never defers past
- * the soonest a branch could fire.
+ * The soonest a time gate could open. The reaction parks on every window,
+ * through {@link policy_after_windows}.
  */
 export function policy_min_after_days(
   options: AutoclosePolicy
@@ -183,6 +178,16 @@ export function policy_min_after_days(
   if (parsed.after) windows.push(parsed.after.days);
   if (parsed.or?.after) windows.push(parsed.or.after.days);
   return windows.length ? Math.min(...windows) : undefined;
+}
+
+/**
+ * Every `after` window (in days) in a policy. The reaction parks on the
+ * earliest one still ahead, so a branch with a later window keeps its turn once
+ * an earlier one has passed.
+ */
+export function policy_after_windows(options: AutoclosePolicy): number[] {
+  const parsed = AutoclosePolicySchema.parse(options);
+  return [parsed.after, parsed.or?.after].flatMap((w) => (w ? [w.days] : []));
 }
 
 /**

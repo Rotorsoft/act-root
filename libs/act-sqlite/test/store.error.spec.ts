@@ -349,4 +349,29 @@ describe("SqliteStore error paths", () => {
     const wiped = await db.forget_pii("never-existed");
     expect(wiped).toBe(0);
   });
+
+  it("wraps a BEGIN that fails, on a commit, a write and a restore", async () => {
+    const real = new SqliteStore({ url: tmp_db_url() });
+    await real.seed();
+    const client = (real as unknown as { client: { transaction: unknown } })
+      .client;
+    client.transaction = () => Promise.reject(new Error("SQLITE_BUSY"));
+    for (const [operation, run] of [
+      [
+        "commit",
+        () =>
+          real.commit("s", [{ name: "E", data: {} }], {
+            correlation: "",
+            causation: {},
+          }),
+      ],
+      ["claim", () => real.claim(1, 1, "w", 1000)],
+      ["restore", () => real.restore(async () => {})],
+    ] as const) {
+      const failed = await (run() as Promise<unknown>).catch((e) => e);
+      expect(failed).toBeInstanceOf(StoreError);
+      expect((failed as StoreError).operation).toBe(operation);
+    }
+    await real.dispose();
+  });
 });

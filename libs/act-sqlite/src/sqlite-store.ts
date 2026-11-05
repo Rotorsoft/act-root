@@ -562,13 +562,20 @@ export class SqliteStore implements Store {
     return this._serial(() => this.client.execute(stmt));
   }
 
+  // Opens a write transaction: a BEGIN that fails is a {@link StoreError} too.
+  private _begin(operation: string) {
+    return this.client.transaction("write").catch((e: unknown) => {
+      throw new StoreError(operation, { cause: e });
+    });
+  }
+
   // One write transaction, in its turn: any failure rolls back and throws a {@link StoreError} naming the operation.
   private _tx<T>(
     operation: string,
     work: (tx: Transaction) => Promise<T>
   ): Promise<T> {
     return this._serial(async () => {
-      const tx = await this.client.transaction("write");
+      const tx = await this._begin(operation);
       try {
         const result = await work(tx);
         await tx.commit();
@@ -592,7 +599,7 @@ export class SqliteStore implements Store {
     expectedVersion?: number
   ): Promise<Committed<E, keyof E>[]> {
     return this._serial(async () => {
-      const tx = await this.client.transaction("write");
+      const tx = await this._begin("commit");
       // Hoisted so the catch can build a ConcurrencyError with the head
       // version on a (stream, version) unique collision.
       let current_version = -1;
@@ -1674,7 +1681,7 @@ export class SqliteStore implements Store {
     ) => Promise<void>
   ): Promise<void> {
     return this._serial(async () => {
-      const tx = await this.client.transaction("write");
+      const tx = await this._begin("restore");
       try {
         await tx.execute("DELETE FROM events");
         await tx.execute("DELETE FROM streams");
