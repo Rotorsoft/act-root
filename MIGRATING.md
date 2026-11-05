@@ -25,6 +25,7 @@ guide stays pinned next to the API reference it describes:
 | From → To | Guide | Highlights |
 |---|---|---|
 | → `1.x` | [Migrating to 1.x](docs/docs/guides/migrating-to-1.x.md) | First stable line. No breaking changes to migrate — the page gives the upgrade command and links the charter. |
+| `1.x` → `2.x` | [Migrating to 2.x](docs/docs/guides/migrating-to-2.x.md) | `commit(appends, meta)` for direct callers and adapters, `.given` becomes `.requires`, `.emit` checks what a handler returns. |
 
 ## Writing a migration guide (the convention)
 

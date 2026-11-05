@@ -104,6 +104,15 @@ npx vitest run
 
 Green means your adapter honors every behavior the orchestrator depends on. Dialect-specific tests — connection-pool exhaustion, transaction edge cases, your backend's own error mapping — stay in their own spec files alongside the TCK spec. The kit only asserts what _every_ adapter of that port must do; it deliberately knows nothing about your backend.
 
+## What 2.0 adds
+
+2.0 changes `commit` to take a list of appends ([upgrading an adapter](./writing-a-store.md#upgrading-an-adapter-to-20)), and the store TCK gains a `commit across streams` block with no capability to opt out of. An adapter passes it when:
+
+- a stale version in any append fails the whole commit, and nothing is stored;
+- a stream named twice, or an append with no messages, is refused;
+- new and existing streams can share one commit, with ids assigned in order across the appends;
+- two connections racing on a shared stream leave exactly one winner, and on separate streams both win.
+
 ## Guarding your own public surface
 
 The TCK proves you honor _Act's_ contract. A second, smaller kit — `runStabilityTck` — guards _your own_ surface from accidental drift. It snapshots every entry point you declare (plus everything it re-exports through relative imports) and fails when a rename, a removed export, or a changed signature shows up unannounced. It is the same gate every in-tree package uses on itself.

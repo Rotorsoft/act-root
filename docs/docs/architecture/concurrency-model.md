@@ -45,6 +45,12 @@ Inside `action()` the commit always carries a version: the one the caller passed
 
 The loser gets `ConcurrencyError`, so its preconditions and the state check never pass on a load that went stale. The retries that already exist absorb it: the action's own `maxRetries` reloads and re-checks, and a reaction that still loses fails like any other handler error, through its retry, backoff and block policy. A reaction that declares no `backoff` waits the default ten seconds before that retry, so give the action a `maxRetries` when reactions often write to the same stream. An explicit `expectedVersion` is never retried, because it would conflict again on every attempt.
 
+### One commit, several streams
+
+An action with [`.loads`](../concepts/state-management.md#rules-across-streams-loads) appends to its own stream and every loaded stream it emits to in one `Store.commit`, each append guarded by the version that stream had when loaded. The store checks every version before inserting anything, and inserts them all in one transaction, so a rival on any stream fails the whole commit and nothing lands. The `ConcurrencyError` names the stream that moved, and `maxRetries` runs the action again with fresh loads, so its rules see the new state.
+
+Three limits follow. A load with no events is a read: its stream is outside the commit and isn't guarded. A commit is atomic only inside one store, because a loaded state must be registered in the same Act. And every stream in a commit must be free of rivals at the same moment, so one busy stream makes the whole action retry; [split it](../guides/rules-across-streams.md#a-hot-resource-splits-across-streams) when that becomes a measured problem.
+
 ## Stream leasing — the reader's exclusivity primitive
 
 The drain pipeline polls for streams that have new events past their last-processed watermark, claims them via `FOR UPDATE SKIP LOCKED`, processes their events, then acks (releases the lease and advances the watermark) or blocks (marks the stream failed after exceeding retry budget).
