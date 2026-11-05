@@ -50,14 +50,4 @@ export class PresenceTracker {
   isOnline(streamId: string, identity_id: string): boolean {
     return (this.streams.get(streamId)?.get(identity_id) ?? 0) > 0;
   }
-
-  /** @deprecated use `online` — removal in a later major */
-  get_online(streamId: string): Set<string> {
-    return this.online(streamId);
-  }
-
-  /** @deprecated use `isOnline` — removal in a later major */
-  is_online(streamId: string, identity_id: string): boolean {
-    return this.isOnline(streamId, identity_id);
-  }
 }

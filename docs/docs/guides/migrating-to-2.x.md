@@ -74,11 +74,25 @@ Two things that rewrite doesn't show:
 .emit((data) => ["TicketClosed", data])
 ```
 
+### act-http's snake_case SSE aliases are gone
+
+- **What changed:** the deprecated aliases in `@rotorsoft/act-http/sse` are removed.
+- **Why:** they were announced for removal in the next major, and this is it.
+- **How to update:** rename them.
+
+| Removed | Use |
+|---|---|
+| `publish_overlay` | `overlay` |
+| `get_subscriber_count` | `subscriberCount` |
+| `get_state` | `state` |
+| `cache_size` | `cacheSize` |
+| `get_online` | `online` |
+| `is_online` | `isOnline` |
+
 ## Deprecations (not yet removed)
 
-Nothing new is deprecated in 2.0, and these still work:
+Nothing new is deprecated in 2.0, and this still works:
 
-- **`@rotorsoft/act-http/sse`:** the snake_case aliases (`publish_overlay`, `get_state`, `get_subscriber_count`, `cache_size`, `get_online`, `is_online`). Use `overlay`, `state`, `subscriberCount`, `cacheSize`, `online` and `isOnline`.
 - **`@rotorsoft/act-tck`:** the `work_set` capability. It's ignored.
 
 ## Nothing to do
