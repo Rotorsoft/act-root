@@ -623,3 +623,17 @@ Five lenses over `git diff origin/master...origin/v2`: multi-stream store seams,
 **Ruled out, don't re-sweep:** the `.loads` core under real races on Postgres and SQLite, with separate caches and with snapshots on a loaded state; 1.37.5 data opened by 2.0; a rolling deploy of 1.x and 2.0 workers on one Postgres table; rollback to 1.x with 2.0 multi-stream events; a mismatched act-pg or act-sqlite writes 0 rows (a store never writes garbage, only a wrapper leaks); act-otel counts each event once under per-stream `committed`.
 
 **Patterns:** a head-then-insert check relies on the unique index, and a delete that reseeds removes the row it would have collided with. A time gate parked as "the minimum" loses every later branch of an OR. A check that inspects tuples says nothing about arrays. A TCK block that only counts what it can see on the shared stream can't prove atomicity.
+
+## Wave 29 (2026-11-05, on the 2.0 fixes branch)
+
+Lenses: the audit's own fixes, failure injection in the pipeline with multi-stream commits, live cross-package seams, and history and operator tools. Nearly all of it is also on 1.x, and was run on `master` to prove that.
+
+**Confirmed:** #2318 reopened (a one-event stream's tombstone lands back at version 0, so no version check sees the close, on any adapter); #2338 (fan-in with different sources drops events); #2339 (time travel after a prune or restart); #2340 (`.autocloses` treats a stream name as a pattern); #2341 (one `SQLITE_BUSY` poisons the libsql client's COMMIT, for 21 seconds or more); #2342 (webhook follows redirects, POST becomes GET, event lost); #2343 (`keep` with a terminate `after`); #2344 (settle clears `store_failing`); #2345 (OpenAPI dangling refs); #2346 (SSE after a restart close); #2347, #2348 (audit); #2349, #2350 (recipes); #2351 (failed rollback); #2352 (`.snap` throws after the commit); #2353 (`stop_correlations`); #2354 (version after a snap); #2355, #2356 (Wolfdesk).
+
+**Not confirmed:** `ack` against `subscribe` on act-pg deadlocks only with a probe trigger sleeping per row. But `EXPLAIN` shows both UPDATEs as Hash Join with a Seq Scan on `streams`, so rows lock in heap order and the sort from #2320 orders only the INSERT.
+
+**Ruled out, don't re-sweep:** `.loads` error mapping over real HTTP on hono and trpc; idempotency across several streams; SSE on a stream reached only through a load; act-notify and act-otel live; act-crypto on a later append; lost ack with `maxRetries` (no duplicate from the framework); closing one stream of a pair; autoclose on a state written only through `.loads`; restore of a log with multi-stream commits; `forget` on an event appended through a load; two scoped Acts sharing a state.
+
+**Not swept:** act-pino; inspector queries over multi-stream data; the client UI in a browser; `CloseSignal` in a reaction on a loaded stream; `stream_rename` causation.
+
+**Patterns:** a check by version number can't see a head that returned to the same number; compare what the head is, not only where. A fix for one branch of a parked reaction leaves its siblings, so read the whole function. A test using a constructed `Response` never exercises what `fetch` does. A failed BEGIN isn't the end of a driver's trouble: run fail, release, then commit against the real driver. Reading `master` isn't proof: this wave ran the probes there, and that's what showed the partial fix shipped.
