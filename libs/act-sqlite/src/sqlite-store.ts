@@ -1701,7 +1701,7 @@ export class SqliteStore implements Store {
     ) => Promise<void>
   ): Promise<void> {
     return this._serial(async () => {
-      const tx = await this.client.transaction("write");
+      const tx = await this._begin("restore");
       try {
         await tx.execute("DELETE FROM events");
         await tx.execute("DELETE FROM streams");

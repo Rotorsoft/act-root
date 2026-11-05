@@ -260,7 +260,7 @@ describe("SqliteStore error paths", () => {
     ];
     const meta = { correlation: "", causation: {} };
 
-    it("wraps a BEGIN that fails, on a commit and on any other write", async () => {
+    it("wraps a BEGIN that fails, on a commit, a write and a restore", async () => {
       const real = new SqliteStore({ url: tmp_db_url() });
       await real.seed();
       const client = (real as unknown as { client: { transaction: unknown } })
@@ -272,6 +272,9 @@ describe("SqliteStore error paths", () => {
       const claimed = await real.claim(1, 1, "w", 1000).catch((e) => e);
       expect(claimed).toBeInstanceOf(StoreError);
       expect(claimed.operation).toBe("claim");
+      const restored = await real.restore(async () => {}).catch((e) => e);
+      expect(restored).toBeInstanceOf(StoreError);
+      expect(restored.operation).toBe("restore");
       await real.dispose();
     });
 
