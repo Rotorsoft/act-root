@@ -399,84 +399,12 @@ function json_schema(
   // `unrepresentable: "any"` emits an open (`{}`) schema for a Zod type with
   // no JSON-Schema form (z.date/z.bigint/z.map/z.set/...) instead of Zod 4's
   // default `"throw"`, which would abort the whole document over one field.
-  return name_root(
-    strip_json_schema_meta(
-      z.toJSONSchema(schema, { unrepresentable: "any", io }) as Record<
-        string,
-        unknown
-      >
-    )
+  return strip_json_schema_meta(
+    z.toJSONSchema(schema, { unrepresentable: "any", io }) as Record<
+      string,
+      unknown
+    >
   );
-}
-
-/** Replaces each `$ref` in a schema tree that `refs` maps. */
-function rewrite_refs(node: unknown, refs: ReadonlyMap<string, string>): void {
-  if (Array.isArray(node)) {
-    for (const item of node) rewrite_refs(item, refs);
-  } else if (node && typeof node === "object") {
-    const object = node as Record<string, unknown>;
-    const to = refs.get(object.$ref as string);
-    if (to) object.$ref = to;
-    for (const value of Object.values(object)) rewrite_refs(value, refs);
-  }
-}
-
-/**
- * A schema that refers to itself has `$ref: "#"`, which in a bigger document is
- * that document. It moves into `$defs`, so {@link hoist_defs} can name it.
- */
-function name_root(schema: Record<string, unknown>): Record<string, unknown> {
-  if (!has_root_ref(schema)) return schema;
-  const { $defs, ...root } = schema;
-  rewrite_refs(root, new Map([["#", "#/$defs/__root"]]));
-  rewrite_refs($defs, new Map([["#", "#/$defs/__root"]]));
-  return {
-    $ref: "#/$defs/__root",
-    $defs: { ...($defs as object), __root: root },
-  };
-}
-
-function has_root_ref(node: unknown): boolean {
-  if (Array.isArray(node)) return node.some(has_root_ref);
-  if (!node || typeof node !== "object") return false;
-  const object = node as Record<string, unknown>;
-  return object.$ref === "#" || Object.values(object).some(has_root_ref);
-}
-
-/**
- * Zod refers to a shared or recursive schema with `$ref: "#/$defs/x"`, which
- * resolves only when the schema is its own document. Each entry moves up to
- * `components.schemas` under a name no other schema took, its refs following.
- */
-function hoist_defs(
-  node: unknown,
-  schemas: Record<string, Record<string, unknown>>
-): void {
-  if (Array.isArray(node)) {
-    for (const item of node) hoist_defs(item, schemas);
-    return;
-  }
-  if (!node || typeof node !== "object") return;
-  const object = node as Record<string, unknown>;
-  if (object.$defs) {
-    const defs = object.$defs as Record<string, Record<string, unknown>>;
-    delete object.$defs;
-    const refs = new Map<string, string>();
-    const moved: [string, Record<string, unknown>][] = [];
-    for (const [name, def] of Object.entries(defs)) {
-      let key = name;
-      for (let i = 1; key in schemas; i++) key = `${name}_${i}`;
-      schemas[key] = def;
-      moved.push([key, def]);
-      refs.set(`#/$defs/${name}`, `#/components/schemas/${key}`);
-    }
-    rewrite_refs(object, refs);
-    for (const [, def] of moved) {
-      rewrite_refs(def, refs);
-      hoist_defs(def, schemas);
-    }
-  }
-  for (const value of Object.values(object)) hoist_defs(value, schemas);
 }
 
 /** Let each named property, or every one, also read as a redaction marker. */
@@ -660,21 +588,17 @@ export function openapi<TApp extends Pick<ActSurface, "registry">>(
     };
   }
 
-  const schemas: Record<string, Record<string, unknown>> = {
-    ApiError: API_ERROR_SCHEMA,
-    SnapshotArray: SNAPSHOT_ARRAY_SCHEMA,
-    ...state_schemas,
-  };
-  hoist_defs(paths, schemas);
-  hoist_defs(state_schemas, schemas);
-
   return {
     openapi: "3.1.0",
     info: options.info,
     ...(options.servers ? { servers: options.servers } : {}),
     paths,
     components: {
-      schemas,
+      schemas: {
+        ApiError: API_ERROR_SCHEMA,
+        SnapshotArray: SNAPSHOT_ARRAY_SCHEMA,
+        ...state_schemas,
+      },
       responses: {
         ApiError: API_ERROR_RESPONSE,
       },

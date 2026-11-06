@@ -607,7 +607,7 @@ export class Act<
         // Hand the correlation lease back last, after the wait (a settle
         // cycle still running would re-take it), and await it so a
         // successor isn't refused.
-        await this._scoped(() => this._correlate.release_correlation(true));
+        await this._scoped(() => this._correlate.release_correlation());
         this._emitter.removeAllListeners();
       })();
     }

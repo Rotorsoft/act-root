@@ -88,7 +88,6 @@ export type StaticTarget = {
  * this only caches it, so a missing record is re-read from the row.
  */
 type Subscription = {
-  readonly source: string | undefined;
   readonly priority: number;
   readonly lane: string | undefined;
 };
@@ -252,9 +251,8 @@ export class CorrelateCycle<
       correlated_at >= 0
         ? correlated_at
         : Math.max(-1, watermark - COLD_START_BACK_SCAN);
-    for (const { stream, source, priority = 0, lane } of this._static_targets) {
+    for (const { stream, priority = 0, lane } of this._static_targets) {
       this._static_subscriptions.set(stream, {
-        source,
         priority,
         lane,
       });
@@ -434,16 +432,6 @@ export class CorrelateCycle<
               entry.upgraded = upgraded;
               entry.handler = reaction.handler.name;
             }
-            // A row keeps the source it was created with, so its fetch never
-            // reads another.
-            const held_source =
-              seen_in_scan || !recorded ? entry.source : recorded.source;
-            if (held_source !== resolved.source)
-              report_once(
-                this._reported,
-                `source|${resolved.target}|${resolved.source}`,
-                `Reaction "${reaction.handler.name}" resolved source "${resolved.source}" for target "${resolved.target}", which reads source "${held_source}". A target reads one source, so this reaction never sees those events. Give it its own target, or leave out the source.`
-              );
             if (this._in_fetch_window(resolved.source, event.stream))
               entry.correlated_at = event.id;
             correlated.set(resolved.target, entry);
@@ -494,10 +482,9 @@ export class CorrelateCycle<
       ).length;
       this._checkpoint = last_id;
       // Only dynamic targets can be upgraded: a static target is never re-laned.
-      for (const { stream, source, priority, lane } of streams) {
+      for (const { stream, priority, lane } of streams) {
         if (correlated.get(stream)?.upgraded)
           this._dynamic_subscriptions.set(stream, {
-            source,
             priority: priority as number,
             lane,
           });
@@ -528,7 +515,6 @@ export class CorrelateCycle<
         );
         if (!row) return;
         this._dynamic_subscriptions.set(stream, {
-          source: row.source,
           priority: row.priority,
           lane: row.lane,
         });
@@ -550,16 +536,11 @@ export class CorrelateCycle<
     );
   }
 
-  /**
-   * Release the lease early by re-acquiring it for zero ms. Best-effort. On
-   * shutdown a scan in flight is discarded too; on a live app it's the only
-   * thing that will correlate its commit, so it finishes, and holds the lease
-   * for one more term.
-   */
-  async release_correlation(final = false): Promise<void> {
+  /** Release the lease early by re-acquiring it for zero ms. Best-effort. */
+  async release_correlation(): Promise<void> {
     try {
       this._lease_until = 0;
-      if (final) this._epoch++;
+      this._epoch++;
       await this._cd.subscribe([], undefined, {
         key: this._key,
         by: this._by,
