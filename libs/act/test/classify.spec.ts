@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { act, log, projection, slice, state, ZodEmpty } from "../src/index.js";
+import { act, projection, slice, state, ZodEmpty } from "../src/index.js";
 import { classify_registry } from "../src/internal/classify.js";
 
 describe("classify_registry", () => {
@@ -105,23 +105,6 @@ describe("classify_registry", () => {
     expect(c.static_targets).toEqual([
       { stream: "shared", source: "sA", priority: 7 },
     ]);
-  });
-
-  it("warns about static reactions on two sources", () => {
-    const warn = vi.spyOn(log(), "warn").mockImplementation(() => {});
-    act()
-      .withState(Counter)
-      .on("Incremented")
-      .do(async function first() {})
-      .to({ target: "T", source: "a" })
-      .on("Decremented")
-      .do(async function second() {})
-      .to({ target: "T", source: "b" })
-      .build();
-    expect(warn.mock.calls.map(([m]) => String(m)).join()).toContain(
-      'Target "T" has reactions on two sources'
-    );
-    warn.mockRestore();
   });
 
   it("keeps the max priority regardless of declaration order", () => {

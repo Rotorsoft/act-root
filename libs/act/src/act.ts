@@ -384,10 +384,6 @@ export class Act<
     this._reactive = classification.event_to_lanes.size > 0;
     this._event_to_state = classification.event_to_state;
     this._event_to_lanes = classification.event_to_lanes;
-    for (const { target, kept, dropped } of classification.source_conflicts)
-      this._logger.warn(
-        `Target "${target}" has reactions on two sources, "${kept}" and "${dropped}". A target reads one source, so those on "${dropped}" never see their events. Give them their own target.`
-      );
     this._drain = options.drain !== false;
     this._auto_settle = options.autoSettle !== false;
 

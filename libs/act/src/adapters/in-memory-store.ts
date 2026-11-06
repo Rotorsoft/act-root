@@ -275,9 +275,6 @@ export class InMemoryStore implements Store {
     { at: number; by: string; until: number }
   >();
   private _stream_versions: Map<string, number> = new Map();
-  // Streams whose head is a tombstone. A full close of a one-event stream
-  // leaves its head at the same version, so a version can't tell.
-  private _closed: Set<string> = new Set();
   // stream → (event_id → cloned pii). Two levels so `forget_pii` drops one
   // inner Map. Absence means no PII.
   private _pii: Map<string, Map<number, Record<string, unknown>>> = new Map();
@@ -287,7 +284,6 @@ export class InMemoryStore implements Store {
     this._next_id = 0;
     this._correlated_at = -1;
     this._stream_versions.clear();
-    this._closed.clear();
     this._pii.clear();
   }
 
@@ -413,7 +409,7 @@ export class InMemoryStore implements Store {
     const current_version = this._stream_versions.get(stream) ?? -1;
     if (
       typeof expectedVersion === "number" &&
-      (current_version !== expectedVersion || this._closed.has(stream))
+      current_version !== expectedVersion
     ) {
       throw new ConcurrencyError(
         stream,
@@ -441,8 +437,6 @@ export class InMemoryStore implements Store {
       return this._with_pii(c);
     });
     this._stream_versions.set(stream, version - 1);
-    if (msgs.at(-1)?.name === TOMBSTONE_EVENT) this._closed.add(stream);
-    else this._closed.delete(stream);
     return committed;
   }
 
@@ -858,8 +852,6 @@ export class InMemoryStore implements Store {
       };
       this._events.push(event);
       this._stream_versions.set(stream, 0);
-      if (snapshot === undefined) this._closed.add(stream);
-      else this._closed.delete(stream);
       result.set(stream, { deleted, committed: event });
     }
     return result;
@@ -876,7 +868,6 @@ export class InMemoryStore implements Store {
     const prev_next_id = this._next_id;
     const prev_streams = this._streams;
     const prev_stream_versions = this._stream_versions;
-    const prev_closed = this._closed;
     const prev_pii = this._pii;
     const prev_correlated_at = this._correlated_at;
     const prev_correlators = new Map(
@@ -889,7 +880,6 @@ export class InMemoryStore implements Store {
     this._next_id = 0;
     this._streams = new Map();
     this._stream_versions = new Map();
-    this._closed = new Set();
     this._pii = new Map();
     try {
       await driver(async (event) => {
@@ -901,8 +891,6 @@ export class InMemoryStore implements Store {
         if (pii != null) this._put_pii(event.stream, id, pii);
         // Last event per stream wins.
         this._stream_versions.set(event.stream, event.version);
-        if (event.name === TOMBSTONE_EVENT) this._closed.add(event.stream);
-        else this._closed.delete(event.stream);
         return id;
       });
     } catch (err) {
@@ -910,7 +898,6 @@ export class InMemoryStore implements Store {
       this._next_id = prev_next_id;
       this._streams = prev_streams;
       this._stream_versions = prev_stream_versions;
-      this._closed = prev_closed;
       this._pii = prev_pii;
       this._correlated_at = prev_correlated_at;
       this._correlators = prev_correlators;

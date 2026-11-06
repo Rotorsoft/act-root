@@ -48,12 +48,6 @@ export type Classification = {
   readonly static_targets: StaticTarget[];
   readonly event_to_state: ReadonlyMap<string, State<any, any, any>>;
   readonly event_to_lanes: ReadonlyMap<string, EventLaneSet>;
-  /** Static reactions that lost: their target reads the first one's source. */
-  readonly source_conflicts: ReadonlyArray<{
-    readonly target: string;
-    readonly kept: string | undefined;
-    readonly dropped: string | undefined;
-  }>;
 };
 
 /**
@@ -70,7 +64,6 @@ export function classify_registry<
   registry: Registry<TSchemaReg, TEvents, TActions>,
   states: ReadonlyMap<string, State<Schema, any, any>>
 ): Classification {
-  const source_conflicts: Classification["source_conflicts"][number][] = [];
   const statics = new Map<string, StaticTarget>();
   // Per-target lane, checked across EVERY reaction to a target regardless of
   // source. A stream drains on exactly one lane, and `subscribe`
@@ -120,12 +113,6 @@ export function classify_registry<
         // cannot do. One entry per stream, max priority, so the
         // highest-priority registrant sets the scheduling priority.
         const existing = statics.get(target);
-        if (existing && existing.source !== source)
-          source_conflicts.push({
-            target,
-            kept: existing.source,
-            dropped: source,
-          });
         if (!existing) {
           statics.set(target, { stream: target, source, priority, lane });
         } else if (priority > (existing.priority as number)) {
@@ -151,6 +138,5 @@ export function classify_registry<
     static_targets: [...statics.values()],
     event_to_state,
     event_to_lanes,
-    source_conflicts,
   };
 }

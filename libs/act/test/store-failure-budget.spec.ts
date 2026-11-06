@@ -33,64 +33,6 @@ const counter = state({ Counter: z.object({ count: z.number() }) })
 const actor = { id: "a", name: "a" };
 
 describe("a failing store does not quarantine a healthy stream", () => {
-  it("a claim that finds nothing while the failed stream is leased doesn't clear the flag", async () => {
-    const s = new InMemoryStore();
-    await s.seed();
-    s.ack = () =>
-      Promise.reject(new StoreError("ack", { cause: new Error("busy") }));
-    const app = act()
-      .withState(counter)
-      .on("ticked")
-      .do(async function h() {}, { maxRetries: 2 })
-      .to({ target: "leased", source: "held" })
-      .build({
-        autoSettle: false,
-        circuitBreaker: { failureThreshold: 100, cooldownMs: 100_000 },
-        scoped: { store: s, cache: new InMemoryCache() },
-      });
-    app.on("error", () => {});
-    const blocked: unknown[] = [];
-    app.on("blocked", (b) => blocked.push(...b));
-    await app.do("tick", { stream: "held", actor }, {});
-    await app.correlate();
-    for (let i = 0; i < 8; i++) {
-      await app.drain({ leaseMillis: 20 });
-      // Traffic elsewhere arms the drain while the failed stream is leased.
-      await app.do("tick", { stream: `other-${i}`, actor }, {});
-      await app.correlate();
-      await app.drain({ leaseMillis: 20 });
-      await sleep(30);
-    }
-    await app.shutdown();
-    expect(blocked).toEqual([]);
-  });
-
-  it("a failing ack under settle doesn't block a healthy stream", async () => {
-    const s = new InMemoryStore();
-    await s.seed();
-    s.ack = () =>
-      Promise.reject(new StoreError("ack", { cause: new Error("busy") }));
-    const app = act()
-      .withState(counter)
-      .on("ticked")
-      .do(async function h() {}, { maxRetries: 2 })
-      .to({ target: "proj" })
-      .build({
-        circuitBreaker: { failureThreshold: 100, cooldownMs: 100_000 },
-        scoped: { store: s, cache: new InMemoryCache() },
-      });
-    app.on("error", () => {});
-    const blocked: unknown[] = [];
-    app.on("blocked", (b) => blocked.push(...b));
-    for (let i = 0; i < 8; i++) {
-      await app.do("tick", { stream: "settled", actor }, {});
-      app.settle({ leaseMillis: 1, debounceMs: 1 });
-      await sleep(25);
-    }
-    await app.shutdown();
-    expect(blocked).toEqual([]);
-  });
-
   afterEach(async () => {
     await dispose()();
   });

@@ -111,8 +111,6 @@ The store owns a single libSQL connection, which is what makes the above true: w
 
 Raising `busy_timeout` is not the fix, and is worse than it looks. libSQL's busy wait blocks the Node event loop for its full duration: in a single process where both connections share that loop, the other connection's commit cannot run while the wait is in progress, so the wait is guaranteed to reach its timeout — having frozen your server, timers and all, the whole time. Measured, the failure moves from ~1 ms to the full timeout, and still fails.
 
-If a write does lose that race, it fails with `StoreError` and stores nothing, and later commits can keep failing with `cannot commit transaction - SQL statements in progress`, for 20 seconds or more in a test, until the driver lets go of its failed statement. Restarting the process ends it at once.
-
 If a second component needs the same data, route it through the store (`query`, `query_streams`) rather than opening its own connection. If it genuinely must have raw SQL access, run it while the app is stopped.
 
 ### Database schema reference

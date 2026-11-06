@@ -67,38 +67,6 @@ describe("PostgresStore — overlapping full closes", () => {
     await dispose()("EXIT").catch(() => {});
   });
 
-  it.each([
-    ["one event", 1],
-    ["two events", 2],
-  ])(
-    "refuses a commit stalled across the close of a stream with %s",
-    async (_, events) => {
-      const stream = `stalled-${events}`;
-      const app = build();
-      const pg = store() as PostgresStore;
-      for (let i = 0; i < events; i++)
-        await app.do("add", { stream, actor }, { by: 1 });
-      const commit = pg.commit.bind(pg);
-      vi.spyOn(pg, "commit").mockImplementationOnce(async (...args) => {
-        await app.close([{ stream }]);
-        return commit(...args);
-      });
-      await expect(
-        app.do("add", { stream, actor }, { by: 100 })
-      ).rejects.toBeInstanceOf(ConcurrencyError);
-      vi.restoreAllMocks();
-      await expect(
-        app.do("add", { stream, actor }, { by: 1 })
-      ).rejects.toBeInstanceOf(StreamClosedError);
-      const names: string[] = [];
-      await pg.query((e) => names.push(e.name as string), {
-        stream,
-        stream_exact: true,
-      });
-      expect(names).toEqual(["__tombstone__"]);
-    }
-  );
-
   it("subscribing in different orders doesn't deadlock", async () => {
     const pg = store() as PostgresStore;
     const rival = new PostgresStore({

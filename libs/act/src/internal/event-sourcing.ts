@@ -136,24 +136,6 @@ const cache_drop = (stream: string): Promise<void> =>
       )
     );
 
-/**
- * Whether a state's `.snap` predicate asks for a snapshot. It runs after the
- * commit landed, so a predicate that throws must not fail the action.
- */
-function wants_snap<TState extends Schema, TEvents extends Schemas>(
-  state: { snap?: (snapshot: Snapshot<TState, TEvents>) => boolean },
-  snapshot: Snapshot<TState, TEvents>
-): boolean {
-  try {
-    return state.snap?.(snapshot) ?? false;
-  } catch (error) {
-    log().warn(
-      `Skipped a snapshot: its .snap predicate threw: ${String(error)}`
-    );
-    return false;
-  }
-}
-
 /** Commits a snapshot event. Never throws: a failed snapshot must not fail the action. */
 export async function snap<TState extends Schema, TEvents extends Schemas>(
   snapshot: Snapshot<TState, TEvents>
@@ -624,7 +606,7 @@ export async function action<
       const last = snapshots.at(-1)!;
 
       // Awaited, so the cache holds the post-snap checkpoint for the next caller.
-      const snap_event = wants_snap(me, last) ? await snap(last) : undefined;
+      const snap_event = me.snap?.(last) ? await snap(last) : undefined;
 
       // Sensitive states depend on the actor, so they aren't cached.
       if (!me.pii_aware)

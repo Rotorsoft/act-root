@@ -942,19 +942,13 @@ export class PostgresStore implements Store {
     // checkout itself is in-process, not a round trip.
     const client = await this._client("commit");
     try {
-      const last = await client.query<{ version: number; name: string }>(
-        `SELECT version, name FROM ${this._fqt}
+      const last = await client.query<{ version: number }>(
+        `SELECT version FROM ${this._fqt}
          WHERE stream=$1 ORDER BY version DESC LIMIT 1`,
         [stream]
       );
-      const head = last.rows.at(0);
-      let version = head?.version ?? -1;
-      // A full close of a one-event stream leaves the head at the same
-      // version, so the version alone can't see it.
-      if (
-        typeof expectedVersion === "number" &&
-        (version !== expectedVersion || head?.name === TOMBSTONE_EVENT)
-      )
+      let version = last.rows.at(0)?.version ?? -1;
+      if (typeof expectedVersion === "number" && version !== expectedVersion)
         throw new ConcurrencyError(
           stream,
           version,

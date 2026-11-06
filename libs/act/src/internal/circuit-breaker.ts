@@ -36,7 +36,6 @@ export type CircuitBreakerHooks = {
 
 export class CircuitBreaker {
   private _failures = 0;
-  private _failing = false;
   private _opened_at: number | undefined;
   private _wake: ReturnType<typeof setTimeout> | undefined;
   private readonly _threshold: number;
@@ -56,7 +55,7 @@ export class CircuitBreaker {
    * one, which `state()` cannot.
    */
   get failing(): boolean {
-    return this._failing;
+    return this._failures > 0;
   }
 
   /** How long the store is left alone after a failure before a retry. */
@@ -72,15 +71,6 @@ export class CircuitBreaker {
 
   /** A store op passed — reset to closed and cancel any pending retry. */
   passed(): void {
-    this._failing = false;
-    this.reached();
-  }
-
-  /**
-   * The store answered, so close the breaker. It proves less than a whole pass:
-   * {@link failing} stays set, since what failed may still be failing.
-   */
-  reached(): void {
     this._failures = 0;
     this._opened_at = undefined;
     this._clear_wake();
@@ -138,7 +128,6 @@ export class CircuitBreaker {
       return "open";
     }
     this._failures += 1;
-    this._failing = true;
     if (this._failures >= this._threshold) {
       this._opened_at = now;
       return "open";

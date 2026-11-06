@@ -26,7 +26,6 @@ import {
   ConcurrencyError,
   is_literal_source,
   StoreError,
-  TOMBSTONE_EVENT,
   ValidationError,
 } from "@rotorsoft/act";
 import {
@@ -582,7 +581,7 @@ export class SqliteStore implements Store {
         await tx.commit();
         return result;
       } catch (e) {
-        await tx.rollback().catch(() => {});
+        await tx.rollback();
         throw new StoreError(operation, { cause: e });
       }
     });
@@ -605,18 +604,15 @@ export class SqliteStore implements Store {
       // version on a (stream, version) unique collision.
       let current_version = -1;
       try {
-        const head = await tx.execute({
-          sql: "SELECT version, name FROM events WHERE stream = ? ORDER BY version DESC LIMIT 1",
+        const version_row = await tx.execute({
+          sql: "SELECT COALESCE(MAX(version), -1) as v FROM events WHERE stream = ?",
           args: [stream],
         });
-        current_version = Number(head.rows[0]?.version ?? -1);
+        current_version = Number(version_row.rows[0].v);
 
-        // A full close of a one-event stream leaves the head at the same
-        // version, so the version alone can't see it.
         if (
           typeof expectedVersion === "number" &&
-          (current_version !== expectedVersion ||
-            head.rows[0]?.name === TOMBSTONE_EVENT)
+          current_version !== expectedVersion
         ) {
           throw new ConcurrencyError(
             stream,
@@ -660,7 +656,7 @@ export class SqliteStore implements Store {
         await tx.commit();
         return committed;
       } catch (e) {
-        await tx.rollback().catch(() => {});
+        await tx.rollback();
         // Map the (stream, version) unique collision to
         // ConcurrencyError — the same signal PG raises from 23505 — so a
         // caller retries on the framework contract, not a raw libsql error.
@@ -1716,7 +1712,7 @@ export class SqliteStore implements Store {
         });
         await tx.commit();
       } catch (error) {
-        await tx.rollback().catch(() => {});
+        await tx.rollback();
         throw error;
       }
     });
