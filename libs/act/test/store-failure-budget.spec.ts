@@ -42,7 +42,7 @@ describe("a failing store does not quarantine a healthy stream", () => {
       .withState(counter)
       .on("ticked")
       .do(async function h() {}, { maxRetries: 2 })
-      .to({ target: "leased" })
+      .to({ target: "leased", source: "held" })
       .build({
         autoSettle: false,
         circuitBreaker: { failureThreshold: 100, cooldownMs: 100_000 },
@@ -53,11 +53,13 @@ describe("a failing store does not quarantine a healthy stream", () => {
     app.on("blocked", (b) => blocked.push(...b));
     await app.do("tick", { stream: "held", actor }, {});
     await app.correlate();
-    for (let i = 0; i < 6; i++) {
-      await app.drain({ leaseMillis: 15 });
-      // Empty: the stream whose ack failed is still leased.
-      await app.drain({ leaseMillis: 15 });
-      await sleep(25);
+    for (let i = 0; i < 8; i++) {
+      await app.drain({ leaseMillis: 20 });
+      // Traffic elsewhere arms the drain while the failed stream is leased.
+      await app.do("tick", { stream: `other-${i}`, actor }, {});
+      await app.correlate();
+      await app.drain({ leaseMillis: 20 });
+      await sleep(30);
     }
     await app.shutdown();
     expect(blocked).toEqual([]);
