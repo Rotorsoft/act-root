@@ -14,7 +14,6 @@ import {
   state,
   store,
 } from "@rotorsoft/act";
-import type { PoolClient } from "pg";
 import { z } from "zod";
 import { PostgresStore } from "../src/postgres-store.js";
 import { schema } from "./schema.js";
@@ -68,118 +67,37 @@ describe("PostgresStore — overlapping full closes", () => {
     await dispose()("EXIT").catch(() => {});
   });
 
-  it("refuses a commit that stalled across a full close, and the stream stays closed", async () => {
-    const app = build();
-    const pg = store() as PostgresStore;
-    for (let i = 0; i < 2; i++)
-      await app.do("add", { stream: "stalled", actor }, { by: 1 });
-    const held = pg as unknown as {
-      _client: (op: string) => Promise<PoolClient>;
-    };
-    const checkout = held._client.bind(pg);
-    vi.spyOn(held, "_client").mockImplementationOnce(async (op) => {
-      const client = await checkout(op);
-      const query = client.query.bind(client) as (
-        ...args: unknown[]
-      ) => Promise<unknown>;
-      (client as unknown as { query: unknown }).query = async (
-        ...args: unknown[]
-      ) => {
-        if (String(args[0]).startsWith("WITH l AS")) {
-          (client as unknown as { query: unknown }).query = query;
-          await app.close([{ stream: "stalled" }]);
-        }
-        return query(...args);
-      };
-      return client;
-    });
-
-    await expect(
-      app.do("add", { stream: "stalled", actor }, { by: 100 })
-    ).rejects.toBeInstanceOf(ConcurrencyError);
-    vi.restoreAllMocks();
-
-    await expect(
-      app.do("add", { stream: "stalled", actor }, { by: 1 })
-    ).rejects.toBeInstanceOf(StreamClosedError);
-    const names: string[] = [];
-    await pg.query((e) => names.push(e.name as string), {
-      stream: "stalled",
-      stream_exact: true,
-    });
-    expect(names).toEqual(["__tombstone__"]);
-  });
-
-  it("refuses a commit stalled across the close of a one-event stream", async () => {
-    const app = build();
-    const pg = store() as PostgresStore;
-    await app.do("add", { stream: "one-event", actor }, { by: 1 });
-    const held = pg as unknown as {
-      _client: (op: string) => Promise<PoolClient>;
-    };
-    const checkout = held._client.bind(pg);
-    vi.spyOn(held, "_client").mockImplementationOnce(async (op) => {
-      const client = await checkout(op);
-      const query = client.query.bind(client) as (
-        ...args: unknown[]
-      ) => Promise<unknown>;
-      (client as unknown as { query: unknown }).query = async (
-        ...args: unknown[]
-      ) => {
-        if (String(args[0]).startsWith("WITH l AS")) {
-          (client as unknown as { query: unknown }).query = query;
-          await app.close([{ stream: "one-event" }]);
-        }
-        return query(...args);
-      };
-      return client;
-    });
-    await expect(
-      app.do("add", { stream: "one-event", actor }, { by: 100 })
-    ).rejects.toBeInstanceOf(ConcurrencyError);
-    vi.restoreAllMocks();
-    await expect(
-      app.do("add", { stream: "one-event", actor }, { by: 1 })
-    ).rejects.toBeInstanceOf(StreamClosedError);
-    const meta = { correlation: "", causation: {} };
-    await expect(
-      pg.commit("one-event", [{ name: "added", data: { by: 1 } }], meta, 0)
-    ).rejects.toBeInstanceOf(ConcurrencyError);
-  });
-
-  it("refuses a head that moved, even with no version to expect", async () => {
-    const pg = store() as PostgresStore;
-    const meta = { correlation: "", causation: {} };
-    const ev = [{ name: "added", data: { by: 1 } }];
-    const held = pg as unknown as {
-      _client: (op: string) => Promise<PoolClient>;
-    };
-    const checkout = held._client.bind(pg);
-    vi.spyOn(held, "_client").mockImplementationOnce(async (op) => {
-      const client = await checkout(op);
-      const query = client.query.bind(client) as (
-        ...args: unknown[]
-      ) => Promise<unknown>;
-      (client as unknown as { query: unknown }).query = async (
-        ...args: unknown[]
-      ) => {
-        if (String(args[0]).startsWith("WITH l AS")) {
-          (client as unknown as { query: unknown }).query = query;
-          await new PostgresStore({
-            port: PORT,
-            schema: SCHEMA,
-            table: "events",
-          }).commit("moved", ev, meta);
-        }
-        return query(...args);
-      };
-      return client;
-    });
-    await expect(pg.commit("moved", ev, meta)).rejects.toBeInstanceOf(
-      ConcurrencyError
-    );
-    vi.restoreAllMocks();
-  });
+  it.each([
+    ["one event", 1],
+    ["two events", 2],
+  ])(
+    "refuses a commit stalled across the close of a stream with %s",
+    async (_, events) => {
+      const stream = `stalled-${events}`;
+      const app = build();
+      const pg = store() as PostgresStore;
+      for (let i = 0; i < events; i++)
+        await app.do("add", { stream, actor }, { by: 1 });
+      const commit = pg.commit.bind(pg);
+      vi.spyOn(pg, "commit").mockImplementationOnce(async (...args) => {
+        await app.close([{ stream }]);
+        return commit(...args);
+      });
+      await expect(
+        app.do("add", { stream, actor }, { by: 100 })
+      ).rejects.toBeInstanceOf(ConcurrencyError);
+      vi.restoreAllMocks();
+      await expect(
+        app.do("add", { stream, actor }, { by: 1 })
+      ).rejects.toBeInstanceOf(StreamClosedError);
+      const names: string[] = [];
+      await pg.query((e) => names.push(e.name as string), {
+        stream,
+        stream_exact: true,
+      });
+      expect(names).toEqual(["__tombstone__"]);
+    }
+  );
 
   it("subscribing in different orders doesn't deadlock", async () => {
     const pg = store() as PostgresStore;

@@ -942,12 +942,8 @@ export class PostgresStore implements Store {
     // checkout itself is in-process, not a round trip.
     const client = await this._client("commit");
     try {
-      const last = await client.query<{
-        id: number;
-        version: number;
-        name: string;
-      }>(
-        `SELECT id, version, name FROM ${this._fqt}
+      const last = await client.query<{ version: number; name: string }>(
+        `SELECT version, name FROM ${this._fqt}
          WHERE stream=$1 ORDER BY version DESC LIMIT 1`,
         [stream]
       );
@@ -995,23 +991,12 @@ export class PostgresStore implements Store {
       // JOINs the notify CTE so it is referenced (a bare SELECT CTE
       // would otherwise be skipped) without changing row multiplicity —
       // it yields at most one row.
-      //
-      // The index catches a rival at the same version, but not a close: it
-      // deletes the rows that would collide and writes its tombstone at
-      // version 0. So the statement also checks the head is still the row the
-      // probe saw, by id, since a version can come back around, and inserts
-      // nothing if it isn't. A statement already waiting on the lock when a
-      // close commits keeps its older snapshot and still gets through; closing
-      // that needs a database function or the lock across a round trip.
-      const unmoved = `COALESCE((SELECT e.id FROM ${this._fqt} e WHERE e.stream = $5
-        ORDER BY e.version DESC LIMIT 1), -1) = $8::int`;
       const insert_select =
         msgs.length === 1
-          ? `SELECT $1, $2::jsonb, $3::jsonb, $5, $4::int, $6 FROM l WHERE ${unmoved}`
+          ? `SELECT $1, $2::jsonb, $3::jsonb, $5, $4::int, $6 FROM l`
           : `SELECT u.name, u.data::jsonb, u.pii::jsonb, $5, u.version, $6
              FROM l, unnest($1::text[], $2::text[], $3::text[], $4::int[])
                WITH ORDINALITY AS u(name, data, pii, version, ord)
-             WHERE ${unmoved}
              ORDER BY u.ord`;
       const notify_ctes = this.config.notify
         ? `,
@@ -1019,13 +1004,13 @@ export class PostgresStore implements Store {
              SELECT json_build_object(
                'stream', $5::text,
                'events', json_agg(json_build_object('id', ins.id, 'name', ins.name) ORDER BY ins.version),
-               'by', $10::text
+               'by', $9::text
              )::text AS p
              FROM ins
            ),
            n AS (
-             SELECT pg_notify($9, payload.p) FROM payload
-             WHERE octet_length(payload.p) < $11
+             SELECT pg_notify($8, payload.p) FROM payload
+             WHERE octet_length(payload.p) < $10
            )`
         : "";
       const final_select = this.config.notify
@@ -1040,39 +1025,14 @@ export class PostgresStore implements Store {
         ${final_select}`;
       const base_params =
         msgs.length === 1
-          ? [
-              names[0],
-              datas[0],
-              piis[0],
-              versions[0],
-              stream,
-              meta,
-              this._fqt,
-              head?.id ?? -1,
-            ]
-          : [
-              names,
-              datas,
-              piis,
-              versions,
-              stream,
-              meta,
-              this._fqt,
-              head?.id ?? -1,
-            ];
+          ? [names[0], datas[0], piis[0], versions[0], stream, meta, this._fqt]
+          : [names, datas, piis, versions, stream, meta, this._fqt];
       const params = this.config.notify
         ? [...base_params, this._channel, this._by, NOTIFY_MAX_PAYLOAD_BYTES]
         : base_params;
 
       try {
         const { rows } = await client.query<Committed<E, keyof E>>(sql, params);
-        if (!rows.length)
-          throw new ConcurrencyError(
-            stream,
-            base_version,
-            msgs as unknown as Message<Schemas, string>[],
-            expectedVersion ?? -1
-          );
         // Decrypt before handing back to the caller — the committed
         // event the framework returns must carry the cleartext payload
         // (the reducer chain runs against `event.pii`). The encrypted
