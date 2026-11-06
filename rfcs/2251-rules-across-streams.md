@@ -239,7 +239,7 @@ The scenarios are four patterns. Each scenario ships as a test; the guide and `r
 The feature is only as good as the patterns people can find and run. Each pattern is taught in one place, and names its other scenarios in a line:
 
 - **The guide:** `docs/docs/guides/rules-across-streams.md`, one section per pattern with the rule in plain words, the builder code of its starred scenario, what a race does, and which trade-off it pays. It links the alternatives (reactions with compensation, sagas) for when strong consistency isn't worth it.
-- **Flow animations:** the map that already ships as a preview (`docs/flows/rules-across-streams.flow.json`), updated to the built API, with flows that play a commit landing in two streams at once, a refusal from a precondition and from a schema, and a lost race being retried; its preview label goes once 2.0 ships.
+- **Flow animations:** the map of the recipe (`docs/flows/rules-across-streams.flow.json`), built from the API, with flows that play a commit landing in two streams at once, a refusal from a precondition and from a schema, and a lost race being retried; its preview label goes once 2.0 ships.
 - **A recipe:** `recipes/rules-across-streams`, one state per pattern with its tests. Wolfdesk gains the open-tickets-per-agent limit, added, not rewritten.
 - **Recipes:** filling the new streams for a rule added to existing data, and splitting a hot resource across several streams.
 
@@ -297,7 +297,7 @@ The scaffold skill generates `.loads` and the uniqueness or capacity states when
 ## Stability / charter impact
 
 - **Breaking, for adapters and direct `Store` callers:** `commit(appends, meta)`. A migration note shows the one-append form; the TCK shows what an adapter adds. Ships in 2.0 with a `BREAKING CHANGE:` footer.
-- **Additive, for apps:** `.loads`, the fourth `loaded` argument, and events emitted to loaded streams. An app that uses none of them behaves as today.
+- **Additive, for apps:** `.loads`, and events emitted to loaded streams. An app that uses neither behaves as today. A rule's `holds` gains a fourth `loaded` argument, which breaks only code that calls a rule directly.
 
 ## Open questions
 

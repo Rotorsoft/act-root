@@ -337,7 +337,7 @@ Set `source` only when you want to genuinely scope drain to a *stable* stream pa
 ## 8. Business Rules
 
 ```typescript
-type Precondition<S extends Schema, P, A = Actor, L extends Schemas = {}> = {
+type Precondition<S extends Schema, P, A = Actor, L extends Record<string, Schema | undefined> = {}> = {
   description: string;
   holds: (payload: Readonly<P>, state: Readonly<S>, actor: A | undefined, loaded: Readonly<L>) => boolean;
 };

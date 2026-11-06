@@ -49,6 +49,10 @@ export const Order = state({ Order: Claim })
   .loads(Slots, (data) => shardStream(data.sale, data.shard), ["SlotTaken"])
   .requires([
     {
+      description: "the buyer has no slot yet",
+      holds: (_, state) => !state.sale,
+    },
+    {
       description: "a free slot",
       holds: (_, __, ___, { Slots }) => Slots.taken < Slots.slots,
     },

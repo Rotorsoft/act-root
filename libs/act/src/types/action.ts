@@ -385,6 +385,7 @@ export type Snapshot<TState extends Schema, TEvents extends Schemas> = {
  * @template TState - State schema.
  * @template TPayload - The action payload, or the part of it the rule reads.
  * @template TActor - Actor type extending base Actor.
+ * @template TLoaded - The states the action loads, read in `holds`' fourth argument.
  */
 export type Precondition<
   TState extends Schema,

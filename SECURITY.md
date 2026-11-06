@@ -1,21 +1,15 @@
 # Security Policy
 
-## Supported Versions
+## Supported versions
 
-Use this section to tell people about which versions of your project are
-currently being supported with security updates.
+| Version | Supported |
+| ------- | --------- |
+| 2.x | Yes |
+| 1.x | Security and critical correctness fixes, for at least 6 months after 2.0 ships |
+| < 1.0 | No |
 
-| Version | Supported          |
-| ------- | ------------------ |
-| 5.1.x   | :white_check_mark: |
-| 5.0.x   | :x:                |
-| 4.0.x   | :white_check_mark: |
-| < 4.0   | :x:                |
+Packages still on a 0.x line (`@rotorsoft/act-crypto`, `@rotorsoft/act-ops`) get fixes on their latest published version only. The [Stability Charter](STABILITY.md#support-window) has the full policy.
 
-## Reporting a Vulnerability
+## Reporting a vulnerability
 
-Use this section to tell people how to report a vulnerability.
-
-Tell them where to go, how often they can expect to get an update on a
-reported vulnerability, what to expect if the vulnerability is accepted or
-declined, etc.
+Report it privately through a [GitHub security advisory](https://github.com/Rotorsoft/act-root/security/advisories/new), not a public issue. We aim to acknowledge a report within a few business days, and to coordinate disclosure with you once a fix is available.

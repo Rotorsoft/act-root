@@ -116,13 +116,13 @@ We remove public surface slowly and with warning. The general rule: **a deprecat
 
 Every breaking (major) release ships a migration guide in the **same PR** that lands the breaking change, so the upgrade path is documented before the version is cut. The conventions, page template, and release-PR checklist live in [MIGRATING.md](MIGRATING.md).
 
-The live `docs/` folder tracks the latest API and is not frozen with releases. When a new major ships, the previous line is [snapshotted](https://docusaurus.io/docs/versioning) under `docs/versioned_docs/` and a version dropdown appears, so older-major users keep a pinned reference. Until then there is one set of docs.
+The live `docs/` folder tracks the latest API and is not frozen with releases. When a new major ships, the previous line is [snapshotted](https://docusaurus.io/docs/versioning) under `docs/versioned_docs/`, and the version dropdown lets older-major users keep a pinned reference.
 
-The first such page is [Migrating to 1.x](docs/docs/guides/migrating-to-1.x.md): the `1.x` line ships no breaking change, so it only gives the upgrade command and links back here. The next breaking release fills in the template.
+The first such page is [Migrating to 1.x](docs/docs/guides/migrating-to-1.x.md): the `1.x` line ships no breaking change, so it only gives the upgrade command and links back here. [Migrating to 2.x](docs/docs/guides/migrating-to-2.x.md) is the first to fill in the template.
 
 ## Per-library status
 
-| Package | Tracks core 1.x? |
+| Package | Tracks core's major? |
 |---|---|
 | `@rotorsoft/act` | Yes — defines the charter |
 | `@rotorsoft/act-pg` | Yes — `Store` adapter, same contract |
@@ -132,7 +132,11 @@ The first such page is [Migrating to 1.x](docs/docs/guides/migrating-to-1.x.md):
 | `@rotorsoft/act-pino` | Yes — `Logger` adapter, narrow surface |
 | `@rotorsoft/act-sse` | **Removed from this repo.** Deprecated on npm; the surface lives at `@rotorsoft/act-http/sse`. Published `1.x` versions keep working; [migrating](#deprecation-policy) renames four methods. |
 | `@rotorsoft/act-diagram` | Yes — shipped 1.0 alongside core. Diagram output shape (SVG structure, click-through anchors) is *not* part of the stability surface and may evolve. |
-| `@rotorsoft/act-tck` | Yes — TCK's published surface (`run*Tck` functions, `Capabilities` types, fixture helpers) is on the 1.x line alongside the `Store`/`Cache`/`Logger` contracts it validates |
+| `@rotorsoft/act-tck` | Yes — TCK's published surface (`run*Tck` functions, `Capabilities` types, fixture helpers) follows core's major alongside the `Store`/`Cache`/`Logger` contracts it validates |
+| `@rotorsoft/act-notify` | Yes — wraps a `Store`, so it moves with `commit`. Its version number doesn't match core's. |
+| `@rotorsoft/act-otel` | Peer of core's major; its version number doesn't match core's. Metric names are documented in its README. |
+| `@rotorsoft/act-ops` | No — no dependency on core; on its own 0.x line. |
+| `@rotorsoft/act-crypto` | No — no dependency on core; on its own 0.x line. |
 
 Each library's `README.md` carries a one-line stability note linking back to this document.
 

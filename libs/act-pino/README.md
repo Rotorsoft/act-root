@@ -112,8 +112,8 @@ Pair with `dispose()` from `@rotorsoft/act` to wire pino flush into the framewor
 
 ## Compatibility
 
-- **Node**: >=22.23.3
-- **Peer**: `@rotorsoft/act` >=0.39.0
+- **Node**: >=22.23.4
+- **Peer**: `@rotorsoft/act` of the same major
 - **Bundled deps**: `pino` ^10.3.1, `pino-pretty` ^13.1.3
 - **Module formats**: ESM (`import`) and CJS (`require`). No side effects.
 

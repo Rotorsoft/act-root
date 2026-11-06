@@ -46,7 +46,7 @@ try {
 
 ## ConcurrencyError
 
-Thrown when optimistic concurrency control detects a conflict — another process committed events to the same stream between your `load()` and `commit()`.
+Thrown when optimistic concurrency control detects a conflict — another process committed events to a stream the action appends to between your `load()` and `commit()`.
 
 ```typescript no-check
 import { ConcurrencyError } from "@rotorsoft/act";

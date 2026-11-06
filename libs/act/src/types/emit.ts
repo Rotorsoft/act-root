@@ -20,26 +20,36 @@ type NoOwnEvent = "an action must append an event to its own stream";
  */
 type Exact<TData, TSchema> = unknown extends TSchema
   ? TData
-  : TSchema extends unknown
-    ? TData extends readonly unknown[]
-      ? TSchema extends readonly unknown[]
+  : Same<TData, TSchema> extends true
+    ? TData
+    : Fields<TData, TSchema>;
+
+/** Whether two types are identical, so a recursive type stops here. */
+type Same<A, B> =
+  (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2
+    ? true
+    : false;
+
+type Fields<TData, TSchema> = TSchema extends unknown
+  ? TData extends readonly unknown[]
+    ? TSchema extends readonly unknown[]
+      ? {
+          [I in keyof TData]: Exact<
+            TData[I],
+            I extends keyof TSchema ? TSchema[I] : TSchema[number]
+          >;
+        }
+      : never
+    : TData extends object
+      ? TSchema extends object
         ? {
-            [I in keyof TData]: Exact<
-              TData[I],
-              I extends keyof TSchema ? TSchema[I] : TSchema[number]
-            >;
+            [K in keyof TData]: K extends keyof TSchema
+              ? Exact<TData[K], TSchema[K]>
+              : never;
           }
         : never
-      : TData extends object
-        ? TSchema extends object
-          ? {
-              [K in keyof TData]: K extends keyof TSchema
-                ? Exact<TData[K], TSchema[K]>
-                : never;
-            }
-          : never
-        : TData
-    : never;
+      : TData
+  : never;
 
 type ExactEvent<TEvent, TAll> = TEvent extends readonly [
   infer TName extends keyof TAll,
@@ -62,7 +72,25 @@ type CheckEmitted<TOut, TOwn, TAll> = string extends keyof TAll
       ? [Extract<TOut[number], readonly [keyof TOwn, unknown]>] extends [never]
         ? NoOwnEvent
         : { [I in keyof TOut]: ExactEvent<TOut[I], TAll> }
-      : TOut;
+      : TOut extends readonly []
+        ? TOut
+        : TOut extends readonly (infer TEvent)[]
+          ? [Extract<TEvent, readonly [keyof TOwn, unknown]>] extends [never]
+            ? NoOwnEvent
+            : readonly ExactEvent<TEvent, TAll>[]
+          : TOut;
+
+/**
+ * The events `.emit("Event")` can name: the payload becomes the event's data,
+ * so it has to satisfy the event's schema. A wider payload is fine, since the
+ * schema strips what it doesn't declare.
+ */
+type PassThrough<TEvents extends Schemas, TAction, TRouted> = {
+  [E in Exclude<
+    keyof TEvents & string,
+    keyof TRouted
+  >]: Readonly<TAction> extends Readonly<TEvents[E]> ? E : never;
+}[Exclude<keyof TEvents & string, keyof TRouted>];
 
 /** A handler whose returned events are checked. */
 type EmitHandler<
@@ -112,10 +140,10 @@ type Emit<
   ): TDone;
   /**
    * Finishes the action by passing the payload through as the data of an event
-   * declared in `.emits()` that no load lists.
+   * declared in `.emits()` that no load lists and the payload can satisfy.
    */
-  (event_name: Exclude<keyof TEvents & string, keyof TRouted>): TDone;
-  (event_name: Exclude<keyof TEvents & string, keyof TRouted>): TDone;
+  (event_name: PassThrough<TEvents, TAction, TRouted>): TDone;
+  (event_name: PassThrough<TEvents, TAction, TRouted>): TDone;
   <const TOut extends EmitOut<TEvents & TRouted>>(
     handler: EmitHandler<TState, TEvents, TAction, TLoaded, TRouted, TOut>
   ): TDone;

@@ -17,6 +17,10 @@ Most business apps can be modeled with just three primitives: **Actions → \{St
 - **Auditability** — every state change is an event, enabling time-travel, debugging, and compliance
 - **Adaptability** — swap storage backends, integrate external systems, scale from in-memory to production
 
+## Rules across streams
+
+A rule that spans streams, such as a unique email or a limited number of seats, needs no saga. An action loads the other stream with `.loads`, decides, and commits to every stream at once: all of it lands or none of it does. See [Rules across streams](./guides/rules-across-streams.md).
+
 ## See it move
 
 Every Act app can be drawn and played from its own builders: who invokes each action, how the state checks it, which events commit, and which reactions and timers follow. Watch the [WolfDesk ticket flows](pathname:///flows/wolfdesk.html), browse [all animations](pathname:///flows/index.html), or [make one for your app](./guides/flow-animations.md).

@@ -60,6 +60,10 @@ export const User = state({
   .loads(Email, (data) => emailStream(data.email), ["EmailTaken"])
   .requires([
     {
+      description: "the user isn't registered yet",
+      holds: (_, state) => !state.emailStream,
+    },
+    {
       description: "the email is free",
       holds: (_, __, ___, { Email }) => !Email.holder,
     },

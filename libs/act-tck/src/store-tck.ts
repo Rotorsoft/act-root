@@ -49,7 +49,7 @@ export type StoreCapabilities = {
    * the cross-instance conformance cases: a listener receives commits
    * from a *sibling* instance produced by the same `factory`, never its
    * own commits (the port's self-filtering MUST), and exactly one
-   * notification per commit transaction carrying the full event batch.
+   * notification per stream a commit appends to, carrying that stream's events.
    * Requires the `factory` to produce instances sharing one backing
    * store — e.g. two PostgresStores on the same schema/table, or two
    * `withBroker` decorators on one broker. True cross-*process*
@@ -217,7 +217,7 @@ export type StoreTckOptions = {
  * - `query_streams` — filters, exact-match, pagination, blocked
  * - `notify` (capability-gated) — cross-instance delivery, self-filtering
  *   (an instance never receives its own commits), one notification per
- *   commit transaction with the full event batch
+ *   stream a commit appends to, with that stream's events
  *
  * Tests namespace their streams with a per-test {@link uid} so the
  * suite is parallel-safe against a shared backing store (e.g., a real
@@ -457,6 +457,74 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           [a, 0],
           [b, 1],
         ]);
+      });
+
+      it("stores every event of every append, whole", async () => {
+        const a = `across-whole-a-${uid()}`;
+        const b = `across-whole-b-${uid()}`;
+        const across = make_meta({ stream: a });
+        const committed = await store.commit<CounterEvents>(
+          [
+            { stream: a, msgs: [inc(1)] },
+            { stream: b, msgs: [inc(2), dec(3)] },
+          ],
+          across
+        );
+        const shape = (e: Committed<CounterEvents, keyof CounterEvents>) => [
+          e.name,
+          e.data,
+          e.meta,
+        ];
+        const expected = [
+          ["Incremented", { amount: 2 }, across],
+          ["Decremented", { amount: 3 }, across],
+        ];
+        expect(committed.filter((e) => e.stream === b).map(shape)).toEqual(
+          expected
+        );
+        const stored: Committed<CounterEvents, keyof CounterEvents>[] = [];
+        await store.query<CounterEvents>((e) => stored.push(e), {
+          stream: b,
+          stream_exact: true,
+        });
+        expect(stored.map(shape)).toEqual(expected);
+      });
+
+      it.skipIf(!caps.pii_isolation)(
+        "keeps the sensitive fields of a later append",
+        async () => {
+          const a = `across-pii-a-${uid()}`;
+          const b = `across-pii-b-${uid()}`;
+          await store.commit<CounterEvents>(
+            [
+              { stream: a, msgs: [inc(1)] },
+              { stream: b, msgs: [{ ...inc(2), pii: { email: "e" } }] },
+            ],
+            make_meta({ stream: a })
+          );
+          const stored: unknown[] = [];
+          await store.query<CounterEvents>((e) => stored.push(e.pii), {
+            stream: b,
+            stream_exact: true,
+          });
+          expect(stored).toEqual([{ email: "e" }]);
+        }
+      );
+
+      it("leaves nothing of the commit that lost a race, on any of its streams", async () => {
+        const shared = `across-all-shared-${uid()}`;
+        const [x, y] = [`across-all-x-${uid()}`, `across-all-y-${uid()}`];
+        const race = (own: string) =>
+          store.commit<CounterEvents>(
+            [
+              { stream: own, msgs: [inc(1)], expectedVersion: -1 },
+              { stream: shared, msgs: [inc(1)], expectedVersion: -1 },
+            ],
+            meta
+          );
+        const rs = await Promise.allSettled([race(x), race(y)]);
+        expect(rs.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+        expect((await count(x)) + (await count(y))).toBe(1);
       });
 
       it("lets one of two racing commits on a shared stream win, and both on disjoint streams", async () => {
@@ -6060,7 +6128,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
       // two withBroker decorators on one broker). These cases enforce
       // the port's MUSTs: cross-instance delivery, self-filtering
       // ("implementations must skip their own commits"), and one
-      // notification per commit transaction carrying the full batch.
+      // notification per stream a commit appends to, with its events.
       describe("notify (capability)", () => {
         it("delivers a notification when a different instance commits", async () => {
           // Self-filtering contract: an instance does not see its own
@@ -6139,7 +6207,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           }
         });
 
-        it("delivers one notification per commit transaction carrying the full event batch", async () => {
+        it("delivers one notification carrying a stream's full batch from one commit", async () => {
           const received: StoreNotification[] = [];
           let resolve_sentinel!: () => void;
           const sentinel_arrived = new Promise<void>((res) => {
@@ -6181,6 +6249,46 @@ export const runStoreTck = (options: StoreTckOptions): void => {
             expect([...events.map((e) => e.id)].sort((a, b) => a - b)).toEqual(
               events.map((e) => e.id)
             );
+          } finally {
+            await writer.dispose();
+            await Promise.resolve(disposer());
+          }
+        });
+
+        it("delivers one notification per stream a commit appends to, with that stream's events", async () => {
+          const received: StoreNotification[] = [];
+          let resolve_sentinel!: () => void;
+          const sentinel_arrived = new Promise<void>((res) => {
+            resolve_sentinel = res;
+          });
+          const a = `notify-across-a-${uid()}`;
+          const b = `notify-across-b-${uid()}`;
+          const sentinel = `notify-across-sentinel-${uid()}`;
+          const disposer = await store.notify!.call(store, (n) => {
+            received.push(n);
+            if (n.stream === sentinel) resolve_sentinel();
+          });
+          const writer = await options.factory();
+          try {
+            const committed = await writer.commit<CounterEvents>(
+              [
+                { stream: a, msgs: [inc(1), inc(2)] },
+                { stream: b, msgs: [dec(3)] },
+              ],
+              make_meta({ stream: a })
+            );
+            await writer.commit<CounterEvents>(
+              [{ stream: sentinel, msgs: [inc(1)] }],
+              make_meta({ stream: sentinel })
+            );
+            await sentinel_arrived;
+            for (const stream of [a, b]) {
+              const of_stream = received.filter((n) => n.stream === stream);
+              expect(of_stream).toHaveLength(1);
+              expect(of_stream[0].events.map((e) => e.id)).toEqual(
+                committed.filter((e) => e.stream === stream).map((e) => e.id)
+              );
+            }
           } finally {
             await writer.dispose();
             await Promise.resolve(disposer());

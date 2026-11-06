@@ -37,6 +37,10 @@ export const Email = state({
 .loads(Email, (data) => emailStream(data.email), ["EmailTaken"])
 .requires([
   {
+    description: "the user isn't registered yet",
+    holds: (_, state) => !state.emailStream,
+  },
+  {
     description: "the email is free",
     holds: (_, __, ___, { Email }) => !Email.holder,
   },
@@ -64,6 +68,10 @@ Make one stream per thing being limited, with a count. An action that takes a sl
 .loads(Seats, (data) => courseStream(data.course), ["SeatTaken"])
 .loads(Student, (data) => studentStream(data.student), ["CourseAdded"])
 .requires([
+  {
+    description: "the student isn't enrolled yet",
+    holds: (_, state) => !state.active,
+  },
   {
     description: "the course has a free seat",
     holds: (_, __, ___, { Seats }) => Seats.taken < Seats.capacity,

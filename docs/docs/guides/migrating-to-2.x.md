@@ -12,6 +12,12 @@ sidebar_position: 21
 
 Most apps change only what the compiler points at: `.given` becomes `.requires`, and a few `.emit` handlers need their extra fields removed. Direct callers of `Store.commit` and third-party adapters move to `commit(appends, meta)`. [Rules across streams](./rules-across-streams.md) is what 2.0 adds.
 
+**Upgrade every `@rotorsoft/act*` package in the same step.** Their old versions don't work with act 2, and pnpm only warns about that. Act refuses a store still written for the old `commit` when it's injected, but a wrapper taking `(...args)` gets past that check. An old `act-notify` of that kind would send the appends, sensitive fields included, to your broker.
+
+```bash
+pnpm up "@rotorsoft/act*@latest"
+```
+
 ## Breaking changes
 
 ### `Store.commit` takes a list of appends
@@ -30,11 +36,19 @@ await store.commit([{ stream, msgs, expectedVersion }], meta);
 
 An adapter checks every append's version before inserting anything, and inserts them all in one transaction. [Upgrading an adapter](./writing-a-store.md#upgrading-an-adapter-to-20) has the details, and the TCK's [new block](./tck-conformance.md#what-20-adds) proves them.
 
+Two things that rewrite doesn't show:
+
+- **An append with no events now throws.** `commit(stream, [], meta, version)` used to check the version and return `[]`; `commit([{ stream, msgs: [] }], meta)` throws an `Error`. Skip the call instead. `commit([], meta)` returns `[]`.
+- **A wrapper around a `Store`** moves to the new signature too, and sends one notification for each stream a commit appends to, as `withBroker` does.
+
 ### Invariants are preconditions
 
 - **What changed:** `.given`, `Invariant`, `InvariantError`, `Errors.InvariantError`, act-http's `INVARIANT` code and the `validateFoldedState` option are gone.
 - **Why:** each of them guarded one action, so each was a precondition. The real invariants of a domain now live in the state's schema, checked before every commit.
-- **How to update:** see [Upgrading from `.given`](../concepts/state-management.md#upgrading-from-given-removed-in-20).
+- **How to update:** see [Upgrading from `.given`](../concepts/state-management.md#upgrading-from-given-removed-in-20), which covers `GivenHandlers`, `State.given` and act-diagram's `ActionNode.invariants` (read `preconditions`) too.
+- **What code sees:** a refusal that was `ERR_INVARIANT`, "failed invariant: ..." is now `ERR_PRECONDITION`, "failed precondition: ...", and act-http's code goes from `INVARIANT` to `PRECONDITION`, still 409. `PreconditionError` now extends `Error` directly.
+- **A rule called directly** takes four arguments: `holds(payload, state, actor, loaded)`, with `{}` when the action loads nothing.
+- **Coming from 1.34 or earlier:** the schema check on the state before every commit is new to you. A stream whose state already breaks its schema, say a `.nullable()` field cleared with `null`, refuses every action with `ValidationError` until you relax the schema or repair the field. Replay your important streams against the schema before upgrading.
 
 ```ts no-check
 // before (1.x)
@@ -44,9 +58,11 @@ An adapter checks every append's version before inserting anything, and inserts 
 .requires([{ description: "must be open", holds: (_, state) => state.open }])
 ```
 
+`.requires` comes once per action. If you had `.given([a]).requires([b])`, write `.requires([a, b])`, which keeps the order they ran in.
+
 ### `.emit` checks what a handler returns
 
-- **What changed:** a field its event's schema doesn't declare fails to compile; it used to be dropped silently. A handler that never returns anything fails to compile, and so does one that appends to no stream of its own.
+- **What changed:** a field its event's schema doesn't declare fails to compile; it used to be dropped silently. A handler with no return value (`() => {}`) fails to compile, and so does one that appends to no stream of its own. A handler that only throws still compiles. `.emit("Event")` compiles only for an event the payload can satisfy; it used to compile and then refuse every call.
 - **Why:** an action's mistakes should show in the editor, on the line that made them.
 - **How to update:** remove the field or add it to the schema, and return `undefined` to commit nothing. An `.emit` inside a generic helper, where the event's type isn't known yet, may need the name form.
 
@@ -58,6 +74,30 @@ An adapter checks every append's version before inserting anything, and inserts 
 .emit((data) => ["TicketClosed", data])
 ```
 
+### act-http's snake_case SSE aliases are gone
+
+- **What changed:** the deprecated aliases in `@rotorsoft/act-http/sse` are removed.
+- **Why:** they were announced for removal in the next major, and this is it.
+- **How to update:** rename them.
+
+| Removed | Use |
+|---|---|
+| `publish_overlay` | `overlay` |
+| `get_subscriber_count` | `subscriberCount` |
+| `get_state` | `state` |
+| `cache_size` | `cacheSize` |
+| `get_online` | `online` |
+| `is_online` | `isOnline` |
+
 ## Deprecations (not yet removed)
 
-None.
+Nothing new is deprecated in 2.0, and this still works:
+
+- **`@rotorsoft/act-tck`:** the `work_set` capability. It's ignored.
+
+## Nothing to do
+
+- **Your data.** No table or column changes, so a 1.x store opens as it is. 1.x and 2.0 workers can share a Postgres store during a rolling deploy, and 1.x reads events a 2.0 commit wrote if you roll back.
+- **The `Cache` and `Logger` ports.** Unchanged.
+- **`committed` listeners.** An app that doesn't use `.loads` still gets one per action.
+- **Reactions, projections, close policies and events.** Unchanged.

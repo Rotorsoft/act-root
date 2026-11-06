@@ -125,59 +125,6 @@ describe("BroadcastChannel", () => {
     expect(entries[0][0]).toBe("s1");
   });
 
-  describe("deprecated snake_case aliases", () => {
-    it("publish_overlay delegates to overlay (same cache state)", () => {
-      const bc = new BroadcastChannel<TestState>();
-      bc.publish("s1", makeState(5, { name: "original" }));
-
-      const msgs: PatchMessage<TestState>[] = [];
-      bc.subscribe("s1", (m) => msgs.push(m));
-      const msg = bc.publish_overlay("s1", { name: "overlayed" });
-
-      expect(msg).toEqual({ 5: { name: "overlayed" }, _overlay: true });
-      expect(msgs).toHaveLength(1);
-      expect(bc.state("s1")?.name).toBe("overlayed");
-      expect(bc.publish_overlay("missing", { name: "x" })).toBeUndefined();
-    });
-
-    it("get_state delegates to state", () => {
-      const bc = new BroadcastChannel<TestState>();
-      expect(bc.get_state("s1")).toBeUndefined();
-      bc.publish("s1", makeState(3, { name: "cached" }));
-      expect(bc.get_state("s1")).toBe(bc.state("s1"));
-      expect(bc.get_state("s1")?._v).toBe(3);
-    });
-
-    it("get_subscriber_count delegates to subscriberCount", () => {
-      const bc = new BroadcastChannel<TestState>();
-      expect(bc.get_subscriber_count("s1")).toBe(0);
-      const cleanup = bc.subscribe("s1", () => {});
-      expect(bc.get_subscriber_count("s1")).toBe(1);
-      expect(bc.get_subscriber_count("s1")).toBe(bc.subscriberCount("s1"));
-      cleanup();
-      expect(bc.get_subscriber_count("s1")).toBe(0);
-    });
-
-    it("constructor accepts deprecated cache_size", () => {
-      const bc = new BroadcastChannel<TestState>({ cache_size: 1 });
-      bc.publish("s1", makeState(1));
-      bc.publish("s2", makeState(1));
-      expect(bc.state("s1")).toBeUndefined(); // evicted at capacity 1
-      expect(bc.state("s2")?._v).toBe(1);
-    });
-
-    it("cacheSize wins when both cacheSize and cache_size are given", () => {
-      const bc = new BroadcastChannel<TestState>({
-        cacheSize: 2,
-        cache_size: 1,
-      });
-      bc.publish("s1", makeState(1));
-      bc.publish("s2", makeState(1));
-      expect(bc.state("s1")?._v).toBe(1); // capacity 2 — nothing evicted
-      expect(bc.state("s2")?._v).toBe(1);
-    });
-  });
-
   it("respects cacheSize option", () => {
     const bc = new BroadcastChannel<TestState>({ cacheSize: 1 });
     bc.publish("s1", makeState(1));

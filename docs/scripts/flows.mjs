@@ -124,6 +124,9 @@ export function validate(spec) {
         if (action?.loads?.length !== st.loads.length) problems.push(`${where}: names ${st.loads.length} loaded stream(s), one for each of its action's loads`);
       }
       if (st.conflict && st.commit === undefined) problems.push(`${where}: a conflict is on a commit`);
+      // with no commit id there's no own event to go with it, and a commit can't append only to a load
+      if (!st.reject && !st.at && load_events(st.from).includes(st.to) && st.commit === undefined)
+        problems.push(`${where}: ${st.to} is listed on a load, so it needs a "commit" id shared with the action's own event`);
       // an event a load lists goes to that load's stream, and never to the action's own
       if (!st.reject && !st.at && load_events(st.from).includes(st.to) && (st.stream ?? s.stream) === s.stream)
         problems.push(`${where}: ${st.to} is listed on a load, so it needs the loaded stream in "stream"`);

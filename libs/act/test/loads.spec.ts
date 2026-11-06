@@ -738,7 +738,7 @@ describe("types", () => {
     base()
       .loads(Seats, () => "a")
       .requires([positive])
-      .emit("Done");
+      .emit(() => ["Done", {}]);
     base()
       .loads(Seats, () => "a")
       // @ts-expect-error an event no load lists

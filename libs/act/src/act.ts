@@ -13,6 +13,7 @@ import {
   run_close_cycle,
 } from "./internal/close-cycle.js";
 import {
+  check_store,
   DEFAULT_LEASE_MILLIS,
   MAX_SHUTDOWN_GRACE_MS,
   resolveAutocloseConfig,
@@ -349,6 +350,7 @@ export class Act<
     validate_only_lanes(options.onlyLanes, this._declared_lanes);
     // Every Act runs in its own ports frame (the singletons when unscoped),
     // so a shared Act never inherits its caller's frame.
+    if (options.scoped) check_store(options.scoped.store);
     this._ports = options.scoped ?? default_scope();
     const ports = this._ports;
     this._scoped = make_run_scoped({
@@ -679,7 +681,7 @@ export class Act<
    * Executes an action: validates the payload, loads the state, checks its
    * preconditions, runs the handler, folds the events it emits, checks the
    * state's invariants (its schema) on the result, and commits them with
-   * optimistic concurrency on the stream. The reactions to those events
+   * optimistic concurrency on every stream it appends to. The reactions to those events
    * settle on their own (unless `autoSettle: false`).
    *
    * @template TKey - Action name from registered actions
@@ -689,7 +691,8 @@ export class Act<
    * @param options - Per-call dispatch options ({@link DoOptions}) —
    *   `reactingTo` to thread correlation, `correlator` to override the
    *   framework or orchestrator-level correlator for this call only.
-   * @returns Array of snapshots for all affected states (usually one)
+   * @returns The snapshots of the action's own stream, one per event appended
+   *   to it; the loaded snapshot alone when the action commits nothing
    *
    * @throws {ValidationError} If the payload doesn't match the action schema,
    *   or the state the action leaves breaks the state schema

@@ -81,10 +81,6 @@ const broadcast = new BroadcastChannel<AppState>({
 });
 ```
 
-:::note
-The snake_case member names these classes originally shipped with (`publish_overlay`, `get_state`, `get_subscriber_count`, `cache_size`, `get_online`, `is_online`) still work but are deprecated aliases — scheduled for removal in the next major. Use the short names shown here (`overlay`, `state`, `subscriberCount`, `cacheSize`, `online`, `isOnline`).
-:::
-
 ### Broadcasting a commit
 
 After every `app.do()`, forward each emitted snapshot's domain patch. An action with [`.loads`](state-management.md#rules-across-streams-loads) also appends to other streams, and `app.do()` returns only its own; broadcast from a `committed` listener instead (as `packages/server` does), which fires once per stream appended to:

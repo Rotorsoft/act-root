@@ -56,6 +56,7 @@ That's the whole integration. `run*Tck` calls vitest's `describe`/`it` internall
 Every method on the `Store` interface in [`libs/act/src/types/ports.ts`](https://github.com/Rotorsoft/act-root/blob/master/libs/act/src/types/ports.ts):
 
 - `commit` — single + multi-event commits, optimistic concurrency, preserved state on rejection
+- `commit across streams` — every append lands whole or none do, a stale append anywhere refuses the commit and names its stream, the loser of a race leaves nothing on any of its streams
 - `query` — stream, names, correlation, before/after, created_after/before, limit, with_snaps, stream_exact, backward traversal
 - `subscribe` — idempotent re-subscribe
 - `claim` / `ack` — lease lifecycle, dual frontiers, leased streams not double-claimed, ack rejected from wrong holder, exact-source fetch, timed-out-lease retry accounting
@@ -65,7 +66,7 @@ Every method on the `Store` interface in [`libs/act/src/types/ports.ts`](https:/
 - `truncate` — snapshot vs tombstone seeding, empty inputs, missing streams
 - `query_streams` — filters, exact-match, pagination, blocked
 - `query_stats` — array + filter forms, opt-in count/tail/names, exclude + before, snapshot count via `names`
-- `notify` (capability-gated) — cross-instance delivery, self-filtering (an instance never receives its own commits), one notification per commit transaction with the full event batch; requires the `factory` to produce instances sharing one backing store
+- `notify` (capability-gated) — cross-instance delivery, self-filtering (an instance never receives its own commits), one notification per stream a commit appends to, with that stream's events; requires the `factory` to produce instances sharing one backing store
 
 ### `runStoreDifferentialTck`
 
@@ -181,7 +182,7 @@ New / changed methods on `Store`, `Cache`, or `Logger` are added to `libs/act-tc
 
 ## Compatibility
 
-- **Node**: >=22.23.3
+- **Node**: >=22.23.4
 - **Peer**: `@rotorsoft/act`, `vitest`, `zod` and `@fast-check/vitest`; the ranges are in [`package.json`](./package.json) `peerDependencies`
 - **Runtime deps**: none — pure test code
 

@@ -6,7 +6,12 @@
  */
 import { describe, expect, expectTypeOf, it } from "vitest";
 import { z } from "zod";
-import { state, ZodEmpty } from "../src/index.js";
+import {
+  type Actor,
+  type Precondition,
+  state,
+  ZodEmpty,
+} from "../src/index.js";
 
 const AgentLoad = state({ AgentLoad: z.object({ open: z.number() }) })
   .init(() => ({ open: 0 }))
@@ -17,6 +22,11 @@ const AgentLoad = state({ AgentLoad: z.object({ open: z.number() }) })
     }),
     Dropped: ZodEmpty,
   })
+  .build();
+
+const Other = state({ Other: z.object({ o: z.string() }) })
+  .init(() => ({ o: "" }))
+  .emits({ Oed: ZodEmpty })
   .build();
 
 const Move = z.object({ agent: z.string() });
@@ -351,5 +361,74 @@ describe(".loads", () => {
         holds: (_, __, ___, { next }) => next.open === "x",
       },
     ]);
+  });
+
+  it("compiles on a state with a recursive event", () => {
+    const J = z.object({ j: z.json() });
+    const on_json = () =>
+      state({ OnJson: z.object({}) })
+        .init(() => ({}))
+        .emits({ Json: J, Plain: z.object({ a: z.string() }) })
+        .on({ Do: J });
+    on_json().emit(() => ["Plain", { a: "x" }]);
+    on_json().emit((d) => ["Json", d]);
+    on_json().emit(() => ["Json", { j: { deep: [1, "x", null] } }]);
+    // @ts-expect-error `extra` isn't in the schema
+    on_json().emit(() => ["Json", { j: 1, extra: 1 }]);
+    // @ts-expect-error `a` is a string
+    on_json().emit(() => ["Plain", { a: 1 }]);
+  });
+
+  it("refuses a handler with no return value", () => {
+    // @ts-expect-error return the events, or `undefined` to commit nothing
+    moving().emit(() => {});
+  });
+
+  it("checks a list of unknown length", () => {
+    const list = () =>
+      state({ Listed: z.object({}) })
+        .init(() => ({}))
+        .emits({ Base: z.object({ a: z.string() }) })
+        .on({ Do: z.object({ a: z.string() }) });
+    list().emit((d) => [d.a].map((a) => ["Base", { a }] as const));
+    // @ts-expect-error `extra` isn't in the schema
+    list().emit((d) => [d.a].map((a) => ["Base", { a, extra: 1 }] as const));
+    moving()
+      // @ts-expect-error nothing goes to its own stream
+      .emit(() => [1].map(() => ["Taken", { at: 1 }] as const));
+  });
+
+  it("offers the name form only for an event the payload can satisfy", () => {
+    const named = () =>
+      state({ Named: z.object({}) })
+        .init(() => ({}))
+        .emits({ Base: z.object({ a: z.string() }) })
+        .on({ Wide: z.object({ a: z.string(), b: z.number() }) })
+        .emit("Base");
+    expect(named).toBeTypeOf("function");
+    state({ Named2: z.object({}) })
+      .init(() => ({}))
+      .emits({ Base: z.object({ a: z.string() }) })
+      .on({ Unrelated: z.object({ unrelated: z.number() }) })
+      // @ts-expect-error the payload has no `a`
+      .emit("Base");
+  });
+
+  it("takes readonly rules and a rule's own actor", () => {
+    const rules = [{ description: "x", holds: () => true }] as const;
+    moving().requires(rules);
+    type Me = Actor & { role: string };
+    const admin: Precondition<{ agent?: string }, unknown, Me> = {
+      description: "admin",
+      holds: (_, __, actor) => actor?.role === "admin",
+    };
+    moving().requires([admin]);
+  });
+
+  it("lets a load with a name known only at runtime come before others", () => {
+    const dynamic: string = `load-${1}`;
+    moving_once()
+      .loads(AgentLoad, () => "a", [], dynamic)
+      .loads(Other, () => "b", [], "other");
   });
 });

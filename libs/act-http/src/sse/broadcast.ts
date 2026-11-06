@@ -177,15 +177,9 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
      * pass your logger here to route it with the rest of your logs.
      */
     onSubscriberError?: (error: unknown, streamId: string) => void;
-    /**
-     * Deprecated alias of `cacheSize` — removal in the next major. When
-     * both are given, `cacheSize` wins.
-     * @deprecated use `cacheSize`
-     */
-    cache_size?: number;
   }) {
     this.state_cache = new StateCache<S>(
-      options?.cacheSize ?? options?.cache_size ?? 50,
+      options?.cacheSize ?? 50,
       (streamId, dropped) => this.on_cache_evict(streamId, dropped)
     );
     this.on_overlay_miss = options?.onOverlayMiss ?? (() => {});
@@ -334,24 +328,6 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
   /** Get the cached state for a stream (for reconnects / initial SSE yield). */
   state(streamId: string): S | undefined {
     return this.state_cache.get(streamId);
-  }
-
-  /** @deprecated use `overlay` — removal in the next major */
-  publish_overlay(
-    streamId: string,
-    overlay_patch: Partial<S>
-  ): PatchMessage<S> | undefined {
-    return this.overlay(streamId, overlay_patch);
-  }
-
-  /** @deprecated use `subscriberCount` — removal in the next major */
-  get_subscriber_count(streamId: string): number {
-    return this.subscriberCount(streamId);
-  }
-
-  /** @deprecated use `state` — removal in the next major */
-  get_state(streamId: string): S | undefined {
-    return this.state(streamId);
   }
 
   /** Direct access to the state cache (for app-specific reads like presence). */

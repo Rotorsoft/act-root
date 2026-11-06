@@ -64,6 +64,10 @@ export const Enrollment = state({
   .loads(Student, (data) => studentStream(data.student), ["CourseAdded"])
   .requires([
     {
+      description: "the student isn't enrolled yet",
+      holds: (_, state) => !state.active,
+    },
+    {
       description: "the course has a free seat",
       holds: (_, __, ___, { Seats }) => Seats.taken < Seats.capacity,
     },
@@ -122,6 +126,9 @@ export const Session = state({
   })
   .on({ OpenSession }, { maxRetries: 4 })
   .loads(UserSessions, (data) => sessionsStream(data.user), ["SessionOpened"])
+  .requires([
+    { description: "the session isn't open yet", holds: (_, s) => !s.open },
+  ])
   .emit((data) => [
     ["SessionStarted", data],
     ["SessionOpened", {}],
