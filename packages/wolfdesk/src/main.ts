@@ -9,7 +9,6 @@ import {
 import { PostgresStore } from "@rotorsoft/act-pg";
 import { Chance } from "chance";
 import { agentStream } from "./agent.js";
-import { app } from "./bootstrap.js";
 import { agents, db, tickets } from "./drizzle/index.js";
 import { Priority } from "./schemas/index.js";
 
@@ -25,6 +24,9 @@ async function main() {
       table: "wolfdesk",
     })
   );
+  // After the store: bootstrap builds the app as it loads, and a store injected
+  // later is ignored.
+  const { app } = await import("./bootstrap.js");
   await store().drop();
   await store().seed();
 

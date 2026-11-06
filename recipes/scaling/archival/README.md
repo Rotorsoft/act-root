@@ -29,7 +29,7 @@ The archiver also holds the guard. A 10-second archiver delays the truncate by 1
 
 The shape that fits 80% of cases: dump each stream as one JSONL object per event, upload to S3 under a key derived from the stream name. The recipe walks four steps.
 
-**Read stream history via `store().query`.** The store's `query(callback, filter)` method paginates events for the operator. Pass `{ stream }` to scope the read; the callback fires per event in version order. The archiver collects them into an array for serialization.
+**Read stream history via `store().query`.** The store's `query(callback, filter)` method paginates events for the operator. Pass `{ stream, stream_exact: true, with_pii: false }` to scope the read: without `stream_exact`, `room-1` is a pattern that also reads `room-10`, and without `with_pii: false`, the archive holds plaintext sensitive values `app.forget` can never reach. The callback fires per event in version order. The archiver collects them into an array for serialization.
 
 **Serialize to JSONL.** One JSON object per line, no wrapping array. JSONL is friendly to streaming readers, append-only consumers, and `jq -c` debugging. Keep the full `Committed` shape — `id`, `name`, `data`, `stream`, `version`, `created`, `meta` — so a future rehydrator has everything it needs.
 

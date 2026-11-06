@@ -197,6 +197,10 @@ The boundaries matter as much as the surface. The framework owns isolation and e
 - **Keep sensitive values out of stream names.** A stream name can't be forgotten, so `email-ann@x.io` stays in the store after `app.forget`, and Act can't tell what a stream name contains. A stream keyed by a sensitive value uses an HMAC of it, with a key the operator holds: `createHmac("sha256", key).update(value).digest("hex")` from `node:crypto`. A plain hash of a guessable value can be reversed, and changing the key means refilling those streams ([the recipe](https://github.com/rotorsoft/act-root/tree/master/recipes/rules-across-streams/examples/fill-streams.ts)).
 - **Cascade `forget` to external systems already delivered.** A webhook fired on `UserRegistered` carrying the plaintext email is now downstream — `forget` cannot recall it. If a receiver needs to participate in erasure, send them a follow-up "forget this user" event rather than expecting the framework to reach across the network.
 
+## Archiving a sensitive state
+
+`app.forget` can't reach what has left the store. An archiver reads with `with_pii: false`, as the [archival recipe](https://github.com/Rotorsoft/act-root/blob/master/recipes/scaling/archival/README.md) does, unless the archive is itself under your retention policy.
+
 ## Cache contract on PII-aware states
 
 States whose events declare any `sensitive(...)` field never populate the snapshot cache. The reason is structural: state in a PII-aware reducer chain derives from the **actor-gated event view**, so the cached state would vary by caller. Caching a snapshot produced for an admin actor and serving it to a regular user would leak plaintext past the disclosure predicate, and there's no safe per-caller key that doesn't reintroduce the same problem at the cache layer.

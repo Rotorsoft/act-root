@@ -102,7 +102,7 @@ Streams that have accumulated many events since their last `__snapshot__` marker
 
 ### `correlation-gaps` → fix upstream correlator
 
-Events whose `meta.causation.event.id` references a parent id not present in the audit window. Single-pass: collects ids and causation tuples during the shared event scan, post-processes in `drain`.
+Events whose `meta.causation.event.id` references a parent id not present in the audit window. A close's own tombstone is left out. An event whose parent was on a stream later closed or pruned is still listed, and that isn't damage. Single-pass: collects ids and causation tuples during the shared event scan, post-processes in `drain`.
 
 **Remediation:** fix the correlator misconfig that's writing dangling parent references. Doesn't necessarily mean data is corrupted — but it does mean the causation chain breaks for some events.
 

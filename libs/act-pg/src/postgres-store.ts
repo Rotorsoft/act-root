@@ -953,17 +953,16 @@ export class PostgresStore implements Store {
     // StoreError context; checkout itself is in-process, not a round trip.
     const client = await this._client("commit");
     try {
-      const probe = async () => {
-        const heads = await client.query<{ stream: string; version: number }>(
-          `SELECT s.stream,
-             (SELECT version FROM ${this._fqt} WHERE stream = s.stream
-              ORDER BY version DESC LIMIT 1) AS version
-           FROM unnest($1::text[]) AS s(stream)`,
-          [appends.map((a) => a.stream)]
-        );
-        return new Map(heads.rows.map((r) => [r.stream, r.version ?? -1]));
-      };
-      const head_of = await probe();
+      const heads = await client.query<{ stream: string; version: number }>(
+        `SELECT s.stream,
+           (SELECT version FROM ${this._fqt} WHERE stream = s.stream
+            ORDER BY version DESC LIMIT 1) AS version
+         FROM unnest($1::text[]) AS s(stream)`,
+        [appends.map((a) => a.stream)]
+      );
+      const head_of = new Map(
+        heads.rows.map((r) => [r.stream, r.version ?? -1])
+      );
       for (const { stream, msgs, expectedVersion } of appends) {
         const head = head_of.get(stream)!;
         if (typeof expectedVersion === "number" && head !== expectedVersion)
@@ -1007,25 +1006,12 @@ export class PostgresStore implements Store {
       // written, and the final select LEFT JOINs it so it is referenced (a
       // bare SELECT CTE would otherwise be skipped) without changing row
       // multiplicity. A `count(*)` would let Postgres skip the calls.
-      //
-      // The index catches a rival at the same version, but not a head that
-      // moved backwards: a full close deletes the rows that would collide
-      // and writes its tombstone at version 0. So the statement also checks
-      // that every head is still what the probe saw, and inserts nothing if
-      // one moved. A statement already waiting on the lock when a close
-      // commits keeps its older snapshot and still gets through; closing
-      // that needs a database function or the lock across a round trip.
-      const unmoved = `NOT EXISTS (
-          SELECT 1 FROM unnest($8::text[], $9::int[]) AS h(stream, head)
-          WHERE COALESCE((SELECT e.version FROM ${this._fqt} e WHERE e.stream = h.stream
-            ORDER BY e.version DESC LIMIT 1), -1) <> h.head)`;
       const single = names.length === 1;
       const insert_select = single
-        ? `SELECT $1, $2::jsonb, $3::jsonb, $5, $4::int, $6 FROM l WHERE ${unmoved}`
+        ? `SELECT $1, $2::jsonb, $3::jsonb, $5, $4::int, $6 FROM l`
         : `SELECT u.name, u.data::jsonb, u.pii::jsonb, u.stream, u.version, $6
            FROM l, unnest($1::text[], $2::text[], $3::text[], $4::int[], $5::text[])
              WITH ORDINALITY AS u(name, data, pii, version, stream, ord)
-           WHERE ${unmoved}
            ORDER BY u.ord`;
       const notify_ctes = this.config.notify
         ? `,
@@ -1033,13 +1019,13 @@ export class PostgresStore implements Store {
              SELECT json_build_object(
                'stream', ins.stream,
                'events', json_agg(json_build_object('id', ins.id, 'name', ins.name) ORDER BY ins.id),
-               'by', $11::text
+               'by', $9::text
              )::text AS p
              FROM ins GROUP BY ins.stream
            ),
            n AS (
-             SELECT count(pg_notify($10, payload.p)) AS sent FROM payload
-             WHERE octet_length(payload.p) < $12
+             SELECT count(pg_notify($8, payload.p)) AS sent FROM payload
+             WHERE octet_length(payload.p) < $10
            )`
         : "";
       const final_select = this.config.notify
@@ -1052,8 +1038,6 @@ export class PostgresStore implements Store {
           RETURNING *
         )${notify_ctes}
         ${final_select}`;
-      const unique_streams = [...head_of.keys()];
-      const guard = [unique_streams, unique_streams.map((s) => head_of.get(s))];
       const base_params = single
         ? [
             names[0],
@@ -1063,27 +1047,14 @@ export class PostgresStore implements Store {
             streams[0],
             meta,
             this._fqt,
-            ...guard,
           ]
-        : [names, datas, piis, versions, streams, meta, this._fqt, ...guard];
+        : [names, datas, piis, versions, streams, meta, this._fqt];
       const params = this.config.notify
         ? [...base_params, this._channel, this._by, NOTIFY_MAX_PAYLOAD_BYTES]
         : base_params;
 
       try {
         const { rows } = await client.query<Committed<E, keyof E>>(sql, params);
-        if (!rows.length) {
-          const now = await probe();
-          const hit =
-            appends.find((a) => now.get(a.stream) !== head_of.get(a.stream)) ??
-            appends[0];
-          throw new ConcurrencyError(
-            hit.stream,
-            now.get(hit.stream)!,
-            hit.msgs as unknown as Message<Schemas, string>[],
-            hit.expectedVersion ?? -1
-          );
-        }
         // Decrypt before handing back to the caller — the committed
         // event the framework returns must carry the cleartext payload
         // (the reducer chain runs against `event.pii`). The encrypted
@@ -1294,8 +1265,8 @@ export class PostgresStore implements Store {
     return this._tx("subscribe", async (client) => {
       let subscribed = 0;
       if (streams.length) {
-        // Every worker takes these rows in the same order, or two of them
-        // subscribing to the same streams wait on each other and deadlock.
+        // The INSERT takes new rows in this order, so two workers subscribing
+        // to the same new streams can't wait on each other and deadlock.
         const ordered = JSON.stringify(
           [...streams].sort((a, b) => (a.stream < b.stream ? -1 : 1))
         );

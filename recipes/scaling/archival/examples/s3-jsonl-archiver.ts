@@ -40,7 +40,9 @@ export async function archiveStreamToS3(stream: string): Promise<void> {
     (event) => {
       events.push(event);
     },
-    { stream }
+    // `stream` alone is a pattern: `room-1` would also read `room-10`. And
+    // what `app.forget` erases must never reach cold storage.
+    { stream, stream_exact: true, with_pii: false }
   );
 
   const body = events.map((e) => JSON.stringify(e)).join("\n");

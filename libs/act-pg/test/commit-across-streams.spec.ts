@@ -161,21 +161,6 @@ describe("commit across streams, failing part-way", () => {
     expect((err as ConcurrencyError).stream).toBe("unnamed");
   });
 
-  it("names the first stream when no head has moved by the time it looks again", async () => {
-    at_insert(() => Promise.resolve({ rows: [] }));
-    const err = await store
-      .commit(
-        [
-          { stream: "still-a", msgs: ev() },
-          { stream: "still-b", msgs: ev() },
-        ],
-        META
-      )
-      .catch((e: unknown) => e);
-    expect(err).toBeInstanceOf(ConcurrencyError);
-    expect((err as ConcurrencyError).stream).toBe("still-a");
-  });
-
   it("subscribing in different orders doesn't deadlock", async () => {
     for (let round = 0; round < 4; round++) {
       const streams = Array.from({ length: 40 }, (_, i) => ({

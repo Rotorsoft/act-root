@@ -157,6 +157,8 @@ For an active stream that is exactly what you want — the window rolls with the
 
 Be clear about what `keep` is *not* for. It is not a load-latency feature — events behind the latest snapshot never affect load results anyway, so pruning them makes `app.load` exactly zero faster. If your streams have lifecycles that end, the terminate fields above are the right tool; if the whole events table is too big across many streams, look at the [scaling recipes](https://github.com/Rotorsoft/act-root/tree/master/recipes/scaling) instead. `keep` earns its place when a live, never-closing stream must hold a bounded window of history — usually because a regulator or a storage budget says so. Pruning also limits what a **projection rebuild** can recover: only an `.of()` state fold, which starts from the boundary snapshot, rebuilds correctly over a pruned stream. A per-event or `.batch()` projection replays only the surviving tail (see [Rebuilding over closed or pruned streams](./projections-to-database.md#rebuilding-over-closed-or-pruned-streams)). The imperative twin is `app.close([{ stream, before: cutoff }])` for one-off prunes driven by your own scheduler; the mechanics of both are in [Windowed close in the close-cycle architecture](../architecture/close-cycle.md#windowed-close--prune-behind-a-snapshot).
 
+**`keep` with a time-gated terminate.** A prune consumes the event that woke the reaction, so with `{ is: "Resolved", after: { days: 90 }, keep: { days: 30 } }`, a stream that stops committing right after a prune doesn't wake again when the 90 days pass. It closes on its next commit, or with `app.close`.
+
 ### Pruning streams that have gone silent
 
 The rolling window rides the aggregate's own commits, so a stream nobody writes to is a stream nobody prunes. When retention is an obligation rather than a storage optimization, the operator goes looking for the quiet ones directly.
@@ -225,6 +227,10 @@ The two-axis split mirrors the two ways close policies appear in practice:
 Pure-OR policies (no top-level fields, only `or`) work too: `.autocloses({ or: { is: "Resolved", reaches: 10_000 } })` reads "autocloses or is Resolved or reaches 10k" — close when either alone is true. The empty top-level AND group never satisfies its own path on its own; only the `or` block can fire in that case.
 
 The declarative form covers the bulk of real policies in one line. For the long tail — multi-branch policies with different cooldowns per terminal event (`(Resolved + 90d) OR (Cancelled + 30d)`), per-stream metadata, a saga waiting on the absence of an event — drop the policy and call `app.close` from your own logic or scheduler. See the [migration note](#migrating-from-the-function-predicate-form) for the shape.
+
+### Stream names
+
+A stream whose name has a regex metacharacter (such as `user+tag`) has no autoclose: a store could read its name as a pattern. Close it with `app.close`.
 
 ## What runs under the hood
 

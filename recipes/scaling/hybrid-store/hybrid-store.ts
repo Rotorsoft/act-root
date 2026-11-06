@@ -44,7 +44,18 @@ export const hybridStore = (log: Store, subs: Store): Store => ({
   commit: log.commit.bind(log),
   query: log.query.bind(log),
   query_stats: log.query_stats.bind(log),
-  ...(log.restore ? { restore: log.restore.bind(log) } : {}),
+  // Restoring renumbers the log's ids, so the subscriptions' marks go with
+  // them, as `Store.restore` promises. They clear only once the log is in: a
+  // failed restore keeps both. A crash between the two needs another restore.
+  ...(log.restore
+    ? {
+        restore: async (...args: Parameters<NonNullable<Store["restore"]>>) => {
+          await log.restore!(...args);
+          await subs.drop();
+          await subs.seed();
+        },
+      }
+    : {}),
   ...(log.forget_pii ? { forget_pii: log.forget_pii.bind(log) } : {}),
   // `notify` is a wake-up hint about *commits*, so it belongs with the log.
   ...(log.notify ? { notify: log.notify.bind(log) } : {}),
