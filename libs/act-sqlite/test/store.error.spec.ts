@@ -1,4 +1,3 @@
-import { createClient } from "@libsql/client";
 import {
   act,
   ConcurrencyError,
@@ -382,21 +381,6 @@ describe("SqliteStore error paths", () => {
       expect(failed).toBeInstanceOf(StoreError);
       expect((failed as StoreError).operation).toBe(operation);
     }
-    await real.dispose();
-  });
-
-  it("commits again after one busy write", async () => {
-    const url = tmp_db_url();
-    const real = new SqliteStore({ url });
-    await real.seed();
-    const other = createClient({ url });
-    const lock = await other.transaction("write");
-    const meta = { correlation: "", causation: {} };
-    const ev = [{ name: "E", data: {} }];
-    await expect(real.commit("s", ev, meta)).rejects.toBeInstanceOf(StoreError);
-    await lock.rollback();
-    other.close();
-    await expect(real.commit("s", ev, meta)).resolves.toHaveLength(1);
     await real.dispose();
   });
 

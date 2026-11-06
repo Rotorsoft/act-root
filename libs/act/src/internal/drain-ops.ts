@@ -25,7 +25,6 @@ import type {
   SubscribeResult,
 } from "../types/index.js";
 import { is_literal_source } from "../utils.js";
-import { AUTOCLOSE_TARGET_PREFIX } from "./autoclose-reaction.js";
 
 export interface DrainOps<TEvents extends Schemas> {
   claim: typeof claim;
@@ -54,20 +53,11 @@ export async function fetch<TEvents extends Schemas>(
       // like "s1" reads only "s1" — never a sibling prefix "s12". A
       // pattern source (e.g. `^(A|B)$`) stays a regex query, matching the
       // same streams correlate resolved it for.
-      // An autoclose target whose stream name reads as a pattern has no
-      // source: its stream comes from its own name, read exactly.
-      const closing =
-        source === undefined && stream.startsWith(AUTOCLOSE_TARGET_PREFIX)
-          ? stream.slice(AUTOCLOSE_TARGET_PREFIX.length)
-          : undefined;
       const stream_exact =
-        closing !== undefined ||
-        (source !== undefined && is_literal_source(source))
-          ? true
-          : undefined;
+        source !== undefined && is_literal_source(source) ? true : undefined;
       try {
         await store().query<TEvents>((e) => events.push(e), {
-          stream: closing ?? source,
+          stream: source,
           stream_exact,
           after: at,
           limit: eventLimit,

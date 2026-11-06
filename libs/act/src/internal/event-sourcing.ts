@@ -136,7 +136,6 @@ const cache_drop = (stream: string): Promise<void> =>
       )
     );
 
-/** Commits a snapshot event. Never throws: a failed snapshot must not fail the action. */
 /**
  * Whether a state's `.snap` predicate asks for a snapshot. It runs after the
  * commit landed, so a predicate that throws must not fail the action.
@@ -155,6 +154,7 @@ function wants_snap<TState extends Schema, TEvents extends Schemas>(
   }
 }
 
+/** Commits a snapshot event. Never throws: a failed snapshot must not fail the action. */
 export async function snap<TState extends Schema, TEvents extends Schemas>(
   snapshot: Snapshot<TState, TEvents>
 ): Promise<Committed<TEvents, keyof TEvents> | undefined> {
@@ -369,6 +369,9 @@ export async function load<
   const { stream, actor, asOf } = target;
   const time_travel =
     !!asOf && Object.values(asOf).some((v) => v !== undefined);
+  // `limit` and `created_after` read a slice of the real events, without a seed.
+  const seeded =
+    time_travel && asOf!.limit === undefined && !asOf!.created_after;
   const cached = time_travel ? undefined : await cache().get<TState>(stream);
   const cache_hit = !!cached;
   let state = cached?.state ?? (me.init ? me.init() : ({} as TState));
@@ -380,15 +383,9 @@ export async function load<
 
   await store().query<TEvents>(
     (raw) => {
-      // Time travel folds the real events, and `limit` counts those. A snapshot
-      // only seeds it, holding what a prune or a restart took: the first row,
-      // with nothing cut before it.
-      if (time_travel) {
-        if (raw.name === SNAP_EVENT && (replayed > 0 || asOf!.created_after))
-          return;
-        if (asOf!.limit !== undefined && replayed - snaps >= asOf!.limit)
-          return;
-      }
+      // Time travel folds the real events. A snapshot only seeds it, holding what
+      // a prune or a restart took, so it counts only as the first row.
+      if (seeded && raw.name === SNAP_EVENT && replayed > 0) return;
       event = me.view(raw, actor);
       if (event.name === SNAP_EVENT) {
         state = event.data as TState;
@@ -424,11 +421,13 @@ export async function load<
       // so a windowed close's prune can't fold the tail onto stale state.
       ...(cached
         ? { after: cached.event_id, with_snaps: true }
-        : time_travel
+        : seeded
           ? // From the start, past the resume floor, which could jump over the
-            // time bound. The snapshots are for the seed; `limit` is for events.
-            { with_snaps: true, after: -1, ...asOf, limit: undefined }
-          : { with_snaps: true }),
+            // time bound. The snapshots are for the seed.
+            { with_snaps: true, after: -1, ...asOf }
+          : time_travel
+            ? asOf
+            : { with_snaps: true }),
     }
   );
 

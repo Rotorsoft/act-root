@@ -9450,7 +9450,6 @@ export declare function streamPatternToGlob(input: string): string;
  */
 export declare class SqliteStore implements Store {
     private client;
-    private readonly _connect;
     private readonly _resolve_pii_key;
     constructor(config: SqliteConfig);
     private _stringify_pii_for_write;

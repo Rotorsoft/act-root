@@ -553,9 +553,11 @@ export class DrainController<
       });
 
       if (!cycle) {
-        // Caught up: whatever was due when this pass started has no work.
+        // Caught up: whatever was due when this pass started has no work. It
+        // proves the store answers, not that what failed recovered: a stream
+        // whose ack failed is still leased, so this claim didn't see it.
         this._defer.prune(started);
-        this._deps.breaker.passed();
+        this._deps.breaker.reached();
         // Lowers only the raises it saw: one that landed during the claim
         // (an unblock, a reset) brought work this claim couldn't see.
         this._lowered = raised;

@@ -2,9 +2,9 @@
  * Time travel skips the resume floor, not the snapshots: after a windowed close
  * or a restart, a snapshot is all that holds the effect of the events it replaced.
  */
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import { act, dispose, sleep, state, ZodEmpty } from "../src/index.js";
+import { act, dispose, sleep, state, store, ZodEmpty } from "../src/index.js";
 
 const actor = { id: "a", name: "a" };
 const base = () =>
@@ -33,6 +33,20 @@ describe("time travel after history moved into a snapshot", () => {
     await app.close([{ stream: "pruned", before: new Date() }]);
     const { state: past } = await app.load(R, "pruned", undefined, later());
     expect(past.n).toBe(5);
+  });
+
+  it("pushes a limit down to the store, so it doesn't read the whole stream", async () => {
+    const R = base().build();
+    const app = act().withState(R).build({ autoSettle: false });
+    for (let i = 0; i < 4; i++)
+      await app.do("hit", { stream: "limited", actor }, {});
+    const query = vi.spyOn(store(), "query");
+    const { state: past } = await app.load(R, "limited", undefined, {
+      limit: 2,
+    });
+    expect(past.n).toBe(2);
+    expect(query.mock.calls.at(-1)?.[1]).toMatchObject({ limit: 2 });
+    query.mockRestore();
   });
 
   it("keeps the state a restart seeded", async () => {

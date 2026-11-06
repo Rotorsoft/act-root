@@ -309,7 +309,6 @@ export function streamPatternToGlob(input: string): string {
  */
 export class SqliteStore implements Store {
   private client: Client;
-  private readonly _connect: () => Client;
   // Memoized key resolver for the optional `pii_encryption` envelope.
   // Initialized in the constructor when encryption is configured;
   // `undefined` otherwise. The resolver caches the operator's key on
@@ -318,12 +317,10 @@ export class SqliteStore implements Store {
   private readonly _resolve_pii_key: (() => Promise<Buffer>) | undefined;
 
   constructor(config: SqliteConfig) {
-    this._connect = () =>
-      createClient({
-        url: resolve_url(config?.url),
-        authToken: config.authToken,
-      });
-    this.client = this._connect();
+    this.client = createClient({
+      url: resolve_url(config?.url),
+      authToken: config.authToken,
+    });
     this._resolve_pii_key = config.pii_encryption
       ? makeKeyResolver(config.pii_encryption)
       : undefined;
@@ -569,12 +566,6 @@ export class SqliteStore implements Store {
   // Opens a write transaction: a BEGIN that fails is a {@link StoreError} too.
   private _begin(operation: string) {
     return this.client.transaction("write").catch((e: unknown) => {
-      // A busy BEGIN leaves libSQL's connection unable to COMMIT until its
-      // failed statement is collected, so this store moves to a new one.
-      if ((e as { code?: string }).code === "SQLITE_BUSY") {
-        this.client.close();
-        this.client = this._connect();
-      }
       throw new StoreError(operation, { cause: e });
     });
   }

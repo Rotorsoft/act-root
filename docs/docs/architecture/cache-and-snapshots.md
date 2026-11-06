@@ -125,7 +125,7 @@ When any field is set, the framework treats this as a historical read:
 
 - Cache is bypassed (cached state may include events past the cutoff)
 - Cache write at the end is skipped (don't pollute with a historical view)
-- Query reads from the start with `with_snaps` and `after: -1`, under the `asOf` filter. The resume floor would jump to the latest snapshot, which might sit outside the window, and `after: -1` turns it off. The fold takes real events, and a snapshot only as the seed: the first row, when no lower bound cuts the stream. After a windowed close or a restart, that snapshot is all that holds the effect of the events it replaced. `limit` counts events, not snapshots. A cutoff before the seed has no history left to show.
+- Query reads from the start with `with_snaps` and `after: -1`, under the `asOf` filter. The resume floor would jump to the latest snapshot, which might sit outside the window, and `after: -1` turns it off. The fold takes real events, and a snapshot only as the seed: the first row. After a windowed close or a restart, that snapshot is all that holds the effect of the events it replaced. `limit` and `created_after` read a slice of the real events with no seed, so after a prune they see only what's left. A cutoff before the seed has no history left to show.
 
 The snapshot floor is a current-state optimization, and its eligibility is decided in exactly one place — `load()` asks to skip it when there is an `asOf` bound. The stores apply the floor whenever asked and never re-derive that decision (RFC 1274); this is why the same "floor jumped past the cutoff" bug does not have to be re-fixed per adapter for each new bound.
 

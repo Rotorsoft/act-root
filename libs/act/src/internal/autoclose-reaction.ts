@@ -37,7 +37,7 @@ import { CloseSignal } from "./reaction-dispatch.js";
  * an autoclose defer never short-circuits them. Internal; not a public
  * surface.
  */
-export const AUTOCLOSE_TARGET_PREFIX = "__autoclose__:";
+const AUTOCLOSE_TARGET_PREFIX = "__autoclose__:";
 
 /**
  * Inject one synthesized autoclose reaction per `.autocloses(...)` state
@@ -76,13 +76,16 @@ export function synthesize_autoclose_reactions<
       // watermark would let autoclose's defer short-circuit the aggregate's
       // other reactions (the "a defer affects all reactions on a stream"
       // hazard). The close still targets the aggregate (`source`).
-      resolver: (e) => ({
-        target: `${AUTOCLOSE_TARGET_PREFIX}${e.stream}`,
-        // A stream name with a regex metacharacter would read as a pattern,
-        // and a store may refuse it at subscribe, stopping every reaction. The
-        // fetch reads such a stream exactly, from the target's own name.
-        source: is_literal_source(e.stream) ? e.stream : undefined,
-      }),
+      // A stream name with a regex metacharacter would read as a pattern, and a
+      // store may refuse it at subscribe, stopping every reaction. Such a stream
+      // has no autoclose: `app.close` still closes it.
+      resolver: (e) =>
+        is_literal_source(e.stream)
+          ? {
+              target: `${AUTOCLOSE_TARGET_PREFIX}${e.stream}`,
+              source: e.stream,
+            }
+          : undefined,
       // Never block on autoclose: a transient query/store error should retry,
       // not quarantine the synthetic stream.
       options: { blockOnError: false, maxRetries: DEFAULT_MAX_RETRIES },
@@ -138,22 +141,15 @@ export function synthesize_autoclose_reactions<
         // whenever the stats entry is (same non-excluded event set).
         if (keep_days !== undefined) {
           const cutoff = days_before_now(keep_days);
-          if (entry.tail!.created < cutoff) {
-            // With a terminate window still ahead, this visit can't spend the
-            // only wake it has: the head stays unacked, parked on that window.
-            const ahead = after_windows
-              .map((days) => days_after(head.created, days).getTime())
-              .filter((t) => t > Date.now());
+          if (entry.tail!.created < cutoff)
             throw new CloseSignal({
               stream: aggregate,
               before: cutoff,
               archive: archiver
                 ? () => archiver(aggregate, head, cutoff)
                 : undefined,
-              at: ahead.length ? head.id - 1 : head.id,
-              defer: ahead.length ? Math.min(...ahead) : undefined,
+              at: head.id,
             });
-          }
         }
         // Not eligible yet: park on the earliest derivable due-time — the
         // day a terminate cooldown opens and/or the day the oldest

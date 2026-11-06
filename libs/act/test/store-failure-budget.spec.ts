@@ -33,6 +33,36 @@ const counter = state({ Counter: z.object({ count: z.number() }) })
 const actor = { id: "a", name: "a" };
 
 describe("a failing store does not quarantine a healthy stream", () => {
+  it("a claim that finds nothing while the failed stream is leased doesn't clear the flag", async () => {
+    const s = new InMemoryStore();
+    await s.seed();
+    s.ack = () =>
+      Promise.reject(new StoreError("ack", { cause: new Error("busy") }));
+    const app = act()
+      .withState(counter)
+      .on("ticked")
+      .do(async function h() {}, { maxRetries: 2 })
+      .to({ target: "leased" })
+      .build({
+        autoSettle: false,
+        circuitBreaker: { failureThreshold: 100, cooldownMs: 100_000 },
+        scoped: { store: s, cache: new InMemoryCache() },
+      });
+    app.on("error", () => {});
+    const blocked: unknown[] = [];
+    app.on("blocked", (b) => blocked.push(...b));
+    await app.do("tick", { stream: "held", actor }, {});
+    await app.correlate();
+    for (let i = 0; i < 6; i++) {
+      await app.drain({ leaseMillis: 15 });
+      // Empty: the stream whose ack failed is still leased.
+      await app.drain({ leaseMillis: 15 });
+      await sleep(25);
+    }
+    await app.shutdown();
+    expect(blocked).toEqual([]);
+  });
+
   it("a failing ack under settle doesn't block a healthy stream", async () => {
     const s = new InMemoryStore();
     await s.seed();
