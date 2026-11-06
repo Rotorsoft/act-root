@@ -18,7 +18,7 @@ import type {
   StreamPosition,
   StreamStats,
 } from "../types/index.js";
-import { SNAP_EVENT } from "../types/index.js";
+import { SNAP_EVENT, TOMBSTONE_EVENT } from "../types/index.js";
 import {
   current_version_of,
   deprecated_event_names,
@@ -376,6 +376,8 @@ const make_restart_candidate_pass: PassFactory = (deps, options) => {
             stream_exact: true,
             names: [SNAP_EVENT],
             with_snaps: true,
+            // From the start: on its own, `with_snaps` resumes at the latest.
+            after: -1,
           }
         );
         findings.push({
@@ -547,7 +549,8 @@ const make_correlation_gaps_pass: PassFactory = () => {
       const causation = (e.meta as Record<string, unknown> | undefined)
         ?.causation as { event?: { id?: number } } | undefined;
       const parent_id = causation?.event?.id;
-      if (parent_id !== undefined) {
+      // A close's seed names the guard it just deleted, which isn't a gap.
+      if (parent_id !== undefined && e.name !== TOMBSTONE_EVENT) {
         checks.push({ stream: e.stream, id: e.id, parent_id });
       }
     },

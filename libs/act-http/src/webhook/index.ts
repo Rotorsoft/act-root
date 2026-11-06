@@ -75,7 +75,7 @@ function has_header(headers: Record<string, string>, name: string): boolean {
  *
  * Behavior:
  *
- * - 2xx and 3xx return successfully.
+ * - 2xx returns successfully. 3xx isn't followed, and blocks the stream.
  * - 5xx responses, network errors, and timeouts throw
  *   {@link WebhookError} (`status: 0` for network/timeout). Drain
  *   retries per the reaction's `maxRetries` / `backoff`.
@@ -137,6 +137,9 @@ export function webhook<TEvents extends Schemas = Schemas>(
       let response: Response;
       try {
         response = await fetch_impl(url, {
+          // Followed, a redirect turns the POST into a bodyless GET whose 200
+          // reads as delivered. Unfollowed, it blocks as `classify` says.
+          redirect: "manual",
           method,
           headers,
           body,

@@ -24,6 +24,7 @@ import type {
   State,
 } from "../types/index.js";
 import { SNAP_EVENT, TOMBSTONE_EVENT } from "../types/index.js";
+import { is_literal_source } from "../utils.js";
 import { days_after, days_before_now } from "./autoclose-policy.js";
 import { in_autoclose_window, next_window_open } from "./autoclose-window.js";
 import { DEFAULT_MAX_RETRIES } from "./config.js";
@@ -75,10 +76,16 @@ export function synthesize_autoclose_reactions<
       // watermark would let autoclose's defer short-circuit the aggregate's
       // other reactions (the "a defer affects all reactions on a stream"
       // hazard). The close still targets the aggregate (`source`).
-      resolver: (e) => ({
-        target: `${AUTOCLOSE_TARGET_PREFIX}${e.stream}`,
-        source: e.stream,
-      }),
+      // A stream name with a regex metacharacter would read as a pattern, and a
+      // store may refuse it at subscribe, stopping every reaction. Such a stream
+      // has no autoclose: `app.close` still closes it.
+      resolver: (e) =>
+        is_literal_source(e.stream)
+          ? {
+              target: `${AUTOCLOSE_TARGET_PREFIX}${e.stream}`,
+              source: e.stream,
+            }
+          : undefined,
       // Never block on autoclose: a transient query/store error should retry,
       // not quarantine the synthetic stream.
       options: { blockOnError: false, maxRetries: DEFAULT_MAX_RETRIES },

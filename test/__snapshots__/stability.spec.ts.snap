@@ -8026,7 +8026,7 @@ export { NonRetryableHttpError, NonRetryableWebhookError, RetryableHttpError, We
  *
  * Behavior:
  *
- * - 2xx and 3xx return successfully.
+ * - 2xx returns successfully. 3xx isn't followed, and blocks the stream.
  * - 5xx responses, network errors, and timeouts throw
  *   {@link WebhookError} (\`status: 0\` for network/timeout). Drain
  *   retries per the reaction's \`maxRetries\` / \`backoff\`.

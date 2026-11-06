@@ -351,6 +351,9 @@ export async function load<
   const { stream, actor, asOf } = target;
   const time_travel =
     !!asOf && Object.values(asOf).some((v) => v !== undefined);
+  // `limit` and `created_after` read a slice of the real events, without a seed.
+  const seeded =
+    time_travel && asOf!.limit === undefined && !asOf!.created_after;
   const cached = time_travel ? undefined : await cache().get<TState>(stream);
   const cache_hit = !!cached;
   let state = cached?.state ?? (me.init ? me.init() : ({} as TState));
@@ -362,6 +365,9 @@ export async function load<
 
   await store().query<TEvents>(
     (raw) => {
+      // Time travel folds the real events. A snapshot only seeds it, holding what
+      // a prune or a restart took, so it counts only as the first row.
+      if (seeded && raw.name === SNAP_EVENT && replayed > 0) return;
       event = me.view(raw, actor);
       if (event.name === SNAP_EVENT) {
         state = event.data as TState;
@@ -397,7 +403,13 @@ export async function load<
       // so a windowed close's prune can't fold the tail onto stale state.
       ...(cached
         ? { after: cached.event_id, with_snaps: true }
-        : { ...(time_travel ? {} : { with_snaps: true }), ...asOf }),
+        : seeded
+          ? // From the start, past the resume floor, which could jump over the
+            // time bound. The snapshots are for the seed.
+            { with_snaps: true, after: -1, ...asOf }
+          : time_travel
+            ? asOf
+            : { with_snaps: true }),
     }
   );
 
