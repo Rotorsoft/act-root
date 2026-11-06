@@ -26,6 +26,7 @@ import {
   ConcurrencyError,
   is_literal_source,
   StoreError,
+  TOMBSTONE_EVENT,
   ValidationError,
 } from "@rotorsoft/act";
 import {
@@ -308,6 +309,7 @@ export function streamPatternToGlob(input: string): string {
  */
 export class SqliteStore implements Store {
   private client: Client;
+  private readonly _connect: () => Client;
   // Memoized key resolver for the optional `pii_encryption` envelope.
   // Initialized in the constructor when encryption is configured;
   // `undefined` otherwise. The resolver caches the operator's key on
@@ -316,10 +318,12 @@ export class SqliteStore implements Store {
   private readonly _resolve_pii_key: (() => Promise<Buffer>) | undefined;
 
   constructor(config: SqliteConfig) {
-    this.client = createClient({
-      url: resolve_url(config?.url),
-      authToken: config.authToken,
-    });
+    this._connect = () =>
+      createClient({
+        url: resolve_url(config?.url),
+        authToken: config.authToken,
+      });
+    this.client = this._connect();
     this._resolve_pii_key = config.pii_encryption
       ? makeKeyResolver(config.pii_encryption)
       : undefined;
@@ -565,6 +569,12 @@ export class SqliteStore implements Store {
   // Opens a write transaction: a BEGIN that fails is a {@link StoreError} too.
   private _begin(operation: string) {
     return this.client.transaction("write").catch((e: unknown) => {
+      // A busy BEGIN leaves libSQL's connection unable to COMMIT until its
+      // failed statement is collected, so this store moves to a new one.
+      if ((e as { code?: string }).code === "SQLITE_BUSY") {
+        this.client.close();
+        this.client = this._connect();
+      }
       throw new StoreError(operation, { cause: e });
     });
   }
@@ -581,7 +591,7 @@ export class SqliteStore implements Store {
         await tx.commit();
         return result;
       } catch (e) {
-        await tx.rollback();
+        await tx.rollback().catch(() => {});
         throw new StoreError(operation, { cause: e });
       }
     });
@@ -604,15 +614,18 @@ export class SqliteStore implements Store {
       // version on a (stream, version) unique collision.
       let current_version = -1;
       try {
-        const version_row = await tx.execute({
-          sql: "SELECT COALESCE(MAX(version), -1) as v FROM events WHERE stream = ?",
+        const head = await tx.execute({
+          sql: "SELECT version, name FROM events WHERE stream = ? ORDER BY version DESC LIMIT 1",
           args: [stream],
         });
-        current_version = Number(version_row.rows[0].v);
+        current_version = Number(head.rows[0]?.version ?? -1);
 
+        // A full close of a one-event stream leaves the head at the same
+        // version, so the version alone can't see it.
         if (
           typeof expectedVersion === "number" &&
-          current_version !== expectedVersion
+          (current_version !== expectedVersion ||
+            head.rows[0]?.name === TOMBSTONE_EVENT)
         ) {
           throw new ConcurrencyError(
             stream,
@@ -656,7 +669,7 @@ export class SqliteStore implements Store {
         await tx.commit();
         return committed;
       } catch (e) {
-        await tx.rollback();
+        await tx.rollback().catch(() => {});
         // Map the (stream, version) unique collision to
         // ConcurrencyError — the same signal PG raises from 23505 — so a
         // caller retries on the framework contract, not a raw libsql error.
@@ -1712,7 +1725,7 @@ export class SqliteStore implements Store {
         });
         await tx.commit();
       } catch (error) {
-        await tx.rollback();
+        await tx.rollback().catch(() => {});
         throw error;
       }
     });

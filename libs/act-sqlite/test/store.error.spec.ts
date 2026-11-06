@@ -1,4 +1,14 @@
-import { ConcurrencyError, StoreError, ValidationError } from "@rotorsoft/act";
+import { createClient } from "@libsql/client";
+import {
+  act,
+  ConcurrencyError,
+  InMemoryCache,
+  StoreError,
+  state,
+  ValidationError,
+  ZodEmpty,
+} from "@rotorsoft/act";
+import { z } from "zod";
 import { SqliteStore } from "../src/index.js";
 import { rm_tmp_dbs, tmp_db_url } from "./tmp-db.js";
 
@@ -42,7 +52,7 @@ function mockClientFailOn(failOn: string) {
       if (sql.includes(failOn))
         return Promise.reject(new Error(`mocked ${failOn} error`));
       // Provide neutral defaults for SELECTs
-      if (sql.includes("MAX(version)")) {
+      if (sql.includes("ORDER BY version DESC LIMIT 1")) {
         return Promise.resolve({
           rows: [{ v: -1 }],
           rowsAffected: 0,
@@ -173,7 +183,7 @@ describe("SqliteStore error paths", () => {
 
   it("commit: maps a (stream,version) unique collision to ConcurrencyError", async () => {
     // A real DB with a v0 row already present. We stub ONLY the
-    // version-probe SELECT to return a stale MAX(version)=-1, so commit
+    // head-probe SELECT to return no head, a stale -1, so commit
     // recomputes version=0 and the INSERT genuinely collides on the
     // UNIQUE(stream, version) index — the race PG maps via 23505. The
     // driver raises SQLITE_CONSTRAINT_UNIQUE; the adapter must surface
@@ -197,7 +207,7 @@ describe("SqliteStore error paths", () => {
       };
       const realExecute = tx.execute.bind(tx);
       tx.execute = (stmt: Stmt) => {
-        if (sqlOf(stmt).includes("MAX(version)"))
+        if (sqlOf(stmt).includes("ORDER BY version DESC LIMIT 1"))
           return Promise.resolve({
             rows: [{ v: -1 }],
             rowsAffected: 0,
@@ -221,7 +231,7 @@ describe("SqliteStore error paths", () => {
     const tx = txOk();
     tx.execute.mockImplementation((stmt: Stmt) => {
       const sql = sqlOf(stmt);
-      if (sql.includes("MAX(version)")) {
+      if (sql.includes("ORDER BY version DESC LIMIT 1")) {
         return Promise.resolve({
           rows: [{ v: 5 }],
           rowsAffected: 0,
@@ -372,6 +382,101 @@ describe("SqliteStore error paths", () => {
       expect(failed).toBeInstanceOf(StoreError);
       expect((failed as StoreError).operation).toBe(operation);
     }
+    await real.dispose();
+  });
+
+  it("commits again after one busy write", async () => {
+    const url = tmp_db_url();
+    const real = new SqliteStore({ url });
+    await real.seed();
+    const other = createClient({ url });
+    const lock = await other.transaction("write");
+    const meta = { correlation: "", causation: {} };
+    const ev = [{ name: "E", data: {} }];
+    await expect(real.commit("s", ev, meta)).rejects.toBeInstanceOf(StoreError);
+    await lock.rollback();
+    other.close();
+    await expect(real.commit("s", ev, meta)).resolves.toHaveLength(1);
+    await real.dispose();
+  });
+
+  it("keeps StoreError when the rollback fails too", async () => {
+    const meta = { correlation: "", causation: {} };
+    const writes: [string, (store: SqliteStore) => Promise<unknown>][] = [
+      ["claim", (store) => store.claim(1, 1, "w", 1000)],
+      ["commit", (store) => store.commit("s", [{ name: "E", data: {} }], meta)],
+      [
+        "restore",
+        (store) =>
+          store.restore(async () => {
+            throw new Error("source failed");
+          }),
+      ],
+    ];
+    for (const [operation, write] of writes) {
+      const real = new SqliteStore({ url: tmp_db_url() });
+      await real.seed();
+      const client = (real as unknown as { client: { transaction: unknown } })
+        .client;
+      const begin = (
+        client.transaction as (mode: string) => Promise<{
+          execute: unknown;
+          rollback: unknown;
+        }>
+      ).bind(client);
+      client.transaction = async (mode: string) => {
+        const tx = await begin(mode);
+        tx.execute = () => Promise.reject(new Error("disk full"));
+        tx.rollback = () => Promise.reject(new Error("cannot rollback"));
+        return tx;
+      };
+      const error = await write(real).catch((e) => e);
+      expect((error as Error).message, operation).not.toBe("cannot rollback");
+    }
+  });
+
+  it("refuses a guarded commit onto a tombstone, and a one-event stream stays closed", async () => {
+    const real = new SqliteStore({ url: tmp_db_url() });
+    await real.seed();
+    const meta = { correlation: "", causation: {} };
+    await real.commit("s", [{ name: "__tombstone__", data: {} }], meta);
+    await expect(
+      real.commit("s", [{ name: "E", data: {} }], meta, 0)
+    ).rejects.toBeInstanceOf(ConcurrencyError);
+    await real.dispose();
+  });
+
+  it("a stream name with a + doesn't stop other reactions", async () => {
+    const R = state({ R: z.object({ n: z.number() }) })
+      .init(() => ({ n: 0 }))
+      .emits({ Hit: ZodEmpty })
+      .patch({ Hit: (_, s) => ({ n: s.n + 1 }) })
+      .on({ hit: ZodEmpty })
+      .emit(() => ["Hit", {}])
+      .autocloses({ reaches: 100 })
+      .build();
+    const real = new SqliteStore({ url: tmp_db_url() });
+    await real.seed();
+    const seen: string[] = [];
+    const app = act()
+      .withState(R)
+      .on("Hit")
+      .do(async function h(e) {
+        seen.push(e.stream);
+      })
+      .to("log")
+      .build({
+        autoSettle: false,
+        scoped: { store: real, cache: new InMemoryCache() },
+      });
+    const actor = { id: "a", name: "a" };
+    await app.do("hit", { stream: "a+b", actor }, {});
+    await app.do("hit", { stream: "ok", actor }, {});
+    for (let i = 0; i < 4; i++) {
+      await app.correlate();
+      await app.drain();
+    }
+    expect(seen).toEqual(["a+b", "ok"]);
     await real.dispose();
   });
 });

@@ -106,7 +106,7 @@ export class SettleLoop<TEvents extends Schemas> {
           // Recording an idle one would re-close an OPEN breaker mid-outage
           // and let the drain below hammer a store nobody has heard from.
           const scanned = pass.kind === "scanned";
-          if (scanned) this._deps.breaker.passed();
+          if (scanned) this._deps.breaker.reached();
           const drain = await this._deps.drain(drain_options);
           passes.push(drain);
           // Only a pass that read no events and leased nothing is idle: a

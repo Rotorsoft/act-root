@@ -53,6 +53,8 @@ That is why the scan runs for **every** app since [#1487](https://github.com/Rot
 - **`drain()` alone is not a pipeline.** `claim` consults nothing but the mark since [#1488](https://github.com/Rotorsoft/act-root/issues/1488), so a commit becomes claimable only after the next correlate. Correlate arms the lane controllers whenever it raises a mark, not only when it registers a new target — freshly marked work would otherwise sit until an unrelated commit woke the lane. The supported loops are `settle()` (which is correlate→drain) and the explicit `await app.correlate(); await app.drain();` pair — the one the docs and tests have always used. A bare `drain()` after a commit sees the new work only if a correlate ran in between.
 - **A static-only app now pays for a scan it used to skip.** It buys the same O(lease budget) claim every other app gets; on Postgres the measured cost is in [`libs/act-pg/PERFORMANCE.md`](https://github.com/Rotorsoft/act-root/blob/master/libs/act-pg/PERFORMANCE.md).
 
+A target reads one source: a subscription row keeps the source it was created with. Reactions resolving another source for the same target never see those events, and Act reports it, once: at build for a static target, and during correlate for a dynamic one. Give them their own target.
+
 A mark is an assertion about the log, so the scan only raises one for an event the target's own `fetch` would return — an event outside the subscription's `source` filter is not that target's work and leaves its mark alone.
 
 ```mermaid

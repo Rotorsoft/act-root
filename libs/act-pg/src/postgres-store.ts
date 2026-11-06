@@ -942,13 +942,23 @@ export class PostgresStore implements Store {
     // checkout itself is in-process, not a round trip.
     const client = await this._client("commit");
     try {
-      const last = await client.query<{ version: number }>(
-        `SELECT version FROM ${this._fqt}
+      const last = await client.query<{
+        id: number;
+        version: number;
+        name: string;
+      }>(
+        `SELECT id, version, name FROM ${this._fqt}
          WHERE stream=$1 ORDER BY version DESC LIMIT 1`,
         [stream]
       );
-      let version = last.rows.at(0)?.version ?? -1;
-      if (typeof expectedVersion === "number" && version !== expectedVersion)
+      const head = last.rows.at(0);
+      let version = head?.version ?? -1;
+      // A full close of a one-event stream leaves the head at the same
+      // version, so the version alone can't see it.
+      if (
+        typeof expectedVersion === "number" &&
+        (version !== expectedVersion || head?.name === TOMBSTONE_EVENT)
+      )
         throw new ConcurrencyError(
           stream,
           version,
@@ -986,14 +996,14 @@ export class PostgresStore implements Store {
       // would otherwise be skipped) without changing row multiplicity —
       // it yields at most one row.
       //
-      // The index catches a rival at the same version, but not a head that
-      // moved backwards: a full close deletes the rows that would collide
-      // and writes its tombstone at version 0. So the statement also checks
-      // the head is still what the probe saw, and inserts nothing if it
-      // moved. A statement already waiting on the lock when a close commits
-      // keeps its older snapshot and still gets through; closing that needs
-      // a database function or the lock across a round trip.
-      const unmoved = `COALESCE((SELECT e.version FROM ${this._fqt} e WHERE e.stream = $5
+      // The index catches a rival at the same version, but not a close: it
+      // deletes the rows that would collide and writes its tombstone at
+      // version 0. So the statement also checks the head is still the row the
+      // probe saw, by id, since a version can come back around, and inserts
+      // nothing if it isn't. A statement already waiting on the lock when a
+      // close commits keeps its older snapshot and still gets through; closing
+      // that needs a database function or the lock across a round trip.
+      const unmoved = `COALESCE((SELECT e.id FROM ${this._fqt} e WHERE e.stream = $5
         ORDER BY e.version DESC LIMIT 1), -1) = $8::int`;
       const insert_select =
         msgs.length === 1
@@ -1038,7 +1048,7 @@ export class PostgresStore implements Store {
               stream,
               meta,
               this._fqt,
-              base_version,
+              head?.id ?? -1,
             ]
           : [
               names,
@@ -1048,7 +1058,7 @@ export class PostgresStore implements Store {
               stream,
               meta,
               this._fqt,
-              base_version,
+              head?.id ?? -1,
             ];
       const params = this.config.notify
         ? [...base_params, this._channel, this._by, NOTIFY_MAX_PAYLOAD_BYTES]
@@ -1266,8 +1276,8 @@ export class PostgresStore implements Store {
     return this._tx("subscribe", async (client) => {
       let subscribed = 0;
       if (streams.length) {
-        // Every worker takes these rows in the same order, or two of them
-        // subscribing to the same streams wait on each other and deadlock.
+        // The INSERT takes new rows in this order, so two workers subscribing
+        // to the same new streams can't wait on each other and deadlock.
         const ordered = JSON.stringify(
           [...streams].sort((a, b) => (a.stream < b.stream ? -1 : 1))
         );

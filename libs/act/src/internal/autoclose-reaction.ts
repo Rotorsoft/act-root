@@ -24,6 +24,7 @@ import type {
   State,
 } from "../types/index.js";
 import { SNAP_EVENT, TOMBSTONE_EVENT } from "../types/index.js";
+import { is_literal_source } from "../utils.js";
 import { days_after, days_before_now } from "./autoclose-policy.js";
 import { in_autoclose_window, next_window_open } from "./autoclose-window.js";
 import { DEFAULT_MAX_RETRIES } from "./config.js";
@@ -36,7 +37,7 @@ import { CloseSignal } from "./reaction-dispatch.js";
  * an autoclose defer never short-circuits them. Internal; not a public
  * surface.
  */
-const AUTOCLOSE_TARGET_PREFIX = "__autoclose__:";
+export const AUTOCLOSE_TARGET_PREFIX = "__autoclose__:";
 
 /**
  * Inject one synthesized autoclose reaction per `.autocloses(...)` state
@@ -77,7 +78,10 @@ export function synthesize_autoclose_reactions<
       // hazard). The close still targets the aggregate (`source`).
       resolver: (e) => ({
         target: `${AUTOCLOSE_TARGET_PREFIX}${e.stream}`,
-        source: e.stream,
+        // A stream name with a regex metacharacter would read as a pattern,
+        // and a store may refuse it at subscribe, stopping every reaction. The
+        // fetch reads such a stream exactly, from the target's own name.
+        source: is_literal_source(e.stream) ? e.stream : undefined,
       }),
       // Never block on autoclose: a transient query/store error should retry,
       // not quarantine the synthetic stream.
@@ -134,15 +138,22 @@ export function synthesize_autoclose_reactions<
         // whenever the stats entry is (same non-excluded event set).
         if (keep_days !== undefined) {
           const cutoff = days_before_now(keep_days);
-          if (entry.tail!.created < cutoff)
+          if (entry.tail!.created < cutoff) {
+            // With a terminate window still ahead, this visit can't spend the
+            // only wake it has: the head stays unacked, parked on that window.
+            const ahead = after_windows
+              .map((days) => days_after(head.created, days).getTime())
+              .filter((t) => t > Date.now());
             throw new CloseSignal({
               stream: aggregate,
               before: cutoff,
               archive: archiver
                 ? () => archiver(aggregate, head, cutoff)
                 : undefined,
-              at: head.id,
+              at: ahead.length ? head.id - 1 : head.id,
+              defer: ahead.length ? Math.min(...ahead) : undefined,
             });
+          }
         }
         // Not eligible yet: park on the earliest derivable due-time — the
         // day a terminate cooldown opens and/or the day the oldest

@@ -654,6 +654,35 @@ describe("audit", () => {
     });
   });
 
+  describe("after a close", () => {
+    const Hits = state({ Hits: z.object({ n: z.number() }) })
+      .init(() => ({ n: 0 }))
+      .emits({ Hit: z.object({}) })
+      .patch({ Hit: (_, s) => ({ n: s.n + 1 }) })
+      .on({ hit: z.object({}) })
+      .emit(() => ["Hit", {}]);
+    const actor = { id: "a", name: "a" };
+
+    it("doesn't list a healthy closed stream as a correlation gap", async () => {
+      const app = act().withState(Hits.build()).build({ autoSettle: false });
+      await app.do("hit", { stream: "closed-ok", actor }, {});
+      await app.close([{ stream: "closed-ok" }]);
+      expect(await collect(app.audit(["correlation-gaps"]))).toEqual([]);
+    });
+
+    it("counts every snapshot of a restart candidate", async () => {
+      const app = act()
+        .withState(Hits.snap((s) => s.patches >= 2).build())
+        .build({ autoSettle: false });
+      for (let i = 0; i < 5; i++)
+        await app.do("hit", { stream: "two-snaps", actor }, {});
+      const [finding] = await collect(
+        app.audit(["restart-candidate"], { thresholds: { restart_min: 3 } })
+      );
+      expect((finding as { snaps: number }).snaps).toBe(2);
+    });
+  });
+
   describe("restart-candidate category", () => {
     it("flags streams above the event-count threshold when state has .snap()", async () => {
       const app = act().withState(order).build();

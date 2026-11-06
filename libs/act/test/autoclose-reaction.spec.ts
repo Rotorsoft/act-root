@@ -42,6 +42,66 @@ describe("autoclose as a synthesized reaction", () => {
     await dispose()();
   });
 
+  it("closes a stream whose name has a regex metacharacter", async () => {
+    const closed: CloseResult[] = [];
+    const app = act()
+      .withState(ticket({ is: "Resolved" }))
+      .build({ autoSettle: false });
+    app.on("closed", (r) => closed.push(r));
+    await app.do("open", { stream: "room+a", actor }, {});
+    await app.do("resolve", { stream: "room+a", actor }, {});
+    await app.correlate();
+    await app.drain();
+    expect(closed[0]?.truncated.has("room+a")).toBe(true);
+  });
+
+  it("keeps a terminate window's wake across a prune", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const DAY = 86_400_000;
+      const closed: CloseResult[] = [];
+      const app = act()
+        .withState(
+          base()
+            .snap((s) => s.patches >= 1)
+            .autocloses({
+              is: "Resolved",
+              after: { days: 90 },
+              keep: { days: 30 },
+            })
+            .build()
+        )
+        .build({ autoSettle: false });
+      app.on("closed", (r) => closed.push(r));
+      let n = 0;
+      const pump = async () => {
+        await app.do("open", { stream: `noise-${n++}`, actor }, {});
+        await app.correlate();
+        await app.drain({ leaseMillis: 1 });
+      };
+      await app.do("open", { stream: "kept", actor }, {});
+      await pump();
+      vi.setSystemTime(Date.now() + 40 * DAY);
+      await app.do("resolve", { stream: "kept", actor }, {});
+      await pump();
+      await pump();
+      vi.setSystemTime(Date.now() + 91 * DAY);
+      await pump();
+      await pump();
+      vi.setSystemTime(Date.now() + 100 * DAY);
+      await pump();
+      await pump();
+      expect(
+        closed.some((r) => {
+          const t = r.truncated.get("kept");
+          return t && !t.before;
+        })
+      ).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("keeps a later `or.after` backstop once the earlier `after` has passed", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     try {

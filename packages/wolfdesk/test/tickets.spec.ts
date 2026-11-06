@@ -130,8 +130,8 @@ describe("tickets", { timeout: 30_000 }, () => {
     );
     await assignTicket(t, chance.guid(), now, now);
     await addMessage(t, "first message");
-    await markTicketResolved(t);
     await settle(t.stream, (row) => !!row?.escalationId && !!row.reassignAfter);
+    await markTicketResolved(t);
     await closeTicket(t);
     await settle(t.stream, (row) => !!row?.closedById);
 

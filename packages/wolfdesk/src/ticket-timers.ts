@@ -50,7 +50,7 @@ export const TicketTimersSlice = slice()
   .defer((event) => ({ at: event.data.escalateAfter }))
   .do(async function autoEscalate(event, _target, app) {
     const { state } = await app.load("Ticket", event.stream);
-    if (state.closedById || state.escalationId) return;
+    if (state.closedById || state.resolvedById || state.escalationId) return;
     await app.do(
       "EscalateTicket",
       { stream: event.stream, actor: SYS },

@@ -137,6 +137,24 @@ const cache_drop = (stream: string): Promise<void> =>
     );
 
 /** Commits a snapshot event. Never throws: a failed snapshot must not fail the action. */
+/**
+ * Whether a state's `.snap` predicate asks for a snapshot. It runs after the
+ * commit landed, so a predicate that throws must not fail the action.
+ */
+function wants_snap<TState extends Schema, TEvents extends Schemas>(
+  state: { snap?: (snapshot: Snapshot<TState, TEvents>) => boolean },
+  snapshot: Snapshot<TState, TEvents>
+): boolean {
+  try {
+    return state.snap?.(snapshot) ?? false;
+  } catch (error) {
+    log().warn(
+      `Skipped a snapshot: its .snap predicate threw: ${String(error)}`
+    );
+    return false;
+  }
+}
+
 export async function snap<TState extends Schema, TEvents extends Schemas>(
   snapshot: Snapshot<TState, TEvents>
 ): Promise<Committed<TEvents, keyof TEvents> | undefined> {
@@ -362,6 +380,15 @@ export async function load<
 
   await store().query<TEvents>(
     (raw) => {
+      // Time travel folds the real events, and `limit` counts those. A snapshot
+      // only seeds it, holding what a prune or a restart took: the first row,
+      // with nothing cut before it.
+      if (time_travel) {
+        if (raw.name === SNAP_EVENT && (replayed > 0 || asOf!.created_after))
+          return;
+        if (asOf!.limit !== undefined && replayed - snaps >= asOf!.limit)
+          return;
+      }
       event = me.view(raw, actor);
       if (event.name === SNAP_EVENT) {
         state = event.data as TState;
@@ -397,7 +424,11 @@ export async function load<
       // so a windowed close's prune can't fold the tail onto stale state.
       ...(cached
         ? { after: cached.event_id, with_snaps: true }
-        : { ...(time_travel ? {} : { with_snaps: true }), ...asOf }),
+        : time_travel
+          ? // From the start, past the resume floor, which could jump over the
+            // time bound. The snapshots are for the seed; `limit` is for events.
+            { with_snaps: true, after: -1, ...asOf, limit: undefined }
+          : { with_snaps: true }),
     }
   );
 
@@ -594,7 +625,7 @@ export async function action<
       const last = snapshots.at(-1)!;
 
       // Awaited, so the cache holds the post-snap checkpoint for the next caller.
-      const snap_event = me.snap?.(last) ? await snap(last) : undefined;
+      const snap_event = wants_snap(me, last) ? await snap(last) : undefined;
 
       // Sensitive states depend on the actor, so they aren't cached.
       if (!me.pii_aware)

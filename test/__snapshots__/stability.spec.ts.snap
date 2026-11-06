@@ -1086,7 +1086,8 @@ export type Snapshot<TState extends Schema, TEvents extends Schemas> = {
      * replayed event on cache miss, or from the just-committed event on
      * snapshots returned by \`action()\`. Use this instead of
      * \`event?.version\` when you need the version even after a cache hit
-     * skipped the event replay entirely.
+     * skipped the event replay entirely. When \`.snap\` fires after an action,
+     * the snapshot takes the next version, so pin a later action from \`load\`.
      */
     readonly version: number;
     /**
@@ -3324,6 +3325,7 @@ export declare class InMemoryStore implements Store {
     private _correlated_at;
     private _correlators;
     private _stream_versions;
+    private _closed;
     private _pii;
     private _reset_indexes;
     private _put_pii;
@@ -8026,7 +8028,7 @@ export { NonRetryableHttpError, NonRetryableWebhookError, RetryableHttpError, We
  *
  * Behavior:
  *
- * - 2xx and 3xx return successfully.
+ * - 2xx returns successfully. 3xx isn't followed, and blocks the stream.
  * - 5xx responses, network errors, and timeouts throw
  *   {@link WebhookError} (\`status: 0\` for network/timeout). Drain
  *   retries per the reaction's \`maxRetries\` / \`backoff\`.
@@ -9448,6 +9450,7 @@ export declare function streamPatternToGlob(input: string): string;
  */
 export declare class SqliteStore implements Store {
     private client;
+    private readonly _connect;
     private readonly _resolve_pii_key;
     constructor(config: SqliteConfig);
     private _stringify_pii_for_write;
