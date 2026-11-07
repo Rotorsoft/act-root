@@ -2,6 +2,7 @@ import {
   act,
   ConcurrencyError,
   InMemoryCache,
+  is_literal_source,
   SNAP_EVENT,
   sensitive,
   sleep,
@@ -242,8 +243,6 @@ export const runStoreTck = (options: StoreTckOptions): void => {
     // is a runtime no-op that yields `{}`.
     const caps: StoreCapabilities = { ...options.capabilities };
 
-    const is_literal = (source: string) => !/[\]^$.*+?()[{}|\\]/.test(source);
-
     // Stand in for `correlate`, which a store test has no orchestrator to
     // run. `claim` follows marks — committing an event is not
     // enough to make a stream claimable — so a test that expects work to be
@@ -282,7 +281,10 @@ export const runStoreTck = (options: StoreTckOptions): void => {
             mark = Math.max(mark, e.id);
           },
           row.source !== undefined
-            ? { stream: row.source, stream_exact: is_literal(row.source) }
+            ? {
+                stream: row.source,
+                stream_exact: is_literal_source(row.source, row.stream),
+              }
             : {}
         );
         if (mark > row.at)
@@ -1388,6 +1390,17 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         await correlate();
         const leases = await store.claim(5, 5, `w-${uid()}`, 5_000);
         expect(leases.filter((l) => l.stream === s)).toHaveLength(0);
+      });
+
+      it("takes a target reading itself, whatever its name holds", async () => {
+        const name = `self-a+b(${uid()}`;
+        await store.subscribe([{ stream: name, source: name }]);
+        const found: string[] = [];
+        await store.query_streams((p) => found.push(p.stream), {
+          stream: name,
+          stream_exact: true,
+        });
+        expect(found).toEqual([name]);
       });
 
       it("claims a fresh subscription as soon as its first event is marked", async () => {

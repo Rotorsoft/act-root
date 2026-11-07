@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { event_tags } from "../src/builders/event-builder.js";
 import { act, projection, state } from "../src/index.js";
+import { date_reviver_schema } from "../src/internal/date-reviver.js";
 import { sandbox } from "../src/test/index.js";
 
 /**
@@ -347,5 +348,85 @@ describe("schema-driven date revival", () => {
       v: 7,
       at: "2020-01-01T00:00:00.000Z",
     });
+  });
+});
+
+describe("dates in intersections and recursive schemas", () => {
+  const stored = "2026-06-06T00:00:00.000Z";
+  const revive = (schema: unknown, value: unknown) =>
+    date_reviver_schema(schema)?.parse(value) as Record<string, any>;
+
+  it("revives a date on either side of an intersection, or both", () => {
+    const dated = z.object({ at: z.date() });
+    const plain = z.object({ name: z.string() });
+    const value = { at: stored, born: stored, name: "n" };
+    expect(revive(z.intersection(dated, plain), value).at).toBeInstanceOf(Date);
+    expect(revive(z.intersection(plain, dated), value).at).toBeInstanceOf(Date);
+    const both = revive(dated.and(z.object({ born: z.date() })), value);
+    expect(both.at).toBeInstanceOf(Date);
+    expect(both.born).toBeInstanceOf(Date);
+    expect(date_reviver_schema(plain.and(plain))).toBeUndefined();
+  });
+
+  it("revives a date behind z.lazy", () => {
+    const schema = z.object({ at: z.lazy(() => z.date()) });
+    expect(revive(schema, { at: stored }).at).toBeInstanceOf(Date);
+  });
+
+  it("revives dates at every depth of a recursive schema", () => {
+    type Node = { at: Date; kids: Node[] };
+    const lazy: z.ZodType<Node> = z.object({
+      at: z.date(),
+      kids: z.array(z.lazy(() => lazy)),
+    });
+    const getter = z.object({
+      at: z.date(),
+      get kids() {
+        return z.array(getter);
+      },
+    });
+    const tree = { at: stored, kids: [{ at: stored, kids: [] }] };
+    for (const schema of [lazy, getter]) {
+      const out = revive(schema, tree);
+      expect(out.at).toBeInstanceOf(Date);
+      expect(out.kids[0].at).toBeInstanceOf(Date);
+    }
+  });
+
+  it("reads a shared schema the same at each use", () => {
+    const shared = z.object({ at: z.date() });
+    const out = revive(z.object({ a: shared, b: shared }), {
+      a: { at: stored },
+      b: { at: stored },
+    });
+    expect(out.a.at).toBeInstanceOf(Date);
+    expect(out.b.at).toBeInstanceOf(Date);
+  });
+
+  it("builds nothing for a recursive schema with no date", () => {
+    const schema = z.object({
+      name: z.string(),
+      get kids() {
+        return z.array(schema);
+      },
+    });
+    expect(date_reviver_schema(schema)).toBeUndefined();
+  });
+
+  it("builds an app whose event and state are recursive", () => {
+    const Tree = z.object({
+      name: z.string(),
+      get kids() {
+        return z.array(Tree);
+      },
+    });
+    const S = state({ S: z.object({ root: Tree.optional() }) })
+      .init(() => ({}))
+      .emits({ Planted: Tree })
+      .patch({ Planted: ({ data }) => ({ root: data }) })
+      .on({ plant: Tree })
+      .emit((d) => ["Planted", d])
+      .build();
+    expect(() => act().withState(S).build()).not.toThrow();
   });
 });

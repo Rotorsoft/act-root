@@ -1,8 +1,7 @@
 /**
  * What the framework does over this store with history a close changed: time
- * travel after a prune or a restart, and `.autocloses` beside a stream whose
- * name has a regex metacharacter. Core covers these on InMemory; the differences
- * that matter here are the store's.
+ * travel after a prune or a restart. Core covers these on InMemory; the
+ * differences that matter here are the store's.
  */
 import { act, dispose, sleep, state, store, ZodEmpty } from "@rotorsoft/act";
 import { z } from "zod";
@@ -64,24 +63,5 @@ describe("history a close changed", () => {
     await app.do("hit", { stream: "restarted", actor }, {});
     const { state: past } = await app.load(R, "restarted", undefined, later());
     expect(past.n).toBe(6);
-  });
-
-  it("a stream whose name has a regex metacharacter doesn't stop the others", async () => {
-    const R = base().autocloses({ is: "Done" }).build();
-    const app = act().withState(R).build({ autoSettle: false });
-    for (const stream of ["room+a", "room-b"]) {
-      await app.do("hit", { stream, actor }, {});
-      await app.do("done", { stream, actor }, {});
-    }
-    for (let i = 0; i < 3; i++) {
-      await app.correlate();
-      await app.drain();
-    }
-    const head = async (stream: string) =>
-      (await app.query_array({ stream, stream_exact: true })).at(-1)?.name;
-    expect(await head("room-b")).toBe("__tombstone__");
-    expect(await head("room+a")).toBe("Done");
-    await app.close([{ stream: "room+a" }]);
-    expect(await head("room+a")).toBe("__tombstone__");
   });
 });

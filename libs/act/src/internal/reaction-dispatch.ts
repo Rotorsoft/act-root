@@ -73,12 +73,18 @@ export class CloseSignal extends Error {
    * into {@link CloseTarget.before}. Omitted → a full close.
    */
   readonly before?: Date;
+  /**
+   * Revisit the requesting reaction at this time. Only useful with an `at`
+   * below the head: a reaction runs only when an event is waiting for it.
+   */
+  readonly defer?: Date;
 
   constructor(opts?: {
     stream?: string;
     archive?: () => Promise<void>;
     at?: number;
     before?: Date;
+    defer?: Date;
   }) {
     super("reaction requested close");
     this.name = "CloseSignal";
@@ -86,6 +92,7 @@ export class CloseSignal extends Error {
     this.archive = opts?.archive;
     this.at = opts?.at;
     this.before = opts?.before;
+    this.defer = opts?.defer;
   }
 }
 
@@ -195,6 +202,7 @@ export function build_handle<
             // Advance to the live head the handler evaluated against (when
             // provided) so the close-cycle guard sees this reaction caught up.
             acked_at: error.at ?? event.id,
+            defer: error.defer?.getTime(),
             // Close the signalled stream (the autoclose reaction's aggregate,
             // which differs from its synthetic lease stream); a self-closing
             // user reaction omits it and closes its own lease stream. A

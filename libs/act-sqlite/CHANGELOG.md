@@ -1,3 +1,17 @@
+# [@rotorsoft/act-sqlite-v1.22.8](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-sqlite-v1.22.7...@rotorsoft/act-sqlite-v1.22.8) (2026-11-07)
+
+
+### Bug Fixes
+
+* **act:** fix the practical 1.x bugs from the 2.0 pre-release audit ([#2379](https://github.com/Rotorsoft/act-root/issues/2379)) ([32a12b5](https://github.com/Rotorsoft/act-root/commit/32a12b584878057ae79a8c02347fea6f0f7c962a))
+
+# [@rotorsoft/act-sqlite-v1.22.7](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-sqlite-v1.22.6...@rotorsoft/act-sqlite-v1.22.7) (2026-11-06)
+
+
+### Bug Fixes
+
+* **act:** fix real 1.x bugs and drop an unneeded check ([#2357](https://github.com/Rotorsoft/act-root/issues/2357)) ([706e553](https://github.com/Rotorsoft/act-root/commit/706e553c0db1979a1201fe4547a71de7162b80d2)), closes [#2337](https://github.com/Rotorsoft/act-root/issues/2337) [#2339](https://github.com/Rotorsoft/act-root/issues/2339) [#2342](https://github.com/Rotorsoft/act-root/issues/2342) [#2347](https://github.com/Rotorsoft/act-root/issues/2347) [#2348](https://github.com/Rotorsoft/act-root/issues/2348) [#2349](https://github.com/Rotorsoft/act-root/issues/2349) [#2350](https://github.com/Rotorsoft/act-root/issues/2350) [#2356](https://github.com/Rotorsoft/act-root/issues/2356)
+
 # [@rotorsoft/act-sqlite-v1.22.6](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-sqlite-v1.22.5...@rotorsoft/act-sqlite-v1.22.6) (2026-11-05)
 
 

@@ -25,6 +25,8 @@ import type {
 } from "@rotorsoft/act";
 import {
   ConcurrencyError,
+  DEFAULT_QUERY_STREAMS_LIMIT,
+  fair_slots,
   is_literal_source,
   StoreError,
   ValidationError,
@@ -561,8 +563,9 @@ export class SqliteStore implements Store {
   // while a write transaction is open on it: a second one fails at once
   // (`TRANSACTION_ACTIVE` in memory, `SQLITE_BUSY` on a file) instead of
   // waiting. So every statement and every transaction takes its turn here.
-  // A turn covers only the database work, never a caller's callback, so a
-  // callback that writes to the store can't wait on itself.
+  // A turn covers only the database work, so a `query` callback that writes to
+  // the store can't wait on itself. `restore` is the exception: its driver runs
+  // inside the turn, because the whole restore is one transaction.
   private _turn: Promise<unknown> = Promise.resolve();
   private _serial<T>(work: () => Promise<T>): Promise<T> {
     const run = this._turn.then(work);
@@ -803,8 +806,8 @@ export class SqliteStore implements Store {
     // stream, so `streamPatternToGlob` throws `ValidationError` here —
     // pointing operators to InMemory/PG for full regex claim sources —
     // before any row is written. Literal sources skip the check entirely.
-    for (const { source } of streams) {
-      if (source !== undefined && !is_literal_source(source))
+    for (const { stream, source } of streams) {
+      if (source !== undefined && !is_literal_source(source, stream))
         streamPatternToGlob(source);
     }
     return this._tx("subscribe", async (tx) => {
@@ -1011,7 +1014,7 @@ export class SqliteStore implements Store {
       // the ones already picked, so a default-priority lagging stream is
       // never starved out by sustained higher-priority load. With all
       // priorities equal both portions order by `at`, a no-op split.
-      const fair = lagging >= 2 ? Math.max(1, Math.floor(lagging / 4)) : 0;
+      const fair = fair_slots(lagging);
       const priority_slice = candidates.slice(0, lagging - fair);
       const picked = new Set(priority_slice.map((c) => c.stream));
       const fair_slice = [...candidates]
@@ -1259,7 +1262,7 @@ export class SqliteStore implements Store {
     callback: (position: StreamPosition) => void,
     query?: QueryStreams
   ): Promise<QueryStreamsResult> {
-    const limit = query?.limit ?? 100;
+    const limit = query?.limit ?? DEFAULT_QUERY_STREAMS_LIMIT;
     const { clause, args } = this._filter_clause(query ?? {});
     let sql = `SELECT stream, source, at, retry, blocked, error, leased_by, leased_until, priority, lane, deferred_at, correlated_at FROM streams WHERE ${clause}`;
     if (query?.after !== undefined) {
@@ -1695,6 +1698,8 @@ export class SqliteStore implements Store {
    * new sequence is dense from 1. `created` is preserved verbatim
    * from the source.
    */
+  // The driver runs inside this store's turn, so it must read from another
+  // store: a call on this one would wait for the restore to end, forever.
   async restore(
     driver: (
       callback: (event: Committed<Schemas, keyof Schemas>) => Promise<number>

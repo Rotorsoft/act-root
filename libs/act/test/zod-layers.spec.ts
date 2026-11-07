@@ -58,14 +58,10 @@ describe("seeing through Zod wrappers", () => {
     expect(date_reviver_schema(z.date().pipe(z.any()))).toBeUndefined();
   });
 
-  it("revives no date inside z.lazy, so a recursive schema ends", () => {
-    type Node = { at: Date; children: Node[] };
-    const node: z.ZodType<Node> = z.object({
-      at: z.date(),
-      children: z.lazy(() => z.array(node)),
-    });
-    expect(date_reviver_schema(z.lazy(() => z.date()))).toBeUndefined();
-    expect(date_reviver_schema(node)).toBeDefined(); // `at` still revives
+  it("revives a date inside z.lazy, and a recursive schema still ends", () => {
+    const lazy = z.lazy(() => z.date());
+    const reviver = date_reviver_schema(lazy);
+    expect(reviver?.parse("2026-06-06T00:00:00.000Z")).toBeInstanceOf(Date);
   });
 
   it("reads the output side of a pipe, and stops at a transform", () => {

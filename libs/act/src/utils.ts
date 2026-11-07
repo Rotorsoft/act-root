@@ -102,6 +102,9 @@ const SOURCE_METACHARACTERS = /[\^$.*+?()[\]{}|\\]/;
  * as a RegExp before matching — the shape the calculator's static
  * `source: "^(A|B)$"` reaction relies on.
  *
+ * Pass the subscription's `target` too when it's known: a target reading itself
+ * holds a stream's name, whatever characters that name has.
+ *
  * The single source of truth for literal-vs-pattern classification across
  * correlate (which decides what a source marks), the drain fetch path, and
  * the SQLite adapter (which rejects a non-portable pattern), so all three
@@ -113,8 +116,8 @@ const SOURCE_METACHARACTERS = /[\^$.*+?()[\]{}|\\]/;
  * is_literal_source("^(A|B)$");  // → false (compile as RegExp)
  * ```
  */
-export function is_literal_source(source: string): boolean {
-  return !SOURCE_METACHARACTERS.test(source);
+export function is_literal_source(source: string, target?: string): boolean {
+  return source === target || !SOURCE_METACHARACTERS.test(source);
 }
 
 /**
@@ -137,3 +140,21 @@ const ISO_8601 =
  */
 export const dateReviver = (_key: string, value: unknown): unknown =>
   typeof value === "string" && ISO_8601.test(value) ? new Date(value) : value;
+
+/**
+ * How many of `lagging` claim slots ignore priority, so sustained high-priority
+ * load can't starve a low-priority stream forever. Each store's `claim` calls
+ * it, and the rule stays out of the `claim` signature.
+ *
+ * @internal
+ */
+export function fair_slots(lagging: number): number {
+  return lagging >= 2 ? Math.max(1, Math.floor(lagging / 4)) : 0;
+}
+
+/**
+ * How many positions `query_streams` returns when the caller gives no limit.
+ *
+ * @internal
+ */
+export const DEFAULT_QUERY_STREAMS_LIMIT = 100;
