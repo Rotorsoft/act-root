@@ -91,7 +91,8 @@ export function date_reviver_schema(schema: unknown): z.ZodType | undefined {
       if (done.has(node)) return done.get(node);
       if (active.has(node)) {
         recursive = true;
-        return tie ? z.lazy(() => done.get(node) ?? z.unknown()) : undefined;
+        // Every schema on a cycle has a result by the time this reads it.
+        return tie ? z.lazy(() => done.get(node) as z.ZodType) : undefined;
       }
       active.add(node);
       const result = build(node, walk);
