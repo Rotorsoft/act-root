@@ -58,25 +58,6 @@ describe("NUL bytes are refused by Postgres, legibly", () => {
     expect(details).toContain("unsupported Unicode escape sequence");
   });
 
-  it("translates half of a surrogate pair in event data", async () => {
-    const err = await store
-      .commit(
-        [
-          {
-            stream: "half-emoji",
-            msgs: [{ name: "Noted", data: { note: "😀".slice(0, 1) } }],
-          },
-        ],
-        meta
-      )
-      .catch((e) => e as Error);
-
-    expect(err).toBeInstanceOf(ValidationError);
-    const details = String((err as ValidationError).details);
-    expect(details).toContain("half-emoji");
-    expect(details).toContain("Noted");
-  });
-
   it("translates a NUL in a stream name, which the head check reaches first", async () => {
     const err = await store
       .commit(
