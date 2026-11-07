@@ -1,3 +1,46 @@
+# [@rotorsoft/act-notify-v1.0.0](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-notify-v0.3.2...@rotorsoft/act-notify-v1.0.0) (2026-11-07)
+
+
+* feat(act)!: commit(appends, meta) appends to several streams atomically ([#2304](https://github.com/Rotorsoft/act-root/issues/2304)) ([efebf3f](https://github.com/Rotorsoft/act-root/commit/efebf3fe117c3030059689c8786cb8ea4f806cf6)), closes [#2183](https://github.com/Rotorsoft/act-root/issues/2183)
+
+
+### BREAKING CHANGES
+
+* `.given(rules)` is gone; write it as `.requires(rules)`
+with `valid: (state, actor)` becoming `holds: (_, state, actor)`, and type
+a shared rule `Precondition<S, unknown>` instead of `Invariant<S>`. Catch
+`PreconditionError` instead of `InvariantError` (`Errors.InvariantError`
+and act-http's `INVARIANT` code are gone). Remove `validateFoldedState`
+from `act().build(...)`. act-diagram's `ActionNode.invariants` is gone;
+read `preconditions`.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+* fix(act-sqlite): run the store's statements one at a time, so concurrent calls wait, not fail
+
+One SqliteStore owns one libSQL connection, and a second statement while
+a write transaction is open on it failed at once: TRANSACTION_ACTIVE in
+memory, SQLITE_BUSY on a file. Two requests committing together, or a
+commit beside the drain's claim, refused one of them. Every statement and
+transaction now takes its turn in an in-process queue; a query's row
+callback runs outside it, so a callback that writes can't wait on itself.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+* feat(act)!: commit(writes, meta) commits to several streams atomically
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+* refactor(act)!: name each part of a commit an Append, and the argument appends
+
+A commit appends events to streams, so the per-stream item is an
+Append and the argument is `appends`: `commit(appends, meta)`. The
+store's error messages say "the append to" and "is named twice".
+* Store.commit takes `(appends: Append[], meta)`; the
+type 1.x callers never saw as StreamWrite is now Append.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
 # [@rotorsoft/act-notify-v0.3.2](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-notify-v0.3.1...@rotorsoft/act-notify-v0.3.2) (2026-10-26)
 
 
