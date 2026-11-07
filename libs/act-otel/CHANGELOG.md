@@ -1,3 +1,15 @@
+# [@rotorsoft/act-otel-v0.3.0](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-otel-v0.2.2...@rotorsoft/act-otel-v0.3.0) (2026-11-07)
+
+
+### Bug Fixes
+
+* **act:** fix what the 2.0 release audit found ([#2336](https://github.com/Rotorsoft/act-root/issues/2336)) ([6f09d48](https://github.com/Rotorsoft/act-root/commit/6f09d48d2632acad48d1e5edda1f22d72c98242f))
+
+
+### Features
+
+* **act-otel:** support act 2 from a new minor ([734c323](https://github.com/Rotorsoft/act-root/commit/734c323b3dec90219aedb20a3a211107c21a247e))
+
 # [@rotorsoft/act-otel-v0.2.2](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-otel-v0.2.1...@rotorsoft/act-otel-v0.2.2) (2026-10-26)
 
 
