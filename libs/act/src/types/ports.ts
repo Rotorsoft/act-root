@@ -667,8 +667,8 @@ export interface Store extends Disposable, EventSource {
    * claimed stream's events. A **literal** source (no anchor —
    * the common case, and every autoclose/dynamic-resolver
    * source) matches by string equality: the fast, index-friendly path, and
-   * exact so `"s1"` never matches `"s12"`. A **pattern** source (carrying
-   * `^ $ . * + ? ( ) [ ] { } | \`, e.g. a static `^(A|B)$` reaction) is
+   * exact so `"s1"` never matches `"s12"`. A **pattern** source (starting
+   * with `^` or ending with `$`, e.g. a static `^(A|B)$` reaction) is
    * compiled as a regex and matched against candidate stream names.
    * Adapters that cannot faithfully run an arbitrary regex (SQLite) reject
    * a non-portable pattern at {@link subscribe} time rather than silently

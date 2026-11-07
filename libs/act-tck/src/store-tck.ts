@@ -2353,7 +2353,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
     });
 
     // The pattern-source claim cases are gone with the probe.
-    // A pattern source (one carrying regex metacharacters, like the
+    // A pattern source (one with an anchor, like the
     // calculator's `^(A|B)$`) is still matched as a full RegExp — but by
     // correlate, when it decides which events may raise a target's mark,
     // not by `claim`, which no longer reads the event log. The cases now
