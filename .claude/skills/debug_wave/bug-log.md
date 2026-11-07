@@ -648,3 +648,4 @@ Five lenses over the release diff: the recent fixes, `.loads` interactions, mult
 
 **Patterns:** run the whole suite before pushing a fix, because a spec pinning the old behaviour won't be among the affected ones. Test a release by installing it from a registry beside the previous major. Ask what a normal app has to do before ranking anything.
 
+**Found while clearing the release review:** a test that takes almost exactly a framework default (10 s here, the default backoff) isn't slow, it's stalled. Wolfdesk's `EscalateTicket` had no action retries, so an ordinary lost race waited out that backoff on every run, and a 20-second test budget hid it until a slow runner tipped it over. Reading test durations against the defaults would have found it months ago.
