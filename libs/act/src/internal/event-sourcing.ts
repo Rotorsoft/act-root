@@ -282,23 +282,9 @@ export async function scan(
           migrated_count++;
         }
         if (stream_rename) {
-          const { action, event: cause } = migrated.meta.causation;
-          migrated = {
-            ...migrated,
-            stream: stream_rename(migrated.stream),
-            meta: {
-              ...migrated.meta,
-              causation: {
-                ...migrated.meta.causation,
-                ...(action && {
-                  action: { ...action, stream: stream_rename(action.stream) },
-                }),
-                ...(cause && {
-                  event: { ...cause, stream: stream_rename(cause.stream) },
-                }),
-              },
-            },
-          };
+          const renamed = stream_rename(migrated.stream);
+          if (renamed !== migrated.stream)
+            migrated = { ...migrated, stream: renamed };
         }
         if (!callback) {
           kept++;

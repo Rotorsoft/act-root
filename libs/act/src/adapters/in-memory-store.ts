@@ -332,7 +332,6 @@ export class InMemoryStore implements Store {
     await sleep();
     this._reset_indexes();
     this._streams = new Map();
-    this._correlators = new Map();
   }
 
   private _in_query(

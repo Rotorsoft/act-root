@@ -10,7 +10,6 @@
  * Run with `pnpm act [dir]` from the repo root or
  * `pnpm -F @rotorsoft/act-diagram act [dir]` from anywhere.
  */
-import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { extract_model } from "../client/lib/evaluate.js";
 import type { FileTab } from "../client/types/index.js";
@@ -215,7 +214,7 @@ if (isMain) {
     error_output: process.stderr,
     isTTY: !!process.stdout.isTTY,
     argv: process.argv.slice(2),
-    version_string: `act ${JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8")).version}`,
+    version_string: "act (act-diagram)",
     default_dir: process.env.INIT_CWD ?? process.cwd(),
   }).then(
     (code) => process.exit(code),
