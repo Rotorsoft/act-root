@@ -244,7 +244,11 @@ describe("framework rules stay in the framework", () => {
   const restated: [string, RegExp][] = [
     ["the fair share of claim slots", /lagging\s*>=\s*2|Math\.floor\(lagging/],
     ["the query_streams default limit", /query\?\.limit\s*\?\?\s*\d/],
-    ["what makes a source a pattern", /METACHARACTERS|\[\\\^\$\.\*\+/],
+    ["what a commit may hold", /is named twice|has no events/],
+    [
+      "what makes a source a pattern",
+      /METACHARACTERS|source\.startsWith\("\^"\)/,
+    ],
   ];
 
   it.each(restated)("no adapter restates %s", (_, rule) => {

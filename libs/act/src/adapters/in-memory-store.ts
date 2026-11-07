@@ -27,19 +27,12 @@ import type {
   SubscribeInput,
 } from "../types/index.js";
 import { DEFAULT_LANE, SNAP_EVENT, TOMBSTONE_EVENT } from "../types/index.js";
-import { DEFAULT_QUERY_STREAMS_LIMIT, fair_slots, sleep } from "../utils.js";
-
-// A commit names each stream once, and every append carries events.
-function check_appends<E extends Schemas>(appends: readonly Append<E>[]) {
-  const seen = new Set<string>();
-  for (const { stream, msgs } of appends) {
-    if (!msgs.length)
-      throw new Error(`commit: the append to "${stream}" has no events`);
-    if (seen.has(stream))
-      throw new Error(`commit: stream "${stream}" is named twice`);
-    seen.add(stream);
-  }
-}
+import {
+  check_appends,
+  DEFAULT_QUERY_STREAMS_LIMIT,
+  fair_slots,
+  sleep,
+} from "../utils.js";
 
 /**
  * One subscription row: watermark, lease, retry and schedule. Its state is

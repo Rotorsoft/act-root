@@ -230,7 +230,7 @@ The declarative form covers the bulk of real policies in one line. For the long 
 
 ### Stream names
 
-A stream whose name has a regex metacharacter (such as `user+tag`) has no autoclose: a store could read its name as a pattern. Close it with `app.close`.
+A stream whose name starts with `^` or ends with `$` has no autoclose: a store would read its name as a pattern. Close it with `app.close`.
 
 ## What runs under the hood
 

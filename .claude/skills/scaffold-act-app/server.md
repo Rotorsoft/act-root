@@ -460,7 +460,7 @@ function broadcastPresenceChange(streamId: string) {
 }
 ```
 
-Use the short names (`overlay`, `state`, `subscriberCount`, `cacheSize`, `online`, `isOnline`) — the snake_case names are deprecated aliases slated for removal in the next major.
+Use the short names (`overlay`, `state`, `subscriberCount`, `cacheSize`, `online`, `isOnline`). The snake_case names are gone in 2.0.
 
 ### Client-Side Patch Application
 

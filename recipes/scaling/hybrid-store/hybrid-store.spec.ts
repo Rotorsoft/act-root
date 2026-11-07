@@ -22,11 +22,11 @@ describe("hybrid store", () => {
   it("query_streams reports the head of the log", async () => {
     const store = hybridStore(new InMemoryStore(), new InMemoryStore());
     await store.seed();
-    await store.commit("s", [{ name: "Hit", data: {} }], {
+    await store.commit([{ stream: "s", msgs: [{ name: "Hit", data: {} }] }], {
       correlation: "",
       causation: {},
     });
-    await store.commit("s", [{ name: "Hit", data: {} }], {
+    await store.commit([{ stream: "s", msgs: [{ name: "Hit", data: {} }] }], {
       correlation: "",
       causation: {},
     });

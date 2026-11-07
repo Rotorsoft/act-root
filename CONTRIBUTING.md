@@ -33,6 +33,17 @@ A branch stacked on another PR's branch conflicts once that PR squash-merges. Me
 
 Each step closes a failure mode that has actually shipped: per-slice test runs missed what the full gate catches, and PRs that changed described behavior left the docs describing the old shape.
 
+## Fixing the previous major
+
+[STABILITY.md](STABILITY.md#support-window) promises the previous major security and critical correctness fixes for at least 6 months. Nothing releases from a maintenance branch until one is needed, so a release takes a one-time setup. The last commit of the old line carries a tag: `act-1.x-final` for 1.x, set when the 2.0 release PR merges (the merge commit's first parent).
+
+1. Cut the branch from the tag: `git branch 1.x act-1.x-final`, and push it.
+2. On that branch, in the `.releaserc.json` of each package to release, set `"branches"` to `[{ "name": "1.x", "range": "<major>.x" }, "master"]`, with the package's own major (`0.3.x` for a 0.x package). semantic-release publishes this under the `release-1.x` npm tag, so `latest` stays on the new major.
+3. In `ci-cd.yml` on that branch, add `1.x` to the `push` branches, allow it in the `cd` job's `github.ref` check, and pull `github.ref_name` instead of `master` in the `pull latest master` step.
+4. Fix by PR into `1.x`, and port the fix to `master` if it still applies.
+
+No release has gone through these steps yet, so read the first one's dry run (`npx semantic-release --dry-run`) before merging to the branch.
+
 ## Changing a port interface
 
 When you add, remove, or change a method on a port in `libs/act/src/types/ports.ts` (`Store`, `Cache`, `Logger`), update the matching `runStoreTck` / `runCacheTck` / `runLoggerTck` in `libs/act-tck/src/` in the same slice. The TCK is the executable contract; adapters validate themselves against it.

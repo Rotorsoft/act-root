@@ -637,3 +637,14 @@ Lenses: the audit's own fixes, failure injection in the pipeline with multi-stre
 **Not swept:** act-pino; inspector queries over multi-stream data; the client UI in a browser; `CloseSignal` in a reaction on a loaded stream; `stream_rename` causation.
 
 **Patterns:** a check by version number can't see a head that returned to the same number; compare what the head is, not only where. A fix for one branch of a parked reaction leaves its siblings, so read the whole function. A test using a constructed `Response` never exercises what `fetch` does. A failed BEGIN isn't the end of a driver's trouble: run fail, release, then commit against the real driver. Reading `master` isn't proof: this wave ran the probes there, and that's what showed the partial fix shipped.
+
+## 2.0 pre-release audit (2026-11-07)
+
+Five lenses over the release diff: the recent fixes, `.loads` interactions, multi-stream store seams, removals and what really publishes, and a simplify pass. The commit core held up: 42 commit scenarios agreed across adapters, and no `.loads` combination tried showed a new defect. Most of what mattered was in the release mechanics and in the last rounds' own fixes.
+
+**Confirmed:** #2360 (a default reaction on `user+tag`), #2361 (a parked autoclose refuses `app.close`), #2362 (`PinoLogger` drops a transport), #2363 (`hybridStore` `maxEventId`), #2365 (dates in `z.lazy` and `z.intersection`, getter recursion), #2370 (patch releases break a 1.x install), #2371 (the guide's example replays history), #2372, #2373, #2374, #2375, #2376 (TCK), #2377 (CD).
+
+**Not a bug:** a name with `.` does not read a sibling stream; `a.b` and `axb` stay separate on unfixed code. Half an emoji anywhere (#2364): names are ASCII, and the framework doesn't support such payloads, so Postgres's own refusal stands. #2368 (a restore driver reading its own store) is documented, not fixed. #2366, #2367 and #2369 change nothing an app sees, so they closed without code.
+
+**Patterns:** run the whole suite before pushing a fix, because a spec pinning the old behaviour won't be among the affected ones. Test a release by installing it from a registry beside the previous major. Ask what a normal app has to do before ranking anything.
+

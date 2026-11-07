@@ -248,6 +248,8 @@ export const app = act().withState(Seats).withState(Enrollment).build();
 
 Uniqueness and limits are ordinary states: an `Email` state, one stream per value, that a registration loads and appends `EmailTaken` to; a `Seats` state with a count. Every scenario behind this design runs as a state with tests in the [rules across streams recipe](../examples/rules.md), and [RFC 2251](https://github.com/Rotorsoft/act-root/blob/master/rfcs/2251-rules-across-streams.md) explains the trade-offs.
 
+Each `.loads` is recorded on the state as a `Load` (`{ state, target, events, name }`), the shape a tool reading the registry sees; an app never builds one by hand.
+
 ## Upgrading from `.given` (removed in 2.0)
 
 Act 1.x called the rules in `.given([...])` invariants, typed `Invariant` and refused with `InvariantError`. That was the wrong word: every one of them guards one action and is false at some point in a normal lifecycle, so each was a precondition, and the real invariants of a domain were written nowhere. 1.35 deprecated them, and 2.0 removes them:

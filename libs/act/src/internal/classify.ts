@@ -50,6 +50,9 @@ export type Classification = {
   readonly event_to_lanes: ReadonlyMap<string, EventLaneSet>;
 };
 
+const describe_source = (source: string | undefined) =>
+  source === undefined ? "no source (every stream)" : `"${source}"`;
+
 /**
  * Walk the registry once to collect static reaction targets, the set of
  * reactive event names, the per-event lane fan-in, and the event-to-state
@@ -114,7 +117,7 @@ export function classify_registry<
         const existing = statics.get(target);
         if (existing && existing.source !== source)
           throw new Error(
-            `Target "${target}" has reactions on two sources, "${existing.source}" and "${source}". A target reads one source, so the second would never see its events. Give it its own target.`
+            `Target "${target}" has reactions on two sources, ${describe_source(existing.source)} and ${describe_source(source)}. A target reads one source, so the second would miss events or read too many. Give it its own target.`
           );
         if (!existing) {
           statics.set(target, { stream: target, source, priority, lane });

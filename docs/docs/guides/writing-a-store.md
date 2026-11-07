@@ -23,6 +23,8 @@ The interface lives in [`libs/act/src/types/ports.ts`](https://github.com/Rotors
 - `reset(streams)` / `prioritize(filter, n)` / `truncate(targets)` — operator-facing primitives; the `StreamFilter` shape carries an optional `lane` exact-match. `truncate` targets come in two shapes — full (delete everything, seed a snapshot or tombstone) and windowed (`before` boundary, prefix delete behind a snapshot) — covered below
 - `query_streams(callback, query?)` — read-only introspection (operational dashboards); positions carry their `lane`, an optional `deferred_at` (ms since epoch) when the stream is parked on an active future defer, and the optional `correlated_at` **work mark** so a reader can tell "behind the head" from "has work". The query gained an optional `source_matches` filter — covered below
 - `notify(handler)` — *optional* cross-process commit notifications
+- `query_stats(streams, options?)` — per-stream heads, counts and tails (see below)
+- `forget_pii(stream)` — *optional* erase a stream's sensitive payloads
 - `restore(driver)` — *optional* atomic wipe-and-rebuild from an event source (see below)
 
 Reading the JSDoc on each method is the first step. The TCK is the second.
@@ -38,7 +40,7 @@ await store.commit(stream, msgs, meta, expectedVersion);
 await store.commit([{ stream, msgs, expectedVersion }], meta);
 ```
 
-A commit across streams notifies once per stream, with that stream's events. The TCK's `commit across streams` block matches the refusal messages exactly, so take their text from it.
+A commit across streams notifies once per stream, with that stream's events. Call `check_appends(appends)` from `@rotorsoft/act` first: it's the framework's rule for what a commit may hold, and the TCK's `commit across streams` block matches its messages exactly.
 
 An adapter checks every append's version before inserting anything, inserts every append inside the transaction it already opens, and lets the unique `(stream, version)` constraint catch a race on any stream appended to. The TCK's "commit across streams" block is the checklist: stale first, middle and last appends, a stream named twice, an append with no events, an unguarded append beside guarded ones, and two commits racing on a shared stream.
 
@@ -98,7 +100,7 @@ lets the subscription row answer instead. It is the highest event id observed
 to resolve to that target, and a stream is claimable exactly while
 `at < correlated_at`.
 
-Four rules, all pinned by the TCK's `work_set` suite:
+Five rules, all pinned by the TCK's `work_set` suite:
 
 - **It never regresses.** `GREATEST` / `MAX` in the same statement that
   UPSERTs the row, applied for every value including zero and negatives — a
@@ -155,7 +157,7 @@ It rides `subscribe` because `correlate` is its only writer and already calls th
 Three rules the TCK pins:
 
 - **It persists only when greater than the stored value.** A lower or equal `correlated_at` is ignored rather than written, so a worker whose cursor lags cannot rewind it and re-sending the same value is a no-op. `GREATEST` / `MAX` in one statement is the whole implementation.
-- **It is not a subscription.** Keep it in its own single-row relation — a scope owns three relations: events, subscriptions, and this one. Parking it as a reserved subscription row seems cheaper but every stream-scoped surface then counts it: `prioritize`, `reset`, `unblock`, `query_streams`, and `blocked_streams` all start reporting one extra stream.
+- **It is not a subscription.** Keep it in its own relation — a scope owns three relations: events, subscriptions, and this one. Parking it as a reserved subscription row seems cheaper but every stream-scoped surface then counts it: `prioritize`, `reset`, `unblock`, `query_streams`, and `blocked_streams` all start reporting one extra stream.
 - **It starts at `-1`** and is created by `seed()` like every other relation.
 
 Do **not** try to derive it from anything else. It is distinct from a subscription's `at` (how far a *target* has been processed): once a target is subscribed the drain reads the log directly, so processing runs *ahead* of the read cursor, and a checkpoint derived from acked watermarks would skip the events in between for discovery — dynamic targets those events should have created would never exist. Only `correlate` knows how far `correlate` has read.
@@ -318,6 +320,12 @@ async subscribe(streams, correlated_at?, correlator?) {
       [correlator.key, correlated_at ?? null, correlator.by, correlator.millis]
     );
     correlating = (rowCount ?? 0) > 0;
+    // Refused, but the checkpoint still moves: what this caller read stays read.
+    if (!correlating && correlated_at !== undefined)
+      await this.client.query(
+        `UPDATE ${this.checkpoints} SET at = GREATEST(at, $2) WHERE key = $1`,
+        [correlator.key, correlated_at]
+      );
   }
   // ...the usual subscription upserts...
   return { subscribed, watermark, correlated_at: at, ...(correlating === undefined ? {} : { correlating }) };
@@ -417,7 +425,7 @@ runStoreTck({
 });
 ```
 
-The TCK then runs ten cases: empty source, single stream, multi-stream, ISO `created`, pre-existing wipe, subscription clearing, snapshot preservation, causation remap, orphan-ref pass-through, and atomic rollback on mid-iteration throw. They cover the contract end-to-end; passing them means your adapter participates in every transfer flow the framework supports.
+The TCK then runs cases such as: empty source, single stream, multi-stream, ISO `created`, pre-existing wipe, subscription clearing, snapshot preservation, causation remap, orphan-ref pass-through, and atomic rollback on mid-iteration throw. They cover the contract end-to-end; passing them means your adapter participates in every transfer flow the framework supports.
 
 ### Fault-injection adjacent to the TCK
 

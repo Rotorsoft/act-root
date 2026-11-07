@@ -428,6 +428,29 @@ describe(".loads", () => {
       .emit("Base");
   });
 
+  it("lets .emit(name) pass through a union the event shares", () => {
+    const U = z.discriminatedUnion("k", [
+      z.object({ k: z.literal("a"), x: z.string() }),
+      z.object({ k: z.literal("b") }),
+    ]);
+    state({ S: z.object({ n: z.number() }) })
+      .init(() => ({ n: 0 }))
+      .emits({ E: U })
+      .patch({ E: (_, s) => s })
+      .on({ A: U })
+      .emit("E");
+  });
+
+  it("refuses .emit(name) on an empty action when the event requires a field", () => {
+    state({ S: z.object({ n: z.number() }) })
+      .init(() => ({ n: 0 }))
+      .emits({ E: z.object({ a: z.string() }) })
+      .patch({ E: (_, s) => s })
+      .on({ A: ZodEmpty })
+      // @ts-expect-error the empty action has no `a`
+      .emit("E");
+  });
+
   it("takes readonly rules and a rule's own actor", () => {
     const rules = [{ description: "x", holds: () => true }] as const;
     moving().requires(rules);

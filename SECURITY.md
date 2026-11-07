@@ -8,7 +8,7 @@
 | 1.x | Security and critical correctness fixes, for at least 6 months after 2.0 ships |
 | < 1.0 | No |
 
-Packages still on a 0.x line (`@rotorsoft/act-crypto`, `@rotorsoft/act-ops`) get fixes on their latest published version only. The [Stability Charter](STABILITY.md#support-window) has the full policy.
+Packages still on a 0.x line (`@rotorsoft/act-crypto`, `@rotorsoft/act-ops`, `@rotorsoft/act-otel`) get fixes on their latest published version only. The [Stability Charter](STABILITY.md#support-window) has the full policy.
 
 ## Reporting a vulnerability
 

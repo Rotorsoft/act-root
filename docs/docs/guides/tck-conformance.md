@@ -56,7 +56,7 @@ Two things to note versus the in-monorepo guides:
 
 ## Running the TCK
 
-Each port has one entry point. Pass it a display `name`, a `factory` that returns a fresh adapter per test, and (for the store) a `capabilities` bag declaring the optional methods you implement.
+Each port has one entry point. Pass it a display `name`, a `factory` that returns a fresh adapter (the suite calls it once and shares the adapter across its tests), and (for the store) a `capabilities` bag declaring the optional methods you implement.
 
 ```ts no-check
 // test/cache-tck.spec.ts

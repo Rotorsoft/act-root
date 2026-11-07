@@ -25,6 +25,7 @@ import type {
 } from "@rotorsoft/act";
 import {
   ConcurrencyError,
+  check_appends,
   DEFAULT_QUERY_STREAMS_LIMIT,
   fair_slots,
   is_literal_source,
@@ -107,18 +108,6 @@ export interface SqliteConfig {
  * by "no such table: events" on readback.
  * @internal
  */
-// A commit names each stream once, and every append carries events.
-function check_appends<E extends Schemas>(appends: readonly Append<E>[]) {
-  const seen = new Set<string>();
-  for (const { stream, msgs } of appends) {
-    if (!msgs.length)
-      throw new Error(`commit: the append to "${stream}" has no events`);
-    if (seen.has(stream))
-      throw new Error(`commit: stream "${stream}" is named twice`);
-    seen.add(stream);
-  }
-}
-
 const SHARED_MEMORY_URL = "file::memory:?cache=shared";
 
 /**

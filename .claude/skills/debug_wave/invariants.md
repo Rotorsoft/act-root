@@ -70,6 +70,9 @@ These are load-bearing facts about the framework. A red test that only "works" b
 - **A truthy check on an optional string treats `""` as absent.** #2019: `resolver.lane && …` let `lane: ""` skip the undeclared-lane guard, while the dynamic path's `!== undefined` caught it. Same family as the `?? 0` rule: when two paths check one field, they must use the same test.
 - **Breaker classification depends on adapter wrapping, so a mock that rejects with `StoreError` proves nothing.** #2018: act-pg's `truncate` re-throws raw driver errors, so a real timeout in a reaction-requested close was logged as app code, while the test behind the claim mocked a `StoreError` the adapter never produces. Prove error classification with a real fault (a lock plus `statement_timeout`), not a constructed error.
 
+- **Names are basic ASCII by convention.** Streams, events and actions are alphanumeric or ASCII, so a non-ASCII or half-emoji name isn't a finding. `+`, `.` and `(` are ASCII and in scope. The framework doesn't support a payload holding half a surrogate pair either: Postgres refuses it with its own error, and that's the whole story.
+- **A finding has to pass the practical bar before it ranks.** State what a normal app must do to hit it and what its user sees. A contrived combination is an edge case, not a bug to fix before a release.
+
 ## Mechanics that bit us
 
 - Postgres test DB is on **5431** (not 5432): `postgres://postgres:postgres@localhost:5431`. `docker ps` shows container `act-pg`.

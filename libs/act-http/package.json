@@ -2,7 +2,7 @@
   "name": "@rotorsoft/act-http",
   "type": "module",
   "version": "1.12.5",
-  "description": "HTTP integrations for act apps — webhooks and SSE",
+  "description": "HTTP integrations for act apps — webhooks, SSE, and tRPC, Hono and OpenAPI APIs generated from the registry",
   "keywords": [
     "typescript",
     "http",

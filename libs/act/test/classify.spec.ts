@@ -107,6 +107,40 @@ describe("classify_registry", () => {
     ]);
   });
 
+  it("says so when one of the two reactions has no source", () => {
+    const registry = {
+      events: {
+        A: {
+          reactions: new Map([
+            [
+              "a",
+              {
+                handler: async () => {},
+                resolver: { target: "T", source: "s" },
+                options: {},
+              },
+            ],
+          ]),
+        },
+        B: {
+          reactions: new Map([
+            [
+              "b",
+              {
+                handler: async () => {},
+                resolver: { target: "T" },
+                options: {},
+              },
+            ],
+          ]),
+        },
+      },
+    } as never;
+    expect(() => classify_registry(registry, new Map() as never)).toThrow(
+      '"s" and no source (every stream)'
+    );
+  });
+
   it("refuses static reactions on two sources", () => {
     const two_sources = act()
       .withState(Counter)

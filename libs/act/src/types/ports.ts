@@ -663,11 +663,11 @@ export interface Store extends Disposable, EventSource {
    * Claim reads only the subscription rows; it never matches a `source`
    * against the event log. Correlate does that when it decides which
    * targets to mark, and the drain uses the same rule when it fetches the
-   * claimed stream's events. A **literal** source (no regex
-   * metacharacter — the common case, and every autoclose/dynamic-resolver
+   * claimed stream's events. A **literal** source (no anchor —
+   * the common case, and every autoclose/dynamic-resolver
    * source) matches by string equality: the fast, index-friendly path, and
-   * exact so `"s1"` never matches `"s12"`. A **pattern** source (carrying
-   * `^ $ . * + ? ( ) [ ] { } | \`, e.g. a static `^(A|B)$` reaction) is
+   * exact so `"s1"` never matches `"s12"`. A **pattern** source (starting
+   * with `^` or ending with `$`, e.g. a static `^(A|B)$` reaction) is
    * compiled as a regex and matched against candidate stream names.
    * Adapters that cannot faithfully run an arbitrary regex (SQLite) reject
    * a non-portable pattern at {@link subscribe} time rather than silently
