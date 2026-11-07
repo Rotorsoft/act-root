@@ -642,9 +642,9 @@ Lenses: the audit's own fixes, failure injection in the pipeline with multi-stre
 
 Five lenses over the release diff: the recent fixes, `.loads` interactions, multi-stream store seams, removals and what really publishes, and a simplify pass. The commit core held up: 42 commit scenarios agreed across adapters, and no `.loads` combination tried showed a new defect. Most of what mattered was in the release mechanics and in the last rounds' own fixes.
 
-**Confirmed:** #2360 (a default reaction on `user+tag`), #2361 (a parked autoclose refuses `app.close`), #2362 (`PinoLogger` drops a transport), #2363 (`hybridStore` `maxEventId`), #2365 (dates in `z.lazy` and `z.intersection`, getter recursion), #2366, #2367, #2369, #2370 (patch releases break a 1.x install), #2371 (the guide's example replays history), #2372, #2373, #2374, #2375, #2376 (TCK), #2377 (CD).
+**Confirmed:** #2360 (a default reaction on `user+tag`), #2361 (a parked autoclose refuses `app.close`), #2362 (`PinoLogger` drops a transport), #2363 (`hybridStore` `maxEventId`), #2365 (dates in `z.lazy` and `z.intersection`, getter recursion), #2370 (patch releases break a 1.x install), #2371 (the guide's example replays history), #2372, #2373, #2374, #2375, #2376 (TCK), #2377 (CD).
 
-**Not a bug:** a name with `.` does not read a sibling stream; `a.b` and `axb` stay separate on unfixed code. Half an emoji anywhere (#2364): names are ASCII, and the framework doesn't support such payloads, so Postgres's own refusal stands. #2368 (a restore driver reading its own store) is documented, not fixed.
+**Not a bug:** a name with `.` does not read a sibling stream; `a.b` and `axb` stay separate on unfixed code. Half an emoji anywhere (#2364): names are ASCII, and the framework doesn't support such payloads, so Postgres's own refusal stands. #2368 (a restore driver reading its own store) is documented, not fixed. #2366, #2367 and #2369 change nothing an app sees, so they closed without code.
 
 **Patterns:** run the whole suite before pushing a fix, because a spec pinning the old behaviour won't be among the affected ones. Test a release by installing it from a registry beside the previous major. Ask what a normal app has to do before ranking anything.
 
