@@ -26,6 +26,8 @@ import type {
 import {
   ConcurrencyError,
   check_appends,
+  DEFAULT_QUERY_STREAMS_LIMIT,
+  fair_slots,
   is_literal_source,
   StoreError,
   ValidationError,
@@ -1001,7 +1003,7 @@ export class SqliteStore implements Store {
       // the ones already picked, so a default-priority lagging stream is
       // never starved out by sustained higher-priority load. With all
       // priorities equal both portions order by `at`, a no-op split.
-      const fair = lagging >= 2 ? Math.max(1, Math.floor(lagging / 4)) : 0;
+      const fair = fair_slots(lagging);
       const priority_slice = candidates.slice(0, lagging - fair);
       const picked = new Set(priority_slice.map((c) => c.stream));
       const fair_slice = [...candidates]
@@ -1249,7 +1251,7 @@ export class SqliteStore implements Store {
     callback: (position: StreamPosition) => void,
     query?: QueryStreams
   ): Promise<QueryStreamsResult> {
-    const limit = query?.limit ?? 100;
+    const limit = query?.limit ?? DEFAULT_QUERY_STREAMS_LIMIT;
     const { clause, args } = this._filter_clause(query ?? {});
     let sql = `SELECT stream, source, at, retry, blocked, error, leased_by, leased_until, priority, lane, deferred_at, correlated_at FROM streams WHERE ${clause}`;
     if (query?.after !== undefined) {

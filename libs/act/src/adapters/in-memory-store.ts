@@ -27,7 +27,12 @@ import type {
   SubscribeInput,
 } from "../types/index.js";
 import { DEFAULT_LANE, SNAP_EVENT, TOMBSTONE_EVENT } from "../types/index.js";
-import { check_appends, sleep } from "../utils.js";
+import {
+  check_appends,
+  DEFAULT_QUERY_STREAMS_LIMIT,
+  fair_slots,
+  sleep,
+} from "../utils.js";
 
 /**
  * One subscription row: watermark, lease, retry and schedule. Its state is
@@ -461,7 +466,7 @@ export class InMemoryStore implements Store {
     // Lagging: priority DESC, then watermark ASC, like the PG SQL. The
     // `fair` slots ignore priority so sustained high-priority load can't
     // starve a default-priority stream.
-    const fair = lagging >= 2 ? Math.max(1, Math.floor(lagging / 4)) : 0;
+    const fair = fair_slots(lagging);
     const by_priority = [...available].sort(
       (a, b) => b.priority - a.priority || a.at - b.at
     );
@@ -658,7 +663,7 @@ export class InMemoryStore implements Store {
     query?: QueryStreams
   ): Promise<QueryStreamsResult> {
     await sleep();
-    const limit = query?.limit ?? 100;
+    const limit = query?.limit ?? DEFAULT_QUERY_STREAMS_LIMIT;
     const after = query?.after;
     const source_matches = query?.source_matches;
     const matches = this._filter_predicate(query ?? {});
