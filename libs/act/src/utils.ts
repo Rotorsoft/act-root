@@ -140,3 +140,21 @@ const ISO_8601 =
  */
 export const dateReviver = (_key: string, value: unknown): unknown =>
   typeof value === "string" && ISO_8601.test(value) ? new Date(value) : value;
+
+/**
+ * How many of `lagging` claim slots ignore priority, so sustained high-priority
+ * load can't starve a low-priority stream forever. Each store's `claim` calls
+ * it, and the rule stays out of the `claim` signature.
+ *
+ * @internal
+ */
+export function fair_slots(lagging: number): number {
+  return lagging >= 2 ? Math.max(1, Math.floor(lagging / 4)) : 0;
+}
+
+/**
+ * How many positions `query_streams` returns when the caller gives no limit.
+ *
+ * @internal
+ */
+export const DEFAULT_QUERY_STREAMS_LIMIT = 100;

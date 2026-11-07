@@ -5878,6 +5878,20 @@ export declare function is_literal_source(source: string, target?: string): bool
  * event's schema declares as \`z.date()\`.
  */
 export declare const dateReviver: (_key: string, value: unknown) => unknown;
+/**
+ * How many of \`lagging\` claim slots ignore priority, so sustained high-priority
+ * load can't starve a low-priority stream forever. Each store's \`claim\` calls
+ * it, and the rule stays out of the \`claim\` signature.
+ *
+ * @internal
+ */
+export declare function fair_slots(lagging: number): number;
+/**
+ * How many positions \`query_streams\` returns when the caller gives no limit.
+ *
+ * @internal
+ */
+export declare const DEFAULT_QUERY_STREAMS_LIMIT = 100;
 //# sourceMappingURL=utils.d.ts.map"
 `;
 

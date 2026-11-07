@@ -23,6 +23,8 @@ import type {
 } from "@rotorsoft/act";
 import {
   ConcurrencyError,
+  DEFAULT_QUERY_STREAMS_LIMIT,
+  fair_slots,
   log,
   SNAP_EVENT,
   StoreError,
@@ -1083,7 +1085,7 @@ export class PostgresStore implements Store {
       // budget for pure watermark-order claims so a default-priority
       // lagging stream is never starved out by sustained higher-priority
       // load. `fair` is always $5; the optional `lane` bind is last ($7).
-      const fair = lagging >= 2 ? Math.max(1, Math.floor(lagging / 4)) : 0;
+      const fair = fair_slots(lagging);
       // A defer is due by THIS worker's clock ($6), not the database's
       // `NOW()`: the worker's process-local timer wakes the drain on its own
       // clock, so judging `deferred_at` on a second clock made a worker
@@ -1575,7 +1577,7 @@ export class PostgresStore implements Store {
     callback: (position: StreamPosition) => void,
     query?: QueryStreams
   ): Promise<QueryStreamsResult> {
-    const limit = query?.limit ?? 100;
+    const limit = query?.limit ?? DEFAULT_QUERY_STREAMS_LIMIT;
     const { clause, values } = this._filter_clause(query ?? {}, 1);
     const conditions = [clause];
     if (query?.source_matches?.length) {

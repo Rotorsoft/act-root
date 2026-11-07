@@ -2,6 +2,7 @@ import {
   act,
   ConcurrencyError,
   InMemoryCache,
+  is_literal_source,
   SNAP_EVENT,
   sensitive,
   sleep,
@@ -242,8 +243,6 @@ export const runStoreTck = (options: StoreTckOptions): void => {
     // is a runtime no-op that yields `{}`.
     const caps: StoreCapabilities = { ...options.capabilities };
 
-    const is_literal = (source: string) => !/[\]^$.*+?()[{}|\\]/.test(source);
-
     // Stand in for `correlate`, which a store test has no orchestrator to
     // run. `claim` follows marks — committing an event is not
     // enough to make a stream claimable — so a test that expects work to be
@@ -282,7 +281,10 @@ export const runStoreTck = (options: StoreTckOptions): void => {
             mark = Math.max(mark, e.id);
           },
           row.source !== undefined
-            ? { stream: row.source, stream_exact: is_literal(row.source) }
+            ? {
+                stream: row.source,
+                stream_exact: is_literal_source(row.source),
+              }
             : {}
         );
         if (mark > row.at)

@@ -511,9 +511,6 @@ importers:
       '@rotorsoft/act-crypto':
         specifier: workspace:^
         version: link:../act-crypto
-      '@types/pg':
-        specifier: ^8.23.1
-        version: 8.23.1
       pg:
         specifier: ^8.23.1
         version: 8.23.1
@@ -524,6 +521,9 @@ importers:
       '@rotorsoft/act-tck':
         specifier: workspace:^
         version: link:../act-tck
+      '@types/pg':
+        specifier: ^8.23.1
+        version: 8.23.1
 
   libs/act-pino:
     dependencies:
