@@ -133,7 +133,7 @@ So there is nothing left to coordinate:
 truncate: log.truncate.bind(log),
 ```
 
-Every method now belongs to exactly one half, with no exceptions, which is what
+Every method now belongs to exactly one half. The one exception is `query_streams`: its positions come from the subscriptions half and its `maxEventId` from the log. That split is which is what
 makes the rest of this file pure delegation.
 
 **What you take on instead:** retired streams leave their subscription rows

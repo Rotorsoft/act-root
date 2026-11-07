@@ -34,8 +34,8 @@ import type { Store } from "@rotorsoft/act/types";
  * @param log - holds events: `commit`, `query`, `query_stats`, `restore`,
  *   `forget_pii`, `notify`. Append-only, large, cold.
  * @param subs - holds subscriptions: `subscribe`, `claim`, `ack`, `block`,
- *   `unblock`, `defer`, `prioritize`, `reset`, `query_streams`. Small, hot,
- *   mutated in place.
+ *   `unblock`, `defer`, `prioritize`, `reset`, and the positions from
+ *   `query_streams`. Small, hot, mutated in place.
  */
 export const hybridStore = (log: Store, subs: Store): Store => ({
   // ---------------------------------------------------------------------
@@ -76,7 +76,13 @@ export const hybridStore = (log: Store, subs: Store): Store => ({
   defer: subs.defer.bind(subs),
   prioritize: subs.prioritize.bind(subs),
   reset: subs.reset.bind(subs),
-  query_streams: subs.query_streams.bind(subs),
+  // The positions live here, but `maxEventId` is the head of the log. Read it
+  // second, so a lag computed from the result is never negative.
+  query_streams: async (callback, query) => {
+    const result = await subs.query_streams(callback, query);
+    const head = await log.query_streams(() => {}, { limit: 0 });
+    return { ...result, maxEventId: head.maxEventId };
+  },
 
   // ---------------------------------------------------------------------
   // Both halves

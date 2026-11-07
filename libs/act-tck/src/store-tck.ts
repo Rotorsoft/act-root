@@ -4561,6 +4561,22 @@ export const runStoreTck = (options: StoreTckOptions): void => {
             [subConcreteA, subConcreteB, subRegex, subNoSource].sort()
           );
         });
+
+        it("reads a target's own source as its name, never as a pattern", async () => {
+          const tag = uid();
+          const plus = `sm-${tag}-a+b`;
+          const broken = `sm-${tag}-a(`;
+          await store.subscribe([
+            { stream: plus, source: plus },
+            { stream: broken, source: broken },
+          ]);
+          const seen: string[] = [];
+          await store.query_streams((p) => seen.push(p.stream), {
+            stream: `sm-${tag}-a`,
+            source_matches: [plus],
+          });
+          expect(seen).toEqual([plus]);
+        });
       }
     );
 

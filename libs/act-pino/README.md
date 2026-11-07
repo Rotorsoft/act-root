@@ -42,7 +42,7 @@ Full type reference: [typedoc](https://github.com/Rotorsoft/act-root/blob/master
 | Option | Type | Default | Description |
 |---|---|---|---|
 | `level` | `string` | `config().logLevel` | Log level (`trace` / `debug` / `info` / `warn` / `error` / `fatal`) |
-| `pretty` | `boolean` | `true` outside production | Enable `pino-pretty` for human-readable output |
+| `pretty` | `boolean` | `true` outside production, unless `options` has a `transport` | Enable `pino-pretty` for human-readable output. An explicit `true` wins over a `transport` |
 | `options` | `pino.LoggerOptions` | `{}` | Pass-through to pino — transports, serializers, redaction, etc. |
 
 ```typescript

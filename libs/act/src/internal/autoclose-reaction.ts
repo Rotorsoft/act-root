@@ -37,7 +37,7 @@ import { CloseSignal } from "./reaction-dispatch.js";
  * an autoclose defer never short-circuits them. Internal; not a public
  * surface.
  */
-const AUTOCLOSE_TARGET_PREFIX = "__autoclose__:";
+export const AUTOCLOSE_TARGET_PREFIX = "__autoclose__:";
 
 /**
  * Inject one synthesized autoclose reaction per `.autocloses(...)` state
@@ -141,15 +141,24 @@ export function synthesize_autoclose_reactions<
         // whenever the stats entry is (same non-excluded event set).
         if (keep_days !== undefined) {
           const cutoff = days_before_now(keep_days);
-          if (entry.tail!.created < cutoff)
+          if (entry.tail!.created < cutoff) {
+            // A terminate window still ahead needs a wake, and only a pending
+            // event can give one: hold the head unconsumed and revisit. The
+            // hold also caps the prune below the head, which a later `is` or
+            // `after` has to read. The first visit parks on the real tail.
+            const waiting = after_windows.some(
+              (days) => days_after(head.created, days).getTime() > Date.now()
+            );
             throw new CloseSignal({
               stream: aggregate,
               before: cutoff,
               archive: archiver
                 ? () => archiver(aggregate, head, cutoff)
                 : undefined,
-              at: head.id,
+              at: waiting ? head.id - 1 : head.id,
+              defer: waiting ? days_after(new Date(), 1) : undefined,
             });
+          }
         }
         // Not eligible yet: park on the earliest derivable due-time — the
         // day a terminate cooldown opens and/or the day the oldest

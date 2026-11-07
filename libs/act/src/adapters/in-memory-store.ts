@@ -345,6 +345,7 @@ export class InMemoryStore implements Store {
     await sleep();
     this._reset_indexes();
     this._streams = new Map();
+    this._correlators = new Map();
   }
 
   private _in_query(
@@ -695,8 +696,11 @@ export class InMemoryStore implements Store {
       if (after !== undefined && s.stream <= after) continue;
       if (!matches(s)) continue;
       if (source_matches !== undefined) {
-        // No source consumes every stream, so it matches any name.
-        if (s.source && !reverse_match(s.source)) continue;
+        // No source consumes every stream, so it matches any name. A target
+        // reading itself consumes only its own name, which is never a pattern.
+        if (s.source === s.stream) {
+          if (!source_matches.includes(s.stream)) continue;
+        } else if (s.source && !reverse_match(s.source)) continue;
       }
       // Before emitting, so `limit: 0` returns none.
       if (count >= limit) break;

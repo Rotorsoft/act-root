@@ -561,8 +561,9 @@ export class SqliteStore implements Store {
   // while a write transaction is open on it: a second one fails at once
   // (`TRANSACTION_ACTIVE` in memory, `SQLITE_BUSY` on a file) instead of
   // waiting. So every statement and every transaction takes its turn here.
-  // A turn covers only the database work, never a caller's callback, so a
-  // callback that writes to the store can't wait on itself.
+  // A turn covers only the database work, so a `query` callback that writes to
+  // the store can't wait on itself. `restore` is the exception: its driver runs
+  // inside the turn, because the whole restore is one transaction.
   private _turn: Promise<unknown> = Promise.resolve();
   private _serial<T>(work: () => Promise<T>): Promise<T> {
     const run = this._turn.then(work);
@@ -802,9 +803,14 @@ export class SqliteStore implements Store {
     // subset (e.g. `^(A|B)$`) would otherwise silently never claim its
     // stream, so `streamPatternToGlob` throws `ValidationError` here —
     // pointing operators to InMemory/PG for full regex claim sources —
-    // before any row is written. Literal sources skip the check entirely.
-    for (const { source } of streams) {
-      if (source !== undefined && !is_literal_source(source))
+    // before any row is written. Literal sources skip the check entirely, and
+    // so does a target reading itself: that source is a name, never a pattern.
+    for (const { stream, source } of streams) {
+      if (
+        source !== undefined &&
+        source !== stream &&
+        !is_literal_source(source)
+      )
         streamPatternToGlob(source);
     }
     return this._tx("subscribe", async (tx) => {
@@ -1695,6 +1701,8 @@ export class SqliteStore implements Store {
    * new sequence is dense from 1. `created` is preserved verbatim
    * from the source.
    */
+  // The driver runs inside this store's turn, so it must read from another
+  // store: a call on this one would wait for the restore to end, forever.
   async restore(
     driver: (
       callback: (event: Committed<Schemas, keyof Schemas>) => Promise<number>
