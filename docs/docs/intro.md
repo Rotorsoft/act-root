@@ -19,7 +19,7 @@ Most business apps can be modeled with just three primitives: **Actions → \{St
 
 ## Rules across streams
 
-A rule that spans streams, such as a unique email or a limited number of seats, needs no saga. An action loads the other stream with `.loads`, decides, and commits to every stream at once: all of it lands or none of it does. See [Rules across streams](./guides/rules-across-streams.md).
+**New in 2.0.** A rule that spans streams, such as a unique email or a limited number of seats, needs no saga. An action loads the other stream with `.loads`, decides, and commits to every stream at once: all of it lands or none of it does. See [Rules across streams](./guides/rules-across-streams.md), and [Migrating to 2.x](./guides/migrating-to-2.x.md) to upgrade.
 
 ## See it move
 

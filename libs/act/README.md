@@ -49,7 +49,7 @@ Define state, declare actions, dispatch, load. Everything else — projections, 
 
 ## Rules across streams
 
-A rule that spans streams, such as a unique email or a limited number of seats, needs no saga. An action loads the other stream with `.loads`, decides, and commits to every stream at once: all of it lands or none of it does.
+**New in 2.0.** A rule that spans streams, such as a unique email or a limited number of seats, needs no saga. An action loads the other stream with `.loads`, decides, and commits to every stream at once: all of it lands or none of it does.
 
 ```ts no-check
 .on({ Enroll })
