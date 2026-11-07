@@ -58,7 +58,7 @@ Define state, declare actions, dispatch, load. Everything else — projections, 
 .emit((data) => [["Enrolled", data], ["SeatTaken", {}]])
 ```
 
-Every pattern, what a race does and what it costs: [Rules across streams](https://rotorsoft.github.io/act-root/docs/guides/rules-across-streams).
+Every pattern, what a race does and what it costs: [Rules across streams](https://rotorsoft.github.io/act-root/docs/guides/rules-across-streams). [Watch it play](https://rotorsoft.github.io/act-root/flows/rules-across-streams.html).
 
 ## API
 

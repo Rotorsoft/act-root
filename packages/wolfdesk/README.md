@@ -3,6 +3,8 @@
 A larger Act example — a help-desk ticketing system adapted from *Learning Domain-Driven Design* (Vlad Khononov). Wolfdesk shows how to compose a single aggregate from multiple **partial states** and **slices** (vertical slice architecture), with a Drizzle/SQLite read model, deferred-reaction timers for the ticket lifecycle, and a PostgreSQL event store.
 
 > Workspace package, not published. Run via `pnpm dev:wolfdesk` from the monorepo root.
+>
+> [Watch its flows play](https://rotorsoft.github.io/act-root/flows/wolfdesk.html), animated from its builders.
 
 ## What it demonstrates
 

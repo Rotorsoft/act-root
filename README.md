@@ -79,7 +79,7 @@ Next, [`hello.ts`](packages/calculator/src/hello.ts) adds a reaction to this cou
 .emit((data) => [["Enrolled", data], ["SeatTaken", {}]])
 ```
 
-Every pattern, what a race does and what it costs: [Rules across streams](docs/docs/guides/rules-across-streams.md).
+Every pattern, what a race does and what it costs: [Rules across streams](docs/docs/guides/rules-across-streams.md). [Watch it play](https://rotorsoft.github.io/act-root/flows/rules-across-streams.html).
 
 ## What's in the box
 

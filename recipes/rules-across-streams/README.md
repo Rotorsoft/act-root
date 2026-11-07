@@ -3,6 +3,8 @@
 Rules that span streams, each as a small state: one action loads the states its decision needs and commits its events to all of them at once, or to none.
 
 > Run the tour from the repo root: `LOG_LEVEL=error npx tsx recipes/rules-across-streams/examples/tour.ts`.
+>
+> [Watch these rules play](https://rotorsoft.github.io/act-root/flows/rules-across-streams.html): one action, its loaded states and one commit, animated.
 
 ## The scenarios
 
