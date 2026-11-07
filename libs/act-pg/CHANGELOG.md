@@ -1,3 +1,10 @@
+# [@rotorsoft/act-pg-v1.22.6](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-pg-v1.22.5...@rotorsoft/act-pg-v1.22.6) (2026-11-06)
+
+
+### Bug Fixes
+
+* **act:** fix real 1.x bugs and drop an unneeded check ([#2357](https://github.com/Rotorsoft/act-root/issues/2357)) ([706e553](https://github.com/Rotorsoft/act-root/commit/706e553c0db1979a1201fe4547a71de7162b80d2)), closes [#2337](https://github.com/Rotorsoft/act-root/issues/2337) [#2339](https://github.com/Rotorsoft/act-root/issues/2339) [#2342](https://github.com/Rotorsoft/act-root/issues/2342) [#2347](https://github.com/Rotorsoft/act-root/issues/2347) [#2348](https://github.com/Rotorsoft/act-root/issues/2348) [#2349](https://github.com/Rotorsoft/act-root/issues/2349) [#2350](https://github.com/Rotorsoft/act-root/issues/2350) [#2356](https://github.com/Rotorsoft/act-root/issues/2356)
+
 # [@rotorsoft/act-pg-v1.22.5](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-pg-v1.22.4...@rotorsoft/act-pg-v1.22.5) (2026-11-05)
 
 
