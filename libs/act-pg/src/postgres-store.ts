@@ -116,6 +116,11 @@ const PG_UNIQUE_VIOLATION = "23505";
 // story, since it names neither the stream nor the event.
 const PG_NUL_BYTE = new Set(["22P05", "22021"]);
 
+// Half of a surrogate pair is the same kind of limit, `22P02` from the jsonb
+// parser: `"😀".slice(0, 1)` on user text is all it takes.
+const is_lone_surrogate = (error: { code?: string; detail?: string }) =>
+  error.code === "22P02" && /surrogate/i.test(String(error.detail));
+
 // Channel-name prefix for cross-process commit notifications. The
 // effective channel is namespaced per `(schema, table)` so two
 // PostgresStores pointed at distinct event tables in the same database
@@ -919,6 +924,14 @@ export class PostgresStore implements Store {
     // An empty commit writes nothing, but an expectedVersion still has to be
     // checked, as InMemory and SQLite do.
     if (msgs.length === 0 && expectedVersion === undefined) return [];
+    // The driver turns half a surrogate pair into U+FFFD, so the head lookup
+    // would come back under another name.
+    if (/\p{Cs}/u.test(stream))
+      throw new ValidationError(
+        stream,
+        msgs as unknown as Readonly<unknown>,
+        "Postgres cannot store half of a surrogate pair in a stream name"
+      );
     // Serialize commit VISIBILITY, not just id assignment. `id` is a
     // serial: it is assigned at INSERT time but the row appears at
     // COMMIT time, and every watermark consumer (the correlate
@@ -1058,6 +1071,13 @@ export class PostgresStore implements Store {
           stream,
           msgs as unknown as Readonly<unknown>,
           `Postgres cannot store a NUL byte (\\u0000). One of the ${msgs.length} event(s) committed to "${stream}" (${msgs.map((m) => String(m.name)).join(", ")}) carries one in its name, data, meta or pii. InMemory and SQLite accept it, so this commit would have succeeded there — strip NUL bytes at the edge where the data enters. Driver: ${(error as Error).message}`
+        );
+      }
+      if (is_lone_surrogate(error as { code?: string; detail?: string })) {
+        throw new ValidationError(
+          stream,
+          msgs as unknown as Readonly<unknown>,
+          `Postgres cannot store half of a surrogate pair. One of the ${msgs.length} event(s) committed to "${stream}" (${msgs.map((m) => String(m.name)).join(", ")}) carries one in its data, meta or pii, often from slicing text through an emoji. InMemory and SQLite accept it, so this commit would have succeeded there — clean the text at the edge where the data enters. Driver: ${(error as Error).message}`
         );
       }
       // Every other driver error is a StoreError, per the port contract.
@@ -1583,12 +1603,17 @@ export class PostgresStore implements Store {
       // The stored `source` is treated as the regex pattern, and a row
       // qualifies when any supplied candidate name matches it (`n ~ source`).
       // A NULL/empty source has no source constraint — it consumes from
-      // every stream, so it always qualifies. Composes (AND) with others.
+      // every stream, so it always qualifies. A target reading itself holds a
+      // name, never a pattern, and may not even compile as one. `CASE` is what
+      // keeps Postgres from compiling it. Composes (AND) with others.
       values.push(query.source_matches);
       conditions.push(
-        `(source IS NULL OR source = '' OR EXISTS (
-          SELECT 1 FROM unnest($${values.length}::text[]) AS n WHERE n ~ source
-        ))`
+        `(source IS NULL OR source = '' OR CASE
+          WHEN source = stream THEN source = ANY($${values.length}::text[])
+          ELSE EXISTS (
+            SELECT 1 FROM unnest($${values.length}::text[]) AS n WHERE n ~ source
+          )
+        END)`
       );
     }
     if (query?.after !== undefined) {

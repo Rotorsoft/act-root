@@ -18,6 +18,7 @@ import type {
   State,
 } from "../types/index.js";
 import { SNAP_EVENT, TOMBSTONE_EVENT } from "../types/index.js";
+import { AUTOCLOSE_TARGET_PREFIX } from "./autoclose-reaction.js";
 import type { EsOps } from "./event-sourcing.js";
 import { walk_streams } from "./walk-streams.js";
 
@@ -432,7 +433,7 @@ async function probe_min_watermarks(
         position.at < position.correlated_at;
       const cap = pending ? position.at : Math.max(position.at, checkpoint);
       for (const stream of streams) {
-        if (matches(position.source, stream)) {
+        if (matches(position.source, position.stream, stream)) {
           const prev = min_at.get(stream);
           if (prev === undefined || cap < prev) min_at.set(stream, cap);
         }
@@ -445,16 +446,19 @@ async function probe_min_watermarks(
 
 /**
  * Does a subscription with this `source` consume from `stream`? No source
- * consumes every stream; a literal source matches itself as a regex.
- * Compiled patterns are cached per matcher.
+ * consumes every stream; a target reading itself consumes only that name; a
+ * literal source matches itself as a regex. Compiled patterns are cached per
+ * matcher.
  */
 function source_matcher(): (
   source: string | undefined,
+  target: string,
   stream: string
 ) => boolean {
   const compiled = new Map<string, RegExp>();
-  return (source, stream) => {
+  return (source, target, stream) => {
     if (!source) return true;
+    if (source === target) return source === stream;
     let re = compiled.get(source);
     if (!re) {
       re = new RegExp(source);
@@ -544,8 +548,14 @@ async function partition_by_safety(
         position.correlated_at !== undefined &&
         position.at < position.correlated_at;
       if (!has_work) return;
+      // A parked autoclose reads the live head and consumes nothing, so it
+      // has no work a full close would lose.
+      if (position.stream.startsWith(AUTOCLOSE_TARGET_PREFIX)) return;
       for (const [stream, info] of stream_info) {
-        if (matches(position.source, stream) && position.at < info.max_id)
+        if (
+          matches(position.source, position.stream, stream) &&
+          position.at < info.max_id
+        )
           pending_set.add(stream);
       }
     },

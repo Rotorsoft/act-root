@@ -17,6 +17,19 @@ describe("InMemoryStore (adapter-specific)", () => {
     await dispose()();
   });
 
+  it("drop forgets who holds a correlator lease", async () => {
+    const lease = { key: "k", by: "first", millis: 60_000 };
+    await store().subscribe([], 50, lease);
+    await store().drop();
+    await store().seed();
+    const taken = await store().subscribe([], undefined, {
+      ...lease,
+      by: "second",
+    });
+    expect(taken.correlating).toBe(true);
+    expect(taken.correlated_at).toBe(-1);
+  });
+
   it("rejects an invalid stream pattern even on an empty log, like Postgres", async () => {
     await expect(store().query(() => {}, { stream: "(" })).rejects.toThrow(
       SyntaxError

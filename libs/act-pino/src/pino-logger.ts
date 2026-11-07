@@ -52,8 +52,8 @@ export class PinoLogger implements Logger {
     const cfg = config();
     const {
       level = cfg.logLevel,
-      pretty = cfg.env !== "production",
       options = {},
+      pretty = cfg.env !== "production" && !options.transport,
     } = opts;
 
     this._pino = pino({

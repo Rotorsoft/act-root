@@ -272,6 +272,36 @@ describe("scan (pre-flight, no committer)", () => {
     ]);
   });
 
+  it("stream_rename also rewrites the streams in the causation", async () => {
+    const event = baseEvent({ id: 1, stream: "old-b" });
+    const caused = {
+      ...event,
+      meta: {
+        correlation: "c",
+        causation: {
+          action: {
+            name: "go",
+            stream: "old-b",
+            actor: { id: "a", name: "a" },
+          },
+          event: { id: 0, name: "Started", stream: "old-a" },
+        },
+      },
+    } as E;
+    let got: E | undefined;
+    await scan(
+      fromArray([caused]),
+      { stream_rename: (s) => s.replace(/^old-/, "new-") },
+      async (e) => {
+        got = e;
+        return e.id;
+      }
+    );
+    expect(got?.stream).toBe("new-b");
+    expect(got?.meta.causation.action?.stream).toBe("new-b");
+    expect(got?.meta.causation.event?.stream).toBe("new-a");
+  });
+
   it("event_migrations + stream_rename compose, migration runs first", async () => {
     // The migration's `migrate(...)` sees the ORIGINAL stream name
     // because stream_rename runs after. Important for migrations that

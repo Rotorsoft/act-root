@@ -832,6 +832,129 @@ describe("autoclose rolling window (keep)", () => {
     expect(entry?.committed.name).toBe("__tombstone__");
   });
 
+  describe("keep with a time-gated terminate", () => {
+    const policy = {
+      is: "Resolved",
+      after: { days: 90 },
+      keep: { days: 30 },
+    } as const;
+    const day = (n: number) => new Date(T0.getTime() + n * 86_400_000);
+    const run = async (app: {
+      correlate(): Promise<unknown>;
+      drain(): Promise<unknown>;
+    }) => {
+      await app.correlate();
+      await app.drain();
+    };
+
+    function resolved_after_prune() {
+      const closed: CloseResult[] = [];
+      const app = act()
+        .withState(windowed_base().autocloses(policy).build())
+        .build({ autoSettle: false });
+      app.on("closed", (r) => closed.push(r));
+      const full = () =>
+        closed.some(
+          (r) => r.truncated.get("t")?.committed.name === "__tombstone__"
+        );
+      const pruned = () =>
+        closed.filter((r) => r.truncated.get("t")?.before !== undefined).length;
+      return { app, closed, full, pruned };
+    }
+
+    it("closes a stream that went quiet right after a prune", async () => {
+      const { app, full, pruned } = resolved_after_prune();
+      await app.do("bump", { stream: "t", actor }, {});
+      await app.do("bump", { stream: "t", actor }, {});
+      await run(app);
+
+      vi.setSystemTime(day(40));
+      await app.do("resolve", { stream: "t", actor }, {});
+      await run(app);
+      expect(pruned()).toBe(1);
+      expect(full()).toBe(false);
+
+      vi.setSystemTime(day(129));
+      await run(app);
+      expect(full()).toBe(false);
+
+      vi.setSystemTime(day(131));
+      await run(app);
+      await run(app);
+      expect(full()).toBe(true);
+    });
+
+    it("keeps the terminal head when the only snapshot is above it", async () => {
+      const { app, full } = resolved_after_prune();
+      await app.do("bump", { stream: "t", actor }, {});
+      await app.do("resolve", { stream: "t", actor }, {});
+      await run(app);
+
+      vi.setSystemTime(day(40));
+      await run(app);
+      vi.setSystemTime(day(41));
+      await run(app);
+      const [head] = await app.query_array({
+        stream: "t",
+        names: ["Resolved"],
+      });
+      expect(head?.name).toBe("Resolved");
+
+      vi.setSystemTime(day(91));
+      await run(app);
+      await run(app);
+      expect(full()).toBe(true);
+    });
+
+    it("keeps pruning a busy stream while the terminate waits", async () => {
+      const { app, full, pruned } = resolved_after_prune();
+      for (const d of [0, 40, 41, 80, 81]) {
+        vi.setSystemTime(day(d));
+        await app.do("bump", { stream: "t", actor }, {});
+        await app.do("bump", { stream: "t", actor }, {});
+        await run(app);
+      }
+      expect(pruned()).toBeGreaterThanOrEqual(2);
+      expect(full()).toBe(false);
+    });
+
+    it("lets app.close close the stream while the terminate waits", async () => {
+      const { app, full, pruned } = resolved_after_prune();
+      await app.do("bump", { stream: "t", actor }, {});
+      await app.do("bump", { stream: "t", actor }, {});
+      await run(app);
+
+      vi.setSystemTime(day(40));
+      await app.do("resolve", { stream: "t", actor }, {});
+      await run(app);
+      expect(pruned()).toBe(1);
+
+      await app.close([{ stream: "t" }]);
+      expect(full()).toBe(true);
+
+      // The parked visit still comes due, and finds nothing left to do.
+      vi.setSystemTime(day(41));
+      await run(app);
+      await expect(app.drain()).resolves.toBeDefined();
+    });
+  });
+
+  it("doesn't let a parked autoclose refuse app.close", async () => {
+    const app = act()
+      .withState(
+        windowed_base()
+          .autocloses({ after: { days: 90 } })
+          .build()
+      )
+      .build({ autoSettle: false });
+    await app.do("bump", { stream: "p", actor }, {});
+    await app.correlate();
+    await app.drain();
+    const result = await app.close([{ stream: "p" }]);
+    expect(result.skipped).toEqual([]);
+    expect(result.truncated.has("p")).toBe(true);
+  });
+
   it("skips the prune when no snapshot qualifies, retrying next trigger", async () => {
     const closed: CloseResult[] = [];
     const app = act()

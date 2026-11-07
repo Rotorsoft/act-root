@@ -19,6 +19,21 @@ const R = state({ R: z.object({ n: z.number() }) })
   .build();
 
 describe("hybrid store", () => {
+  it("query_streams reports the head of the log", async () => {
+    const store = hybridStore(new InMemoryStore(), new InMemoryStore());
+    await store.seed();
+    await store.commit("s", [{ name: "Hit", data: {} }], {
+      correlation: "",
+      causation: {},
+    });
+    await store.commit("s", [{ name: "Hit", data: {} }], {
+      correlation: "",
+      causation: {},
+    });
+    const { maxEventId } = await store.query_streams(() => {});
+    expect(maxEventId).toBe(1);
+  });
+
   it("a commit after restoring a shorter log reaches its reaction", async () => {
     const store = hybridStore(new InMemoryStore(), new InMemoryStore());
     await store.seed();

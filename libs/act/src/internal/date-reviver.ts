@@ -11,6 +11,8 @@
 import { z } from "zod";
 import { def_of, inner_of } from "./zod.js";
 
+type Walk = (schema: unknown) => z.ZodType | undefined;
+
 /**
  * Rebuild one union variant so it still recognises its own payloads.
  *
@@ -30,19 +32,22 @@ import { def_of, inner_of } from "./zod.js";
  * Reports whether this variant declared a date, so a union with none anywhere
  * builds nothing at all.
  */
-function variant_schema(schema: unknown): {
+function variant_schema(
+  schema: unknown,
+  walk: Walk
+): {
   schema: z.ZodType;
   dated: boolean;
 } {
   const shape = def_of(schema)?.shape as Record<string, z.ZodType> | undefined;
   if (!shape) {
-    const dates = date_reviver_schema(schema);
+    const dates = walk(schema);
     return { schema: dates ?? (schema as z.ZodType), dated: !!dates };
   }
   const next: Record<string, z.ZodType> = {};
   let dated = false;
   for (const [key, field] of Object.entries(shape)) {
-    const dates = date_reviver_schema(field);
+    const dates = walk(field);
     if (dates) dated = true;
     next[key] = (dates ?? field).optional();
   }
@@ -70,14 +75,40 @@ function variant_schema(schema: unknown): {
  * Zod does the walking, so nesting, arrays, records, unions and the wrappers
  * are handled by the engine rather than by a traversal of our own that would
  * drift as Zod grows constructs. A construct this doesn't recognise
- * contributes no date, which is the documented fallthrough. `z.lazy()` is one
- * on purpose: this walk descends into shapes, so a recursive schema would
- * never end.
+ * contributes no date, which is the documented fallthrough.
+ *
+ * A recursive schema is walked twice. The first pass stops at any schema it is
+ * already inside, which visits everything reachable and answers whether there
+ * is a date at all, so a recursive schema with none still builds nothing. The
+ * second ties each of those stops back to the schema's own result.
  */
 export function date_reviver_schema(schema: unknown): z.ZodType | undefined {
+  let recursive = false;
+  const pass = (tie: boolean): z.ZodType | undefined => {
+    const done = new Map<unknown, z.ZodType | undefined>();
+    const active = new Set<unknown>();
+    const walk: Walk = (node) => {
+      if (done.has(node)) return done.get(node);
+      if (active.has(node)) {
+        recursive = true;
+        return tie ? z.lazy(() => done.get(node) ?? z.unknown()) : undefined;
+      }
+      active.add(node);
+      const result = build(node, walk);
+      active.delete(node);
+      done.set(node, result);
+      return result;
+    };
+    return walk(schema);
+  };
+  const first = pass(false);
+  return first && recursive ? pass(true) : first;
+}
+
+function build(schema: unknown, walk: Walk): z.ZodType | undefined {
   const def = def_of(schema);
   if (!def) return undefined;
-  const inner = () => date_reviver_schema(def.innerType);
+  const inner = () => walk(def.innerType);
   switch (def.type) {
     case "date":
       return z.coerce.date();
@@ -86,23 +117,23 @@ export function date_reviver_schema(schema: unknown): z.ZodType | undefined {
       if (!shape) return undefined;
       const dated: Record<string, z.ZodType> = {};
       for (const [key, field] of Object.entries(shape)) {
-        const dates = date_reviver_schema(field);
+        const dates = walk(field);
         if (dates) dated[key] = dates.optional();
       }
       return Object.keys(dated).length ? z.looseObject(dated) : undefined;
     }
     case "array": {
-      const element = date_reviver_schema(def.element);
+      const element = walk(def.element);
       return element && z.array(element);
     }
     case "tuple": {
-      const items = (def.items as unknown[]).map((i) => date_reviver_schema(i));
+      const items = (def.items as unknown[]).map((i) => walk(i));
       return items.some(Boolean)
         ? z.tuple(items.map((i) => i ?? z.unknown()) as never)
         : undefined;
     }
     case "record": {
-      const value = date_reviver_schema(def.valueType);
+      const value = walk(def.valueType);
       return value && z.record(z.string(), value);
     }
     case "union": {
@@ -112,7 +143,9 @@ export function date_reviver_schema(schema: unknown): z.ZodType | undefined {
       // that actually declared the date never gets tried, and a sibling's
       // payload gets the wrong variant's rules. Every option therefore keeps
       // its fields; see {@link variant_schema}.
-      const variants = (def.options as unknown[]).map(variant_schema);
+      const variants = (def.options as unknown[]).map((o) =>
+        variant_schema(o, walk)
+      );
       return variants.some((v) => v.dated)
         ? z.union(variants.map((v) => v.schema) as never)
         : undefined;
@@ -123,7 +156,16 @@ export function date_reviver_schema(schema: unknown): z.ZodType | undefined {
     case "pipe":
       // `z.preprocess()` and `.pipe()`: the stored value is the output side.
       // A `.transform()`'s output is unknown, so it revives nothing.
-      return date_reviver_schema(def.out);
+      return walk(def.out);
+    case "lazy":
+      return walk((def.getter as () => unknown)());
+    case "intersection": {
+      // One side after the other, not a Zod intersection: each side keeps the
+      // fields it doesn't revive, so the two results wouldn't merge.
+      const left = walk(def.left);
+      const right = walk(def.right);
+      return left && right ? left.pipe(right) : (left ?? right);
+    }
     default:
       return inner_of(def) ? inner() : undefined;
   }
