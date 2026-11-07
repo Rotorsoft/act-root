@@ -61,10 +61,10 @@ describe("history a close changed", () => {
     expect(past.n).toBe(6);
   });
 
-  it("a stream whose name has a regex metacharacter doesn't stop the others", async () => {
+  it("a stream whose name reads as a pattern doesn't stop the others", async () => {
     const R = base().autocloses({ is: "Done" }).build();
     const app = act().withState(R).build({ autoSettle: false });
-    for (const stream of ["room+a", "room-b"]) {
+    for (const stream of ["^room-a", "room-b"]) {
       await app.do("hit", { stream, actor }, {});
       await app.do("done", { stream, actor }, {});
     }
@@ -75,8 +75,8 @@ describe("history a close changed", () => {
     const head = async (stream: string) =>
       (await app.query_array({ stream, stream_exact: true })).at(-1)?.name;
     expect(await head("room-b")).toBe("__tombstone__");
-    expect(await head("room+a")).toBe("Done");
-    await app.close([{ stream: "room+a" }]);
-    expect(await head("room+a")).toBe("__tombstone__");
+    expect(await head("^room-a")).toBe("Done");
+    await app.close([{ stream: "^room-a" }]);
+    expect(await head("^room-a")).toBe("__tombstone__");
   });
 });
