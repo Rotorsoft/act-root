@@ -1,3 +1,10 @@
+# [@rotorsoft/act-patch-v1.2.13](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-patch-v1.2.12...@rotorsoft/act-patch-v1.2.13) (2026-11-07)
+
+
+### Bug Fixes
+
+* **act:** fix what the 2.0 release audit found ([#2336](https://github.com/Rotorsoft/act-root/issues/2336)) ([6f09d48](https://github.com/Rotorsoft/act-root/commit/6f09d48d2632acad48d1e5edda1f22d72c98242f))
+
 # [@rotorsoft/act-patch-v1.2.12](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-patch-v1.2.11...@rotorsoft/act-patch-v1.2.12) (2026-10-26)
 
 
