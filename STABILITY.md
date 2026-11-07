@@ -93,7 +93,7 @@ Act is maintained by a small team. The windows below are deliberately modest —
 - **Previous major — maintenance.** When a new major `N` ships, the prior major `N-1` enters a maintenance window of **at least 6 months** during which it receives **security fixes and critical correctness fixes only** (data loss, lost events, crashes). No new features, no non-critical fixes. After the window closes, `N-1` is end-of-life.
 - **Older majors (`N-2` and earlier) — unsupported.** Best-effort community help via [issues](https://github.com/rotorsoft/act-root/issues) and [discussions](https://github.com/rotorsoft/act-root/discussions), no guaranteed fixes or releases.
 
-The windows above have been in effect since the [1.0 release](https://github.com/Rotorsoft/act-root/milestone/1). For any package still on a **0.x** line (currently `@rotorsoft/act-crypto` and `@rotorsoft/act-ops`), only the **latest published version** is supported — there are no maintenance branches before a package's own 1.0; upgrade to the newest release to pick up fixes.
+The windows above have been in effect since the [1.0 release](https://github.com/Rotorsoft/act-root/milestone/1). For any package still on a **0.x** line (currently `@rotorsoft/act-crypto`, `@rotorsoft/act-ops` and `@rotorsoft/act-otel`), only the **latest published version** is supported — there are no maintenance branches before a package's own 1.0; upgrade to the newest release to pick up fixes.
 
 The same window applies to every package that tracks core (see the table below): an `act-pg` or `act-sqlite` release is supported for as long as the core major it targets is.
 
