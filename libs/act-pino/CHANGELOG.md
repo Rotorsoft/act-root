@@ -1,3 +1,20 @@
+# [@rotorsoft/act-pino-v2.0.0](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-pino-v1.0.9...@rotorsoft/act-pino-v2.0.0) (2026-11-07)
+
+
+* fix(act-pino)!: require act 2 with a major version of its own ([7bc0576](https://github.com/Rotorsoft/act-root/commit/7bc05766f2514a88904a5e68fb3c5aa741cf0adc))
+
+
+### Bug Fixes
+
+* **act:** fix what the 2.0 release audit found ([#2336](https://github.com/Rotorsoft/act-root/issues/2336)) ([6f09d48](https://github.com/Rotorsoft/act-root/commit/6f09d48d2632acad48d1e5edda1f22d72c98242f))
+
+
+### BREAKING CHANGES
+
+* act-pino 2 needs @rotorsoft/act 2. The logger itself is unchanged.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
 # [@rotorsoft/act-pino-v1.0.9](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-pino-v1.0.8...@rotorsoft/act-pino-v1.0.9) (2026-11-07)
 
 
