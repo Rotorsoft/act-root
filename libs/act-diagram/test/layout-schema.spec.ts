@@ -28,7 +28,6 @@ describe("compute_layout — schema propagation", () => {
             {
               name: "placeOrder",
               emits: ["OrderPlaced", "OrderShipped"],
-              invariants: [],
             },
           ],
         },
@@ -56,7 +55,7 @@ describe("compute_layout — schema propagation", () => {
           name: "S",
           varName: "S:0",
           events: [{ name: "E", hasCustomPatch: false }],
-          actions: [{ name: "act1", emits: ["E"], invariants: [] }],
+          actions: [{ name: "act1", emits: ["E"] }],
         },
       ],
       slices: [],
@@ -76,7 +75,7 @@ describe("compute_layout — schema propagation", () => {
           name: "S",
           varName: "S:0",
           events: [{ name: "OrderPlaced", hasCustomPatch: false }],
-          actions: [{ name: "place", emits: ["OrderPlaced"], invariants: [] }],
+          actions: [{ name: "place", emits: ["OrderPlaced"] }],
         },
       ],
       slices: [

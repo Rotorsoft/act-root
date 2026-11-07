@@ -41,24 +41,6 @@ describe("PresenceTracker", () => {
     expect(() => p.remove("nope", "nope")).not.toThrow();
   });
 
-  describe("deprecated snake_case aliases", () => {
-    it("get_online delegates to online", () => {
-      const p = new PresenceTracker();
-      expect(p.get_online("g1").size).toBe(0);
-      p.add("g1", "p1");
-      expect(p.get_online("g1")).toEqual(new Set(["p1"]));
-      expect(p.get_online("g1")).toEqual(p.online("g1"));
-    });
-
-    it("is_online delegates to isOnline", () => {
-      const p = new PresenceTracker();
-      expect(p.is_online("g1", "p1")).toBe(false);
-      p.add("g1", "p1");
-      expect(p.is_online("g1", "p1")).toBe(true);
-      expect(p.is_online("g1", "p1")).toBe(p.isOnline("g1", "p1"));
-    });
-  });
-
   it("handles remove of unknown identity on existing stream", () => {
     const p = new PresenceTracker();
     p.add("g1", "p1");

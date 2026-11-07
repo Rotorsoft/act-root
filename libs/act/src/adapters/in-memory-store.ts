@@ -8,6 +8,7 @@
 
 import { ConcurrencyError } from "../types/errors.js";
 import type {
+  Append,
   BlockedLease,
   Committed,
   EventMeta,
@@ -26,7 +27,12 @@ import type {
   SubscribeInput,
 } from "../types/index.js";
 import { DEFAULT_LANE, SNAP_EVENT, TOMBSTONE_EVENT } from "../types/index.js";
-import { DEFAULT_QUERY_STREAMS_LIMIT, fair_slots, sleep } from "../utils.js";
+import {
+  check_appends,
+  DEFAULT_QUERY_STREAMS_LIMIT,
+  fair_slots,
+  sleep,
+} from "../utils.js";
 
 /**
  * One subscription row: watermark, lease, retry and schedule. Its state is
@@ -400,44 +406,44 @@ export class InMemoryStore implements Store {
   }
 
   async commit<E extends Schemas>(
-    stream: string,
-    msgs: Message<E, keyof E>[],
-    meta: EventMeta,
-    expectedVersion?: number
+    appends: readonly Append<E>[],
+    meta: EventMeta
   ) {
     await sleep();
-    const current_version = this._stream_versions.get(stream) ?? -1;
-    if (
-      typeof expectedVersion === "number" &&
-      current_version !== expectedVersion
-    ) {
-      throw new ConcurrencyError(
-        stream,
-        current_version,
-        msgs as Message<Schemas, keyof Schemas>[],
-        expectedVersion
-      );
+    check_appends(appends);
+    // Every version is checked before anything is appended, so a stale
+    // append leaves every stream as it was.
+    for (const { stream, msgs, expectedVersion } of appends) {
+      const current = this._stream_versions.get(stream) ?? -1;
+      if (typeof expectedVersion === "number" && current !== expectedVersion)
+        throw new ConcurrencyError(
+          stream,
+          current,
+          msgs as unknown as Message<Schemas, keyof Schemas>[],
+          expectedVersion
+        );
     }
-
-    let version = current_version + 1;
-    const committed = msgs.map(({ name, data, pii }) => {
-      const c: Committed<E, keyof E> = {
-        id: this._next_id++,
-        stream,
-        version,
-        created: new Date(),
-        name,
-        data,
-        meta,
-      };
-      // Stored pii-less, so `forget_pii` never touches the event row.
-      this._events.push(c as Committed<Schemas, keyof Schemas>);
-      if (pii != null) this._put_pii(stream, c.id, pii);
-      version++;
-      return this._with_pii(c);
+    const created = new Date();
+    return appends.flatMap(({ stream, msgs }) => {
+      let version = this._stream_versions.get(stream) ?? -1;
+      const committed = msgs.map(({ name, data, pii }) => {
+        const c: Committed<E, keyof E> = {
+          id: this._next_id++,
+          stream,
+          version: ++version,
+          created,
+          name,
+          data,
+          meta,
+        };
+        // Stored pii-less, so `forget_pii` never touches the event row.
+        this._events.push(c as Committed<Schemas, keyof Schemas>);
+        if (pii != null) this._put_pii(stream, c.id, pii);
+        return this._with_pii(c);
+      });
+      this._stream_versions.set(stream, version);
+      return committed;
     });
-    this._stream_versions.set(stream, version - 1);
-    return committed;
   }
 
   async claim(

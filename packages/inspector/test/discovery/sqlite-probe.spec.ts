@@ -33,10 +33,14 @@ async function buildActSqlite(file: string, withEvents = false): Promise<void> {
     await store.seed();
     if (withEvents) {
       await store.commit(
-        "stream-a",
         [
-          { name: "OpenedV1", data: { i: 1 } },
-          { name: "OpenedV1", data: { i: 2 } },
+          {
+            stream: "stream-a",
+            msgs: [
+              { name: "OpenedV1", data: { i: 1 } },
+              { name: "OpenedV1", data: { i: 2 } },
+            ],
+          },
         ],
         { correlation: "c", causation: {} }
       );

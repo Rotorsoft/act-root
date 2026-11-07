@@ -260,12 +260,13 @@ type ApiError = {
 |---|---|---|
 | `ValidationError` | 422 / `VALIDATION` | `UNPROCESSABLE_CONTENT` |
 | `PreconditionError` | 409 / `PRECONDITION` | `CONFLICT` |
-| `InvariantError` (deprecated, from `.given` rules) | 409 / `INVARIANT` | `CONFLICT` |
 | `ConcurrencyError` | 412 / `CONCURRENCY` | `PRECONDITION_FAILED` |
 | `StreamClosedError` | 410 / `STREAM_CLOSED` | `NOT_FOUND` (404): tRPC has no 410 |
 | `NonRetryableError` | 400 / `NON_RETRYABLE` | `BAD_REQUEST` |
 | anything else | 500 / `INTERNAL` | `INTERNAL_SERVER_ERROR` |
  The transports never define their own mapping — they all call `toApiError(err)` at their error boundary and forward `{ status, body }` to the wire. Operators wanting different mappings wrap the transport instead of mutating the table; consistency is the load-bearing property, not the specific status codes.
+
+An action with [`.loads`](../concepts/state-management.md#rules-across-streams-loads) adds nothing here. Its route returns its own stream's snapshots, typed by its own state. A rule over a loaded state answers 409, with `detail` naming the action and the rule. A rival on a loaded stream answers 412, with `detail` naming that stream, and nothing lands on any stream. OpenAPI describes both on each route.
 
 ### `withIdempotency`
 
@@ -338,7 +339,7 @@ This is the right pattern when you want a Hono/tRPC instance with a mix of gener
 
 Every generator accepts an optional `expectedVersion(action, input, ctx) => number | undefined`. When the callback returns a number, the generator threads it into `Target.expectedVersion` for that call — `app.do` enforces the optimistic-concurrency check and throws `ConcurrencyError` on a stale write. Returning `undefined` leaves the call to the version the action loads; a number pins it, and a pinned conflict is never retried.
 
-A state with `.snap` takes the next version for each snapshot, so a version read from an action's result can be stale: read it from `app.load`. The conventional wiring is the `If-Match` header on REST or a last-known-version field on a tRPC input — either way the host owns where the expected version comes from. Document it for both transports in one shot via the OpenAPI emitter's `expectedVersion: true` option, which adds the `If-Match` parameter to every operation.
+A state with `.snap` takes the next version for each snapshot, so pin to a result's `version`, which is the stream's head, not `event.version`. The conventional wiring is the `If-Match` header on REST or a last-known-version field on a tRPC input — either way the host owns where the expected version comes from. Document it for both transports in one shot via the OpenAPI emitter's `expectedVersion: true` option, which adds the `If-Match` parameter to every operation.
 
 ## Idempotency
 
@@ -368,7 +369,7 @@ Behavior: fresh claim → handler runs, response normal. Duplicate of a committe
 
 ## Real-time subscriptions
 
-Both `trpc(app, { sse })` and `hono(app, { sse })` accept an optional SSE wiring that walks the registry and emits **one subscription per unique state name**, all reading from a host-supplied `BroadcastChannel`. The host continues to own publication; the generator owns subscription, accounting, cleanup, and the wire format — so the loop you used to hand-write (open SSE response, subscribe to channel, forward patches, manage heartbeat, decrement counter on close) collapses to one option. On tRPC the subscriptions mount at `router.subscribe.<stateName>`, beside the action mutations, so `subscribe` is a reserved action name there: generating a router with `sse` for an app that has an action called `subscribe` throws instead of silently dropping the action.
+Both `trpc(app, { sse })` and `hono(app, { sse })` accept an optional SSE wiring that walks the registry and emits **one subscription per unique state name**, including states reached only through [`.loads`](../concepts/state-management.md#rules-across-streams-loads), all reading from a host-supplied `BroadcastChannel`. The host continues to own publication; the generator owns subscription, accounting, cleanup, and the wire format — so the loop you used to hand-write (open SSE response, subscribe to channel, forward patches, manage heartbeat, decrement counter on close) collapses to one option. On tRPC the subscriptions mount at `router.subscribe.<stateName>`, beside the action mutations, so `subscribe` is a reserved action name there: generating a router with `sse` for an app that has an action called `subscribe` throws instead of silently dropping the action.
 
 A state whose events declare `sensitive(...)` fields can't be served over SSE: generating either transport with `sse` for an app that has one throws at build. The channel caches one state per stream, folded over whichever actor committed last, and sends it to every subscriber, so it would hand one actor's plaintext to everyone and overwrite the owner's view with `[REDACTED]`. Generate without `sse`, or keep the sensitive fields in a state you don't broadcast.
 

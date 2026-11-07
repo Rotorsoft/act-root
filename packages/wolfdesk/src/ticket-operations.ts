@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { slice, state } from "@rotorsoft/act";
+import { Agent, agentStream } from "./agent.js";
 import {
   AssignTicket,
   EscalateTicket,
@@ -19,6 +20,7 @@ import {
   mustBeUser,
   mustNotBeAcknowledgedByAgent,
   mustNotBeEscalated,
+  mustNotBeResolved,
 } from "./ticket-preconditions.js";
 
 // --- State ---
@@ -35,9 +37,20 @@ export const TicketOperations = state({ Ticket: TicketOperationsState })
     TicketReassigned,
   })
 
-  .on({ AssignTicket })
-  .requires([mustBeOpen])
-  .emit("TicketAssigned")
+  .on({ AssignTicket }, { maxRetries: 4 })
+  .loads(
+    Agent,
+    (_, state) => state.agentId && agentStream(state.agentId),
+    ["TicketDropped"],
+    "current"
+  )
+  .loads(Agent, (data) => agentStream(data.agentId), ["TicketTaken"], "next")
+  .requires([mustBeOpen, mustNotBeResolved])
+  .emit((data) => [
+    ["TicketAssigned", data],
+    ["TicketDropped", {}],
+    ["TicketTaken", {}],
+  ])
 
   .on({ RequestTicketEscalation })
   .requires([mustBeOpen, mustBeUser, mustBeDueForEscalation])
@@ -55,20 +68,34 @@ export const TicketOperations = state({ Ticket: TicketOperationsState })
   .requires([mustBeOpen, mustNotBeEscalated])
   .emit((data) => ["TicketEscalated", { ...data, escalationId: randomUUID() }])
 
-  .on({ ReassignTicket })
+  // Moves the ticket between two agents in one commit.
+  .on({ ReassignTicket }, { maxRetries: 4 })
+  .loads(
+    Agent,
+    (_, state) => state.agentId && agentStream(state.agentId),
+    ["TicketDropped"],
+    "current"
+  )
+  .loads(Agent, (data) => agentStream(data.agentId), ["TicketTaken"], "next")
   .requires([
     mustBeOpen,
+    mustNotBeResolved,
     mustBeEscalated,
     mustBeDueForReassignment,
     mustNotBeAcknowledgedByAgent,
   ])
-  .emit("TicketReassigned")
+  .emit((data) => [
+    ["TicketReassigned", data],
+    ["TicketDropped", {}],
+    ["TicketTaken", {}],
+  ])
 
   .build();
 
 // --- Slice ---
 // prettier-ignore
 export const TicketOpsSlice = slice()
+  .withState(Agent)
   .withState(TicketOperations)
   .on("TicketEscalationRequested")
   .do(async function escalate(event, _stream, app) {

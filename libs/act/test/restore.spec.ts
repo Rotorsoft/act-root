@@ -758,10 +758,13 @@ describe("restore into a store that already correlated", () => {
   async function backup() {
     const src = new InMemoryStore();
     for (let i = 0; i < 3; i++)
-      await src.commit("restored", [{ name: "Ticked", data: {} }], {
-        correlation: "c",
-        causation: {},
-      });
+      await src.commit(
+        [{ stream: "restored", msgs: [{ name: "Ticked", data: {} }] }],
+        {
+          correlation: "c",
+          causation: {},
+        }
+      );
     return src;
   }
 
@@ -853,10 +856,13 @@ describe("restore into a store that already correlated", () => {
   /** A backup of `n` events, one stream each. */
   async function backup_of(n: number, src = new InMemoryStore()) {
     for (let i = 0; i < n; i++)
-      await src.commit(`restored-${i}`, [{ name: "Ticked", data: {} }], {
-        correlation: "c",
-        causation: {},
-      });
+      await src.commit(
+        [{ stream: `restored-${i}`, msgs: [{ name: "Ticked", data: {} }] }],
+        {
+          correlation: "c",
+          causation: {},
+        }
+      );
     return src;
   }
 

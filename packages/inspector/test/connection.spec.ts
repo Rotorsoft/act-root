@@ -137,10 +137,13 @@ describe("transfer (unified backup / restore / cross-adapter)", () => {
   it("dry-run reports counts without touching the target", async () => {
     await caller.connect({ adapter: "inmemory" });
     const store = getActiveStore()!;
-    await store.commit("dry-stream", [{ name: "Tick", data: {} }], {
-      correlation: "dry",
-      causation: {},
-    });
+    await store.commit(
+      [{ stream: "dry-stream", msgs: [{ name: "Tick", data: {} }] }],
+      {
+        correlation: "dry",
+        causation: {},
+      }
+    );
     const baselineEntries = (await caller.audit()).entries.length;
     const result = await caller.transfer({
       source: { adapter: "current" },

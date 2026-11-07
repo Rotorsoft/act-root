@@ -139,6 +139,7 @@ export const TicketCreationState = TicketBase.extend({
   supportCategoryId: z.uuid(),
   priority: z.enum(Priority),
   title: z.string().min(1),
+  agentId: z.uuid().optional(),
   closedById: z.uuid().optional(),
   resolvedById: z.uuid().optional(),
   closeAfter: z.date().optional(),
@@ -148,6 +149,7 @@ export const TicketMessagingState = TicketBase;
 
 export const TicketOperationsState = TicketBase.extend({
   agentId: z.uuid().optional(),
+  resolvedById: z.uuid().optional(),
   requestId: z.uuid().optional(),
   requestedById: z.uuid().optional(),
   escalationId: z.uuid().optional(),

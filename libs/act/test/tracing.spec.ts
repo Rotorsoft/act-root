@@ -207,6 +207,30 @@ describe("tracing", () => {
       expect(commitCalls).toHaveLength(0);
     });
 
+    it("withActionTrace names each committed event with the stream it was appended to", async () => {
+      const Tally = state({ Tally: z.object({ n: z.number() }) })
+        .init(() => ({ n: 0 }))
+        .emits({ Tallied: ZodEmpty })
+        .patch({ Tallied: (_, s) => ({ n: s.n + 1 }) })
+        .build();
+      const Router = state({ Router: z.object({}) })
+        .init(() => ({}))
+        .emits({ Routed: ZodEmpty })
+        .on({ route: ZodEmpty })
+        .loads(Tally, () => "tally-1", ["Tallied"])
+        .emit(() => [
+          ["Routed", {}],
+          ["Tallied", {}],
+        ])
+        .build();
+      const { action } = build_es(withLevel("trace"));
+      await action(Router, "route", target("r-1"), {});
+      expect(traceSpy).toHaveBeenCalledWith(
+        [{}, {}],
+        expect.stringContaining("r-1.Routed, tally-1.Tallied")
+      );
+    });
+
     it("withSnapTrace logs stream and version", async () => {
       const [snapshot] = await es.action(Counter, "increment", target("s3"), {
         by: 1,

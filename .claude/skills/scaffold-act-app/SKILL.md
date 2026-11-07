@@ -18,6 +18,7 @@ Build a TypeScript monorepo application using `@rotorsoft/act` from a functional
 | Domain Event | Event + Patch | `.emits({ Event: schema })` + optional `.patch({...})` for custom reducers |
 | Business Rule / Guard | Precondition | `.requires([{ description, holds }])` |
 | Rule that always holds | Invariant | a refinement on the state's Zod schema, checked before every commit |
+| Rule across entities, unique value, shared limit | Loaded state | `.loads(State, target, ["Event"])`; a unique value or a limit is a state of its own |
 | Policy / Process Manager | Reaction (Slice or Act) | `.on("Event").do(handler)` |
 | Read Model / Query | Projection | `projection("target").on({ Event }).do(handler)` |
 | Bounded Context / Feature | Slice | `slice().withState(State)` |
@@ -50,6 +51,7 @@ Specs use varied terminology. Map to framework concepts:
 | Policy, Process Manager, Automation, Saga, Reactor | Reaction | `slice().withState(State).on("Event").do(handler)` |
 | Guard, Business Rule, Constraint, Precondition | Precondition | `.requires([{ description, holds }])` (typed over `unknown` when it ignores the payload) |
 | Invariant, a rule every state must keep | Invariant | a refinement on the state's Zod schema |
+| Unique, one per, at most N, no overlap, both or neither, across entities | Loaded state | `.loads(State, target, ["Event"])` (see domain.md § Rules across streams) |
 | Specification, Acceptance Criteria, Given-When-Then, Scenario | Test case | `describe / it` block |
 | Screen, UI, View, Page | Client component | tRPC procedure + React component |
 | Bounded Context, Module, Feature, Slice | Slice | `slice().withState(State)` |
@@ -205,7 +207,7 @@ For production deployment (PostgresStore, background processing, automated jobs)
 - [ ] AppActor type defined extending Actor, systemActor constant exported
 - [ ] Every action emits at least one event
 - [ ] Patch handlers are pure functions returning partial state
-- [ ] Preconditions (`.requires`) guard every action; invariants live in the state schemas; no deprecated `.given`
+- [ ] Preconditions (`.requires`) guard every action; invariants live in the state schemas
 - [ ] Reactions pass triggering event for causation tracking
 - [ ] Projections co-located with slices, with query and clear functions
 - [ ] Projections register only lifecycle event handlers when using @rotorsoft/act-http/sse broadcast

@@ -32,10 +32,10 @@ describe("InMemoryStore (adapter-specific)", () => {
   it("binary-searches id bounds on backward scans across truncation holes", async () => {
     const s = store();
     const meta = { correlation: "c", causation: {} };
-    await s.commit("bw-a", [{ name: "A", data: {} }], meta); // id 0
-    await s.commit("bw-b", [{ name: "B", data: {} }], meta); // id 1
-    await s.commit("bw-a", [{ name: "A", data: {} }], meta); // id 2
-    await s.commit("bw-b", [{ name: "B", data: {} }], meta); // id 3
+    await s.commit([{ stream: "bw-a", msgs: [{ name: "A", data: {} }] }], meta); // id 0
+    await s.commit([{ stream: "bw-b", msgs: [{ name: "B", data: {} }] }], meta); // id 1
+    await s.commit([{ stream: "bw-a", msgs: [{ name: "A", data: {} }] }], meta); // id 2
+    await s.commit([{ stream: "bw-b", msgs: [{ name: "B", data: {} }] }], meta); // id 3
     // Full truncate of bw-a punches holes at ids 0 and 2 — ids no longer
     // equal array indexes, so the backward `before` bound must resolve by
     // id, not position.
@@ -68,10 +68,13 @@ describe("InMemoryStore (adapter-specific)", () => {
     expect(await s.claim(5, 5, "w", 5_000)).toHaveLength(0);
 
     // The first event this store ever issues carries id 0.
-    const [first] = await s.commit("src", [{ name: "E", data: {} }], {
-      correlation: "",
-      causation: {},
-    });
+    const [first] = await s.commit(
+      [{ stream: "src", msgs: [{ name: "E", data: {} }] }],
+      {
+        correlation: "",
+        causation: {},
+      }
+    );
     expect(first.id).toBe(0);
 
     // It must be claimable, and the lease must open at -1 so the event

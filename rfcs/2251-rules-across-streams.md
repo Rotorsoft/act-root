@@ -3,7 +3,7 @@
 - **Issue:** #2251
 - **Author:** Claude, for rotorsoft
 - **Created:** 2026-10-31
-- **Revised:** 2026-11-01 (replaces the first design, merged in #2252); 2026-11-03 (a load without events is a read, no chained targets, no act-crypto helper, a loaded state is registered in this Act, teaching by pattern: #2285, #2289–#2293)
+- **Revised:** 2026-11-01 (replaces the first design, merged in #2252); 2026-11-03 (a load without events is a read, no chained targets, no act-crypto helper, a loaded state is registered in this Act, teaching by pattern: #2285, #2289–#2293); 2026-11-03 (`commit(appends, meta)`, and `.loads` is positional: #2304, #2255); 2026-11-04 (an action appends to its own stream too)
 - **Ships in:** 2.0 (the `Store.commit` signature changes)
 
 ## Motivation
@@ -108,7 +108,9 @@ const Email = state({ Email: z.object({ holder: z.string().optional() }) })
   })
   .build();
 
-const email = (value: string) => `email-${value.trim().toLowerCase()}`;
+// A stream name can't be forgotten, so it holds an HMAC of the address, never the address.
+const email = (value: string) =>
+  `email-${createHmac("sha256", key).update(value.trim().toLowerCase()).digest("hex")}`;
 
 const User = state({ User: UserSchema })
   // ...
@@ -134,8 +136,8 @@ A limit is the same pattern with a count, like `Seats`. What a framework helper 
 
 1. **Load** the action's own stream (state and version), then every `.loads` target at once; a target function sees the payload and the action's state.
 2. **Check the preconditions** with the action's state and every state it loaded (the fourth argument, `loaded`, keyed by state name, or by the load's name when it has one).
-3. **Run `.emit` and route each event:** an event of the action's own state goes to its stream; an event listed on a load goes to that load's stream. Fold each event onto its stream's state, and check every folded state against its schema.
-4. **Commit once,** `commit(writes)`, with each stream's expected version set to the version it had **when it was loaded**. A loaded stream that receives no event is not written, so it isn't guarded.
+3. **Run `.emit` and route each event:** an event of the action's own state goes to its stream; an event listed on a load goes to that load's stream. An action that emits to loaded streams emits to its own stream too: its own stream records the decision, so an action whose events all go to loaded streams throws, and a change to one stream alone belongs on that stream's state. Fold each event onto its stream's state, and check every folded state against its schema.
+4. **Commit once,** `commit(appends)`, with each stream's expected version set to the version it had **when it was loaded**. A loaded stream that receives no event gets no append, so it isn't guarded.
 5. **The store checks every version in one atomic step.** If any stream moved since its load, nothing is written and the commit throws `ConcurrencyError`; `maxRetries` reruns the sequence from step 1 with fresh loads. An explicit `expectedVersion` from the caller applies to the action's own stream and is never retried.
 
 No write rests on stale context: every stream the action writes is unchanged since it was loaded, or nothing commits. A stream that was only read can move in between; see Trade-offs. A load served from the cache is safe for the same reason; a cached version that's behind fails the check, and the retry reloads.
@@ -144,13 +146,13 @@ No write rests on stale context: every stream the action writes is unchanged sin
 
 ### `Store` port (breaking for adapters; 2.0)
 
-- `commit(writes, meta)` replaces `commit(stream, msgs, meta, expectedVersion?)`. `writes` is `readonly { stream: string; msgs: Message[]; expectedVersion?: number }[]`, each stream at most once, each with at least one message. All writes land or none do; each `expectedVersion` is checked against its own stream, and a stale one throws `ConcurrencyError` naming that stream. A write with no messages is refused. It returns the committed events of every write, in order.
+- `commit(appends, meta)` replaces `commit(stream, msgs, meta, expectedVersion?)`. `appends` is `readonly Append[]`, each `{ stream, msgs, expectedVersion? }`, each stream at most once, each with at least one message. All appends land or none do; each `expectedVersion` is checked against its own stream, and a stale one throws `ConcurrencyError` naming that stream. An append with no messages is refused. It returns the committed events of every append, in order.
 - Adapters do the inserts for several streams inside the transaction they already open; the existing unique `(stream, version)` index catches a race on any of them, since every write inserts a row. No new table, column or index.
 
 ### Builders (additive)
 
 - **`.loads(State, target, events?, name?)`** on the action chain of `state` and `slice`, between `.on(...)` and `.requires(...)`; it can repeat.
-  - `target(payload, state)` returns the stream id;
+  - `target(payload, state)` returns the stream id, or `undefined` to skip the load, for a relation that may not exist yet: `loaded` then holds `undefined` for it, typed so only for such a target, and events listed on it are dropped;
   - `events` lists the loaded state's events this action may emit to that stream (none: a read, not guarded);
   - `name` keys the load when the action loads the same state twice.
 - **Preconditions and `.emit`** get the loaded states as a new fourth argument, `loaded`: `holds(payload, state, actor, loaded)` and `emit(payload, snapshot, target, loaded)`.
@@ -165,24 +167,24 @@ No write rests on stale context: every stream the action writes is unchanged sin
 Every new piece is typed from the states it names, end to end, and a type-level test fails to compile when any of these widens:
 
 - **`.loads`:** a `State` carries its name as a literal type, so each load adds `{ [name]: thatState }` to the action's `loaded` type. `events` accepts only the loaded state's event names. A load name is a literal too, so a duplicate fails to compile.
-- **Preconditions:** `holds(payload, state, actor, loaded)`, the fourth parameter optional, so a shared `Precondition<S, unknown>` still fits every action.
+- **Preconditions:** `holds(payload, state, actor, loaded)`. The type declares `actor` and `loaded` as parameters (not optional ones, so a rule can destructure `loaded`), and a shared `Precondition<S, unknown>` that leaves them out still fits every action.
 - **`.emit`:** `(payload, snapshot, target, loaded)`, and its return type is the state's own events plus every event listed on its loads, each with its own payload type. An event listed on no load fails to compile; an event listed on two loads of one action fails to compile.
 - **`app.do` and act-http:** unchanged return types. A generated tRPC or Hono mutation still returns its action's snapshots, typed; the other streams' commits reach typed state-scoped `committed` listeners.
 
-The build checks the same for plain JavaScript and dynamically built states: a load of the action's own stream, an event that doesn't belong to the loaded state, an event listed on two loads, a state loaded twice without names, and an emitted event no load lists all throw.
+The build checks the same for plain JavaScript and dynamically built states: an event that doesn't belong to the loaded state, an event listed on two loads, a state loaded twice without names, a static `.emit` of an event a load lists, and an emitted event no load lists all throw. A target depends on the caller's input, so a load of the action's own stream, or two loads naming one stream (a transfer to the same account), refuses at the call with `PreconditionError`.
 
 ## Scenarios
 
-The scenarios are four patterns. Each scenario ships as a test; the guide and `packages/rules` teach one per pattern (★), and Wolfdesk's agent limit is the in-app example.
+The scenarios are four patterns. Each scenario ships as a test; the guide and `recipes/rules-across-streams` teach one per pattern (★), and Wolfdesk's agent limit is the in-app example.
 
 | Pattern | Scenario | The action loads… and may emit to it… |
 |---|---|---|
 | A unique value | ★ User email: register, change (two loads of `Email`), deactivate, erase | `Email` at `email-<value>`: `EmailTaken`, `EmailReleased` |
 | | Vehicle plate never reissued | `Plate` at `plate-<value>`: `PlateTaken`; scrapping emits nothing to it |
 | | Idempotency or opt-in token; one review per customer per product | `Token` at `token-<id>`, or `Review` at `review-<customer>-<product>` |
-| A count limit | ★ Course capacity, student max courses | `Seats` at `course-<id>`: `SeatTaken`; `StudentLoad` at `student-<id>`: `CourseAdded` |
+| A count limit | ★ Course capacity, student max courses | `Seats` at `course-<id>`: `SeatTaken`; `Student` at `student-<id>`: `CourseAdded` |
 | | Sessions per user, released on timeout | `UserSessions` at `sessions-<user>`: `SessionOpened`; a deferred reaction emits `SessionClosed` |
-| | Wolfdesk: 5 open tickets per agent | `AgentLoad` at `agent-<id>`: `TicketTaken`, `TicketDropped`; a reassign loads two agents |
+| | Wolfdesk: 5 open tickets per agent | `Agent` at `agent-<id>`: `TicketTaken`, `TicketDropped`; a reassign loads two agents |
 | | Gapless invoice numbers | `InvoiceCounter` at `invoices`: `NumberIssued` |
 | Another state's schema | ★ Room booking, no overlap | `Room` at `room-<id>`: `RoomReserved`; `Room`'s schema forbids overlapping intervals |
 | | Invoice payments | `Invoice` at `invoice-<id>`: `PaymentApplied`; the schema keeps paid ≤ amount |
@@ -226,7 +228,7 @@ The scenarios are four patterns. Each scenario ships as a test; the guide and `p
 - **Event ownership.** Each event still belongs to one state and folds only onto that state's streams. An action emits another state's events only to a stream it loaded and only those its load lists.
 - **Cache and snapshots.** Each stream is cached and snapshotted as today.
 - **Close, windowed close, archives.** Each stream's lifecycle is its own. Freeing a value on close is the closing action loading the value's stream and emitting the release.
-- **`forget` and sensitive fields.** A stream id is not forgettable, so a stream keyed by a sensitive value (an email) uses an HMAC of it with an operator-held key (`createHmac` from `node:crypto`; the guide shows the three lines and why the key never rotates without refilling the value streams, #2258). A loaded stream loads with the caller's actor, so its sensitive fields are gated as the caller's would be.
+- **`forget` and sensitive fields.** A stream id is not forgettable, so a stream keyed by a sensitive value (an email) uses an HMAC of it with an operator-held key (`createHmac` from `node:crypto`; [`sensitive-data.md`](../docs/docs/guides/sensitive-data.md#what-the-framework-does-not-do) shows the line and why the key never rotates without refilling the value streams). A loaded stream loads with the caller's actor, so its sensitive fields are gated as the caller's would be.
 - **Reactions, lanes, defer.** Every committed event is correlated as today, so `SeatTaken` reaches `Seats`' reactions; a reaction's `app.do` can load and emit across streams too.
 - **Partial states.** `.loads` belongs to its action.
 - **Time travel.** `load(..., { asOf })` never runs `.loads`.
@@ -237,8 +239,8 @@ The scenarios are four patterns. Each scenario ships as a test; the guide and `p
 The feature is only as good as the patterns people can find and run. Each pattern is taught in one place, and names its other scenarios in a line:
 
 - **The guide:** `docs/docs/guides/rules-across-streams.md`, one section per pattern with the rule in plain words, the builder code of its starred scenario, what a race does, and which trade-off it pays. It links the alternatives (reactions with compensation, sagas) for when strong consistency isn't worth it.
-- **Flow animations:** the map that already ships as a preview (`docs/flows/rules-across-streams.flow.json`), updated to the built API, with flows that play a commit landing in two streams at once, a refusal from a precondition and from a schema, and a lost race being retried; its preview label goes once 2.0 ships.
-- **An example app:** a new `packages/rules` (beside the existing examples, which stay as they are), one state per pattern with its tests. Wolfdesk gains the open-tickets-per-agent limit, added, not rewritten.
+- **Flow animations:** the map of the recipe (`docs/flows/rules-across-streams.flow.json`), built from the API, with flows that play a commit landing in two streams at once, a refusal from a precondition and from a schema, and a lost race being retried; its preview label goes once 2.0 ships.
+- **A recipe:** `recipes/rules-across-streams`, one state per pattern with its tests. Wolfdesk gains the open-tickets-per-agent limit, added, not rewritten.
 - **Recipes:** filling the new streams for a rule added to existing data, and splitting a hot resource across several streams.
 
 The scaffold skill generates `.loads` and the uniqueness or capacity states when a spec states a rule across entities, and the behavior-contract page gets a row for every runtime guarantee here.
@@ -252,14 +254,16 @@ The scaffold skill generates `.loads` and the uniqueness or capacity states when
 - a write with no messages is refused;
 - a write with no `expectedVersion` beside guarded ones;
 - creating streams (`-1`) and appending to existing ones in one commit;
-- ids are assigned in order across the writes and become visible in that order;
+- ids are assigned in order across the appends and become visible in that order;
 - two connections racing on a shared stream: exactly one wins; on disjoint streams: both win.
 
 **Core (`.loads` and routed events):**
-- a load of the action's own stream, or two loads naming one stream, throws (at build when static, at the call when not);
+- a load of the action's own stream, or two loads naming one stream, refuses with `PreconditionError` at the call: a target often comes from the caller's input;
 - a state loaded twice without names throws at build; a duplicate load name fails to compile;
 - an event listed on a load that doesn't belong to the loaded state, an event listed on two loads, and an emitted event of another state that no load lists all fail to compile and throw at build (or at the call, for a dynamic emit);
+- an action whose events all go to loaded streams fails to compile, and throws at the call;
 - a target function that throws commits nothing;
+- an action whose events all go to loaded streams throws, storing nothing;
 - a precondition over a loaded state refuses with `PreconditionError`; a loaded state's schema refuses its folded state with `ValidationError`; either way nothing commits;
 - the action emits only its own events, only events to loaded streams, or nothing (nothing commits, no `committed`); every written stream is guarded;
 - a load without events is not guarded: the commit lands when that stream moved;
@@ -292,10 +296,10 @@ The scaffold skill generates `.loads` and the uniqueness or capacity states when
 
 ## Stability / charter impact
 
-- **Breaking, for adapters and direct `Store` callers:** `commit(writes, meta)`. A migration note shows the one-write form; the TCK shows what an adapter adds. Ships in 2.0 with a `BREAKING CHANGE:` footer.
-- **Additive, for apps:** `.loads`, the fourth `loaded` argument, and events emitted to loaded streams. An app that uses none of them behaves as today.
+- **Breaking, for adapters and direct `Store` callers:** `commit(appends, meta)`. A migration note shows the one-append form; the TCK shows what an adapter adds. Ships in 2.0 with a `BREAKING CHANGE:` footer.
+- **Additive, for apps:** `.loads`, and events emitted to loaded streams. An app that uses neither behaves as today. A rule's `holds` gains a fourth `loaded` argument, which breaks only code that calls a rule directly.
 
 ## Open questions
 
-1. **`.loads`' signature.** Positional (`State, target, events?, name?`) or an options object for the optional parts (`.loads(Account, (d) => d.from, { emits: ["Debited"], as: "from" })`).
+1. ~~**`.loads`' signature.**~~ Settled (2026-11-03): positional, `.loads(State, target, events?, name?)`, simpler to write. Both shapes keep the load's name in the type when it's written inline; an options object held in a variable widens it to `string`, a positional name in a `const` doesn't.
 2. **Hot-resource splitting:** a recipe in 2.0; does it ever need surface?

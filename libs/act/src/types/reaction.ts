@@ -94,10 +94,10 @@ export type ReactionResolver<
  *
  * @property target - Stream name that processes this reaction
  * @property source - Optional source the target consumes from. A
- *   **literal** name (no regex metacharacter) is matched by string
+ *   **literal** name (no `^` at the start or `$` at the end) is matched by string
  *   equality in the store's claim/fetch path — the fast, index-friendly
- *   path, and exact so `"s1"` never matches `"s12"`. A name carrying regex
- *   metacharacters (e.g. `^(A|B)$`) is compiled as a `RegExp` and matched
+ *   path, and exact so `"s1"` never matches `"s12"`. A name carrying an
+ *   anchor (e.g. `^(A|B)$`) is compiled as a `RegExp` and matched
  *   against candidate streams with the caller's own anchoring
  * @property priority - Optional scheduling hint. The lagging-frontier
  *   `claim()` orders streams by `priority DESC, at ASC`, so a higher value

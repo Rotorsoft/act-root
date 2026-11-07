@@ -158,11 +158,14 @@ describe("PostgresStore seed-sync contract", () => {
     // …and the widened columns actually accept an identifier past the old
     // varchar(100) cap, including a derived `.autocloses` target.
     const long_stream = `legacy-${"x".repeat(140)}`;
-    await store().commit(long_stream, [{ name: "opened", data: { n: 9 } }], {
-      correlation: "c",
-      causation: {},
-      stream: long_stream,
-    } as never);
+    await store().commit(
+      [{ stream: long_stream, msgs: [{ name: "opened", data: { n: 9 } }] }],
+      {
+        correlation: "c",
+        causation: {},
+        stream: long_stream,
+      } as never
+    );
     await store().subscribe([
       { stream: `__autoclose__:${long_stream}`, source: long_stream },
     ]);
@@ -210,10 +213,13 @@ describe("PostgresStore seed-sync contract", () => {
     );
     expect(rows[0].n).toBe(1);
     // The store is immediately usable after the concurrent boot.
-    await store().commit("boot-1", [{ name: "opened", data: { n: 1 } }], {
-      correlation: "c1",
-      causation: { action: { name: "open", stream: "boot-1" } },
-    } as never);
+    await store().commit(
+      [{ stream: "boot-1", msgs: [{ name: "opened", data: { n: 1 } }] }],
+      {
+        correlation: "c1",
+        causation: { action: { name: "open", stream: "boot-1" } },
+      } as never
+    );
   });
 
   it("creates the schema on a connection that looked it up before it existed", async () => {

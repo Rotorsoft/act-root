@@ -29,14 +29,24 @@ const SYS = { id: randomUUID(), name: "ticket-timers" };
  */
 async function reassign_if_due(stream: string, app: IAct) {
   const { state } = await app.load("Ticket", stream);
-  if (state.closedById || !state.escalationId || !state.reassignAfter) return;
+  if (
+    state.closedById ||
+    state.resolvedById ||
+    !state.escalationId ||
+    !state.reassignAfter
+  )
+    return;
   const acked = Object.values(
     state.messages as Record<string, { wasRead?: boolean; from: string }>
   ).some((m) => m.wasRead && m.from === state.userId);
   if (acked) return;
   if (Date.now() < state.reassignAfter.getTime())
     throw new DeferSignal({ at: state.reassignAfter });
-  await app.do("ReassignTicket", { stream, actor: SYS }, reassignAgent(stream));
+  await app.do(
+    "ReassignTicket",
+    { stream, actor: SYS },
+    await reassignAgent(stream, state.supportCategoryId, state.agentId)
+  );
 }
 
 // --- Slice -------------------------------------------------------------------
@@ -50,7 +60,7 @@ export const TicketTimersSlice = slice()
   .defer((event) => ({ at: event.data.escalateAfter }))
   .do(async function autoEscalate(event, _target, app) {
     const { state } = await app.load("Ticket", event.stream);
-    if (state.closedById || state.escalationId) return;
+    if (state.closedById || state.resolvedById || state.escalationId) return;
     await app.do(
       "EscalateTicket",
       { stream: event.stream, actor: SYS },

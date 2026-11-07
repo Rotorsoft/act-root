@@ -29,8 +29,6 @@ try {
 
 Thrown when a precondition from `.requires()` refuses an action before events are emitted. The message is `"<action> failed precondition: <description>"`, and `description` carries the rule's description. A broken invariant (the state's schema, checked before every commit) throws `ValidationError` instead.
 
-A rule declared with the deprecated `.given()` refuses with the deprecated `InvariantError` (`"<action> failed invariant: <description>"`, name `ERR_INVARIANT`). `PreconditionError` extends `InvariantError`, so code that catches `InvariantError` still catches every refused action. Both go away in 2.0 ([why](./state-management.md#why-given-and-invarianterror-are-deprecated)).
-
 ```typescript no-check
 import { PreconditionError } from "@rotorsoft/act";
 
@@ -48,7 +46,7 @@ try {
 
 ## ConcurrencyError
 
-Thrown when optimistic concurrency control detects a conflict — another process committed events to the same stream between your `load()` and `commit()`.
+Thrown when optimistic concurrency control detects a conflict — another process committed events to a stream the action appends to between your `load()` and `commit()`.
 
 ```typescript no-check
 import { ConcurrencyError } from "@rotorsoft/act";
@@ -197,7 +195,6 @@ import { Errors } from "@rotorsoft/act";
 
 // Errors.ValidationError    = "ERR_VALIDATION"
 // Errors.PreconditionError  = "ERR_PRECONDITION"
-// Errors.InvariantError     = "ERR_INVARIANT" (deprecated, from .given rules)
 // Errors.ConcurrencyError   = "ERR_CONCURRENCY"
 // Errors.StreamClosedError  = "ERR_STREAM_CLOSED"
 // Errors.NonRetryableError  = "ERR_NON_RETRYABLE"

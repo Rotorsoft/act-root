@@ -30,11 +30,14 @@ const ARCHIVE_BUCKET = process.env.ARCHIVE_BUCKET ?? "act-archive";
 
 /**
  * Archive every event on `stream` to S3 as JSONL, one event per line.
- * The S3 key is derived from the stream name with no timestamp, so a
- * retry after a previous tick's failure overwrites the same object
- * cleanly (idempotent).
+ * The S3 key holds the stream name and the head it was read at, so a retry
+ * overwrites the same object (idempotent), and a later prune or close of the same
+ * stream, which reads only what's left, doesn't overwrite an earlier copy.
  */
-export async function archiveStreamToS3(stream: string): Promise<void> {
+export async function archiveStreamToS3(
+  stream: string,
+  head: { id: number }
+): Promise<void> {
   const events: unknown[] = [];
   await store().query(
     (event) => {
@@ -50,7 +53,7 @@ export async function archiveStreamToS3(stream: string): Promise<void> {
   await s3.send(
     new PutObjectCommand({
       Bucket: ARCHIVE_BUCKET,
-      Key: `${stream}.jsonl`,
+      Key: `${stream}-${head.id}.jsonl`,
       Body: body,
       ContentType: "application/x-ndjson",
     })

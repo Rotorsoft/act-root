@@ -136,10 +136,10 @@ export type TruncateResult = Map<
  * Payload delivered by {@link Store.notify} when a **different process**
  * commits one or more events to the same backing store.
  *
- * Notifications are emitted **per commit transaction**, not per event —
- * a single commit of N events produces one notification carrying all N
- * `events`. This matches transactional semantics, minimizes wire wakeups,
- * and lets handlers reason about atomic batches.
+ * Notifications are emitted **per stream a commit appends to**, not per event —
+ * a commit of N events to one stream produces one notification carrying all N
+ * `events`, and a commit across streams one for each, with that stream's events.
+ * This minimizes wire wakeups and lets handlers reason about atomic batches.
  *
  * Stores that implement `notify` self-filter their own commits — handlers
  * receive notifications only for cross-process activity. This is the signal
@@ -494,6 +494,21 @@ export type SubscribeInput = {
 };
 
 /**
+ * One append of a {@link Store.commit}: the events to append to one stream
+ * and, optionally, the version the stream must be at.
+ *
+ * @template E - Event schemas
+ */
+export type Append<E extends Schemas> = {
+  /** The stream the events go to; named at most once per commit. */
+  readonly stream: string;
+  /** The events to append, at least one. */
+  readonly msgs: readonly Message<E, keyof E>[];
+  /** The version the stream must be at; `-1` expects an empty stream, `undefined` skips the check. */
+  readonly expectedVersion?: number;
+};
+
+/**
  * Interface for event store implementations.
  *
  * The Store interface defines the contract for persistence adapters in Act.
@@ -561,40 +576,42 @@ export interface Store extends Disposable, EventSource {
   drop: () => Promise<void>;
 
   /**
-   * Commits one or more events to a stream atomically.
+   * Appends events to one or more streams atomically: every append lands,
+   * or none does.
    *
-   * This is the core method for persisting events. It must:
-   * - Assign global sequence IDs to events
-   * - Increment the stream version
-   * - Check optimistic concurrency if expectedVersion is provided
-   * - Store events atomically (all or nothing)
-   * - Attach metadata (id, stream, version, created timestamp)
+   * Each append names its stream, its events and, optionally, the version
+   * the stream must be at. The store must:
+   * - check every `expectedVersion` against its own stream before
+   *   appending anything (`-1` expects an empty stream, `undefined` skips
+   *   the check), and throw {@link ConcurrencyError} naming the first
+   *   stream that moved;
+   * - refuse a stream named twice and an append with no events (a plain
+   *   `Error`), so a commit is never a version check alone;
+   * - assign global ids in append order, then event order, and make the
+   *   events visible in that order;
+   * - continue each stream's versions from its head, and attach `meta` to
+   *   every event.
+   *
+   * No appends at all commits nothing and returns `[]`.
    *
    * @template E - Event schemas
-   * @param stream - The stream ID to commit to
-   * @param msgs - Array of messages (events) to commit
-   * @param meta - Event metadata (correlation, causation)
-   * @param expectedVersion - Expected current version for optimistic concurrency;
-   * `-1` expects an empty stream, `undefined` skips the check
-   * @returns Array of committed events with full metadata
+   * @param appends - One {@link Append} per stream
+   * @param meta - Event metadata (correlation, causation), shared by every event
+   * @returns The committed events of every append, in append order
    *
-   * @throws {ConcurrencyError} If expectedVersion doesn't match current version
+   * @throws {ConcurrencyError} If a stream's version doesn't match its `expectedVersion`
    *
    * @example
    * ```typescript
    * const events = await store().commit(
-   *   "user-123",
-   *   [{ name: "UserCreated", data: { email: "user@example.com" } }],
-   *   { correlation: "req-456", causation: { action: {...} } },
-   *   -1 // Expect an empty (new) stream
+   *   [{ stream: "user-123", msgs: [{ name: "UserCreated", data: { email: "user@example.com" } }], expectedVersion: -1 }],
+   *   { correlation: "req-456", causation: { action: {...} } }
    * );
    * ```
    */
   commit: <E extends Schemas>(
-    stream: string,
-    msgs: Message<E, keyof E>[],
-    meta: EventMeta,
-    expectedVersion?: number
+    appends: readonly Append<E>[],
+    meta: EventMeta
   ) => Promise<Committed<E, keyof E>[]>;
 
   /**
@@ -646,11 +663,11 @@ export interface Store extends Disposable, EventSource {
    * Claim reads only the subscription rows; it never matches a `source`
    * against the event log. Correlate does that when it decides which
    * targets to mark, and the drain uses the same rule when it fetches the
-   * claimed stream's events. A **literal** source (no regex
-   * metacharacter — the common case, and every autoclose/dynamic-resolver
+   * claimed stream's events. A **literal** source (no anchor —
+   * the common case, and every autoclose/dynamic-resolver
    * source) matches by string equality: the fast, index-friendly path, and
-   * exact so `"s1"` never matches `"s12"`. A **pattern** source (carrying
-   * `^ $ . * + ? ( ) [ ] { } | \`, e.g. a static `^(A|B)$` reaction) is
+   * exact so `"s1"` never matches `"s12"`. A **pattern** source (starting
+   * with `^` or ending with `$`, e.g. a static `^(A|B)$` reaction) is
    * compiled as a regex and matched against candidate stream names.
    * Adapters that cannot faithfully run an arbitrary regex (SQLite) reject
    * a non-portable pattern at {@link subscribe} time rather than silently

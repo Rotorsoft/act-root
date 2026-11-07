@@ -10,7 +10,11 @@ import type { ReactionNode } from "../types/index.js";
 export function proxy_target() {}
 
 function attach_emit(
-  info: { actions: Record<string, any>; events: Record<string, any> },
+  info: {
+    actions: Record<string, any>;
+    events: Record<string, any>;
+    loads: Record<string, { events: string[] }[]>;
+  },
   action_name: string,
   handler: any
 ) {
@@ -18,9 +22,12 @@ function attach_emit(
   if (typeof handler === "string") {
     emits.push(handler);
   } else if (typeof handler === "function") {
-    // Strategy 1: string search for event names in handler source
+    // Strategy 1: string search for event names in handler source: the
+    // state's own events, and the events its loads list (emitted to the
+    // loaded streams).
     const src = String(handler);
-    for (const event_name of Object.keys(info.events)) {
+    const routed = (info.loads[action_name] ?? []).flatMap((l) => l.events);
+    for (const event_name of [...Object.keys(info.events), ...routed]) {
       if (
         src.includes(`"${event_name}"`) ||
         src.includes(`'${event_name}'`) ||
@@ -54,7 +61,7 @@ function attach_emit(
             },
           }
         );
-        const result = handler(dummy_arg, dummy_arg, dummy_arg);
+        const result = handler(dummy_arg, dummy_arg, dummy_arg, dummy_arg);
         if (Array.isArray(result) && typeof result[0] === "string") {
           emits.push(result[0]);
         }
@@ -76,8 +83,13 @@ export function mock_state(
     schema: entry[name],
     events: {} as Record<string, any>,
     actions: {} as Record<string, any>,
-    given: {} as Record<string, any[]>,
     requires: {} as Record<string, any[]>,
+    // Each action's `.loads(...)`: the loaded state's name, the load's
+    // name, and the events listed on it.
+    loads: {} as Record<
+      string,
+      { state: string; name: string; events: string[] }[]
+    >,
     patches: new Set<string>(),
     _tag: "State" as const,
   };
@@ -94,14 +106,21 @@ export function mock_state(
         if (rules) info.requires[action_name] = rules;
         return { emit };
       };
-      return {
-        given(rules?: any[]) {
-          if (rules) info.given[action_name] = rules;
-          return { requires, emit };
-        },
-        requires,
-        emit,
+      const loads = (
+        state?: { name?: string },
+        _target?: unknown,
+        events: string[] = [],
+        name?: string
+      ) => {
+        const state_name = state?.name ?? "";
+        (info.loads[action_name] ??= []).push({
+          state: state_name,
+          name: name ?? state_name,
+          events,
+        });
+        return { loads, requires, emit };
       };
+      return { loads, requires, emit };
     },
     snap: () => action_builder(_currentAction),
     // Close-the-books policy methods. The diagram doesn't render the
@@ -376,14 +395,7 @@ export function mock_act(on_build?: (info: any) => void) {
   return builder;
 }
 
-class InvariantError extends Error {
-  constructor(message?: string) {
-    super(message);
-    this.name = "InvariantError";
-  }
-}
-
-class PreconditionError extends InvariantError {
+class PreconditionError extends Error {
   constructor(message?: string) {
     super(message);
     this.name = "PreconditionError";
@@ -408,7 +420,9 @@ export const MODULES: Record<string, Record<string, unknown>> = {
     }),
     dispose: () => () => Promise.resolve(),
     ZodEmpty: z.record(z.string(), z.never()),
-    InvariantError,
+    // Runs where an event schema is declared, so a file that can't call it
+    // stops there and loses every state after it.
+    sensitive: (schema: unknown) => schema,
     PreconditionError,
   },
   zod: { z, ...z },

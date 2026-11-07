@@ -46,7 +46,7 @@ export const app = act()
 - `withActor<T>()` takes no runtime argument — it's a pure type-level constraint
 - All `target.actor` objects passed to `app.do()` must satisfy `T`
 - Use `systemActor` in reactions, seed scripts, and internal automation
-- The actor is available in emit handlers via `target.actor` and in preconditions via the optional `actor` parameter
+- The actor is available in emit handlers via `target.actor` and in preconditions via the third parameter of `holds`, which is `undefined` when the caller passes none
 
 ## 3. Patch Handler Signature
 
@@ -337,13 +337,15 @@ Set `source` only when you want to genuinely scope drain to a *stable* stream pa
 ## 8. Business Rules
 
 ```typescript
-type Precondition<S extends Schema, P> = {
+type Precondition<S extends Schema, P, A = Actor, L extends Record<string, Schema | undefined> = {}> = {
   description: string;
-  holds: (payload: Readonly<P>, state: Readonly<S>, actor?: Actor) => boolean;
+  holds: (payload: Readonly<P>, state: Readonly<S>, actor: A | undefined, loaded: Readonly<L>) => boolean;
 };
 ```
 
-`.requires([...])` declares the preconditions; one typed `Precondition<S, unknown>` ignores the payload and serves every action. A failed one refuses with a `PreconditionError` and commits nothing. Rules on the payload alone belong in the action's Zod schema, and rules every state must keep (invariants) in the state's Zod schema, which every action checks before it commits. Don't use the deprecated `.given([...])`. When to use which: [domain.md § Business Rules](domain.md#business-rules).
+A rule may declare fewer parameters. `loaded` holds the states the action's `.loads` brought in, keyed by state name or load name (see domain.md § Rules across streams).
+
+`.requires([...])` declares the preconditions; one typed `Precondition<S, unknown>` ignores the payload and serves every action. A failed one refuses with a `PreconditionError` and commits nothing. Rules on the payload alone belong in the action's Zod schema, and rules every state must keep (invariants) in the state's Zod schema, which every action checks before it commits. When to use which: [domain.md § Business Rules](domain.md#business-rules).
 
 ## 9. Emit Handler Signature
 
@@ -351,8 +353,9 @@ type Precondition<S extends Schema, P> = {
 type ActionHandler<S, E, A, K> = (
   action: Readonly<A[K]>,           // action payload
   snapshot: Readonly<Snapshot<S>>,  // current state snapshot — destructure as { state }
-  target: Target                    // { stream, actor } — destructure as { stream, actor }
-) => Emitted<E> | Emitted<E>[] | undefined;
+  target: Target,                   // { stream, actor } — destructure as { stream, actor }
+  loaded: Readonly<L>               // the states its `.loads` brought in, by state or load name
+) => Emitted<E & R> | Emitted<E & R>[] | undefined;  // R: the events listed on its loads
 
 // Where Emitted is a tuple:
 type Emitted<E> = [EventName, EventData];

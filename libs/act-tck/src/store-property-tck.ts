@@ -87,8 +87,7 @@ export const runStorePropertyTck = (options: StorePropertyTckOptions): void => {
           for (const { stream, count } of commits) {
             const before = expected.get(stream) ?? -1;
             const committed = await store.commit<CounterEvents>(
-              stream,
-              events(count),
+              [{ stream, msgs: events(count) }],
               make_meta({ stream })
             );
             committed.forEach((e, i) => {
@@ -114,8 +113,7 @@ export const runStorePropertyTck = (options: StorePropertyTckOptions): void => {
           await reset();
           for (const { stream, count } of commits) {
             await store.commit<CounterEvents>(
-              stream,
-              events(count),
+              [{ stream, msgs: events(count) }],
               make_meta({ stream })
             );
           }
@@ -124,10 +122,8 @@ export const runStorePropertyTck = (options: StorePropertyTckOptions): void => {
           // Actual head is before.length - 1, so before.length is wrong.
           await expect(
             store.commit<CounterEvents>(
-              stream,
-              [inc(1)],
-              make_meta({ stream }),
-              before.length
+              [{ stream, msgs: [inc(1)], expectedVersion: before.length }],
+              make_meta({ stream })
             )
           ).rejects.toThrow();
           const after = await collect(store, { stream, stream_exact: true });
@@ -155,8 +151,7 @@ export const runStorePropertyTck = (options: StorePropertyTckOptions): void => {
           for (const op of ops) {
             if (op.kind === "commit") {
               await store.commit<CounterEvents>(
-                op.stream,
-                [inc(1)],
+                [{ stream: op.stream, msgs: [inc(1)] }],
                 make_meta({ stream: op.stream })
               );
             } else if (op.kind === "claim") {
@@ -199,8 +194,7 @@ export const runStorePropertyTck = (options: StorePropertyTckOptions): void => {
           await store.subscribe(all.map((stream) => ({ stream })));
           for (const stream of commitsA) {
             await store.commit<CounterEvents>(
-              stream,
-              [inc(1)],
+              [{ stream, msgs: [inc(1)] }],
               make_meta({ stream })
             );
           }
@@ -215,8 +209,7 @@ export const runStorePropertyTck = (options: StorePropertyTckOptions): void => {
           for (const l of acked1) watermark1.set(l.stream, l.at);
           for (const stream of commitsB) {
             await store.commit<CounterEvents>(
-              stream,
-              [inc(1)],
+              [{ stream, msgs: [inc(1)] }],
               make_meta({ stream })
             );
           }
@@ -243,8 +236,7 @@ export const runStorePropertyTck = (options: StorePropertyTckOptions): void => {
           await store.subscribe(streams.map((stream) => ({ stream })));
           for (const stream of commits) {
             await store.commit<CounterEvents>(
-              stream,
-              [inc(1)],
+              [{ stream, msgs: [inc(1)] }],
               make_meta({ stream })
             );
           }
@@ -258,8 +250,7 @@ export const runStorePropertyTck = (options: StorePropertyTckOptions): void => {
           // reappears.
           await store.subscribe([{ stream: "ctrl" }]);
           await store.commit<CounterEvents>(
-            "ctrl",
-            [inc(1)],
+            [{ stream: "ctrl", msgs: [inc(1)] }],
             make_meta({ stream: "ctrl" })
           );
           await mark_all(store);

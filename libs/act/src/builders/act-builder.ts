@@ -25,6 +25,7 @@ import type {
   Actor,
   BatchHandler,
   LaneConfig,
+  Load,
   Registry,
   Schema,
   SchemaRegister,
@@ -384,6 +385,53 @@ export function act<
           for (const [name, gate] of built.handler_readers) _hr.set(name, gate);
           finalize_deprecations();
           if (built.advisory) log().warn(built.advisory);
+
+          // A load reads and writes through this Act's store, so it must name
+          // a registered state; it resolves to the merged one, partials and all.
+          // The resolved loads go on a copy this Act owns: the state object
+          // the app passed in may be registered in other Acts, with other
+          // partials of the loaded state.
+          for (const [name, state] of states) {
+            if (!state.loads) continue;
+            const resolved: Record<string, Load[]> = {};
+            for (const [action, loads] of Object.entries(state.loads)) {
+              resolved[action] = loads!.map((l) => {
+                const registered = states.get(l.state.name);
+                if (!registered)
+                  throw new Error(
+                    `Action "${action}" loads "${l.state.name}", which is not registered — add it via withState/withSlice before build()`
+                  );
+                // An event listed on a load is emitted as statically as
+                // `.emit("X")`, so a deprecated one throws the same way.
+                const deprecated = l.events.find((e) =>
+                  _de.get(registered.name)?.has(e)
+                );
+                if (deprecated)
+                  throw new Error(
+                    `Action "${action}" lists deprecated event "${deprecated}" on its load of "${registered.name}". ` +
+                      `A newer version exists: "${current_version_of(deprecated, Object.keys(registered.events))}". ` +
+                      `List the current version instead.`
+                  );
+                return { ...l, state: registered };
+              });
+            }
+            for (const [action, loads] of Object.entries(resolved)) {
+              const static_target = (
+                state.on[action] as { _static_emit?: string }
+              )._static_emit;
+              if (
+                static_target &&
+                loads.some((l) => l.events.includes(static_target))
+              )
+                throw new Error(
+                  `Action "${action}" statically emits "${static_target}", which its load lists, so nothing goes to its own stream; emit one of its own events too`
+                );
+            }
+            const own = { ...state, loads: resolved };
+            states.set(name, own);
+            for (const action of Object.keys(own.actions))
+              (registry.actions as Record<string, unknown>)[action] = own;
+          }
 
           for (const state of states.values()) {
             if (state.disclose) _dp.set(state.name, state.disclose);

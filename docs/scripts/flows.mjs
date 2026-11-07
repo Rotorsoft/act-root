@@ -93,6 +93,58 @@ export function validate(spec) {
       if (prev && prev.commit === st.commit && prev.from !== st.from) problems.push(`scenario "${s.title}" step ${i + 1}: one commit comes from one action`);
     });
   }
+  // a slice lists the states it declares; each is drawn in it, with its own actions and events
+  for (const sl of spec.slices ?? []) {
+    for (const st of sl.states ?? [])
+      if ((spec.nodes ?? []).find((n) => n.id === st)?.lane !== "state") problems.push(`slice ${sl.id} declares ${st}, which isn't a state bar`);
+  }
+  for (const n of spec.nodes ?? []) {
+    const sl = (spec.slices ?? []).find((s) => s.id === n.slice);
+    if (!sl?.states) continue;
+    if (n.state && !sl.states.includes(n.state)) problems.push(`node ${n.id} says its state is ${n.state}, which slice ${sl.id} doesn't declare`);
+    for (const l of n.loads ?? [])
+      if (!sl.states.includes(l.state)) problems.push(`node ${n.id} loads ${l.state}, which slice ${sl.id} doesn't declare`);
+  }
+  // a load names a state, and lists only events its action has an edge to
+  const node_of = new Map((spec.nodes ?? []).map((n) => [n.id, n]));
+  for (const n of spec.nodes ?? []) {
+    if (n.loads && n.lane !== "action") problems.push(`node ${n.id} is in the ${n.lane} lane, and only an action loads`);
+    for (const l of n.loads ?? []) {
+      if (lane_of.get(l.state) !== "state") problems.push(`node ${n.id} loads ${l.state}, which isn't a state bar`);
+      for (const ev of l.events ?? [])
+        if (!edge_keys.has(`${n.id}>${ev}`)) problems.push(`node ${n.id} lists ${ev} on a load, with no edge to it`);
+    }
+  }
+  const load_events = (action) => (node_of.get(action)?.loads ?? []).flatMap((l) => l.events ?? []);
+  for (const s of spec.scenarios ?? []) {
+    (s.steps ?? []).forEach((st, i) => {
+      const where = `scenario "${s.title}" step ${i + 1}`;
+      if (st.loads) {
+        const action = node_of.get(st.at ?? st.to);
+        if (action?.loads?.length !== st.loads.length) problems.push(`${where}: names ${st.loads.length} loaded stream(s), one for each of its action's loads`);
+      }
+      if (st.conflict && st.commit === undefined) problems.push(`${where}: a conflict is on a commit`);
+      // with no commit id there's no own event to go with it, and a commit can't append only to a load
+      if (!st.reject && !st.at && load_events(st.from).includes(st.to) && st.commit === undefined)
+        problems.push(`${where}: ${st.to} is listed on a load, so it needs a "commit" id shared with the action's own event`);
+      // an event a load lists goes to that load's stream, and never to the action's own
+      if (!st.reject && !st.at && load_events(st.from).includes(st.to) && (st.stream ?? s.stream) === s.stream)
+        problems.push(`${where}: ${st.to} is listed on a load, so it needs the loaded stream in "stream"`);
+    });
+    // an action with loads appends to its own stream too
+    const commits = new Map();
+    (s.steps ?? []).forEach((st) => {
+      if (st.commit === undefined) return;
+      commits.set(st.commit, [...(commits.get(st.commit) ?? []), st]);
+    });
+    for (const [id, steps] of commits) {
+      if (!steps.some((st) => !load_events(st.from).includes(st.to))) problems.push(`scenario "${s.title}": commit ${id} appends only to loaded streams; an action appends to its own stream too`);
+      const lost = new Set(steps.map((st) => st.conflict));
+      if (lost.size > 1) problems.push(`scenario "${s.title}": commit ${id} has one conflict, on every step`);
+      const [stream] = lost;
+      if (stream && !steps.some((st) => (st.stream ?? s.stream) === stream)) problems.push(`scenario "${s.title}": commit ${id} conflicts on ${stream}, a stream it doesn't append to`);
+    }
+  }
   const projections = new Set((spec.nodes ?? []).filter((n) => n.lane === "projection").map((n) => n.id));
   const unwalked = (spec.edges ?? [])
     .filter((e) => !projections.has(e.to) && !walked.has(`${e.from}>${e.to}`))

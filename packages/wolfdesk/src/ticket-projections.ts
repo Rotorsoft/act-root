@@ -1,5 +1,6 @@
 import { log, projection } from "@rotorsoft/act";
-import { db, tickets } from "./drizzle/index.js";
+import { Agent, agentOfStream } from "./agent.js";
+import { agents, db, tickets } from "./drizzle/index.js";
 import { TicketCreation } from "./ticket-creation.js";
 import { TicketMessaging } from "./ticket-messaging.js";
 import { TicketOperations } from "./ticket-operations.js";
@@ -38,6 +39,23 @@ export const TicketProjection = projection("tickets")
         .insert(tickets)
         .values({ id: row.stream, ...columns })
         .onConflictDoUpdate({ target: tickets.id, set: columns })
+        .then(() => log().info(`${row.stream} => projected @${row.event_id}`));
+    }
+  })
+  .build();
+
+// The desk: one row per agent, with its open tickets. The assign and reassign
+// reactions read it to pick an agent.
+export const AgentProjection = projection("agents")
+  .of(Agent)
+  .flush(async (rows) => {
+    for (const row of rows) {
+      const { name, supportCategoryId, open } = row.state;
+      const columns = { name, supportCategoryId, open };
+      await db
+        .insert(agents)
+        .values({ id: agentOfStream(row.stream), ...columns })
+        .onConflictDoUpdate({ target: agents.id, set: columns })
         .then(() => log().info(`${row.stream} => projected @${row.event_id}`));
     }
   })

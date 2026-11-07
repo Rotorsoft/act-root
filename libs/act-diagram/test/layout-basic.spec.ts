@@ -77,7 +77,7 @@ const SIMPLE_MODEL: DomainModel = emptyModel({
       name: "Counter",
       varName: "Counter",
       events: [{ name: "Incremented", hasCustomPatch: true }],
-      actions: [{ name: "increment", emits: ["Incremented"], invariants: [] }],
+      actions: [{ name: "increment", emits: ["Incremented"] }],
     },
   ],
 });
@@ -89,13 +89,13 @@ const TWO_STATES_MODEL: DomainModel = emptyModel({
       name: "Counter",
       varName: "Counter",
       events: [{ name: "Incremented", hasCustomPatch: false }],
-      actions: [{ name: "increment", emits: ["Incremented"], invariants: [] }],
+      actions: [{ name: "increment", emits: ["Incremented"] }],
     },
     {
       name: "Timer",
       varName: "Timer",
       events: [{ name: "Started", hasCustomPatch: false }],
-      actions: [{ name: "start", emits: ["Started"], invariants: [] }],
+      actions: [{ name: "start", emits: ["Started"] }],
     },
   ],
 });
@@ -112,13 +112,13 @@ const MULTI_ACTION_MODEL: DomainModel = emptyModel({
         { name: "TicketAssigned", hasCustomPatch: false },
       ],
       actions: [
-        { name: "OpenTicket", emits: ["TicketOpened"], invariants: [] },
+        { name: "OpenTicket", emits: ["TicketOpened"] },
         {
           name: "CloseTicket",
           emits: ["TicketClosed"],
-          invariants: ["must be open"],
+          preconditions: ["must be open"],
         },
-        { name: "AssignTicket", emits: ["TicketAssigned"], invariants: [] },
+        { name: "AssignTicket", emits: ["TicketAssigned"] },
       ],
     },
   ],
@@ -270,18 +270,15 @@ describe("compute_layout", () => {
                   "DotPressed",
                   "EqualsPressed",
                 ],
-                invariants: [],
               },
-              { name: "Clear", emits: ["Cleared"], invariants: [] },
+              { name: "Clear", emits: ["Cleared"] },
             ],
           },
           {
             name: "DigitBoard",
             varName: "DigitBoard",
             events: [{ name: "DigitCounted", hasCustomPatch: false }],
-            actions: [
-              { name: "CountDigit", emits: ["DigitCounted"], invariants: [] },
-            ],
+            actions: [{ name: "CountDigit", emits: ["DigitCounted"] }],
           },
           {
             name: "CalculatorResult",
@@ -291,7 +288,6 @@ describe("compute_layout", () => {
               {
                 name: "ProjectResult",
                 emits: ["ResultProjected"],
-                invariants: [],
               },
             ],
           },
@@ -391,7 +387,7 @@ describe("compute_layout", () => {
     });
   });
 
-  describe("guards / invariants metadata", () => {
+  describe("guards / preconditions metadata", () => {
     it("annotates guarded actions with sub='guarded' and guards array", () => {
       const layout = compute_layout(MULTI_ACTION_MODEL);
       const close = find(layout, "action", "CloseTicket")!;

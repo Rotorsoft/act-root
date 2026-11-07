@@ -39,7 +39,7 @@ function modelWithRealSchemas(): DomainModel {
             zod: OrderPlacedV2Schema,
           },
         ],
-        actions: [{ name: "place", emits: ["OrderPlaced_v2"], invariants: [] }],
+        actions: [{ name: "place", emits: ["OrderPlaced_v2"] }],
       },
     ],
     slices: [

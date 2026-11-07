@@ -168,7 +168,11 @@ jobs:
       id-token: write
     strategy:
       max-parallel: 1 # prevents concurrent pull/push conflicts on main branch
-      fail-fast: false
+      # A package that fails stops the ones after it, which are in dependency
+      # order: a dependent packs its peer range from the core version on the
+      # branch, so publishing past a failed core would ship the wrong range and
+      # npm can't take that back. Re-running the job resumes from the failure.
+      fail-fast: true
       matrix:
         lib: ${{ fromJson(needs.changes.outputs.libs) }}
 

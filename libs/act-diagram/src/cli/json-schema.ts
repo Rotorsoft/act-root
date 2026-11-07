@@ -14,6 +14,7 @@
  * transforms) has a clean JSON representation.
  */
 import { z } from "zod";
+import { load_label, load_of } from "../client/lib/loads.js";
 import type { DomainModel } from "../client/types/index.js";
 import {
   type ContractIndex,
@@ -33,6 +34,8 @@ type EventReport = {
   producers: Array<{
     action: string;
     state: string;
+    /** The loaded state whose stream gets the event, when not the action's own. */
+    appends_to?: string;
     file?: string;
     line?: number;
   }>;
@@ -67,9 +70,11 @@ const find_producers = (model: DomainModel, event_name: string) => {
   for (const st of model.states) {
     for (const act of st.actions) {
       if (act.emits.includes(event_name)) {
+        const load = load_of(act, event_name);
         out.push({
           action: act.name,
           state: st.name,
+          ...(load ? { appends_to: load_label(load) } : {}),
           file: st.file,
           line: act.line,
         });

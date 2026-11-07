@@ -43,7 +43,7 @@ async function seed(n: number) {
   await control.seed();
   for (let i = 0; i < n; i++) {
     const s = `s-${i}`;
-    await control.commit(s, batch(1), META);
+    await control.commit([{ stream: s, msgs: batch(1) }], META);
     await control.subscribe([{ stream: s, source: s }]);
   }
   // Distinct watermarks (all below the event id) so lagging and leading

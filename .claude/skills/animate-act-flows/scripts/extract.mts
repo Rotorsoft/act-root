@@ -57,6 +57,15 @@ for (const s of model.states) {
       label: a.name,
       state: s.name,
       preconditions: a.preconditions ?? a.invariants,
+      ...(a.loads?.length
+        ? {
+            loads: a.loads.map((l: { state: string; name: string; events: string[] }) => ({
+              state: `state:${l.state}`,
+              ...(l.name === l.state ? {} : { name: l.name }),
+              events: l.events.map((e) => `evt:${e}`),
+            })),
+          }
+        : {}),
       ...with_schema(a.zod),
       ...(s.file ? { file: s.file, line: a.line } : {}),
     });

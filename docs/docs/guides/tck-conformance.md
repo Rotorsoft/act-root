@@ -36,7 +36,7 @@ The dependency wiring is what differs from an in-tree adapter. You depend on `@r
   "type": "module",
   "exports": { ".": "./dist/index.js" },
   "peerDependencies": {
-    "@rotorsoft/act": ">=1.0.0",
+    "@rotorsoft/act": ">=2.0.0 <3",
     "zod": "^4"
   },
   "devDependencies": {
@@ -56,7 +56,7 @@ Two things to note versus the in-monorepo guides:
 
 ## Running the TCK
 
-Each port has one entry point. Pass it a display `name`, a `factory` that returns a fresh adapter per test, and (for the store) a `capabilities` bag declaring the optional methods you implement.
+Each port has one entry point. Pass it a display `name`, a `factory` that returns a fresh adapter (the suite calls it once and shares the adapter across its tests), and (for the store) a `capabilities` bag declaring the optional methods you implement.
 
 ```ts no-check
 // test/cache-tck.spec.ts
@@ -103,6 +103,20 @@ npx vitest run
 ```
 
 Green means your adapter honors every behavior the orchestrator depends on. Dialect-specific tests — connection-pool exhaustion, transaction edge cases, your backend's own error mapping — stay in their own spec files alongside the TCK spec. The kit only asserts what _every_ adapter of that port must do; it deliberately knows nothing about your backend.
+
+## What 2.0 adds
+
+Cap your peer range at the next major (`>=2.0.0 <3`): a store written for one `commit` can't work with the other.
+
+2.0 changes `commit` to take a list of appends ([upgrading an adapter](./writing-a-store.md#upgrading-an-adapter-to-20)), and the store TCK gains a `commit across streams` block with no capability to opt out of. An adapter passes it when:
+
+- a stale version in any append fails the whole commit, and nothing is stored;
+- a stream named twice, or an append with no messages, is refused;
+- new and existing streams can share one commit, with ids assigned in order across the appends;
+- two connections racing on a shared stream leave exactly one winner, the loser leaves nothing on any of its streams, and on separate streams both win;
+- every event of every append is stored whole: its name, data, meta and sensitive fields.
+
+The race is the TCK's only view of atomicity, so it can't catch a driver failing part-way through a commit. Test that in your adapter's own suite, with a fault injected on a later append's insert, as act-pg and act-sqlite do.
 
 ## Guarding your own public surface
 

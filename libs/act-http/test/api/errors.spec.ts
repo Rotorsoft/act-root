@@ -1,6 +1,5 @@
 import {
   ConcurrencyError,
-  InvariantError,
   NonRetryableError,
   PreconditionError,
   StreamClosedError,
@@ -13,7 +12,6 @@ describe("ERROR_MAP", () => {
   it("declares one entry per recognized framework error", () => {
     expect(Object.keys(ERROR_MAP).sort()).toEqual([
       "ConcurrencyError",
-      "InvariantError",
       "NonRetryableError",
       "PreconditionError",
       "StreamClosedError",
@@ -29,10 +27,6 @@ describe("ERROR_MAP", () => {
     expect(ERROR_MAP.PreconditionError).toEqual({
       status: 409,
       code: "PRECONDITION",
-    });
-    expect(ERROR_MAP.InvariantError).toEqual({
-      status: 409,
-      code: "INVARIANT",
     });
     expect(ERROR_MAP.ConcurrencyError).toEqual({
       status: 412,
@@ -79,23 +73,6 @@ describe("toApiError", () => {
     expect(result.body.error).toBe("PreconditionError");
     expect(result.body.code).toBe("PRECONDITION");
     expect(result.body.detail).toBe(err.message);
-  });
-
-  it("maps the deprecated InvariantError to 409 + INVARIANT", () => {
-    const err = new InvariantError(
-      "doIt",
-      // `any`: placeholder payload for the mapping test
-      { foo: "bar" } as any,
-      { stream: "s", actor: { id: "1", name: "u" } },
-      // `any`: minimal snapshot stand-in for the mapping test
-      {} as any,
-      "guard tripped"
-    );
-    const result = toApiError(err);
-    expect(result.status).toBe(409);
-    expect(result.body.error).toBe("InvariantError");
-    expect(result.body.code).toBe("INVARIANT");
-    expect(result.body.detail).toBe("doIt failed invariant: guard tripped");
   });
 
   it("maps ConcurrencyError to 412 + CONCURRENCY", () => {

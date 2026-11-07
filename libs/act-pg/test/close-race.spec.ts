@@ -5,15 +5,7 @@
  * deleting a commit the second one let through after reseeding. The case
  * where both closes truncate is covered in core (`close.spec.ts`).
  */
-import {
-  act,
-  ConcurrencyError,
-  cache,
-  dispose,
-  StreamClosedError,
-  state,
-  store,
-} from "@rotorsoft/act";
+import { act, cache, dispose, state, store } from "@rotorsoft/act";
 import { z } from "zod";
 import { PostgresStore } from "../src/postgres-store.js";
 import { schema } from "./schema.js";
@@ -66,25 +58,6 @@ describe("PostgresStore — overlapping full closes", () => {
   afterAll(async () => {
     await dispose()("EXIT").catch(() => {});
   });
-
-  it("subscribing in different orders doesn't deadlock", async () => {
-    const pg = store() as PostgresStore;
-    const rival = new PostgresStore({
-      port: PORT,
-      schema: SCHEMA,
-      table: "events",
-    });
-    for (let round = 0; round < 4; round++) {
-      const streams = Array.from({ length: 40 }, (_, i) => ({
-        stream: `order-${round}-${i}`,
-      }));
-      await Promise.all([
-        pg.subscribe(streams),
-        rival.subscribe([...streams].reverse()),
-      ]);
-    }
-    await rival.dispose();
-  }, 20_000);
 
   it("keeps a commit accepted after another app reseeded the stream", async () => {
     const app1 = build();

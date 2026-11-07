@@ -80,8 +80,8 @@ export declare class Act<TSchemaReg extends SchemaRegister<TActions>, TEvents ex
      * event-specific payload.
      *
      * \`committed\` also takes a state, as a \`State\` or its name: the listener
-     * then hears only commits by that state's actions, with its snapshots
-     * typed from that state.
+     * then hears only commits to that state's streams, whichever action
+     * appended them, with its snapshots typed from that state.
      *
      * @example
      * \`\`\`typescript
@@ -147,7 +147,7 @@ export declare class Act<TSchemaReg extends SchemaRegister<TActions>, TEvents ex
      * Executes an action: validates the payload, loads the state, checks its
      * preconditions, runs the handler, folds the events it emits, checks the
      * state's invariants (its schema) on the result, and commits them with
-     * optimistic concurrency on the stream. The reactions to those events
+     * optimistic concurrency on every stream it appends to. The reactions to those events
      * settle on their own (unless \`autoSettle: false\`).
      *
      * @template TKey - Action name from registered actions
@@ -157,7 +157,8 @@ export declare class Act<TSchemaReg extends SchemaRegister<TActions>, TEvents ex
      * @param options - Per-call dispatch options ({@link DoOptions}) —
      *   \`reactingTo\` to thread correlation, \`correlator\` to override the
      *   framework or orchestrator-level correlator for this call only.
-     * @returns Array of snapshots for all affected states (usually one)
+     * @returns The snapshots of the action's own stream, one per event appended
+     *   to it; the loaded snapshot alone when the action commits nothing
      *
      * @throws {ValidationError} If the payload doesn't match the action schema,
      *   or the state the action leaves breaks the state schema
@@ -776,15 +777,6 @@ export type ActOptions<TLanes extends string = string> = {
         readonly end: number;
         readonly timeZone?: string;
     };
-    /**
-     * Ignored: every action checks the state it leaves against the state's
-     * schema before it commits, so a broken invariant refuses the action
-     * with a {@link ValidationError} and nothing is stored. Loads, replays and
-     * projection folds don't check.
-     *
-     * @deprecated The check is always on. Remove the option; removed in 2.0.
-     */
-    readonly validateFoldedState?: boolean;
 };
 //# sourceMappingURL=act.d.ts.map
 // === action.d.ts ===
@@ -1086,7 +1078,8 @@ export type Snapshot<TState extends Schema, TEvents extends Schemas> = {
      * replayed event on cache miss, or from the just-committed event on
      * snapshots returned by \`action()\`. Use this instead of
      * \`event?.version\` when you need the version even after a cache hit
-     * skipped the event replay entirely.
+     * skipped the event replay entirely. When \`.snap\` fires after an action,
+     * this is the snapshot's version, so it's what to pin a later action to.
      */
     readonly version: number;
     /**
@@ -1127,24 +1120,6 @@ export type Snapshot<TState extends Schema, TEvents extends Schemas> = {
     readonly replayed: number;
 };
 /**
- * A rule declared with the deprecated \`.given([...])\`: a condition the
- * current state (and the actor) must meet for an action to run now.
- *
- * Despite the name, it's a precondition, not an invariant: it guards one
- * action and is false at other times by design. What must hold after every
- * action belongs in the state's schema, which every action checks before it
- * commits.
- *
- * @deprecated Declare the rule with \`.requires([...])\` as a
- * {@link Precondition} that ignores the payload. Removed in 2.0.
- * @template TState - State schema.
- * @template TActor - Actor type extending base Actor.
- */
-export type Invariant<TState extends Schema, TActor extends Actor = Actor> = {
-    description: string;
-    valid: (state: Readonly<TState>, actor?: TActor) => boolean;
-};
-/**
  * A precondition is a named rule an action requires before it runs: what
  * the state, the actor and the payload must meet for the action to run now,
  * such as "the ticket must be open". Declared with \`.requires([...])\` and
@@ -1162,10 +1137,33 @@ export type Invariant<TState extends Schema, TActor extends Actor = Actor> = {
  * @template TState - State schema.
  * @template TPayload - The action payload, or the part of it the rule reads.
  * @template TActor - Actor type extending base Actor.
+ * @template TLoaded - The states the action loads, read in \`holds\`' fourth argument.
  */
-export type Precondition<TState extends Schema, TPayload, TActor extends Actor = Actor> = {
+export type Precondition<TState extends Schema, TPayload, TActor extends Actor = Actor, TLoaded extends Record<string, Schema | undefined> = {}> = {
     description: string;
-    holds: (payload: Readonly<TPayload>, state: Readonly<TState>, actor?: TActor) => boolean;
+    holds: (payload: Readonly<TPayload>, state: Readonly<TState>, actor: TActor | undefined, loaded: Readonly<TLoaded>) => boolean;
+};
+/**
+ * One \`.loads(...)\` of an action: another state the decision needs, at the
+ * stream \`target\` names, and the events of that state the action may emit
+ * to that stream. A load without events is a read: nothing is appended
+ * to its stream, and it isn't guarded.
+ *
+ * Built by the state builder; resolved to the registered state by
+ * \`act().build()\`.
+ */
+export type Load = {
+    /** The loaded state; after build, the one registered under its name. */
+    readonly state: State<any, any, any>;
+    /**
+     * The stream to load, from the payload and the action's state; \`undefined\`
+     * skips this load.
+     */
+    readonly target: (payload: any, state: any) => string | undefined;
+    /** The loaded state's events the action may emit to that stream. */
+    readonly events: readonly string[];
+    /** The key of this load in \`loaded\`: the load's name, or the state's. */
+    readonly name: string;
 };
 /**
  * Represents an emitted event tuple from an action handler.
@@ -1225,7 +1223,7 @@ export type PassthroughPatchHandler = ((event: {
  * @template TActions - Action schemas.
  * @template TKey - Action name.
  */
-export type ActionHandler<TState extends Schema, TEvents extends Schemas, TActions extends Schemas, TKey extends keyof TActions> = (action: Readonly<TActions[TKey]>, snapshot: Readonly<Snapshot<TState, TEvents>>, target: Target) => Emitted<TEvents> | Emitted<TEvents>[] | undefined;
+export type ActionHandler<TState extends Schema, TEvents extends Schemas, TActions extends Schemas, TKey extends keyof TActions, TLoaded extends Record<string, Schema | undefined> = {}, TRouted extends Schemas = {}> = (action: Readonly<TActions[TKey]>, snapshot: Readonly<Snapshot<TState, TEvents>>, target: Target, loaded: Readonly<TLoaded>) => Emitted<TEvents & TRouted> | readonly Emitted<TEvents & TRouted>[] | undefined;
 /**
  * Maps action names to their handlers.
  * @template TState - State schema.
@@ -1236,20 +1234,12 @@ export type ActionHandlers<TState extends Schema, TEvents extends Schemas, TActi
     [TKey in keyof TActions]: ActionHandler<TState, TEvents, TActions, TKey>;
 };
 /**
- * Maps action names to the deprecated \`.given\` rules checked before the action's handler runs.
- * @template TState - State schema.
- * @template TActions - Action schemas.
- */
-export type GivenHandlers<TState extends Schema, TActions extends Schemas> = {
-    [TKey in keyof TActions]?: Invariant<TState>[];
-};
-/**
  * Maps action names to the preconditions they require.
  * @template TState - State schema.
  * @template TActions - Action schemas.
  */
 export type RequiresHandlers<TState extends Schema, TActions extends Schemas> = {
-    [TKey in keyof TActions]?: Precondition<TState, TActions[TKey]>[];
+    [TKey in keyof TActions]?: Precondition<TState, TActions[TKey], Actor, Schemas>[];
 };
 /**
  * Backoff strategy for delaying the next retry attempt after a handler
@@ -1434,8 +1424,14 @@ export type State<TState extends Schema, TEvents extends Schemas, TActions exten
     init: () => Readonly<TState>;
     patch: PatchHandlers<TState, TEvents>;
     on: ActionHandlers<TState, TEvents, TActions>;
-    given?: GivenHandlers<TState, TActions>;
     requires?: RequiresHandlers<TState, TActions>;
+    /**
+     * The other states each action loads, keyed by action name. Set by
+     * \`.loads(...)\`; an action without an entry loads only its own stream.
+     */
+    loads?: {
+        [TKey in keyof TActions]?: readonly Load[];
+    };
     snap?: (snapshot: Snapshot<TState, TEvents>) => boolean;
     /**
      * Per-action retry policy keyed by action name. Set by
@@ -2090,7 +2086,7 @@ export type AuditFinding = {
  */
 import type { ZodType } from "zod";
 import type { Act } from "../act.js";
-import type { ActionHandler, ActionOptions, ActOptions, Actor, AutocloseArchiver, AutoclosePolicy, BatchHandler, CacheEntry, Committed, DeferWhen, EventRegister, FoldOptions, IAct, Invariant, LaneConfig, PatchHandlers, Precondition, ReactionOptions, ReactionResolver, Schema, SchemaRegister, Schemas, Snapshot, State, ZodTypes } from "./index.js";
+import type { ActionOptions, ActOptions, Actor, AutocloseArchiver, AutoclosePolicy, BatchHandler, CacheEntry, Committed, DeferWhen, Emitted, EventRegister, FoldOptions, IAct, LaneConfig, PatchHandlers, Precondition, ReactionOptions, ReactionResolver, Schema, SchemaRegister, Schemas, Snapshot, State, Target, ZodTypes } from "./index.js";
 import type { DEFAULT_LANE } from "./reaction.js";
 /**
  * The \`.do(handler)\` step, parameterized by the builder it returns (\`TReturn\`).
@@ -2321,37 +2317,132 @@ export type StateEntry<TKey extends string = string, TState extends Schema = Sch
 export type ActionEntry<TKey extends string = string, TNewActions extends Schema = Schema> = {
     [P in TKey]: ZodType<TNewActions>;
 };
+/** What a handler may return: one event, a list of them, or nothing. */
+type EmitOut<TEvents extends Schemas> = Emitted<TEvents> | readonly Emitted<TEvents>[] | undefined;
+type NoOwnEvent = "an action must append an event to its own stream";
 /**
- * The \`.emit(...)\` step that finishes an action declaration: a handler that
- * returns the events, or an event name to pass the payload through as the
- * event data.
+ * Data with any field its schema doesn't declare typed \`never\`, at any depth.
+ * A field the schema leaves open (\`z.unknown()\`, \`z.any()\`) takes anything.
  */
-type ActionEmit<TState extends Schema, TEvents extends Schemas, TActions extends Schemas, TName extends string, TSnap extends boolean, TKey extends string, TNewActions extends Schema> = {
-    /** Custom handler — receives \`(action, snapshot)\` and returns one
-     *  or more \`[EventName, data]\` tuples (or \`undefined\`). */
-    (handler: ActionHandler<TState, TEvents, {
-        [P in TKey]: TNewActions;
-    }, TKey>): ActionBuilder<TState, TEvents, TActions & {
-        [P in TKey]: TNewActions;
-    }, TName, TSnap>;
-    /** Passthrough — the action payload becomes the event data
-     *  directly. Must reference an event declared in \`.emits()\`. */
-    (event_name: keyof TEvents & string): ActionBuilder<TState, TEvents, TActions & {
-        [P in TKey]: TNewActions;
-    }, TName, TSnap>;
-};
+type Exact<TData, TSchema> = unknown extends TSchema ? TData : Same<TData, TSchema> extends true ? TData : Fields<TData, TSchema>;
+/** Whether two types are identical, so a recursive type stops here. */
+type Same<A, B> = (<T>() => T extends A ? 1 : 2) extends <T>() => (T extends B ? 1 : 2) ? true : false;
+type Fields<TData, TSchema> = TSchema extends unknown ? TData extends readonly unknown[] ? TSchema extends readonly unknown[] ? {
+    [I in keyof TData]: Exact<TData[I], I extends keyof TSchema ? TSchema[I] : TSchema[number]>;
+} : never : TData extends object ? TSchema extends object ? {
+    [K in keyof TData]: K extends keyof TSchema ? Exact<TData[K], TSchema[K]> : never;
+} : never : TData : never;
+type ExactEvent<TEvent, TAll> = TEvent extends readonly [
+    infer TName extends keyof TAll,
+    infer TData
+] ? readonly [TName, Exact<TData, TAll[TName]>] : TEvent;
 /**
- * What follows \`.on(...)\` or \`.given(...)\`: the preconditions, then the
+ * A handler's return, with extra fields and a missing own event made into
+ * errors. Event names only known at runtime (\`string\`) can't be checked here.
+ */
+type CheckEmitted<TOut, TOwn, TAll> = string extends keyof TAll ? TOut : TOut extends readonly [PropertyKey, unknown] ? TOut[0] extends keyof TOwn ? ExactEvent<TOut, TAll> : NoOwnEvent : TOut extends readonly [unknown, ...unknown[]] ? [Extract<TOut[number], readonly [keyof TOwn, unknown]>] extends [never] ? NoOwnEvent : {
+    [I in keyof TOut]: ExactEvent<TOut[I], TAll>;
+} : TOut extends readonly [] ? TOut : TOut extends readonly (infer TEvent)[] ? [Extract<TEvent, readonly [keyof TOwn, unknown]>] extends [never] ? NoOwnEvent : readonly ExactEvent<TEvent, TAll>[] : TOut;
+/**
+ * The events \`.emit("Event")\` can name: the payload becomes the event's data,
+ * so the fields they share have to satisfy the event's schema. A wider payload
+ * is fine, since the schema strips what it doesn't declare. An event with no
+ * named fields (\`z.object({})\`) can't be told apart from a record, so it's
+ * left to the schema at runtime.
+ */
+type PassThrough<TEvents extends Schemas, TAction, TRouted> = {
+    [E in Exclude<keyof TEvents & string, keyof TRouted>]: string extends keyof TEvents[E] ? E : Readonly<TAction> extends Readonly<TEvents[E]> ? E : string extends keyof TAction ? never : Readonly<Pick<TAction, keyof TAction & keyof TEvents[E]>> extends Readonly<TEvents[E]> ? E : never;
+}[Exclude<keyof TEvents & string, keyof TRouted>];
+/** A handler whose returned events are checked. */
+type EmitHandler<TState extends Schema, TEvents extends Schemas, TAction extends Schema, TLoaded extends Record<string, Schema | undefined>, TRouted extends Schemas, TOut> = (action: Readonly<TAction>, snapshot: Readonly<Snapshot<TState, TEvents>>, target: Target, loaded: Readonly<TLoaded>) => CheckEmitted<TOut, Omit<TEvents, keyof TRouted>, TEvents & TRouted>;
+/**
+ * \`.emit\`, finishing an action and returning \`TDone\`.
+ *
+ * The order of these four is load-bearing, so don't merge the duplicates. The
+ * first handler gives a function with no parameters its types: TypeScript fixes
+ * its return type on the first signature it meets. The name in between keeps
+ * \`.emit("Event")\`. When more than three signatures fail, TypeScript reports
+ * only the last one's error, at its exact place, so a mistake in a handler's
+ * list is marked on the entry. \`emit-types.spec.ts\` guards that, but CI runs it
+ * on TS 7 only, where three of the four also pass: dropping one still fails on
+ * TS 6 and older.
+ */
+type Emit<TState extends Schema, TEvents extends Schemas, TAction extends Schema, TLoaded extends Record<string, Schema | undefined>, TRouted extends Schemas, TDone> = {
+    /**
+     * Finishes the action with a handler, which receives \`(action, snapshot,
+     * target, loaded)\` and returns one or more \`[EventName, data]\` tuples (or
+     * \`undefined\`): the state's own events, and the events listed on its loads.
+     */
+    <const TOut extends EmitOut<TEvents & TRouted>>(handler: EmitHandler<TState, TEvents, TAction, TLoaded, TRouted, TOut>): TDone;
+    /**
+     * Finishes the action by passing the payload through as the data of an event
+     * declared in \`.emits()\` that no load lists and the payload can satisfy.
+     */
+    (event_name: PassThrough<TEvents, TAction, TRouted>): TDone;
+    (event_name: PassThrough<TEvents, TAction, TRouted>): TDone;
+    <const TOut extends EmitOut<TEvents & TRouted>>(handler: EmitHandler<TState, TEvents, TAction, TLoaded, TRouted, TOut>): TDone;
+};
+/** The \`.emit(...)\` step that finishes an action declaration. */
+type ActionEmit<TState extends Schema, TEvents extends Schemas, TActions extends Schemas, TName extends string, TSnap extends boolean, TKey extends string, TNewActions extends Schema, TLoaded extends Record<string, Schema | undefined> = {}, TRouted extends Schemas = {}> = Emit<TState, TEvents, TNewActions, TLoaded, TRouted, ActionBuilder<TState, TEvents, TActions & {
+    [P in TKey]: TNewActions;
+}, TName, TSnap>>;
+/**
+ * What \`.loads(...)\` returns when its load name is already taken by an
+ * earlier load of the action: no further step, so the chain fails to
+ * compile. Name the loads (the fourth argument) to load a state twice.
+ */
+type DuplicateLoad<TAs extends string> = {
+    readonly error: \`the action already loads "\${TAs}"; name each load of the same state\`;
+};
+/** A name only known at runtime can't be compared, so it's never a duplicate. */
+type IsDuplicate<TAs extends string, TLoaded> = string extends TAs ? false : string extends keyof TLoaded ? false : TAs extends keyof TLoaded ? true : false;
+/**
+ * What follows \`.on(...)\`: the loads, the preconditions, then the
  * \`.emit(...)\` that finishes the action.
  */
-type ActionRules<TState extends Schema, TEvents extends Schemas, TActions extends Schemas, TName extends string, TSnap extends boolean, TKey extends string, TNewActions extends Schema> = {
+type ActionRules<TState extends Schema, TEvents extends Schemas, TActions extends Schemas, TName extends string, TSnap extends boolean, TKey extends string, TNewActions extends Schema, TLoaded extends Record<string, Schema | undefined> = {}, TRouted extends Schemas = {}> = {
+    /**
+     * Loads another state the decision needs, exactly as \`app.load\` would,
+     * and lists the events of that state the action may emit to its stream.
+     * It can repeat, once per stream.
+     *
+     * The preconditions and \`.emit\` get every loaded state in a fourth
+     * argument, \`loaded\`, keyed by the state's name or by the load's \`name\`.
+     * An event listed on a load goes to that load's stream, and the action
+     * appends to every stream it emits to in one atomic commit, each guarded
+     * by the version it had when loaded. A load without events is a read:
+     * nothing is appended to its stream, and it isn't guarded.
+     *
+     * A target that can return \`undefined\` makes the load optional: when it does,
+     * nothing is loaded, \`loaded\` holds \`undefined\` for it (and is typed so), and
+     * \`.emit\`'s events listed on it are dropped.
+     *
+     * @param state - The state to load; it must be registered in the same Act.
+     * @param target - The stream to load, from the payload and the action's state; \`undefined\` skips the load.
+     * @param events - The loaded state's events the action may emit to that stream.
+     * @param name - The key of this load in \`loaded\`; needed to load one state twice.
+     *
+     * @example
+     * \`\`\`typescript
+     * .on({ Enroll })
+     * .loads(Seats, (data) => \`course-\${data.course}\`, ["SeatTaken"])
+     * .requires([{ description: "a free seat", holds: (_, __, ___, { Seats }) => Seats.taken < Seats.capacity }])
+     * .emit((data) => [["Enrolled", data], ["SeatTaken", { student: data.student }]])
+     * \`\`\`
+     */
+    loads: <TLState extends Schema, TLEvents extends Schemas, TLName extends string, const TList extends Exclude<keyof TLEvents & string, keyof TRouted> = never, const TAs extends string = TLName, TStream extends string | undefined = string>(state: State<TLState, TLEvents, any, TLName> & (IsDuplicate<TAs, TLoaded> extends true ? DuplicateLoad<TAs> : unknown), target: (payload: Readonly<TNewActions>, state: Readonly<TState>) => TStream, events?: readonly TList[], name?: TAs) => IsDuplicate<TAs, TLoaded> extends true ? DuplicateLoad<TAs> : ActionRules<TState, TEvents, TActions, TName, TSnap, TKey, TNewActions, TLoaded & {
+        [P in TAs]: undefined extends TStream ? TLState | undefined : TLState;
+    }, TRouted & {
+        [E in TList]: TLEvents[E];
+    }>;
     /**
      * Adds named preconditions the action requires: what the state, the
-     * actor and the payload must meet for the action to run now.
+     * actor, the payload and the loaded states must meet for the action to
+     * run now.
      *
      * They're checked in declaration order, before the handler runs. Each
-     * pairs a \`description\` with a \`holds(payload, state, actor?)\` predicate;
-     * the first that returns \`false\` refuses the action with
+     * pairs a \`description\` with a \`holds(payload, state, actor, loaded)\`
+     * predicate; the first that returns \`false\` refuses the action with
      * \`PreconditionError\` carrying its description. A rule that ignores the
      * payload (typed \`Precondition<S, unknown>\`) fits every action, so
      * declare it once and reuse it.
@@ -2367,21 +2458,21 @@ type ActionRules<TState extends Schema, TEvents extends Schemas, TActions extend
      * ])
      * \`\`\`
      */
-    requires: (rules: Precondition<TState, TNewActions>[]) => {
+    requires: <TRuleActor extends Actor = Actor>(rules: readonly Precondition<TState, TNewActions, TRuleActor, TLoaded>[]) => {
         /**
          * Defines the action handler that emits events, as \`.emit()\` after
          * \`.on()\` does: a handler returning the events to emit (none is fine),
          * or an event name to pass the payload through as the event data.
          */
-        emit: ActionEmit<TState, TEvents, TActions, TName, TSnap, TKey, TNewActions>;
+        emit: ActionEmit<TState, TEvents, TActions, TName, TSnap, TKey, TNewActions, TLoaded, TRouted>;
     };
     /**
      * Defines the action handler that emits events.
      *
-     * The handler receives the action payload and current state snapshot,
-     * and returns the events to emit, or nothing (\`undefined\` or \`[]\`) to
-     * commit nothing. Events are applied to state via the patch handlers
-     * defined earlier.
+     * The handler receives the action payload, the current state snapshot,
+     * the target and the loaded states, and returns the events to emit, or
+     * nothing (\`undefined\` or \`[]\`) to commit nothing. Events are applied to
+     * state via the patch handlers defined earlier.
      *
      * Pass a string event name for passthrough: the action payload becomes
      * the event data directly.
@@ -2397,7 +2488,7 @@ type ActionRules<TState extends Schema, TEvents extends Schemas, TActions extend
      * })
      * \`\`\`
      */
-    emit: ActionEmit<TState, TEvents, TActions, TName, TSnap, TKey, TNewActions>;
+    emit: ActionEmit<TState, TEvents, TActions, TName, TSnap, TKey, TNewActions, TLoaded, TRouted>;
 };
 /**
  * Builder interface for defining actions (commands) on a state.
@@ -2440,7 +2531,7 @@ export type ActionBuilder<TState extends Schema, TEvents extends Schemas, TActio
      * @param entry - Single-key record \`{ ActionName: schema }\`
      * @param options - Optional per-action retry policy
      *   ({@link ActionOptions}).
-     * @returns An object with \`.given()\`, \`.requires()\` and \`.emit()\` for further configuration
+     * @returns An object with \`.loads()\`, \`.requires()\` and \`.emit()\` for further configuration
      *
      * @example Simple action without preconditions
      * \`\`\`typescript
@@ -2448,23 +2539,7 @@ export type ActionBuilder<TState extends Schema, TEvents extends Schemas, TActio
      *   .emit((action) => ["Incremented", { amount: action.by }])
      * \`\`\`
      */
-    on: <TKey extends string, TNewActions extends Schema>(entry: ActionEntry<TKey, TNewActions>, options?: ActionOptions) => ActionRules<TState, TEvents, TActions, TName, TSnap, TKey, TNewActions> & {
-        /**
-         * Adds rules the current state (and the actor) must meet for the action
-         * to run now, checked before \`.requires()\`. A rule whose
-         * \`valid(state, actor?)\` returns \`false\` refuses the action with the
-         * deprecated \`InvariantError\` (\`"<action> failed invariant: ..."\`).
-         *
-         * @deprecated These rules are preconditions, not invariants. Declare
-         * them with \`.requires()\`, whose \`holds(payload, state, actor?)\` can
-         * ignore the payload; invariants belong in the state's schema. Removed
-         * in 2.0.
-         *
-         * @param rules - Array of {@link Invariant} objects (\`{ description, valid }\`)
-         * @returns An object with \`.requires()\` and \`.emit()\` to finish the action
-         */
-        given: (rules: Invariant<TState>[]) => ActionRules<TState, TEvents, TActions, TName, TSnap, TKey, TNewActions>;
-    };
+    on: <TKey extends string, TNewActions extends Schema>(entry: ActionEntry<TKey, TNewActions>, options?: ActionOptions) => ActionRules<TState, TEvents, TActions, TName, TSnap, TKey, TNewActions>;
     /**
      * Defines a snapshotting strategy to optimize state reconstruction.
      *
@@ -2947,14 +3022,11 @@ import type { Actor, DeferWhen, Message, Schema, Schemas, Snapshot, Target } fro
  *
  * - \`ERR_VALIDATION\`: Schema validation error
  * - \`ERR_PRECONDITION\`: A precondition refused the action
- * - \`ERR_INVARIANT\`: A deprecated \`.given\` rule refused the action
  * - \`ERR_CONCURRENCY\`: Optimistic concurrency validation error on commits
  */
 export declare const Errors: {
     readonly ValidationError: "ERR_VALIDATION";
     readonly PreconditionError: "ERR_PRECONDITION";
-    /** @deprecated \`.given\` rules are preconditions; use \`PreconditionError\`. Removed in 2.0. */
-    readonly InvariantError: "ERR_INVARIANT";
     readonly ConcurrencyError: "ERR_CONCURRENCY";
     readonly StreamClosedError: "ERR_STREAM_CLOSED";
     readonly NonRetryableError: "ERR_NON_RETRYABLE";
@@ -2998,42 +3070,6 @@ export declare class ValidationError extends Error {
     constructor(target: string, payload: any, details: any);
 }
 /**
- * Thrown when a rule declared with the deprecated \`.given([...])\` refuses
- * an action, with the message \`"<action> failed invariant: <description>"\`.
- *
- * Those rules were always preconditions, not invariants: what must hold
- * after every action lives in the state's schema. {@link PreconditionError}
- * extends this class, so \`instanceof InvariantError\` still catches every
- * refused action.
- *
- * @deprecated Declare the rule with \`.requires([...])\` and catch
- * {@link PreconditionError}. Removed in 2.0.
- *
- * @template TState - State schema type
- * @template TEvents - Event schemas type
- * @template TActions - Action schemas type
- * @template TKey - Action name
- * @template TActor - Actor type extending base Actor
- */
-export declare class InvariantError<TState extends Schema, TEvents extends Schemas, TActions extends Schemas, TKey extends keyof TActions, TActor extends Actor = Actor> extends Error {
-    /** The action that was attempted */
-    readonly action: TKey;
-    /** The action payload that was provided */
-    readonly payload: Readonly<TActions[TKey]>;
-    /** The target stream and actor context */
-    readonly target: Target<TActor>;
-    /** The current state snapshot when the rule was checked */
-    readonly snapshot: Snapshot<TState, TEvents>;
-    /** Human-readable description of the rule that refused the action */
-    readonly description: string;
-    /**
-     * @param rule - Which layer refused the action: a \`.given([...])\` rule
-     *   (the default) or a precondition from \`.requires([...])\`. It names the
-     *   layer in the message.
-     */
-    constructor(action: TKey, payload: Readonly<TActions[TKey]>, target: Target<TActor>, snapshot: Snapshot<TState, TEvents>, description: string, rule?: "invariant" | "precondition");
-}
-/**
  * Thrown when a precondition from \`.requires([...])\` refuses an action,
  * with the message \`"<action> failed precondition: <description>"\`.
  *
@@ -3042,9 +3078,6 @@ export declare class InvariantError<TState extends Schema, TEvents extends Schem
  * emits anything, so nothing is stored. Invariants (what must hold after
  * every action) live in the state's schema instead; a broken one throws
  * {@link ValidationError}.
- *
- * It extends the deprecated {@link InvariantError} until 2.0, so code that
- * catches \`InvariantError\` keeps catching every refused action.
  *
  * @template TState - State schema type
  * @template TEvents - Event schemas type
@@ -3073,7 +3106,17 @@ export declare class InvariantError<TState extends Schema, TEvents extends Schem
  *
  * @see {@link Precondition} for declaring them
  */
-export declare class PreconditionError<TState extends Schema, TEvents extends Schemas, TActions extends Schemas, TKey extends keyof TActions, TActor extends Actor = Actor> extends InvariantError<TState, TEvents, TActions, TKey, TActor> {
+export declare class PreconditionError<TState extends Schema, TEvents extends Schemas, TActions extends Schemas, TKey extends keyof TActions, TActor extends Actor = Actor> extends Error {
+    /** The action that was attempted */
+    readonly action: TKey;
+    /** The action payload that was provided */
+    readonly payload: Readonly<TActions[TKey]>;
+    /** The target stream and actor context */
+    readonly target: Target<TActor>;
+    /** The current state snapshot when the precondition was checked */
+    readonly snapshot: Snapshot<TState, TEvents>;
+    /** Human-readable description of the precondition that refused the action */
+    readonly description: string;
     constructor(action: TKey, payload: Readonly<TActions[TKey]>, target: Target<TActor>, snapshot: Snapshot<TState, TEvents>, description: string);
 }
 /**
@@ -3284,7 +3327,7 @@ export declare class InMemoryCache implements Cache {
  *
  * @category Adapters
  */
-import type { BlockedLease, Committed, EventMeta, Lease, Message, Query, QueryStatsOptions, QueryStreams, QueryStreamsResult, Schema, Schemas, Store, StreamFilter, StreamPosition, StreamStats, SubscribeInput } from "../types/index.js";
+import type { Append, BlockedLease, Committed, EventMeta, Lease, Query, QueryStatsOptions, QueryStreams, QueryStreamsResult, Schema, Schemas, Store, StreamFilter, StreamPosition, StreamStats, SubscribeInput } from "../types/index.js";
 /**
  * In-memory event store: the default when no other store is injected.
  * For development, tests and examples; all data is lost when the process
@@ -3335,7 +3378,7 @@ export declare class InMemoryStore implements Store {
     private _in_query;
     private _snap_floor;
     query<E extends Schemas>(callback: (event: Committed<E, keyof E>) => void, query?: Query): Promise<number>;
-    commit<E extends Schemas>(stream: string, msgs: Message<E, keyof E>[], meta: EventMeta, expectedVersion?: number): Promise<Committed<E, keyof E>[]>;
+    commit<E extends Schemas>(appends: readonly Append<E>[], meta: EventMeta): Promise<Committed<E, keyof E>[]>;
     claim(lagging: number, leading: number, by: string, millis: number, lane?: string): Promise<Lease[]>;
     subscribe(streams: SubscribeInput[], correlated_at?: number, correlator?: {
         key: string;
@@ -3754,10 +3797,10 @@ export type TruncateResult = Map<string, {
  * Payload delivered by {@link Store.notify} when a **different process**
  * commits one or more events to the same backing store.
  *
- * Notifications are emitted **per commit transaction**, not per event —
- * a single commit of N events produces one notification carrying all N
- * \`events\`. This matches transactional semantics, minimizes wire wakeups,
- * and lets handlers reason about atomic batches.
+ * Notifications are emitted **per stream a commit appends to**, not per event —
+ * a commit of N events to one stream produces one notification carrying all N
+ * \`events\`, and a commit across streams one for each, with that stream's events.
+ * This minimizes wire wakeups and lets handlers reason about atomic batches.
  *
  * Stores that implement \`notify\` self-filter their own commits — handlers
  * receive notifications only for cross-process activity. This is the signal
@@ -4095,6 +4138,20 @@ export type SubscribeInput = {
     readonly correlated_at?: number;
 };
 /**
+ * One append of a {@link Store.commit}: the events to append to one stream
+ * and, optionally, the version the stream must be at.
+ *
+ * @template E - Event schemas
+ */
+export type Append<E extends Schemas> = {
+    /** The stream the events go to; named at most once per commit. */
+    readonly stream: string;
+    /** The events to append, at least one. */
+    readonly msgs: readonly Message<E, keyof E>[];
+    /** The version the stream must be at; \`-1\` expects an empty stream, \`undefined\` skips the check. */
+    readonly expectedVersion?: number;
+};
+/**
  * Interface for event store implementations.
  *
  * The Store interface defines the contract for persistence adapters in Act.
@@ -4161,36 +4218,40 @@ export interface Store extends Disposable, EventSource {
      */
     drop: () => Promise<void>;
     /**
-     * Commits one or more events to a stream atomically.
+     * Appends events to one or more streams atomically: every append lands,
+     * or none does.
      *
-     * This is the core method for persisting events. It must:
-     * - Assign global sequence IDs to events
-     * - Increment the stream version
-     * - Check optimistic concurrency if expectedVersion is provided
-     * - Store events atomically (all or nothing)
-     * - Attach metadata (id, stream, version, created timestamp)
+     * Each append names its stream, its events and, optionally, the version
+     * the stream must be at. The store must:
+     * - check every \`expectedVersion\` against its own stream before
+     *   appending anything (\`-1\` expects an empty stream, \`undefined\` skips
+     *   the check), and throw {@link ConcurrencyError} naming the first
+     *   stream that moved;
+     * - refuse a stream named twice and an append with no events (a plain
+     *   \`Error\`), so a commit is never a version check alone;
+     * - assign global ids in append order, then event order, and make the
+     *   events visible in that order;
+     * - continue each stream's versions from its head, and attach \`meta\` to
+     *   every event.
+     *
+     * No appends at all commits nothing and returns \`[]\`.
      *
      * @template E - Event schemas
-     * @param stream - The stream ID to commit to
-     * @param msgs - Array of messages (events) to commit
-     * @param meta - Event metadata (correlation, causation)
-     * @param expectedVersion - Expected current version for optimistic concurrency;
-     * \`-1\` expects an empty stream, \`undefined\` skips the check
-     * @returns Array of committed events with full metadata
+     * @param appends - One {@link Append} per stream
+     * @param meta - Event metadata (correlation, causation), shared by every event
+     * @returns The committed events of every append, in append order
      *
-     * @throws {ConcurrencyError} If expectedVersion doesn't match current version
+     * @throws {ConcurrencyError} If a stream's version doesn't match its \`expectedVersion\`
      *
      * @example
      * \`\`\`typescript
      * const events = await store().commit(
-     *   "user-123",
-     *   [{ name: "UserCreated", data: { email: "user@example.com" } }],
-     *   { correlation: "req-456", causation: { action: {...} } },
-     *   -1 // Expect an empty (new) stream
+     *   [{ stream: "user-123", msgs: [{ name: "UserCreated", data: { email: "user@example.com" } }], expectedVersion: -1 }],
+     *   { correlation: "req-456", causation: { action: {...} } }
      * );
      * \`\`\`
      */
-    commit: <E extends Schemas>(stream: string, msgs: Message<E, keyof E>[], meta: EventMeta, expectedVersion?: number) => Promise<Committed<E, keyof E>[]>;
+    commit: <E extends Schemas>(appends: readonly Append<E>[], meta: EventMeta) => Promise<Committed<E, keyof E>[]>;
     /**
      * Queries events from the store with optional filtering.
      *
@@ -4236,11 +4297,11 @@ export interface Store extends Disposable, EventSource {
      * Claim reads only the subscription rows; it never matches a \`source\`
      * against the event log. Correlate does that when it decides which
      * targets to mark, and the drain uses the same rule when it fetches the
-     * claimed stream's events. A **literal** source (no regex
-     * metacharacter — the common case, and every autoclose/dynamic-resolver
+     * claimed stream's events. A **literal** source (no anchor —
+     * the common case, and every autoclose/dynamic-resolver
      * source) matches by string equality: the fast, index-friendly path, and
-     * exact so \`"s1"\` never matches \`"s12"\`. A **pattern** source (carrying
-     * \`^ $ . * + ? ( ) [ ] { } | \\\`, e.g. a static \`^(A|B)$\` reaction) is
+     * exact so \`"s1"\` never matches \`"s12"\`. A **pattern** source (starting
+     * with \`^\` or ending with \`$\`, e.g. a static \`^(A|B)$\` reaction) is
      * compiled as a regex and matched against candidate stream names.
      * Adapters that cannot faithfully run an arbitrary regex (SQLite) reject
      * a non-portable pattern at {@link subscribe} time rather than silently
@@ -5050,10 +5111,10 @@ export type ReactionResolver<TEvents extends Schemas, TKey extends keyof TEvents
  *
  * @property target - Stream name that processes this reaction
  * @property source - Optional source the target consumes from. A
- *   **literal** name (no regex metacharacter) is matched by string
+ *   **literal** name (no \`^\` at the start or \`$\` at the end) is matched by string
  *   equality in the store's claim/fetch path — the fast, index-friendly
- *   path, and exact so \`"s1"\` never matches \`"s12"\`. A name carrying regex
- *   metacharacters (e.g. \`^(A|B)$\`) is compiled as a \`RegExp\` and matched
+ *   path, and exact so \`"s1"\` never matches \`"s12"\`. A name carrying an
+ *   anchor (e.g. \`^(A|B)$\`) is compiled as a \`RegExp\` and matched
  *   against candidate streams with the caller's own anchoring
  * @property priority - Optional scheduling hint. The lagging-frontier
  *   \`claim()\` orders streams by \`priority DESC, at ASC\`, so a higher value
@@ -5758,7 +5819,7 @@ import type { Schema } from "../types/index.js";
  * 2. Event types via \`.emits()\` — all events default to passthrough (\`({ data }) => data\`)
  * 3. Custom event reducers via \`.patch()\` (optional — only for events that need custom logic)
  * 4. Actions (commands) via \`.on()\` → \`.emit()\` — pass an event name string for passthrough
- * 5. Business rules: preconditions via \`.requires()\` (\`.given()\` is deprecated)
+ * 5. Business rules: preconditions via \`.requires()\`
  * 6. Snapshotting strategy via \`.snap()\`
  *
  * @template TState - Zod schema type defining the shape of the state
@@ -5845,25 +5906,23 @@ export declare const extend: <S extends Record<string, unknown>, T extends Recor
  */
 export declare function sleep(ms?: number): Promise<unknown>;
 /**
- * True when \`source\` is a **literal** stream name — it carries no regex
- * metacharacter, so every adapter treats it as an exact match. This is the
- * fast, index-friendly path and covers every autoclose/dynamic-resolver
- * source (bare stream names). A \`false\` return means the source is a
- * **pattern** (contains \`^ $ . * + ? ( ) [ ] { } | \\\`) and must be compiled
- * as a RegExp before matching — the shape the calculator's static
- * \`source: "^(A|B)$"\` reaction relies on.
+ * True when \`source\` is a stream's **name**, matched exactly. Only an anchored
+ * source, one that starts with \`^\` or ends with \`$\`, is a **pattern** and gets
+ * compiled as a RegExp. A name can hold any other character, so
+ * \`user+tag@example.com\` and \`order(1)\` are names, and a pattern always says
+ * that it is one.
  *
  * Pass the subscription's \`target\` too when it's known: a target reading itself
  * holds a stream's name, whatever characters that name has.
  *
- * The single source of truth for literal-vs-pattern classification across
- * correlate (which decides what a source marks), the drain fetch path, and
- * the SQLite adapter (which rejects a non-portable pattern), so all three
- * agree on which sources take the exact path.
+ * The single source of truth for this across correlate (which decides what a
+ * source marks), the drain fetch path, the close check, and the adapters, so
+ * they all agree.
  *
  * @example
  * \`\`\`typescript
  * is_literal_source("Board");    // → true  (exact lookup)
+ * is_literal_source("a+b");      // → true  (exact lookup)
  * is_literal_source("^(A|B)$");  // → false (compile as RegExp)
  * \`\`\`
  */
@@ -5878,6 +5937,16 @@ export declare function is_literal_source(source: string, target?: string): bool
  * event's schema declares as \`z.date()\`.
  */
 export declare const dateReviver: (_key: string, value: unknown) => unknown;
+/**
+ * What every store refuses in a \`commit\`: an append with no events, and a
+ * stream named twice. In core so each adapter calls the one rule.
+ *
+ * @internal
+ */
+export declare function check_appends(appends: readonly {
+    readonly stream: string;
+    readonly msgs: readonly unknown[];
+}[]): void;
 /**
  * How many of \`lagging\` claim slots ignore priority, so sustained high-priority
  * load can't starve a low-priority stream forever. Each store's \`claim\` calls
@@ -6185,11 +6254,6 @@ export declare const ERROR_MAP: {
     readonly PreconditionError: {
         readonly status: 409;
         readonly code: "PRECONDITION";
-    };
-    /** @deprecated Thrown only by the deprecated \`.given\` rules. Removed in 2.0. */
-    readonly InvariantError: {
-        readonly status: 409;
-        readonly code: "INVARIANT";
     };
     readonly ConcurrencyError: {
         readonly status: 412;
@@ -7485,12 +7549,6 @@ export declare class BroadcastChannel<S extends BroadcastState = BroadcastState>
          * pass your logger here to route it with the rest of your logs.
          */
         onSubscriberError?: (error: unknown, streamId: string) => void;
-        /**
-         * Deprecated alias of \`cacheSize\` — removal in the next major. When
-         * both are given, \`cacheSize\` wins.
-         * @deprecated use \`cacheSize\`
-         */
-        cache_size?: number;
     });
     private broadcast_resync;
     private on_cache_evict;
@@ -7518,14 +7576,14 @@ export declare class BroadcastChannel<S extends BroadcastState = BroadcastState>
     subscribe(streamId: string, cb: Subscriber<S>): () => void;
     /** Get the number of subscribers for a stream. */
     subscriberCount(streamId: string): number;
+    /**
+     * Tells a stream's clients to refetch, and forgets its cached state. For a
+     * stream whose versions started over: after \`close({ restart: true })\`, a
+     * client ahead of the new versions would read every patch as stale.
+     */
+    resync(streamId: string): void;
     /** Get the cached state for a stream (for reconnects / initial SSE yield). */
     state(streamId: string): S | undefined;
-    /** @deprecated use \`overlay\` — removal in the next major */
-    publish_overlay(streamId: string, overlay_patch: Partial<S>): PatchMessage<S> | undefined;
-    /** @deprecated use \`subscriberCount\` — removal in the next major */
-    get_subscriber_count(streamId: string): number;
-    /** @deprecated use \`state\` — removal in the next major */
-    get_state(streamId: string): S | undefined;
     /** Direct access to the state cache (for app-specific reads like presence). */
     get cache(): StateCache<S>;
 }
@@ -7610,10 +7668,6 @@ export declare class PresenceTracker {
     online(streamId: string): Set<string>;
     /** Check if a specific identity is online for a stream. */
     isOnline(streamId: string, identity_id: string): boolean;
-    /** @deprecated use \`online\` — removal in the next major */
-    get_online(streamId: string): Set<string>;
-    /** @deprecated use \`isOnline\` — removal in the next major */
-    is_online(streamId: string, identity_id: string): boolean;
 }
 //# sourceMappingURL=presence.d.ts.map
 // === state-cache.d.ts ===
@@ -9024,7 +9078,7 @@ exports[`@rotorsoft/act-pg — public API stability > stable public surface for 
 export * from "./postgres-store.js";
 //# sourceMappingURL=index.d.ts.map
 // === postgres-store.d.ts ===
-import type { BlockedLease, Committed, EventMeta, Lease, Message, NotifyDisposer, Query, QueryStatsOptions, QueryStreams, QueryStreamsResult, Schema, Schemas, Store, StoreNotification, StreamFilter, StreamPosition, StreamStats, SubscribeInput, SubscribeResult } from "@rotorsoft/act";
+import type { Append, BlockedLease, Committed, EventMeta, Lease, NotifyDisposer, Query, QueryStatsOptions, QueryStreams, QueryStreamsResult, Schema, Schemas, Store, StoreNotification, StreamFilter, StreamPosition, StreamStats, SubscribeInput, SubscribeResult } from "@rotorsoft/act";
 import { type Encryption } from "@rotorsoft/act-crypto";
 import pg from "pg";
 type Config = Readonly<{
@@ -9214,7 +9268,7 @@ export declare class PostgresStore implements Store {
     seed(): Promise<void>;
     drop(): Promise<void>;
     query<E extends Schemas>(callback: (event: Committed<E, keyof E>) => void, query?: Query): Promise<number>;
-    commit<E extends Schemas>(stream: string, msgs: Message<E, keyof E>[], meta: EventMeta, expectedVersion?: number): Promise<Committed<E, keyof E>[]>;
+    commit<E extends Schemas>(appends: readonly Append<E>[], meta: EventMeta): Promise<Committed<E, keyof E>[]>;
     /** \`FOR UPDATE SKIP LOCKED\`: workers never block each other. */
     claim(lagging: number, leading: number, by: string, millis: number, lane?: string): Promise<Lease[]>;
     subscribe(streams: SubscribeInput[], correlated_at?: number, correlator?: {
@@ -9333,7 +9387,7 @@ exports[`@rotorsoft/act-sqlite — public API stability > stable public surface 
 export * from "./sqlite-store.js";
 //# sourceMappingURL=index.d.ts.map
 // === sqlite-store.d.ts ===
-import type { BlockedLease, Committed, EventMeta, Lease, Message, Query, QueryStatsOptions, QueryStreams, QueryStreamsResult, Schemas, Store, StreamFilter, StreamPosition, StreamStats, SubscribeInput, SubscribeResult } from "@rotorsoft/act";
+import type { Append, BlockedLease, Committed, EventMeta, Lease, Query, QueryStatsOptions, QueryStreams, QueryStreamsResult, Schemas, Store, StreamFilter, StreamPosition, StreamStats, SubscribeInput, SubscribeResult } from "@rotorsoft/act";
 import { type Encryption } from "@rotorsoft/act-crypto";
 /**
  * SQLite store configuration
@@ -9476,7 +9530,7 @@ export declare class SqliteStore implements Store {
     private _begin;
     private _tx;
     dispose(): Promise<void>;
-    commit<E extends Schemas>(stream: string, msgs: Message<E, keyof E>[], meta: EventMeta, expectedVersion?: number): Promise<Committed<E, keyof E>[]>;
+    commit<E extends Schemas>(appends: readonly Append<E>[], meta: EventMeta): Promise<Committed<E, keyof E>[]>;
     query<E extends Schemas>(callback: (event: Committed<E, keyof E>) => void, query?: Query): Promise<number>;
     subscribe(streams: SubscribeInput[], correlated_at?: number, correlator?: {
         key: string;
@@ -10196,7 +10250,7 @@ export type StoreCapabilities = {
      * the cross-instance conformance cases: a listener receives commits
      * from a *sibling* instance produced by the same \`factory\`, never its
      * own commits (the port's self-filtering MUST), and exactly one
-     * notification per commit transaction carrying the full event batch.
+     * notification per stream a commit appends to, carrying that stream's events.
      * Requires the \`factory\` to produce instances sharing one backing
      * store — e.g. two PostgresStores on the same schema/table, or two
      * \`withBroker\` decorators on one broker. True cross-*process*
@@ -10362,7 +10416,7 @@ export type StoreTckOptions = {
  * - \`query_streams\` — filters, exact-match, pagination, blocked
  * - \`notify\` (capability-gated) — cross-instance delivery, self-filtering
  *   (an instance never receives its own commits), one notification per
- *   commit transaction with the full event batch
+ *   stream a commit appends to, with that stream's events
  *
  * Tests namespace their streams with a per-test {@link uid} so the
  * suite is parallel-safe against a shared backing store (e.g., a real

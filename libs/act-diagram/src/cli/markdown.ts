@@ -7,6 +7,7 @@
  * settings — readers expect Markdown to be paste-able into a PR body
  * or a static doc file.
  */
+import { commit_summary, load_label, load_of } from "../client/lib/loads.js";
 import {
   type ContractIndex,
   event_names_for,
@@ -124,17 +125,33 @@ export function format_markdown(idx: ContractIndex): string {
         `- **defined in:** \`${loc(state_file, action?.line ?? a.line)}\``
       );
     if (action) {
-      const preconditions = action.preconditions ?? action.invariants;
+      if (action.loads?.length) {
+        lines.push("- **loads:**");
+        for (const l of action.loads) {
+          const what = l.events.length
+            ? `appends ${l.events.map((e) => `\`${e}\``).join(", ")}`
+            : "read, not guarded";
+          lines.push(`  - \`${load_label(l)}\`: ${what}`);
+        }
+      }
+      const preconditions = action.preconditions ?? [];
       if (preconditions.length) {
         lines.push("- **preconditions:**");
         for (const pre of preconditions) lines.push(`  - ${pre}`);
       }
       if (action.emits.length > 0) {
         lines.push("- **emits:**");
-        for (const ev of action.emits) lines.push(`  - \`${ev}\``);
+        for (const ev of action.emits) {
+          const load = load_of(action, ev);
+          const to = load ? ` to the \`${load_label(load)}\` stream` : "";
+          lines.push(`  - \`${ev}\`${to}`);
+        }
       } else {
         lines.push("- **emits:** _(none)_");
       }
+      // `a.qualifier` names the owner of a found action.
+      const commit = commit_summary(action, a.qualifier as string);
+      if (commit) lines.push(`- **commit:** ${commit}, all or none`);
     }
     lines.push("");
   }

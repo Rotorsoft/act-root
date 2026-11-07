@@ -150,13 +150,11 @@ async function main() {
     { by: 1, reason: "manual" }
   );
   await store().commit(
-    "tally-1",
-    [{ name: "Vanished", data: { gone: true } }],
+    [{ stream: "tally-1", msgs: [{ name: "Vanished", data: { gone: true } }] }],
     META
   );
   await store().commit(
-    "tally-2",
-    [{ name: "Bumped_v2", data: { by: 5 } }], // missing `reason`
+    [{ stream: "tally-2", msgs: [{ name: "Bumped_v2", data: { by: 5 } }] }],
     META
   );
   for (const f of await collect(app, "schema")) describeFinding(f);
@@ -178,17 +176,28 @@ async function main() {
   // 8 legacy events across 2 streams + 2 current events. 80% legacy.
   for (const s of ["tally-a", "tally-b"]) {
     for (let i = 0; i < 4; i++) {
-      await store().commit(s, [{ name: "Bumped", data: { by: 1 } }], META);
+      await store().commit(
+        [{ stream: s, msgs: [{ name: "Bumped", data: { by: 1 } }] }],
+        META
+      );
     }
   }
   await store().commit(
-    "tally-a",
-    [{ name: "Bumped_v2", data: { by: 1, reason: "migrated" } }],
+    [
+      {
+        stream: "tally-a",
+        msgs: [{ name: "Bumped_v2", data: { by: 1, reason: "migrated" } }],
+      },
+    ],
     META
   );
   await store().commit(
-    "tally-b",
-    [{ name: "Bumped_v2", data: { by: 1, reason: "migrated" } }],
+    [
+      {
+        stream: "tally-b",
+        msgs: [{ name: "Bumped_v2", data: { by: 1, reason: "migrated" } }],
+      },
+    ],
     META
   );
   for (const f of await collect(app, "deprecated-load", {
@@ -341,8 +350,12 @@ async function main() {
   // past the last snapshot — same shape the audit cares about.
   for (let i = 0; i < 15; i++) {
     await store().commit(
-      "drifty",
-      [{ name: "Bumped_v2", data: { by: 1, reason: "no-snap" } }],
+      [
+        {
+          stream: "drifty",
+          msgs: [{ name: "Bumped_v2", data: { by: 1, reason: "no-snap" } }],
+        },
+      ],
       META
     );
   }
@@ -376,8 +389,7 @@ async function main() {
     { stream: "homeless", source: "homeless", lane: "deprecated-lane" },
   ]);
   await store().commit(
-    "rogue",
-    [{ name: "Bumped", data: { by: 99 } }], // legacy event isn't routed
+    [{ stream: "rogue", msgs: [{ name: "Bumped", data: { by: 99 } }] }],
     META
   );
   for (const f of await collect(app, "routing-health")) describeFinding(f);
@@ -397,13 +409,21 @@ async function main() {
       "  writing dangling parent references."
   );
   await store().commit(
-    "ok-stream",
-    [{ name: "Bumped_v2", data: { by: 1, reason: "ok" } }],
+    [
+      {
+        stream: "ok-stream",
+        msgs: [{ name: "Bumped_v2", data: { by: 1, reason: "ok" } }],
+      },
+    ],
     META
   );
   await store().commit(
-    "orphan-stream",
-    [{ name: "Bumped_v2", data: { by: 1, reason: "orphan" } }],
+    [
+      {
+        stream: "orphan-stream",
+        msgs: [{ name: "Bumped_v2", data: { by: 1, reason: "orphan" } }],
+      },
+    ],
     {
       correlation: "demo-corr",
       causation: { event: { id: 9999, stream: "fake", name: "fake" } },
@@ -461,8 +481,14 @@ async function main() {
       "  table walks. Seed one tiny finding per category and let\n" +
       "  the dispatcher route each row to the interested passes.\n"
   );
-  await store().commit("all-1", [{ name: "Bumped", data: { by: 1 } }], META);
-  await store().commit("all-1", [{ name: "Mystery", data: {} }], META);
+  await store().commit(
+    [{ stream: "all-1", msgs: [{ name: "Bumped", data: { by: 1 } }] }],
+    META
+  );
+  await store().commit(
+    [{ stream: "all-1", msgs: [{ name: "Mystery", data: {} }] }],
+    META
+  );
   await app.do(
     "increment",
     { stream: "all-2", actor: ACTOR },

@@ -56,10 +56,13 @@ class HoldingStore extends PostgresStore {
 async function gated_source(gate: Promise<void>): Promise<EventSource> {
   const src = new InMemoryStore();
   for (let i = 0; i < 3; i++)
-    await src.commit(`restored-${i}`, [{ name: "Ticked", data: {} }], {
-      correlation: "c",
-      causation: {},
-    });
+    await src.commit(
+      [{ stream: `restored-${i}`, msgs: [{ name: "Ticked", data: {} }] }],
+      {
+        correlation: "c",
+        causation: {},
+      }
+    );
   return {
     async query(callback, query) {
       await gate;

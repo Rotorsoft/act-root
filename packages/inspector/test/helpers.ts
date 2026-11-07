@@ -35,10 +35,8 @@ export async function seed(
   expectedVersion?: number
 ) {
   const committed = await store.commit(
-    stream,
-    [{ name, data }],
-    stubMeta,
-    expectedVersion
+    [{ stream, msgs: [{ name, data }], expectedVersion }],
+    stubMeta
   );
   return committed[0]!;
 }

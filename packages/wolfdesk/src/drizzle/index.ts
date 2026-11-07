@@ -12,7 +12,16 @@ const client = createClient({ url: `file:${db_path}` });
 export const db = drizzle(client);
 
 export async function init_tickets_db() {
+  await db.run("PRAGMA busy_timeout=5000;");
   await db.run("PRAGMA journal_mode=WAL;");
+  await db.run(`
+    CREATE TABLE IF NOT EXISTS agents (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      support_category_id TEXT NOT NULL,
+      open INTEGER NOT NULL
+    );
+  `);
   await db.run(`
     CREATE TABLE IF NOT EXISTS tickets (
       id TEXT PRIMARY KEY,
@@ -34,4 +43,4 @@ export async function init_tickets_db() {
   `);
 }
 
-export { tickets } from "./schema.js";
+export { agents, tickets } from "./schema.js";

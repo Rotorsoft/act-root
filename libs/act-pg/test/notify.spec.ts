@@ -54,8 +54,12 @@ describe("PostgresStore.notify", () => {
     await dispose();
 
     await writer.commit(
-      "stream-after-dispose",
-      [{ name: "PostDispose", data: {} }],
+      [
+        {
+          stream: "stream-after-dispose",
+          msgs: [{ name: "PostDispose", data: {} }],
+        },
+      ],
       { correlation: "c", causation: {} }
     );
 
@@ -71,10 +75,13 @@ describe("PostgresStore.notify", () => {
     // Re-subscribe — should release the prior LISTEN client and start fresh.
     const secondDispose = await listener.notify!((n) => secondSeen.push(n));
 
-    await writer.commit("stream-rewire", [{ name: "Rewired", data: {} }], {
-      correlation: "c",
-      causation: {},
-    });
+    await writer.commit(
+      [{ stream: "stream-rewire", msgs: [{ name: "Rewired", data: {} }] }],
+      {
+        correlation: "c",
+        causation: {},
+      }
+    );
 
     await vi.waitFor(() => expect(secondSeen).not.toHaveLength(0), {
       timeout: 1_500,
@@ -102,10 +109,13 @@ describe("PostgresStore.notify", () => {
     }
     // Then send a valid commit and ensure the listener is still alive.
     await sleep(50);
-    await writer.commit("stream-after-bad", [{ name: "AfterBad", data: {} }], {
-      correlation: "c",
-      causation: {},
-    });
+    await writer.commit(
+      [{ stream: "stream-after-bad", msgs: [{ name: "AfterBad", data: {} }] }],
+      {
+        correlation: "c",
+        causation: {},
+      }
+    );
     await vi.waitFor(() => expect(received).not.toHaveLength(0), {
       timeout: 1_500,
     });
@@ -132,8 +142,12 @@ describe("PostgresStore.notify", () => {
 
     // Listener still alive — a real commit is delivered.
     await writer.commit(
-      "stream-after-empty",
-      [{ name: "AfterEmpty", data: {} }],
+      [
+        {
+          stream: "stream-after-empty",
+          msgs: [{ name: "AfterEmpty", data: {} }],
+        },
+      ],
       { correlation: "c", causation: {} }
     );
     await vi.waitFor(() => expect(received).not.toHaveLength(0), {
@@ -179,8 +193,12 @@ describe("PostgresStore.notify", () => {
 
     // Listener still alive — a real commit is delivered.
     await writer.commit(
-      "stream-after-bad-fields",
-      [{ name: "AfterBadFields", data: {} }],
+      [
+        {
+          stream: "stream-after-bad-fields",
+          msgs: [{ name: "AfterBadFields", data: {} }],
+        },
+      ],
       { correlation: "c", causation: {} }
     );
     await vi.waitFor(() => expect(received).not.toHaveLength(0), {
@@ -236,8 +254,7 @@ describe("PostgresStore.notify", () => {
     const dispose = await listener.notify!((n) => received.push(n));
     try {
       await optOutWriter.commit(
-        "stream-no-notify",
-        [{ name: "Quiet", data: {} }],
+        [{ stream: "stream-no-notify", msgs: [{ name: "Quiet", data: {} }] }],
         { correlation: "c", causation: {} }
       );
       await sleep(200);
@@ -260,15 +277,22 @@ describe("PostgresStore.notify", () => {
     });
 
     // First commit triggers the throwing path.
-    await writer.commit("stream-throw", [{ name: "ThrowOnce", data: {} }], {
-      correlation: "c",
-      causation: {},
-    });
+    await writer.commit(
+      [{ stream: "stream-throw", msgs: [{ name: "ThrowOnce", data: {} }] }],
+      {
+        correlation: "c",
+        causation: {},
+      }
+    );
     await sleep(100);
     // Second commit should still be delivered to the recovered handler.
     await writer.commit(
-      "stream-after-throw",
-      [{ name: "AfterThrow", data: {} }],
+      [
+        {
+          stream: "stream-after-throw",
+          msgs: [{ name: "AfterThrow", data: {} }],
+        },
+      ],
       { correlation: "c", causation: {} }
     );
     await vi.waitFor(() => expect(received).not.toHaveLength(0), {

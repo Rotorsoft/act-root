@@ -194,8 +194,8 @@ Bottom-up: inventory scan → per-state validation → per-slice composition (wi
 
 ## Compatibility
 
-- **Node**: >=22.23.3
-- **Peer**: `react` ^18 || ^19, `react-dom` ^18 || ^19, `zod` ^4.4.3
+- **Node**: >=22.23.4
+- **Peer**: `react` ^18 || ^19, `react-dom` ^18 || ^19, `zod` ^4.6.7
 - **Bundled deps**: `lucide-react`, `sucrase`
 - **CLI**: works from any project where the package is installed; recognizes `$VISUAL` / `$EDITOR` (vim, nvim, nano, emacs, VS Code, Cursor)
 - **Browser**: the component is a React SPA — runs in any browser that supports modern ES (the host's bundler picks the target)

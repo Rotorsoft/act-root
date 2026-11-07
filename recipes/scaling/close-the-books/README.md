@@ -33,7 +33,7 @@ recipe is for the workloads that have outgrown default storage.
 The declarator takes an options object whose fields read like a
 sentence. The canonical wolfdesk Ticket
 (`packages/wolfdesk/src/ticket-creation.ts`) closes a ticket 90 days
-after it resolves, and any ticket that has lingered a year:
+after it resolves. Add a backstop for anything that lingers a year:
 
 ```ts
 .autocloses({
@@ -43,7 +43,10 @@ after it resolves, and any ticket that has lingered a year:
 })
 ```
 
-Top-level fields combine with AND; the `or` block fires on its own.
+Top-level fields combine with AND; the `or` block fires on its own. A
+close runs no action, so a backstop doesn't suit a stream holding something
+for another one: Wolfdesk leaves it out because retiring an open ticket
+would keep its agent's slot for good.
 The same cooldown shape fits `Delivered` + 14 days on an order or
 `Paid` + 7 days on an invoice. Every field (`after`, `is`, `reaches`,
 `keep`) and the composition rules are in

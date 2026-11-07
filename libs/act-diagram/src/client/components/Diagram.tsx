@@ -22,6 +22,7 @@ import {
   STATE_W,
   W,
 } from "../lib/layout.js";
+import { load_label } from "../lib/loads.js";
 
 const COLORS = {
   action: { bg: "#1e40af", border: "#3b82f6", text: "#93c5fd" },
@@ -69,8 +70,10 @@ function formatModelTree(model: DomainModel): string {
         if (!st) continue;
         lines.push(`  State: ${st.name}`);
         for (const a of st.actions) {
-          const rules = a.preconditions ?? a.invariants;
+          const rules = a.preconditions ?? [];
           let line = `    ${a.name} → [${a.emits.join(", ")}]`;
+          if (a.loads?.length)
+            line += ` loads: [${a.loads.map(load_label).join(", ")}]`;
           if (rules.length) line += ` preconditions: [${rules.join(", ")}]`;
           lines.push(line);
         }
@@ -245,7 +248,7 @@ export function Diagram({
   const onUp = useCallback(() => {
     drag.current = false;
   }, []);
-  const { ns, es, boxes, minX, minY, width, height, layoutError } =
+  const { ns, es, boxes, commits, minX, minY, width, height, layoutError } =
     useMemo(() => {
       try {
         return {
@@ -258,6 +261,7 @@ export function Diagram({
           ns: [],
           es: [],
           boxes: [],
+          commits: [],
           minX: 0,
           minY: 0,
           width: 100,
@@ -588,6 +592,34 @@ export function Diagram({
                 />
               );
             })}
+            {/* The events of one commit across streams, as one unit */}
+            {commits.map((c) => (
+              <g key={`${c.x}:${c.y}`} pointerEvents="none">
+                <rect
+                  x={c.x}
+                  y={c.y}
+                  width={c.w}
+                  height={c.h}
+                  rx={6}
+                  fill={COLORS.event.bg}
+                  fillOpacity={0.08}
+                  stroke={COLORS.event.border}
+                  strokeWidth={1}
+                  strokeDasharray="4,3"
+                />
+                <text
+                  x={c.x + 5}
+                  y={c.y + c.h / 2}
+                  fill={COLORS.event.text}
+                  className="text-[7px]"
+                  textAnchor="middle"
+                  dominantBaseline="central"
+                  transform={`rotate(-90, ${c.x + 5}, ${c.y + c.h / 2})`}
+                >
+                  {c.label}
+                </text>
+              </g>
+            ))}
             <defs>
               <marker
                 id="arr"
@@ -626,8 +658,19 @@ export function Diagram({
                   onClick={() => onClickElement?.(n.label, n.type, n.file)}
                   onMouseEnter={(ev) => {
                     const sections: TipSection[] = [];
+                    if (n.loads?.length)
+                      sections.push({ label: "Loads", items: n.loads });
+                    if (n.commit)
+                      sections.push({ label: "Commit", items: [n.commit] });
                     if (n.emits?.length)
                       sections.push({ label: "Emits", items: n.emits });
+                    if (n.loaded_by?.length)
+                      sections.push({ label: "Loaded by", items: n.loaded_by });
+                    if (n.outside?.length)
+                      sections.push({
+                        label: "Also emitted by",
+                        items: n.outside,
+                      });
                     if (n.handles?.length)
                       sections.push({ label: "Handles", items: n.handles });
                     if (n.guards?.length)
@@ -660,6 +703,7 @@ export function Diagram({
                     fill={alpha(c.bg, 0.75)}
                     stroke={hasWarn ? "#ef4444" : c.border}
                     strokeWidth={hasWarn ? 2 : 1.5}
+                    strokeDasharray={n.outside?.length ? "4,2" : undefined}
                   />
                   {lines.map((line, li) => (
                     <text
@@ -678,6 +722,18 @@ export function Diagram({
                       {line}
                     </text>
                   ))}
+                  {/* An action's loads, or the loaded stream an event goes to */}
+                  {n.note && (
+                    <text
+                      x={n.pos.x + nw / 2}
+                      y={n.pos.y + nh - 5}
+                      fill={COLORS.state.text}
+                      textAnchor="middle"
+                      className="text-[7px]"
+                    >
+                      {n.note}
+                    </text>
+                  )}
                   {/* Top-right icons */}
                   {(() => {
                     let ix = n.pos.x + nw - 13;

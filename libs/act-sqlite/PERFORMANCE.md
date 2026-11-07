@@ -80,6 +80,8 @@ design and does not implement `Store.notify`.
 |---|---|
 | `commit: single event` | single-row durable write (WAL append, one transaction) |
 | `commit: 50-event batch` | multi-row INSERT — guards against a per-event statement-prep regression |
+| `commit: 2 streams`, `commit: 3 streams` | one event to each of 2 or 3 streams in one transaction — prices each extra stream (one more head read, one more INSERT) |
+| `commit: hot shared stream (8 writers)` | 8 commits at once, each appending to its own stream and one shared stream; the store runs them one at a time, so none is refused |
 | `load: cold replay over snapshot floor` | the **#1024 path** — cold `load()` must read only the snapshot + tail, not the whole stream |
 | `drain: correlate+drain 50 events` | `claim()` + replay query + `ack()` loop |
 | `query_stats: page of 50 (count+names)` | the ROW_NUMBER window / CTE plan stays indexed as the streams table grows |
@@ -230,3 +232,17 @@ gate currently measures only the half that got worse.
    ([#1510](https://github.com/Rotorsoft/act-root/issues/1510) already tracks
    the related "cost still grows with subscribed streams" question on this
    adapter).
+
+## Commits across streams (2.0, `commit(appends, meta)`)
+
+2.0's `commit(appends, meta)` reads and checks every head, then inserts every append, in one write transaction. The 2.0 column also runs on the store that queues its statements in-process (1.22.5), so concurrent callers wait their turn instead of failing.
+
+Both columns come from the Perf Baseline workflow, dispatched on the same day on the same GitHub runner type: master (1.x) and the 2.0 branch. p50 in ms.
+
+| Scenario | 1.x (master) | 2.0 | Note |
+|---|---|---|---|
+| `commit: single event` | 0.609 | 0.557 | no regression |
+| `commit: 50-event batch` | 2.425 | 2.697 | within the gate's noise band |
+| `commit: 2 streams` (one event each) | — | 0.602 | +0.05 ms over one stream |
+| `commit: 3 streams` | — | 0.688 | one more head read and insert |
+| `commit: hot shared stream (8 writers)` | — | 3.83 (p95 5.67) | all 8 land with no retry: the store runs them one at a time |

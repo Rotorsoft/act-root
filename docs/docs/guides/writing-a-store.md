@@ -12,7 +12,7 @@ title: Writing a custom Store adapter
 The interface lives in [`libs/act/src/types/ports.ts`](https://github.com/Rotorsoft/act-root/blob/master/libs/act/src/types/ports.ts):
 
 - `seed()` / `drop()` — initialization and teardown
-- `commit(stream, msgs, meta, expectedVersion?)` — append events atomically with optimistic concurrency. Map a `(stream, version)` unique-constraint violation to `ConcurrencyError` (Postgres keys off SQLSTATE `23505`, SQLite off its unique-constraint message) and wrap every other driver error in `StoreError('commit')` — never rethrow a raw dialect error, or callers can't tell a losable concurrency race from a real fault ([#1202](https://github.com/Rotorsoft/act-root/issues/1202))
+- `commit(appends, meta)` — append each append's events (`{ stream, msgs, expectedVersion? }`, one per stream) atomically with optimistic concurrency: check every `expectedVersion` before appending anything and throw `ConcurrencyError` naming the first stream that moved, refuse a stream named twice and an append with no events, and assign ids in append order, then event order. All appends land or none do; no appends return `[]` (see [Upgrading to 2.0](#upgrading-an-adapter-to-20)). Map a `(stream, version)` unique-constraint violation to `ConcurrencyError` (Postgres keys off SQLSTATE `23505`, SQLite off its unique-constraint message) and wrap every other driver error in `StoreError('commit')` — never rethrow a raw dialect error, or callers can't tell a losable concurrency race from a real fault ([#1202](https://github.com/Rotorsoft/act-root/issues/1202))
 - `query(callback, query?)` — stream events to a callback with filter, range, regex, and `with_snaps` support. Respecting the `after` / `limit` pair is what gives `scan` bounded-memory restore: the framework paginates by re-issuing `query` per batch, so any adapter that already honors those filters gets memory-safe scans for free. Stream/source filters must honor the portable regex grammar (`^` / `$` anchors, `.`, `.*`, literal characters — literal `_` / `%` included) and match **case-sensitively** on every adapter: Postgres uses POSIX `~`, InMemory a `RegExp`, and SQLite `GLOB` (case-sensitive, where `.*` → `*` and `.` → `?`) rather than `LIKE`, whose ASCII case-insensitivity would let `^order-` overmatch `Order-x` ([#1197](https://github.com/Rotorsoft/act-root/issues/1197)). If your backend can't express a richer pattern exactly, **throw `ValidationError`** instead of approximating — the TCK's "stream filter grammar" suite enforces both halves ([#1114](https://github.com/Rotorsoft/act-root/issues/1114)). Two edge inputs are contractual: an empty `names: []` is an explicit empty allow-list that matches **no** events (an omitted `names` matches all), and `before` / `after` are honored at their falsy-zero values — a `before: 0` or `after: 0` is a real id bound (`id < before` / `id > after`), not a dropped filter ([#1199](https://github.com/Rotorsoft/act-root/issues/1199)). Return exactly what you stored: an ISO string stays a string, in `data`, `meta` and `pii` alike. The framework knows which fields each event's schema declares as `z.date()` and turns those back into `Date`s on read (see the [Store contract](../architecture/extension-points.md#store-contract)), and the TCK's schema-driven dates case fails an adapter that revives strings itself.
 - `claim(lagging, leading, by, millis, lane?)` — call core's `fair_slots(lagging)` for the priority-blind share; atomically discover and lease streams for reaction processing (the workhorse of `drain`); optional `lane` filter for ACT-1103 drain lanes
 - `subscribe(streams, correlated_at?)` — register streams so they become claimable; each row carries optional `lane` that the adapter writes when the row's priority merge allows it — at or above the stored priority, so the highest-priority registrant owns the lane and restart-driven re-laning still works at equal priority and an optional `correlated_at` **work mark** that decides claim eligibility — both covered below. It also carries the **correlate checkpoint**, read from the return and written by the optional second argument
@@ -23,9 +23,26 @@ The interface lives in [`libs/act/src/types/ports.ts`](https://github.com/Rotors
 - `reset(streams)` / `prioritize(filter, n)` / `truncate(targets)` — operator-facing primitives; the `StreamFilter` shape carries an optional `lane` exact-match. `truncate` targets come in two shapes — full (delete everything, seed a snapshot or tombstone) and windowed (`before` boundary, prefix delete behind a snapshot) — covered below
 - `query_streams(callback, query?)` — read-only introspection (operational dashboards); positions carry their `lane`, an optional `deferred_at` (ms since epoch) when the stream is parked on an active future defer, and the optional `correlated_at` **work mark** so a reader can tell "behind the head" from "has work". The query gained an optional `source_matches` filter — covered below
 - `notify(handler)` — *optional* cross-process commit notifications
+- `query_stats(streams, options?)` — per-stream heads, counts and tails (see below)
+- `forget_pii(stream)` — *optional* erase a stream's sensitive payloads
 - `restore(driver)` — *optional* atomic wipe-and-rebuild from an event source (see below)
 
 Reading the JSDoc on each method is the first step. The TCK is the second.
+
+## Upgrading an adapter to 2.0
+
+2.0 replaces `commit(stream, msgs, meta, expectedVersion?)` with `commit(appends, meta)`, so one action can append to several streams in one step ([RFC 2251](https://github.com/Rotorsoft/act-root/blob/master/rfcs/2251-rules-across-streams.md)). A direct call moves to the one-append form:
+
+```ts no-check
+// 1.x
+await store.commit(stream, msgs, meta, expectedVersion);
+// 2.0
+await store.commit([{ stream, msgs, expectedVersion }], meta);
+```
+
+A commit across streams notifies once per stream, with that stream's events. Call `check_appends(appends)` from `@rotorsoft/act` first: it's the framework's rule for what a commit may hold, and the TCK's `commit across streams` block matches its messages exactly.
+
+An adapter checks every append's version before inserting anything, inserts every append inside the transaction it already opens, and lets the unique `(stream, version)` constraint catch a race on any stream appended to. The TCK's "commit across streams" block is the checklist: stale first, middle and last appends, a stream named twice, an append with no events, an unguarded append beside guarded ones, and two commits racing on a shared stream.
 
 ## The store schema is the framework's job
 
@@ -83,7 +100,7 @@ lets the subscription row answer instead. It is the highest event id observed
 to resolve to that target, and a stream is claimable exactly while
 `at < correlated_at`.
 
-Four rules, all pinned by the TCK's `work_set` suite:
+Five rules, all pinned by the TCK's `work_set` suite:
 
 - **It never regresses.** `GREATEST` / `MAX` in the same statement that
   UPSERTs the row, applied for every value including zero and negatives — a
@@ -140,7 +157,7 @@ It rides `subscribe` because `correlate` is its only writer and already calls th
 Three rules the TCK pins:
 
 - **It persists only when greater than the stored value.** A lower or equal `correlated_at` is ignored rather than written, so a worker whose cursor lags cannot rewind it and re-sending the same value is a no-op. `GREATEST` / `MAX` in one statement is the whole implementation.
-- **It is not a subscription.** Keep it in its own single-row relation — a scope owns three relations: events, subscriptions, and this one. Parking it as a reserved subscription row seems cheaper but every stream-scoped surface then counts it: `prioritize`, `reset`, `unblock`, `query_streams`, and `blocked_streams` all start reporting one extra stream.
+- **It is not a subscription.** Keep it in its own relation — a scope owns three relations: events, subscriptions, and this one. Parking it as a reserved subscription row seems cheaper but every stream-scoped surface then counts it: `prioritize`, `reset`, `unblock`, `query_streams`, and `blocked_streams` all start reporting one extra stream.
 - **It starts at `-1`** and is created by `seed()` like every other relation.
 
 Do **not** try to derive it from anything else. It is distinct from a subscription's `at` (how far a *target* has been processed): once a target is subscribed the drain reads the log directly, so processing runs *ahead* of the read cursor, and a checkpoint derived from acked watermarks would skip the events in between for discovery — dynamic targets those events should have created would never exist. Only `correlate` knows how far `correlate` has read.
@@ -303,6 +320,12 @@ async subscribe(streams, correlated_at?, correlator?) {
       [correlator.key, correlated_at ?? null, correlator.by, correlator.millis]
     );
     correlating = (rowCount ?? 0) > 0;
+    // Refused, but the checkpoint still moves: what this caller read stays read.
+    if (!correlating && correlated_at !== undefined)
+      await this.client.query(
+        `UPDATE ${this.checkpoints} SET at = GREATEST(at, $2) WHERE key = $1`,
+        [correlator.key, correlated_at]
+      );
   }
   // ...the usual subscription upserts...
   return { subscribed, watermark, correlated_at: at, ...(correlating === undefined ? {} : { correlating }) };
@@ -402,7 +425,7 @@ runStoreTck({
 });
 ```
 
-The TCK then runs ten cases: empty source, single stream, multi-stream, ISO `created`, pre-existing wipe, subscription clearing, snapshot preservation, causation remap, orphan-ref pass-through, and atomic rollback on mid-iteration throw. They cover the contract end-to-end; passing them means your adapter participates in every transfer flow the framework supports.
+The TCK then runs cases such as: empty source, single stream, multi-stream, ISO `created`, pre-existing wipe, subscription clearing, snapshot preservation, causation remap, orphan-ref pass-through, and atomic rollback on mid-iteration throw. They cover the contract end-to-end; passing them means your adapter participates in every transfer flow the framework supports.
 
 ### Fault-injection adjacent to the TCK
 
