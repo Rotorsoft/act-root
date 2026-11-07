@@ -148,6 +148,21 @@ describe("BroadcastChannel", () => {
 });
 
 // Two delivery defects on the same fan-out path.
+describe("resync", () => {
+  it("resync drops the cached state and tells clients to refetch", () => {
+    const bc = new BroadcastChannel<TestState>();
+    bc.publish("s1", makeState(5, { name: "before" }));
+    const msgs: PatchMessage<TestState>[] = [];
+    bc.subscribe("s1", (m) => msgs.push(m));
+    bc.resync("s1");
+    expect(bc.state("s1")).toBeUndefined();
+    expect(applyPatchMessage(msgs[0], makeState(5))).toMatchObject({
+      ok: false,
+      reason: "behind",
+    });
+  });
+});
+
 describe("subscriber containment and overlay cache misses", () => {
   const st = (v: number, name = "n"): TestState =>
     ({ _v: v, name, count: 1 }) as TestState;

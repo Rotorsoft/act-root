@@ -42,7 +42,10 @@
       "lane": "action",
       "label": "Enroll",
       "col": 1,
-      "preconditions": ["the course has a free seat"],
+      "preconditions": [
+        "the student isn't enrolled yet",
+        "the course has a free seat"
+      ],
       "schema": "course: string\nstudent: string",
       "description": ".on({ Enroll }, { maxRetries: 8 }).loads(Seats, ...).loads(Student, ...). Loads the course's Seats and the student's load before its rule, and commits to all three streams together, guarded by the versions it loaded.",
       "loads": [
@@ -62,7 +65,7 @@
       "lane": "action",
       "label": "Register",
       "col": 6.0,
-      "preconditions": ["the email is free"],
+      "preconditions": ["the user isn't registered yet", "the email is free"],
       "schema": "email: email",
       "description": ".on({ Register }).loads(Email, (data) => email(data.email), [\"EmailTaken\"]). One Email stream per address, keyed by an HMAC of it, loaded before the rule.",
       "loads": [
@@ -328,7 +331,7 @@
       "lane": "action",
       "label": "ReserveItem",
       "col": 19.25,
-      "preconditions": ["enough stock"],
+      "preconditions": ["the order is new", "enough stock"],
       "schema": "qty: number\nproduct: string\nexpiresAt: number",
       "description": ".loads(Product, (data) => data.product, [\"StockReserved\"]). Loads the product's stock before checking it.",
       "loads": [

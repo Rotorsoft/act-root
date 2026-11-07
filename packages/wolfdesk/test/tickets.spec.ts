@@ -129,8 +129,8 @@ describe("tickets", { timeout: 30_000 }, () => {
     );
     await assignTicket(t, chance.guid(), now, now);
     await addMessage(t, "first message");
-    await markTicketResolved(t);
     await settle(t.stream, (row) => !!row?.escalationId && !!row.reassignAfter);
+    await markTicketResolved(t);
     await closeTicket(t);
     await settle(t.stream, (row) => !!row?.closedById);
 
@@ -216,6 +216,18 @@ describe("tickets", { timeout: 30_000 }, () => {
 
       const snapshot = await app.load("Ticket", t.stream);
       expect(snapshot.state.closedById).toBeDefined();
+    });
+
+    it("should leave a resolved ticket unescalated", async () => {
+      const t = target(chance.guid(), "resolved first");
+      // Assigned before the first drain, so this due-now deadline is the one
+      // the escalate defer fires on.
+      await openTicket(t, "resolved first", "Hello");
+      await assignTicket(t, chance.guid(), new Date(), future());
+      await markTicketResolved(t);
+      await settle(t.stream, (row) => !!row?.resolvedById);
+      const ticket = await findTicket(t.stream);
+      expect(ticket?.escalationId).toBeNull();
     });
 
     it("should reassign an escalated, unanswered ticket", async () => {

@@ -86,7 +86,13 @@ The snake_case member names these classes originally shipped with (`publish_over
 :::
 
 :::caution[A restart close]
-`close({ restart: true })` starts a stream's versions over, and a client's patches then read as `stale` until the versions pass where it was. A client on such a stream needs to reconnect.
+`close({ restart: true })` starts a stream's versions over, and a client ahead of them would read every patch as `stale`. Tell clients to refetch:
+
+```typescript no-check
+app.on("closed", ({ truncated }) => {
+  for (const stream of truncated.keys()) broadcast.resync(stream);
+});
+```
 :::
 
 ### Broadcasting a commit

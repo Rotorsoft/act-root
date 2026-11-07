@@ -33,7 +33,7 @@ The shape that fits 80% of cases: dump each stream as one JSONL object per event
 
 **Serialize to JSONL.** One JSON object per line, no wrapping array. JSONL is friendly to streaming readers, append-only consumers, and `jq -c` debugging. Keep the full `Committed` shape — `id`, `name`, `data`, `stream`, `version`, `created`, `meta` — so a future rehydrator has everything it needs.
 
-**Upload with stable key naming.** `tickets/${stream}.jsonl` (or `audit/${stream}.jsonl`, etc.) — one key per stream. Retries on the same stream overwrite the same key, which is the cheap way to get idempotency. Don't include a timestamp in the key; that turns retries into duplicate uploads.
+**Upload with stable key naming.** `tickets/${stream}-${head.id}.jsonl` — one key per stream and head, since a later prune or close reads only what's left and must not overwrite the earlier copy. Retries for the same head overwrite the same key, which is the cheap way to get idempotency. Don't include a timestamp in the key; that turns retries into duplicate uploads.
 
 **Throw on AWS errors.** Catch nothing. If `s3.send(...)` rejects, let it bubble — the framework's safety property turns a thrown archiver into "leave the stream alone" until you resume it with `app.close([{ stream }])`. Swallowing the error and resolving would silently truncate the stream with no archive in cold storage.
 

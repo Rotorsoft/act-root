@@ -80,7 +80,7 @@ describe("classify_registry", () => {
     expect(c.event_to_lanes.has("Decremented")).toBe(true);
   });
 
-  it("collapses same-target reactions from different sources, keeping the max priority", () => {
+  it("collapses same-target reactions, keeping the max priority", () => {
     // A subscription row is keyed by stream, so the batch must carry one
     // entry per target. Two entries would leave the priority merge to the
     // adapter, and a single batched UPDATE cannot do it.
@@ -95,7 +95,7 @@ describe("classify_registry", () => {
       .do(function reactHigh() {
         return Promise.resolve();
       })
-      .to({ target: "shared", source: "sB", priority: 7 })
+      .to({ target: "shared", source: "sA", priority: 7 })
       .build() as unknown as {
       registry: Parameters<typeof classify_registry>[0];
       _states: Parameters<typeof classify_registry>[1];
@@ -105,6 +105,20 @@ describe("classify_registry", () => {
     expect(c.static_targets).toEqual([
       { stream: "shared", source: "sA", priority: 7 },
     ]);
+  });
+
+  it("refuses static reactions on two sources", () => {
+    const two_sources = act()
+      .withState(Counter)
+      .on("Incremented")
+      .do(async function first() {})
+      .to({ target: "T", source: "a" })
+      .on("Decremented")
+      .do(async function second() {})
+      .to({ target: "T", source: "b" });
+    expect(() => two_sources.build()).toThrow(
+      'Target "T" has reactions on two sources'
+    );
   });
 
   it("keeps the max priority regardless of declaration order", () => {
@@ -119,7 +133,7 @@ describe("classify_registry", () => {
       .do(function reactLow2() {
         return Promise.resolve();
       })
-      .to({ target: "shared", source: "sB", priority: 1 })
+      .to({ target: "shared", source: "sA", priority: 1 })
       .build() as unknown as {
       registry: Parameters<typeof classify_registry>[0];
       _states: Parameters<typeof classify_registry>[1];

@@ -398,6 +398,20 @@ describe(".loads", () => {
       .emit(() => [1].map(() => ["Taken", { at: 1 }] as const));
   });
 
+  it("offers the name form for a wider payload, whatever the event's fields", () => {
+    const wider = z.object({ a: z.string() });
+    state({ Wider: z.object({}) })
+      .init(() => ({}))
+      .emits({
+        Empty: z.object({}),
+        Maybe: z.object({ b: z.string().optional() }),
+      })
+      .on({ One: wider })
+      .emit("Empty")
+      .on({ Two: wider })
+      .emit("Maybe");
+  });
+
   it("offers the name form only for an event the payload can satisfy", () => {
     const named = () =>
       state({ Named: z.object({}) })
