@@ -10,7 +10,7 @@ What it is not, on purpose: there are no spans and no trace propagation — this
 
 ## Installation
 
-Takes `@rotorsoft/act` as a peer, of the major this version of the package was released for.
+Takes `@rotorsoft/act` as a peer, of the major this version of the package was released for. Version 0.3 needs `@rotorsoft/act` 2; stay on 0.2 for `@rotorsoft/act` 1.
 
 ```bash
 pnpm add @rotorsoft/act-otel prom-client
