@@ -783,14 +783,9 @@ export class SqliteStore implements Store {
     // subset (e.g. `^(A|B)$`) would otherwise silently never claim its
     // stream, so `streamPatternToGlob` throws `ValidationError` here —
     // pointing operators to InMemory/PG for full regex claim sources —
-    // before any row is written. Literal sources skip the check entirely, and
-    // so does a target reading itself: that source is a name, never a pattern.
+    // before any row is written. Literal sources skip the check entirely.
     for (const { stream, source } of streams) {
-      if (
-        source !== undefined &&
-        source !== stream &&
-        !is_literal_source(source)
-      )
+      if (source !== undefined && !is_literal_source(source, stream))
         streamPatternToGlob(source);
     }
     return this._tx("subscribe", async (tx) => {

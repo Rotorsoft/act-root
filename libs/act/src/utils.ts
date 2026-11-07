@@ -102,6 +102,9 @@ const SOURCE_METACHARACTERS = /[\^$.*+?()[\]{}|\\]/;
  * as a RegExp before matching — the shape the calculator's static
  * `source: "^(A|B)$"` reaction relies on.
  *
+ * Pass the subscription's `target` too when it's known: a target reading itself
+ * holds a stream's name, whatever characters that name has.
+ *
  * The single source of truth for literal-vs-pattern classification across
  * correlate (which decides what a source marks), the drain fetch path, and
  * the SQLite adapter (which rejects a non-portable pattern), so all three
@@ -113,8 +116,8 @@ const SOURCE_METACHARACTERS = /[\^$.*+?()[\]{}|\\]/;
  * is_literal_source("^(A|B)$");  // → false (compile as RegExp)
  * ```
  */
-export function is_literal_source(source: string): boolean {
-  return !SOURCE_METACHARACTERS.test(source);
+export function is_literal_source(source: string, target?: string): boolean {
+  return source === target || !SOURCE_METACHARACTERS.test(source);
 }
 
 /**

@@ -1583,17 +1583,12 @@ export class PostgresStore implements Store {
       // The stored `source` is treated as the regex pattern, and a row
       // qualifies when any supplied candidate name matches it (`n ~ source`).
       // A NULL/empty source has no source constraint — it consumes from
-      // every stream, so it always qualifies. A target reading itself holds a
-      // name, never a pattern, and may not even compile as one. `CASE` is what
-      // keeps Postgres from compiling it. Composes (AND) with others.
+      // every stream, so it always qualifies. Composes (AND) with others.
       values.push(query.source_matches);
       conditions.push(
-        `(source IS NULL OR source = '' OR CASE
-          WHEN source = stream THEN source = ANY($${values.length}::text[])
-          ELSE EXISTS (
-            SELECT 1 FROM unnest($${values.length}::text[]) AS n WHERE n ~ source
-          )
-        END)`
+        `(source IS NULL OR source = '' OR EXISTS (
+          SELECT 1 FROM unnest($${values.length}::text[]) AS n WHERE n ~ source
+        ))`
       );
     }
     if (query?.after !== undefined) {
