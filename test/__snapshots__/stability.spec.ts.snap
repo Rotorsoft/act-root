@@ -3868,15 +3868,14 @@ export type StreamPosition = {
  *   of the given names (i.e. \`name ~ source\`, the inverse of \`source\`
  *   above which is \`source ~ pattern\`). A subscription with an absent or
  *   empty \`source\` (no source constraint — it consumes from every
- *   stream) ALWAYS qualifies, regardless of the names. Used by the
- *   close-cycle safety probe to fetch only the subscriptions that could
- *   consume from a set of close-target streams instead of scanning the
- *   whole subscriptions table. **Callers must treat it as a hint, not an
- *   exact filter:** a
+ *   stream) ALWAYS qualifies, regardless of the names. For a caller that
+ *   wants only the subscriptions that could consume from a set of streams;
+ *   the framework itself doesn't use it. **Callers must treat it as a hint,
+ *   not an exact filter:** a
  *   store that can't express reverse-regex (e.g. an anchor-aware \`LIKE\`
  *   approximation) MAY return a superset — typically by ignoring the
  *   filter entirely — so callers that need exactness re-verify in
- *   process (the probe already does). Stores that honor it server-side
+ *   process. Stores that honor it server-side
  *   advertise \`source_matches\` in the TCK's \`StoreCapabilities\`, which
  *   gates the narrowing-behavior tests; correctness never depends on the
  *   flag, only the row count fetched.
@@ -5854,6 +5853,9 @@ export declare function sleep(ms?: number): Promise<unknown>;
  * as a RegExp before matching — the shape the calculator's static
  * \`source: "^(A|B)$"\` reaction relies on.
  *
+ * Pass the subscription's \`target\` too when it's known: a target reading itself
+ * holds a stream's name, whatever characters that name has.
+ *
  * The single source of truth for literal-vs-pattern classification across
  * correlate (which decides what a source marks), the drain fetch path, and
  * the SQLite adapter (which rejects a non-portable pattern), so all three
@@ -5865,7 +5867,7 @@ export declare function sleep(ms?: number): Promise<unknown>;
  * is_literal_source("^(A|B)$");  // → false (compile as RegExp)
  * \`\`\`
  */
-export declare function is_literal_source(source: string): boolean;
+export declare function is_literal_source(source: string, target?: string): boolean;
 /**
  * Revive ISO-8601-shaped strings into \`Date\`s during \`JSON.parse\`.
  *
@@ -5876,6 +5878,20 @@ export declare function is_literal_source(source: string): boolean;
  * event's schema declares as \`z.date()\`.
  */
 export declare const dateReviver: (_key: string, value: unknown) => unknown;
+/**
+ * How many of \`lagging\` claim slots ignore priority, so sustained high-priority
+ * load can't starve a low-priority stream forever. Each store's \`claim\` calls
+ * it, and the rule stays out of the \`claim\` signature.
+ *
+ * @internal
+ */
+export declare function fair_slots(lagging: number): number;
+/**
+ * How many positions \`query_streams\` returns when the caller gives no limit.
+ *
+ * @internal
+ */
+export declare const DEFAULT_QUERY_STREAMS_LIMIT = 100;
 //# sourceMappingURL=utils.d.ts.map"
 `;
 

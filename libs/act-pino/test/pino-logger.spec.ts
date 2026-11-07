@@ -1,3 +1,6 @@
+import { mkdtempSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { PinoLogger } from "../src/pino-logger.js";
 
 /** `process.report.getReport()` is typed as `object`; this is the one field we read. */
@@ -19,6 +22,21 @@ describe("PinoLogger", () => {
 
   afterEach(() => {
     process.stdout.write = originalWrite;
+  });
+
+  it("honors a transport from options, outside production too", async () => {
+    const file = join(mkdtempSync(join(tmpdir(), "act-pino-")), "app.log");
+    const logger = new PinoLogger({
+      level: "info",
+      options: {
+        transport: { target: "pino/file", options: { destination: file } },
+      },
+    });
+    logger.info({ hello: 1 }, "to my transport");
+    await logger.dispose();
+    await vi.waitFor(() => {
+      expect(readFileSync(file, "utf8")).toContain("to my transport");
+    });
   });
 
   it("creates with default options", () => {
