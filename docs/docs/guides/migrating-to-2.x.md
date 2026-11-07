@@ -39,7 +39,7 @@ An adapter checks every append's version before inserting anything, and inserts 
 Two things that rewrite doesn't show:
 
 - **An append with no events now throws.** `commit(stream, [], meta, version)` used to check the version and return `[]`; `commit([{ stream, msgs: [] }], meta)` throws an `Error`. Skip the call instead. `commit([], meta)` returns `[]`.
-- **A wrapper around a `Store`** moves to the new signature too, and sends one notification for each stream a commit appends to, as `withBroker` does.
+- **A wrapper around a `Store`** can't always be caught at build: `act().build()` refuses a four-parameter `commit`, but one with a default or rest parameter passes, and then fails at its first commit. It moves to the new signature too, and sends one notification for each stream a commit appends to, as `withBroker` does.
 
 ### Invariants are preconditions
 
@@ -78,7 +78,7 @@ Two things that rewrite doesn't show:
 
 - **What changed:** two static reactions on one target with different sources now throw at build.
 - **Why:** a subscription row holds one source, so the second reaction's events were silently never delivered.
-- **How to update:** give the second reaction its own target, or leave out `source`.
+- **How to update:** keep the target name on the reaction that has been delivering, and give the other one a new target. Leaving out `source` also builds, but then both reactions read every stream.
 
 ```ts no-check
 // before (1.x): built, and `onTaken` never ran
@@ -86,8 +86,24 @@ Two things that rewrite doesn't show:
 .on("Taken").do(onTaken).to({ target: "audit", source: "seats" })
 
 // after (2.x)
-.on("Done").do(onDone).to({ target: "audit-orders", source: "orders" })
+.on("Done").do(onDone).to({ target: "audit", source: "orders" })
 .on("Taken").do(onTaken).to({ target: "audit-seats", source: "seats" })
+```
+
+**Don't rename the target that has been working.** A new target reads its source from the start, so renaming `audit` would run `onDone` over its whole history again, and a webhook would resend every delivery. `onTaken` above does read from the start, which is what you want: it never ran.
+
+### A reaction's source is a regex only when anchored
+
+- **What changed:** a `source` is a pattern only if it starts with `^` or ends with `$`. Anything else is a stream's exact name, whatever characters it holds.
+- **Why:** a name like `user+tag@example.com` or `order(1)` used to read as a regex, so its reactions never ran, and on SQLite one such name stopped every reaction in the app.
+- **How to update:** anchor any pattern you wrote. It stops matching otherwise, with no error. `app.reset`, `query` and the other filters are unchanged.
+
+```ts no-check
+// before (1.x)
+.to({ target: "orders", source: "order-.*" })
+
+// after (2.x)
+.to({ target: "orders", source: "^order-" })
 ```
 
 ### A result's `version` is the stream's head

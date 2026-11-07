@@ -85,6 +85,10 @@ const broadcast = new BroadcastChannel<AppState>({
 The snake_case member names these classes originally shipped with (`publish_overlay`, `get_state`, `get_subscriber_count`, `cache_size`, `get_online`, `is_online`) still work but are deprecated aliases — scheduled for removal in the next major. Use the short names shown here (`overlay`, `state`, `subscriberCount`, `cacheSize`, `online`, `isOnline`).
 :::
 
+:::caution[A restart close]
+`close({ restart: true })` starts a stream's versions over, and a client's patches then read as `stale` until the versions pass where it was. A client on such a stream needs to reconnect.
+:::
+
 ### Broadcasting a commit
 
 After every `app.do()`, forward each emitted snapshot's domain patch:

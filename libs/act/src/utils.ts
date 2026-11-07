@@ -84,37 +84,25 @@ export async function sleep(ms?: number) {
 }
 
 /**
- * Regex metacharacters that, when present in a reaction `source`, make it a
- * pattern rather than a literal stream name. A source containing none of
- * these is a bare stream name — the common case — and every claim/fetch
- * site matches it by string equality on the store's stream index. A source
- * containing any of them is compiled as a RegExp and matched against
- * candidate streams with the caller's own anchoring (e.g. `^(A|B)$`).
- */
-const SOURCE_METACHARACTERS = /[\^$.*+?()[\]{}|\\]/;
-
-/**
- * True when `source` is a **literal** stream name — it carries no regex
- * metacharacter, so every adapter treats it as an exact match. This is the
- * fast, index-friendly path and covers every autoclose/dynamic-resolver
- * source (bare stream names). A `false` return means the source is a
- * **pattern** (contains `^ $ . * + ? ( ) [ ] { } | \`) and must be compiled
- * as a RegExp before matching — the shape the calculator's static
- * `source: "^(A|B)$"` reaction relies on.
+ * True when `source` is a stream's **name**, matched exactly. Only an anchored
+ * source, one that starts with `^` or ends with `$`, is a **pattern** and gets
+ * compiled as a RegExp. A name can hold any other character, so
+ * `user+tag@example.com` and `order(1)` are names, and a pattern always says
+ * that it is one.
  *
- * The single source of truth for literal-vs-pattern classification across
- * correlate (which decides what a source marks), the drain fetch path, and
- * the SQLite adapter (which rejects a non-portable pattern), so all three
- * agree on which sources take the exact path.
+ * The single source of truth for this across correlate (which decides what a
+ * source marks), the drain fetch path, the close check, and the adapters, so
+ * they all agree.
  *
  * @example
  * ```typescript
  * is_literal_source("Board");    // → true  (exact lookup)
+ * is_literal_source("a+b");      // → true  (exact lookup)
  * is_literal_source("^(A|B)$");  // → false (compile as RegExp)
  * ```
  */
 export function is_literal_source(source: string): boolean {
-  return !SOURCE_METACHARACTERS.test(source);
+  return !source.startsWith("^") && !source.endsWith("$");
 }
 
 /**

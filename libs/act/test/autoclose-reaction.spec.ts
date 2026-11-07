@@ -42,14 +42,30 @@ describe("autoclose as a synthesized reaction", () => {
     await dispose()();
   });
 
-  it("leaves a stream whose name has a regex metacharacter to app.close", async () => {
+  it.each(["room+a", "room.a", "order(1)", "user+tag@example.com"])(
+    "closes %s",
+    async (stream) => {
+      const closed: CloseResult[] = [];
+      const app = act()
+        .withState(ticket({ is: "Resolved" }))
+        .build({ autoSettle: false });
+      app.on("closed", (r) => closed.push(r));
+      await app.do("open", { stream, actor }, {});
+      await app.do("resolve", { stream, actor }, {});
+      await app.correlate();
+      await app.drain();
+      expect(closed.flatMap((r) => [...r.truncated.keys()])).toEqual([stream]);
+    }
+  );
+
+  it("leaves a stream whose name reads as a pattern to app.close", async () => {
     const closed: CloseResult[] = [];
     const app = act()
       .withState(ticket({ is: "Resolved" }))
       .build({ autoSettle: false });
     app.on("closed", (r) => closed.push(r));
-    await app.do("open", { stream: "room+a", actor }, {});
-    await app.do("resolve", { stream: "room+a", actor }, {});
+    await app.do("open", { stream: "^room-a", actor }, {});
+    await app.do("resolve", { stream: "^room-a", actor }, {});
     await app.do("open", { stream: "room-b", actor }, {});
     await app.do("resolve", { stream: "room-b", actor }, {});
     await app.correlate();
@@ -57,8 +73,8 @@ describe("autoclose as a synthesized reaction", () => {
     await app.correlate();
     await app.drain();
     expect(closed.flatMap((r) => [...r.truncated.keys()])).toEqual(["room-b"]);
-    await app.close([{ stream: "room+a" }]);
-    expect(closed.at(-1)?.truncated.has("room+a")).toBe(true);
+    await app.close([{ stream: "^room-a" }]);
+    expect(closed.at(-1)?.truncated.has("^room-a")).toBe(true);
   });
 
   it("keeps a later `or.after` backstop once the earlier `after` has passed", async () => {

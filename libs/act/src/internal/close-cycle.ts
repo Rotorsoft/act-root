@@ -18,6 +18,7 @@ import type {
   State,
 } from "../types/index.js";
 import { SNAP_EVENT, TOMBSTONE_EVENT } from "../types/index.js";
+import { is_literal_source } from "../utils.js";
 import { AUTOCLOSE_TARGET_PREFIX } from "./autoclose-reaction.js";
 import type { EsOps } from "./event-sourcing.js";
 import { walk_streams } from "./walk-streams.js";
@@ -446,9 +447,8 @@ async function probe_min_watermarks(
 
 /**
  * Does a subscription with this `source` consume from `stream`? No source
- * consumes every stream; a target reading itself consumes only that name; a
- * literal source matches itself as a regex. Compiled patterns are cached per
- * matcher.
+ * consumes every stream; a target reading itself, or a literal source, consumes
+ * only that name. Compiled patterns are cached per matcher.
  */
 function source_matcher(): (
   source: string | undefined,
@@ -458,7 +458,8 @@ function source_matcher(): (
   const compiled = new Map<string, RegExp>();
   return (source, target, stream) => {
     if (!source) return true;
-    if (source === target) return source === stream;
+    if (source === target || is_literal_source(source))
+      return source === stream;
     let re = compiled.get(source);
     if (!re) {
       re = new RegExp(source);

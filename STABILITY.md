@@ -90,7 +90,7 @@ The charter above says *what* a major bump protects. This section says *how long
 Act is maintained by a small team. The windows below are deliberately modest — we would rather state a window we can keep than advertise an LTS we can't staff.
 
 - **Active line — the latest published major.** Receives new features, bug fixes, and security patches. This is where development happens. Always upgrade within the active major to get fixes; there are no long-lived patch branches inside a major beyond the latest minor.
-- **Previous major — maintenance.** When a new major `N` ships, the prior major `N-1` enters a maintenance window of **at least 6 months** during which it receives **security fixes and critical correctness fixes only** (data loss, lost events, crashes). No new features, no non-critical fixes. After the window closes, `N-1` is end-of-life.
+- **Previous major — maintenance.** When a new major `N` ships, the prior major `N-1` enters a maintenance window of **at least 6 months** during which it receives **security fixes and critical correctness fixes only** (data loss, lost events, crashes). No new features, no non-critical fixes. After the window closes, `N-1` is end-of-life. The branch for those fixes is cut when the first one is needed: [Fixing the previous major](CONTRIBUTING.md#fixing-the-previous-major).
 - **Older majors (`N-2` and earlier) — unsupported.** Best-effort community help via [issues](https://github.com/rotorsoft/act-root/issues) and [discussions](https://github.com/rotorsoft/act-root/discussions), no guaranteed fixes or releases.
 
 The windows above have been in effect since the [1.0 release](https://github.com/Rotorsoft/act-root/milestone/1). For any package still on a **0.x** line (currently `@rotorsoft/act-crypto`, `@rotorsoft/act-ops` and `@rotorsoft/act-otel`), only the **latest published version** is supported — there are no maintenance branches before a package's own 1.0; upgrade to the newest release to pick up fixes.
@@ -127,7 +127,7 @@ The first such page is [Migrating to 1.x](docs/docs/guides/migrating-to-1.x.md):
 | `@rotorsoft/act` | Yes — defines the charter |
 | `@rotorsoft/act-pg` | Yes — `Store` adapter, same contract |
 | `@rotorsoft/act-sqlite` | Yes — `Store` adapter, same contract |
-| `@rotorsoft/act-patch` | Yes — stable utility, depended on by `act` reducers |
+| `@rotorsoft/act-patch` | No — stable utility with no dependency on core, on its own 1.x line. |
 | `@rotorsoft/act-http` | Yes — umbrella for HTTP integrations (`webhook` helper plus an `sse` subpath that hosts the surface formerly published as `@rotorsoft/act-sse`, removed from this repo) |
 | `@rotorsoft/act-pino` | Yes — `Logger` adapter, narrow surface |
 | `@rotorsoft/act-sse` | **Removed from this repo.** Deprecated on npm; the surface lives at `@rotorsoft/act-http/sse`. Published `1.x` versions keep working; [migrating](#deprecation-policy) renames four methods. |

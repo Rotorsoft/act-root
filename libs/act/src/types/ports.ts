@@ -664,8 +664,8 @@ export interface Store extends Disposable, EventSource {
    * Claim reads only the subscription rows; it never matches a `source`
    * against the event log. Correlate does that when it decides which
    * targets to mark, and the drain uses the same rule when it fetches the
-   * claimed stream's events. A **literal** source (no regex
-   * metacharacter — the common case, and every autoclose/dynamic-resolver
+   * claimed stream's events. A **literal** source (no anchor —
+   * the common case, and every autoclose/dynamic-resolver
    * source) matches by string equality: the fast, index-friendly path, and
    * exact so `"s1"` never matches `"s12"`. A **pattern** source (carrying
    * `^ $ . * + ? ( ) [ ] { } | \`, e.g. a static `^(A|B)$` reaction) is

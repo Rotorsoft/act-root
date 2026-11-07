@@ -934,15 +934,6 @@ export class PostgresStore implements Store {
   ) {
     check_appends(appends);
     if (!appends.length) return [];
-    // The driver turns half a surrogate pair into U+FFFD, so the head lookup
-    // would come back under another name.
-    for (const { stream, msgs } of appends)
-      if (/\p{Cs}/u.test(stream))
-        throw new ValidationError(
-          stream,
-          msgs as unknown as Readonly<unknown>,
-          "Postgres cannot store half of a surrogate pair in a stream name"
-        );
     // Serialize commit VISIBILITY, not just id assignment. `id` is a
     // serial: it is assigned at INSERT time but the row appears at
     // COMMIT time, and every watermark consumer (the correlate
@@ -1641,13 +1632,15 @@ export class PostgresStore implements Store {
       // The stored `source` is treated as the regex pattern, and a row
       // qualifies when any supplied candidate name matches it (`n ~ source`).
       // A NULL/empty source has no source constraint — it consumes from
-      // every stream, so it always qualifies. A target reading itself holds a
-      // name, never a pattern, and may not even compile as one. `CASE` is what
-      // keeps Postgres from compiling it. Composes (AND) with others.
+      // every stream, so it always qualifies. A target reading itself, or a
+      // source with no anchor, holds a name, which may not even compile as a
+      // pattern. `CASE` is what keeps Postgres from compiling it. Composes
+      // (AND) with others.
       values.push(query.source_matches);
       conditions.push(
         `(source IS NULL OR source = '' OR CASE
-          WHEN source = stream THEN source = ANY($${values.length}::text[])
+          WHEN source = stream OR (left(source, 1) <> '^' AND right(source, 1) <> '$')
+            THEN source = ANY($${values.length}::text[])
           ELSE EXISTS (
             SELECT 1 FROM unnest($${values.length}::text[]) AS n WHERE n ~ source
           )

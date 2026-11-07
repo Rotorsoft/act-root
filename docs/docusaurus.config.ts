@@ -140,7 +140,7 @@ const config: Config = {
             "1.x": {
               label: "1.x",
               path: "1.x",
-              banner: "unmaintained",
+              banner: "none",
             },
           },
         },

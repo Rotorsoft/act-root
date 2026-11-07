@@ -2,6 +2,7 @@ import {
   act,
   ConcurrencyError,
   InMemoryCache,
+  PreconditionError,
   SNAP_EVENT,
   sensitive,
   sleep,
@@ -242,7 +243,8 @@ export const runStoreTck = (options: StoreTckOptions): void => {
     // is a runtime no-op that yields `{}`.
     const caps: StoreCapabilities = { ...options.capabilities };
 
-    const is_literal = (source: string) => !/[\]^$.*+?()[{}|\\]/.test(source);
+    const is_literal = (source: string) =>
+      !source.startsWith("^") && !source.endsWith("$");
 
     // Stand in for `correlate`, which a store test has no orchestrator to
     // run. `claim` follows marks — committing an event is not
@@ -554,6 +556,179 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         const [p, q, r, t] = [0, 1, 2, 3].map((i) => `across-d${i}-${uid()}`);
         const disjoint = await Promise.allSettled([race(p, q), race(r, t)]);
         expect(disjoint.every((d) => d.status === "fulfilled")).toBe(true);
+      });
+    });
+
+    describe("what a commit, guard or truncate must not get wrong", () => {
+      const edge_uid = () => uid();
+      const E = (data: any = { a: 1 }, pii?: any) => ({
+        name: "E",
+        data,
+        ...(pii ? { pii } : {}),
+      });
+      const edge_meta = (correlation = "m") =>
+        ({ correlation, causation: {} }) as any;
+      const rows = async (query: any) => {
+        const found: any[] = [];
+        await store.query((e) => found.push(e), query);
+        return found;
+      };
+      const one = (stream: string) => ({ stream, stream_exact: true });
+      it("names the FIRST stale stream when two are stale", async () => {
+        const [a, b] = [`a-${edge_uid()}`, `b-${edge_uid()}`];
+        const e = await (store as any)
+          .commit(
+            [
+              { stream: a, msgs: [E()], expectedVersion: 3 },
+              { stream: b, msgs: [E()], expectedVersion: 4 },
+            ],
+            edge_meta()
+          )
+          .catch((x: any) => x);
+        expect(e).toBeInstanceOf(ConcurrencyError);
+        expect(e.stream).toBe(a);
+      });
+      it("checks a stale expectedVersion of 0 inside a multi-stream commit", async () => {
+        const [a, b] = [`a-${edge_uid()}`, `b-${edge_uid()}`];
+        await (store as any).commit(
+          [{ stream: b, msgs: [E(), E()] }],
+          edge_meta()
+        );
+        await expect(
+          (store as any).commit(
+            [
+              { stream: a, msgs: [E()], expectedVersion: -1 },
+              { stream: b, msgs: [E()], expectedVersion: 0 },
+            ],
+            edge_meta()
+          )
+        ).rejects.toBeInstanceOf(ConcurrencyError);
+        expect(await rows(one(a))).toHaveLength(0);
+      });
+      it("attaches meta to every append, not just the last", async () => {
+        const ss = [0, 1, 2].map((i) => `m${i}-${edge_uid()}`);
+        const c = `corr-${edge_uid()}`;
+        await (store as any).commit(
+          ss.map((stream) => ({ stream, msgs: [E()] })),
+          edge_meta(c)
+        );
+        for (const stream of ss)
+          expect((await rows(one(stream)))[0].meta.correlation).toBe(c);
+      });
+      it("refuses a stream named twice when not adjacent", async () => {
+        const [a, b] = [`a-${edge_uid()}`, `b-${edge_uid()}`];
+        await expect(
+          (store as any).commit(
+            [
+              { stream: a, msgs: [E()] },
+              { stream: b, msgs: [E()] },
+              { stream: a, msgs: [E()] },
+            ],
+            edge_meta()
+          )
+        ).rejects.toThrow("named twice");
+        expect(await rows(one(a))).toHaveLength(0);
+      });
+      it("refuses a lone empty append (a version check alone)", async () => {
+        const a = `a-${edge_uid()}`;
+        await expect(
+          (store as any).commit(
+            [{ stream: a, msgs: [], expectedVersion: -1 }],
+            edge_meta()
+          )
+        ).rejects.toThrow("no events");
+      });
+      it("refuses an empty FIRST append", async () => {
+        const [a, b] = [`a-${edge_uid()}`, `b-${edge_uid()}`];
+        await expect(
+          (store as any).commit(
+            [
+              { stream: a, msgs: [] },
+              { stream: b, msgs: [E()] },
+            ],
+            edge_meta()
+          )
+        ).rejects.toThrow("no events");
+        expect(await rows(one(b))).toHaveLength(0);
+      });
+      it("keeps the sensitive fields of the FIRST append", async () => {
+        const [a, b] = [`a-${edge_uid()}`, `b-${edge_uid()}`];
+        await (store as any).commit(
+          [
+            { stream: a, msgs: [E({}, { email: "x" })] },
+            { stream: b, msgs: [E()] },
+          ],
+          edge_meta()
+        );
+        expect((await rows(one(a)))[0].pii).toEqual({ email: "x" });
+      });
+      it("a guard below a trailing snapshot is stale", async () => {
+        const a = `a-${edge_uid()}`;
+        await (store as any).commit([{ stream: a, msgs: [E()] }], edge_meta());
+        await (store as any).commit(
+          [
+            {
+              stream: a,
+              msgs: [{ name: SNAP_EVENT, data: {} }],
+              expectedVersion: 0,
+            },
+          ],
+          edge_meta()
+        );
+        await expect(
+          (store as any).commit(
+            [{ stream: a, msgs: [E()], expectedVersion: 0 }],
+            edge_meta()
+          )
+        ).rejects.toBeInstanceOf(ConcurrencyError);
+      });
+      it("a guard below a trailing tombstone is stale (what stops a writer during a close)", async () => {
+        const a = `a-${edge_uid()}`;
+        await (store as any).commit([{ stream: a, msgs: [E()] }], edge_meta());
+        await (store as any).commit(
+          [
+            {
+              stream: a,
+              msgs: [{ name: "__tombstone__", data: {} }],
+              expectedVersion: 0,
+            },
+          ],
+          edge_meta()
+        );
+        await expect(
+          (store as any).commit(
+            [{ stream: a, msgs: [E()], expectedVersion: 0 }],
+            edge_meta()
+          )
+        ).rejects.toBeInstanceOf(ConcurrencyError);
+      });
+      it("a commit after a full truncate continues from the seed at version 0", async () => {
+        const a = `a-${edge_uid()}`;
+        await (store as any).commit(
+          [{ stream: a, msgs: [E(), E(), E()] }],
+          edge_meta()
+        );
+        await (store as any).truncate([{ stream: a, snapshot: { n: 3 } }]);
+        const [c] = await (store as any).commit(
+          [{ stream: a, msgs: [E()], expectedVersion: 0 }],
+          edge_meta()
+        );
+        expect(c.version).toBe(1);
+      });
+      it("seeds a full truncate at version 0, carrying the meta it was given", async () => {
+        const a = `a-${edge_uid()}`;
+        await (store as any).commit(
+          [{ stream: a, msgs: [E(), E(), E()] }],
+          edge_meta()
+        );
+        const c = `close-${edge_uid()}`;
+        const r = await (store as any).truncate([
+          { stream: a, snapshot: { n: 3 }, meta: edge_meta(c) },
+        ]);
+        expect(r.get(a).committed.version).toBe(0);
+        const [seed] = await rows({ ...one(a), with_snaps: true });
+        expect(seed.version).toBe(0);
+        expect(seed.meta.correlation).toBe(c);
       });
     });
 
@@ -5011,6 +5186,20 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           await release(k, who);
         });
 
+        it("advances the checkpoint for a caller refused the lease", async () => {
+          const k = key();
+          const holder = by();
+          expect((await take(k, holder)).correlating).toBe(true);
+          const refused = await store.subscribe([], 123_456, {
+            key: k,
+            by: by(),
+            millis: 10_000,
+          });
+          expect(refused.correlating).toBe(false);
+          expect((await take(k, holder)).correlated_at).toBe(123_456);
+          await release(k, holder);
+        });
+
         it("answers undefined when no correlator is supplied", async () => {
           // No lease was asked for, so there is no answer — and the caller
           // scans exactly as it would with no lease at all.
@@ -5126,7 +5315,269 @@ export const runStoreTck = (options: StoreTckOptions): void => {
       }
     );
 
+    describe("an action across streams", () => {
+      const SeatTaken = z.object({ student: z.string() });
+      const Seats = state({
+        Seats: z
+          .object({ taken: z.number() })
+          .refine((s) => s.taken <= 3, "the course is full"),
+      })
+        .init(() => ({ taken: 0 }))
+        .emits({ SeatTaken })
+        .patch({ SeatTaken: (_, s) => ({ taken: s.taken + 1 }) })
+        .on({ TakeSeat: SeatTaken })
+        .emit("SeatTaken")
+        .build();
+      const Enroll = z.object({ course: z.string(), student: z.string() });
+      const course = (data: { course: string }) => `course-${data.course}`;
+      const Enrollment = state({ Enrollment: Enroll })
+        .init(() => ({ course: "", student: "" }))
+        .emits({ Enrolled: Enroll })
+        .on({ Enroll }, { maxRetries: 8 })
+        .loads(Seats, course, ["SeatTaken"])
+        .requires([
+          {
+            description: "the course has a free seat",
+            holds: (_, __, ___, { Seats }) => Seats.taken < 3,
+          },
+        ])
+        .emit((data) => [
+          ["Enrolled", data],
+          ["SeatTaken", { student: data.student }],
+        ])
+        .on({ Overfill: Enroll })
+        .loads(Seats, course, ["SeatTaken"])
+        .emit((data) => [
+          ["Enrolled", data],
+          ["SeatTaken", { student: data.student }],
+        ])
+        .build();
+      const actor = { id: "a", name: "a" };
+      const at = (stream: string) => ({ stream, actor });
+      const over = async (run: (t: any) => Promise<void>) => {
+        const fresh = await options.factory();
+        await fresh.seed();
+        const cache = new InMemoryCache();
+        const app = act()
+          .withState(Seats)
+          .withState(Enrollment)
+          .build({ scoped: { store: fresh, cache } });
+        const c = `c${uid()}`;
+        const events = async (stream: string) => {
+          const found: any[] = [];
+          await fresh.query((e) => found.push(e), {
+            stream,
+            stream_exact: true,
+          });
+          return found;
+        };
+        try {
+          await run({
+            app,
+            fresh,
+            c,
+            events,
+            seat: (student: string) => ({ course: c, student }),
+          });
+        } finally {
+          vi.restoreAllMocks();
+          await app.shutdown();
+          await cache.dispose();
+          await fresh.dispose();
+        }
+      };
+
+      it("commits both streams at once and fires committed once per stream", () =>
+        over(async ({ app, c, events, seat }) => {
+          const stream = `enr-${uid()}`;
+          const heard: any[] = [];
+          app.on("committed", (s: any) => heard.push(s));
+          const snapshots = await app.do("Enroll", at(stream), seat("s1"));
+          expect(snapshots.map((s: any) => s.event?.name)).toEqual([
+            "Enrolled",
+          ]);
+          const [own] = await events(stream);
+          const [other] = await events(`course-${c}`);
+          expect(own.name).toBe("Enrolled");
+          expect(other.name).toBe("SeatTaken");
+          expect(other.id).toBeGreaterThan(own.id);
+          expect(other.meta.correlation).toBe(own.meta.correlation);
+          expect(heard.map((h) => h[0].event?.stream)).toEqual([
+            stream,
+            `course-${c}`,
+          ]);
+          expect((await app.load(Seats, `course-${c}`)).state.taken).toBe(1);
+        }));
+
+      it("stores nothing on either stream when a rule or a schema refuses", () =>
+        over(async ({ app, c, events, seat }) => {
+          for (const i of [1, 2, 3])
+            await app.do("TakeSeat", at(`course-${c}`), { student: `s${i}` });
+          const [a, b] = [`enr-${uid()}`, `enr-${uid()}`];
+          await expect(app.do("Enroll", at(a), seat("late"))).rejects.toThrow(
+            PreconditionError
+          );
+          await expect(app.do("Overfill", at(b), seat("late"))).rejects.toThrow(
+            ValidationError
+          );
+          expect(await events(a)).toEqual([]);
+          expect(await events(b)).toEqual([]);
+          expect(await events(`course-${c}`)).toHaveLength(3);
+        }));
+
+      it("a rival on the loaded stream refuses the whole commit, naming that stream", () =>
+        over(async ({ app, fresh, c, events, seat }) => {
+          const commit = fresh.commit.bind(fresh);
+          vi.spyOn(fresh, "commit").mockImplementationOnce(
+            async (...args: any[]) => {
+              await commit(
+                [
+                  {
+                    stream: `course-${c}`,
+                    msgs: [{ name: "SeatTaken", data: { student: "rival" } }],
+                  },
+                ],
+                { correlation: "rival", causation: {} }
+              );
+              return (commit as any)(...args);
+            }
+          );
+          const stream = `enr-${uid()}`;
+          const err: any = await app
+            .do("Overfill", at(stream), seat("s"))
+            .catch((e: unknown) => e);
+          expect(err).toBeInstanceOf(ConcurrencyError);
+          expect(err.stream).toBe(`course-${c}`);
+          expect(await events(stream)).toEqual([]);
+          expect(await events(`course-${c}`)).toHaveLength(1);
+        }));
+
+      it("racing enrollments fill the seats exactly: the rest are refused by the rule", () =>
+        over(async ({ app, c, events, seat }) => {
+          const results = await Promise.allSettled(
+            [1, 2, 3, 4, 5, 6].map((i) =>
+              app.do("Enroll", at(`race-${uid()}-${i}`), seat(`s${i}`))
+            )
+          );
+          expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(
+            3
+          );
+          for (const r of results.filter((r) => r.status === "rejected"))
+            expect((r as PromiseRejectedResult).reason).toBeInstanceOf(
+              PreconditionError
+            );
+          expect(await events(`course-${c}`)).toHaveLength(3);
+        }));
+    });
+
     describe.skipIf(!caps.restore)("restore (capability)", () => {
+      describe("what a restore must not get wrong", () => {
+        const edge_uid = () => uid();
+        const E = (data: any = { a: 1 }, pii?: any) => ({
+          name: "E",
+          data,
+          ...(pii ? { pii } : {}),
+        });
+        const edge_meta = (correlation = "m") =>
+          ({ correlation, causation: {} }) as any;
+        const rows = async (query: any) => {
+          const found: any[] = [];
+          await store.query((e) => found.push(e), query);
+          return found;
+        };
+        const one = (stream: string) => ({ stream, stream_exact: true });
+        it("a commit after restore continues each stream from its restored head", async () => {
+          const a = `a-${edge_uid()}`;
+          await (store as any).commit(
+            [{ stream: a, msgs: [E(), E()] }],
+            edge_meta()
+          );
+          const log = await rows({ with_snaps: true });
+          await (store as any).restore(async (cb: any) => {
+            for (const e of log) await cb(e);
+          });
+          const [c] = await (store as any).commit(
+            [{ stream: a, msgs: [E()], expectedVersion: 1 }],
+            edge_meta()
+          );
+          expect(c.version).toBe(2);
+        });
+        it("restore renumbers: ids are dense whatever the source ids were", async () => {
+          const a = `a-${edge_uid()}`;
+          const ev = (version: number, id: number) => ({
+            id,
+            stream: a,
+            version,
+            name: "E",
+            data: {},
+            meta: edge_meta(),
+            created: new Date(),
+          });
+          const ids: number[] = [];
+          await (store as any).restore(async (cb: any) => {
+            ids.push(await cb(ev(0, 500)));
+            ids.push(await cb(ev(1, 900)));
+          });
+          expect(ids[1]).toBe(ids[0] + 1);
+          expect(ids[0]).toBeLessThanOrEqual(1);
+        });
+        it("changes nothing when it fails", async () => {
+          const a = `rb-${edge_uid()}`;
+          const key = `k-${edge_uid()}`;
+          const sub = `sub-${edge_uid()}`;
+          const committed = await store.commit(
+            [{ stream: a, msgs: [E({}, { email: "x" }), E()] }],
+            edge_meta()
+          );
+          const head = committed.at(-1)!.id;
+          await store.subscribe([{ stream: sub }], head);
+          const keyed = await store.subscribe([], head, {
+            key,
+            by: "w",
+            millis: 1,
+          });
+          const shared = await store.subscribe([]);
+          await expect(
+            store.restore!(async (callback) => {
+              await callback({
+                id: 1,
+                stream: "other",
+                version: 0,
+                name: "E",
+                data: {},
+                meta: edge_meta(),
+                created: new Date(),
+              } as never);
+              throw new Error("mid-restore");
+            })
+          ).rejects.toThrow();
+
+          const subscriptions: string[] = [];
+          await store.query_streams((p) => subscriptions.push(p.stream), {
+            stream: sub,
+            stream_exact: true,
+          });
+          expect(subscriptions).toEqual([sub]);
+          expect((await store.subscribe([])).correlated_at).toBe(
+            shared.correlated_at
+          );
+          await sleep(5);
+          const keyed_after = await store.subscribe([], undefined, {
+            key,
+            by: "w2",
+            millis: 1,
+          });
+          expect(keyed_after.correlated_at).toBe(keyed.correlated_at);
+          expect((await rows(one(a)))[0].pii).toEqual({ email: "x" });
+          const [next] = await store.commit(
+            [{ stream: a, msgs: [E()], expectedVersion: 1 }],
+            edge_meta()
+          );
+          expect(next.version).toBe(2);
+          expect(next.id).toBeGreaterThan(head);
+        });
+      });
+
       // Restore wipes the whole store — every test starts from a
       // freshly-dropped + seeded baseline so no test inherits
       // another's post-restore state and so subsequent TCK blocks

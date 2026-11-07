@@ -27,7 +27,7 @@ import type {
   SubscribeInput,
 } from "../types/index.js";
 import { DEFAULT_LANE, SNAP_EVENT, TOMBSTONE_EVENT } from "../types/index.js";
-import { sleep } from "../utils.js";
+import { is_literal_source, sleep } from "../utils.js";
 
 // A commit names each stream once, and every append carries events.
 function check_appends<E extends Schemas>(appends: readonly Append<E>[]) {
@@ -697,9 +697,12 @@ export class InMemoryStore implements Store {
       if (!matches(s)) continue;
       if (source_matches !== undefined) {
         // No source consumes every stream, so it matches any name. A target
-        // reading itself consumes only its own name, which is never a pattern.
-        if (s.source === s.stream) {
-          if (!source_matches.includes(s.stream)) continue;
+        // reading itself, or a literal source, consumes only that name.
+        if (
+          s.source === s.stream ||
+          (s.source && is_literal_source(s.source))
+        ) {
+          if (!source_matches.includes(s.source)) continue;
         } else if (s.source && !reverse_match(s.source)) continue;
       }
       // Before emitting, so `limit: 0` returns none.
