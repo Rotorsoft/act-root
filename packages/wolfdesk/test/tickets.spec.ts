@@ -1,4 +1,4 @@
-import type { Cache, Store } from "@rotorsoft/act";
+import { type Cache, ConcurrencyError, type Store } from "@rotorsoft/act";
 import { sandbox } from "@rotorsoft/act/test";
 import { Chance } from "chance";
 import { eq } from "drizzle-orm";
@@ -189,6 +189,21 @@ describe("tickets", { timeout: 30_000 }, () => {
 
       const snapshot = await app.load("Ticket", t.stream);
       expect(snapshot.state.escalationId).toBeDefined();
+    });
+
+    it("should escalate in its action after losing a race", async () => {
+      const t = target(chance.guid(), "race to escalate");
+      await openTicket(t, "race to escalate", "Hello");
+      const commit = store.commit.bind(store);
+      const spy = vi
+        .spyOn(store, "commit")
+        .mockImplementationOnce(async (a) => {
+          throw new ConcurrencyError(a[0].stream, 0, [], 0);
+        });
+      spy.mockImplementation(commit);
+      const [snap] = await escalateTicket(t);
+      spy.mockRestore();
+      expect(snap.state.escalationId).toBeDefined();
     });
 
     it("should close ticket at its closeAfter", async () => {

@@ -64,7 +64,10 @@ export const TicketOperations = state({ Ticket: TicketOperationsState })
     ];
   })
 
-  .on({ EscalateTicket })
+  // The timer reaction commits to a ticket other reactions are moving, so it can
+  // lose a race: the retry reloads and escalates in the same pass, instead of
+  // waiting out the reaction's backoff.
+  .on({ EscalateTicket }, { maxRetries: 4 })
   .requires([mustBeOpen, mustNotBeEscalated])
   .emit((data) => ["TicketEscalated", { ...data, escalationId: randomUUID() }])
 
