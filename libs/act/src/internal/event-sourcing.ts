@@ -745,6 +745,13 @@ export async function action<
             patches: snap_event ? 0 : last.patches,
             snaps: snap_event ? last.snaps + 1 : last.snaps,
           });
+        // The snapshot is the stream's head now, so a version pinned from this
+        // result doesn't refuse the caller's own next action.
+        if (snap_event)
+          appended[appended.length - 1] = {
+            ...last,
+            version: snap_event.version,
+          };
         snapshots.push(...appended);
       }
 

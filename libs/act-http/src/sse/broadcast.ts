@@ -325,6 +325,16 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
     return this.channels.get(streamId)?.size ?? 0;
   }
 
+  /**
+   * Tells a stream's clients to refetch, and forgets its cached state. For a
+   * stream whose versions started over: after `close({ restart: true })`, a
+   * client ahead of the new versions would read every patch as stale.
+   */
+  resync(streamId: string): void {
+    this.state_cache.delete(streamId);
+    this.broadcast_resync(streamId);
+  }
+
   /** Get the cached state for a stream (for reconnects / initial SSE yield). */
   state(streamId: string): S | undefined {
     return this.state_cache.get(streamId);

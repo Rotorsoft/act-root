@@ -326,7 +326,8 @@ export type Snapshot<TState extends Schema, TEvents extends Schemas> = {
    * replayed event on cache miss, or from the just-committed event on
    * snapshots returned by `action()`. Use this instead of
    * `event?.version` when you need the version even after a cache hit
-   * skipped the event replay entirely.
+   * skipped the event replay entirely. When `.snap` fires after an action,
+   * this is the snapshot's version, so it's what to pin a later action to.
    */
   readonly version: number;
   /**

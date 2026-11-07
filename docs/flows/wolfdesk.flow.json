@@ -551,7 +551,7 @@
       "file": "packages/wolfdesk/src/agent.ts",
       "col": 0,
       "slice": "slice:Agent",
-      "schema": "name: string\nsupportCategoryId: uuid"
+      "schema": "name: ≥ 1 chars\nsupportCategoryId: uuid"
     },
     {
       "id": "evt:AgentAdded",
@@ -559,7 +559,7 @@
       "label": "AgentAdded",
       "col": 0,
       "description": "An agent joined the desk, in one support category.",
-      "schema": "name: string\nsupportCategoryId: uuid",
+      "schema": "name: ≥ 1 chars\nsupportCategoryId: uuid",
       "file": "packages/wolfdesk/src/agent.ts",
       "slice": "slice:Agent",
       "state": "state:Agent"

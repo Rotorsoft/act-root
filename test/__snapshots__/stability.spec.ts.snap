@@ -1078,7 +1078,8 @@ export type Snapshot<TState extends Schema, TEvents extends Schemas> = {
      * replayed event on cache miss, or from the just-committed event on
      * snapshots returned by \`action()\`. Use this instead of
      * \`event?.version\` when you need the version even after a cache hit
-     * skipped the event replay entirely.
+     * skipped the event replay entirely. When \`.snap\` fires after an action,
+     * this is the snapshot's version, so it's what to pin a later action to.
      */
     readonly version: number;
     /**
@@ -7483,6 +7484,12 @@ export declare class BroadcastChannel<S extends BroadcastState = BroadcastState>
     subscribe(streamId: string, cb: Subscriber<S>): () => void;
     /** Get the number of subscribers for a stream. */
     subscriberCount(streamId: string): number;
+    /**
+     * Tells a stream's clients to refetch, and forgets its cached state. For a
+     * stream whose versions started over: after \`close({ restart: true })\`, a
+     * client ahead of the new versions would read every patch as stale.
+     */
+    resync(streamId: string): void;
     /** Get the cached state for a stream (for reconnects / initial SSE yield). */
     state(streamId: string): S | undefined;
     /** Direct access to the state cache (for app-specific reads like presence). */

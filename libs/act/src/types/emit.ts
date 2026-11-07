@@ -82,14 +82,22 @@ type CheckEmitted<TOut, TOwn, TAll> = string extends keyof TAll
 
 /**
  * The events `.emit("Event")` can name: the payload becomes the event's data,
- * so it has to satisfy the event's schema. A wider payload is fine, since the
- * schema strips what it doesn't declare.
+ * so the fields they share have to satisfy the event's schema. A wider payload
+ * is fine, since the schema strips what it doesn't declare. An event with no
+ * named fields (`z.object({})`) can't be told apart from a record, so it's
+ * left to the schema at runtime.
  */
 type PassThrough<TEvents extends Schemas, TAction, TRouted> = {
   [E in Exclude<
     keyof TEvents & string,
     keyof TRouted
-  >]: Readonly<TAction> extends Readonly<TEvents[E]> ? E : never;
+  >]: string extends keyof TEvents[E]
+    ? E
+    : Readonly<
+          Pick<TAction, keyof TAction & keyof TEvents[E]>
+        > extends Readonly<TEvents[E]>
+      ? E
+      : never;
 }[Exclude<keyof TEvents & string, keyof TRouted>];
 
 /** A handler whose returned events are checked. */

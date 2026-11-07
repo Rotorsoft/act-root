@@ -74,6 +74,28 @@ Two things that rewrite doesn't show:
 .emit((data) => ["TicketClosed", data])
 ```
 
+### A target reads one source
+
+- **What changed:** two static reactions on one target with different sources now throw at build.
+- **Why:** a subscription row holds one source, so the second reaction's events were silently never delivered.
+- **How to update:** give the second reaction its own target, or leave out `source`.
+
+```ts no-check
+// before (1.x): built, and `onTaken` never ran
+.on("Done").do(onDone).to({ target: "audit", source: "orders" })
+.on("Taken").do(onTaken).to({ target: "audit", source: "seats" })
+
+// after (2.x)
+.on("Done").do(onDone).to({ target: "audit-orders", source: "orders" })
+.on("Taken").do(onTaken).to({ target: "audit-seats", source: "seats" })
+```
+
+### A result's `version` is the stream's head
+
+- **What changed:** when `.snap` fires after an action, the last snapshot's `version` is the snapshot's, not the event's. `event.version` is unchanged.
+- **Why:** it's documented as the head, and pinning to anything older refuses your own next action.
+- **How to update:** pin a later action to `version`, not `event.version`.
+
 ### act-http's snake_case SSE aliases are gone
 
 - **What changed:** the deprecated aliases in `@rotorsoft/act-http/sse` are removed.
