@@ -20,7 +20,7 @@ For the project-level overview, see the [root README](../../README.md).
 pnpm add @rotorsoft/act zod
 ```
 
-The package is ESM only (`"type": "module"`); the examples use top-level `await`.
+The examples use top-level `await`, which needs ESM (`"type": "module"`).
 
 For production, also install one of the durable stores: [`@rotorsoft/act-pg`](https://www.npmjs.com/package/@rotorsoft/act-pg) (Postgres) or [`@rotorsoft/act-sqlite`](https://www.npmjs.com/package/@rotorsoft/act-sqlite) (SQLite). The bundled `InMemoryStore` is used by default and is intended for development and tests.
 
@@ -46,6 +46,19 @@ console.log(snap.state); // { count: 5 }
 ```
 
 Define state, declare actions, dispatch, load. Everything else — projections, reactions, slices, cross-process drain, time-travel — is more of the same builder calls.
+
+## Rules across streams
+
+**New in 2.0.** A rule that spans streams, such as a unique email or a limited number of seats, needs no saga. An action loads the other stream with `.loads`, decides, and commits to every stream at once: all of it lands or none of it does.
+
+```ts no-check
+.on({ Enroll })
+.loads(Seats, (data) => `course-${data.course}`, ["SeatTaken"])
+.requires([{ description: "a free seat", holds: (_, __, ___, { Seats }) => Seats.taken < Seats.capacity }])
+.emit((data) => [["Enrolled", data], ["SeatTaken", {}]])
+```
+
+Every pattern, what a race does and what it costs: [Rules across streams](https://rotorsoft.github.io/act-root/docs/guides/rules-across-streams). [Watch it play](https://rotorsoft.github.io/act-root/flows/rules-across-streams.html).
 
 ## API
 
@@ -129,8 +142,8 @@ await app.unblock({ stream: "^webhooks-out-" }); // bulk
 
 ## Compatibility
 
-- **Node**: >=22.23.3
-- **Peer**: `zod` ^4.4.3
+- **Node**: >=22.23.4
+- **Peer**: `zod` ^4.6.7
 - **Bundled deps**: `@rotorsoft/act-patch` (state reducer)
 - **Module formats**: ESM + CJS
 - **TypeScript**: strict mode recommended for full inference

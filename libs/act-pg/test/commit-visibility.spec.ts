@@ -79,7 +79,7 @@ describe("pg commit visibility — append serialization", () => {
 
     let resolved = false;
     const pending = store
-      .commit("vis-b", [{ name: "Vis", data: {} }], META)
+      .commit([{ stream: "vis-b", msgs: [{ name: "Vis", data: {} }] }], META)
       .then((c) => {
         resolved = true;
         return c;
@@ -105,7 +105,10 @@ describe("pg commit visibility — append serialization", () => {
 
   it("a rolled-back holder releases the lock and the commit proceeds", async () => {
     const holder = await hold_lock();
-    const pending = store.commit("vis-c", [{ name: "Vis", data: {} }], META);
+    const pending = store.commit(
+      [{ stream: "vis-c", msgs: [{ name: "Vis", data: {} }] }],
+      META
+    );
     await sleep(100);
     await holder.query("ROLLBACK");
     holder.release();
@@ -114,7 +117,10 @@ describe("pg commit visibility — append serialization", () => {
   });
 
   it("truncate seeds take the same visibility lock", async () => {
-    await store.commit("vis-d", [{ name: "Vis", data: {} }], META);
+    await store.commit(
+      [{ stream: "vis-d", msgs: [{ name: "Vis", data: {} }] }],
+      META
+    );
     const holder = await hold_lock();
     let resolved = false;
     const pending = store.truncate([{ stream: "vis-d" }]).then((r) => {
@@ -173,8 +179,7 @@ describe("pg commit visibility — end-to-end no-loss", () => {
 
     // Fast writer B commits to a different stream through the store.
     const pending_b = store.commit(
-      "stream-b",
-      [{ name: "Hit", data: {} }],
+      [{ stream: "stream-b", msgs: [{ name: "Hit", data: {} }] }],
       META
     );
 

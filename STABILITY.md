@@ -12,7 +12,7 @@ Breaking changes to anything in this list require a **major** version bump and a
 
 The fluent surfaces exported from `@rotorsoft/act`:
 
-- `state(...)` — including `.init`, `.emits`, `.patch`, `.on` (with optional `ActionOptions` second argument for per-action retry policy), `.given` (deprecated since RFC 2182, removed in 2.0), `.requires` (named preconditions, RFC 2086), `.emit`, `.snap`, `.discloses` (sensitive-data epic #566 — disclosure predicate for `sensitive(...)`-marked event fields), `.autocloses` (online close-the-books epic #802 — declarative close/retention policy, including the rolling-window `keep` variant gated behind `.snap`, #1011), `.archives` (online close-the-books epic #802 — companion archiver run before truncate), `.build`
+- `state(...)` — including `.init`, `.emits`, `.patch`, `.on` (with optional `ActionOptions` second argument for per-action retry policy), `.loads` (rules across streams, RFC 2251), `.requires` (named preconditions, RFC 2086), `.emit`, `.snap`, `.discloses` (sensitive-data epic #566 — disclosure predicate for `sensitive(...)`-marked event fields), `.autocloses` (online close-the-books epic #802 — declarative close/retention policy, including the rolling-window `keep` variant gated behind `.snap`, #1011), `.archives` (online close-the-books epic #802 — companion archiver run before truncate), `.build`
 - `slice(...)` — including `.withState`, the reaction chain `.on(event)` → optional `.defer(when)` (#1091) → `.do(handler, options?)` → optional `.to(resolver | target)`, and `.build`
 - `projection(...)` / `projection(target)` — including per-event `.on({ Event: schema })` handlers with their `.to(...)` routing, the bulk `.batch(handler)` form, the state-projection `.of(...states).flush(handler, config?)` form (#1125), and `.build`
 - `act(...)` — including `.withState`, `.withSlice`, `.withProjection`, `.withActor`, `.withLane` (ACT-1103), the same reaction chain as `slice(...)` (`.on` → optional `.defer` → `.do` → optional `.to`), and `.build(options?)`
@@ -51,7 +51,7 @@ We will be explicit in release notes when this surface changes.
 
 The events emitted by the orchestrator on the public event bus (`ActLifecycleEvents` in `libs/act/src/types/act.ts`):
 
-- `committed` — events committed by an action in this process (`Snapshot[]`)
+- `committed` — events committed by an action in this process (`Snapshot[]`), fired once per stream the action appended to, its own first
 - `acked` — reactions that processed successfully (`Lease[]`)
 - `blocked` — reactions that exhausted their retry budget (`BlockedLease[]`)
 - `settled` — a drain cycle settled (`Drain`)
@@ -90,10 +90,10 @@ The charter above says *what* a major bump protects. This section says *how long
 Act is maintained by a small team. The windows below are deliberately modest — we would rather state a window we can keep than advertise an LTS we can't staff.
 
 - **Active line — the latest published major.** Receives new features, bug fixes, and security patches. This is where development happens. Always upgrade within the active major to get fixes; there are no long-lived patch branches inside a major beyond the latest minor.
-- **Previous major — maintenance.** When a new major `N` ships, the prior major `N-1` enters a maintenance window of **at least 6 months** during which it receives **security fixes and critical correctness fixes only** (data loss, lost events, crashes). No new features, no non-critical fixes. After the window closes, `N-1` is end-of-life.
+- **Previous major — maintenance.** When a new major `N` ships, the prior major `N-1` enters a maintenance window of **at least 6 months** during which it receives **security fixes and critical correctness fixes only** (data loss, lost events, crashes). No new features, no non-critical fixes. After the window closes, `N-1` is end-of-life. The branch for those fixes is cut when the first one is needed: [Fixing the previous major](CONTRIBUTING.md#fixing-the-previous-major).
 - **Older majors (`N-2` and earlier) — unsupported.** Best-effort community help via [issues](https://github.com/rotorsoft/act-root/issues) and [discussions](https://github.com/rotorsoft/act-root/discussions), no guaranteed fixes or releases.
 
-The windows above have been in effect since the [1.0 release](https://github.com/Rotorsoft/act-root/milestone/1). For any package still on a **0.x** line (currently `@rotorsoft/act-crypto` and `@rotorsoft/act-ops`), only the **latest published version** is supported — there are no maintenance branches before a package's own 1.0; upgrade to the newest release to pick up fixes.
+The windows above have been in effect since the [1.0 release](https://github.com/Rotorsoft/act-root/milestone/1). For any package still on a **0.x** line (currently `@rotorsoft/act-crypto`, `@rotorsoft/act-ops` and `@rotorsoft/act-otel`), only the **latest published version** is supported — there are no maintenance branches before a package's own 1.0; upgrade to the newest release to pick up fixes.
 
 The same window applies to every package that tracks core (see the table below): an `act-pg` or `act-sqlite` release is supported for as long as the core major it targets is.
 
@@ -116,23 +116,27 @@ We remove public surface slowly and with warning. The general rule: **a deprecat
 
 Every breaking (major) release ships a migration guide in the **same PR** that lands the breaking change, so the upgrade path is documented before the version is cut. The conventions, page template, and release-PR checklist live in [MIGRATING.md](MIGRATING.md).
 
-The live `docs/` folder tracks the latest API and is not frozen with releases. When a new major ships, the previous line is [snapshotted](https://docusaurus.io/docs/versioning) under `docs/versioned_docs/` and a version dropdown appears, so older-major users keep a pinned reference. Until then there is one set of docs.
+The live `docs/` folder tracks the latest API and is not frozen with releases. When a new major ships, the previous line is [snapshotted](https://docusaurus.io/docs/versioning) under `docs/versioned_docs/`, and the version dropdown lets older-major users keep a pinned reference.
 
-The first such page is [Migrating to 1.x](docs/docs/guides/migrating-to-1.x.md): the `1.x` line ships no breaking change, so it only gives the upgrade command and links back here. The next breaking release fills in the template.
+The first such page is [Migrating to 1.x](docs/docs/guides/migrating-to-1.x.md): the `1.x` line ships no breaking change, so it only gives the upgrade command and links back here. [Migrating to 2.x](docs/docs/guides/migrating-to-2.x.md) is the first to fill in the template.
 
 ## Per-library status
 
-| Package | Tracks core 1.x? |
+| Package | Tracks core's major? |
 |---|---|
 | `@rotorsoft/act` | Yes — defines the charter |
 | `@rotorsoft/act-pg` | Yes — `Store` adapter, same contract |
 | `@rotorsoft/act-sqlite` | Yes — `Store` adapter, same contract |
-| `@rotorsoft/act-patch` | Yes — stable utility, depended on by `act` reducers |
+| `@rotorsoft/act-patch` | No — stable utility with no dependency on core, on its own 1.x line. |
 | `@rotorsoft/act-http` | Yes — umbrella for HTTP integrations (`webhook` helper plus an `sse` subpath that hosts the surface formerly published as `@rotorsoft/act-sse`, removed from this repo) |
 | `@rotorsoft/act-pino` | Yes — `Logger` adapter, narrow surface |
 | `@rotorsoft/act-sse` | **Removed from this repo.** Deprecated on npm; the surface lives at `@rotorsoft/act-http/sse`. Published `1.x` versions keep working; [migrating](#deprecation-policy) renames four methods. |
 | `@rotorsoft/act-diagram` | Yes — shipped 1.0 alongside core. Diagram output shape (SVG structure, click-through anchors) is *not* part of the stability surface and may evolve. |
-| `@rotorsoft/act-tck` | Yes — TCK's published surface (`run*Tck` functions, `Capabilities` types, fixture helpers) is on the 1.x line alongside the `Store`/`Cache`/`Logger` contracts it validates |
+| `@rotorsoft/act-tck` | Yes — TCK's published surface (`run*Tck` functions, `Capabilities` types, fixture helpers) follows core's major alongside the `Store`/`Cache`/`Logger` contracts it validates |
+| `@rotorsoft/act-notify` | Yes — wraps a `Store`, so it moves with `commit`. Its version number doesn't match core's. |
+| `@rotorsoft/act-otel` | Peer of core's major; its version number doesn't match core's. Metric names are documented in its README. |
+| `@rotorsoft/act-ops` | No — no dependency on core; on its own 0.x line. |
+| `@rotorsoft/act-crypto` | No — no dependency on core; on its own 0.x line. |
 
 Each library's `README.md` carries a one-line stability note linking back to this document.
 

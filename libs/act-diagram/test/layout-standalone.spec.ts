@@ -52,7 +52,7 @@ describe("standalone reaction edges", () => {
           name: "S",
           varName: "S",
           events: [{ name: "Evt", hasCustomPatch: false }],
-          actions: [{ name: "a", emits: ["Evt"], invariants: [] }],
+          actions: [{ name: "a", emits: ["Evt"] }],
         },
       ],
       reactions: [
@@ -84,7 +84,7 @@ describe("standalone reactions", () => {
           name: "S",
           varName: "S",
           events: [{ name: "Evt", hasCustomPatch: false }],
-          actions: [{ name: "a", emits: ["Evt"], invariants: [] }],
+          actions: [{ name: "a", emits: ["Evt"] }],
         },
       ],
       reactions: [
@@ -118,7 +118,6 @@ describe("standalone action->event edge when ey not found", () => {
             {
               name: "a",
               emits: ["Known", "Unknown"], // Unknown not in events -> not in event_y_map
-              invariants: [],
             },
           ],
         },
@@ -138,7 +137,7 @@ describe("standalone reaction without trig_node", () => {
           name: "S",
           varName: "S",
           events: [{ name: "Evt", hasCustomPatch: false }],
-          actions: [{ name: "a", emits: ["Evt"], invariants: [] }],
+          actions: [{ name: "a", emits: ["Evt"] }],
         },
       ],
       reactions: [
@@ -163,7 +162,7 @@ describe("standalone reactions with multiple events stacking", () => {
           name: "S",
           varName: "S",
           events: [{ name: "Evt", hasCustomPatch: false }],
-          actions: [{ name: "a", emits: ["Evt"], invariants: [] }],
+          actions: [{ name: "a", emits: ["Evt"] }],
         },
       ],
       reactions: [
@@ -200,7 +199,7 @@ describe("guarded standalone action", () => {
             {
               name: "guardedAction",
               emits: ["Evt"],
-              invariants: ["must be active"],
+              preconditions: ["must be active"],
             },
           ],
         },
@@ -225,7 +224,7 @@ describe("orphan events in standalone states", () => {
             { name: "ActionEvt", hasCustomPatch: false },
             { name: "OrphanEvt", hasCustomPatch: false },
           ],
-          actions: [{ name: "doIt", emits: ["ActionEvt"], invariants: [] }],
+          actions: [{ name: "doIt", emits: ["ActionEvt"] }],
         },
       ],
     });

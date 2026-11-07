@@ -230,8 +230,12 @@ describe("close", () => {
 
     // Commit an event under a name that no registered state owns
     await store().commit(
-      "orphan",
-      [{ name: "UnregisteredEvent", data: { foo: 1 } }],
+      [
+        {
+          stream: "orphan",
+          msgs: [{ name: "UnregisteredEvent", data: { foo: 1 } }],
+        },
+      ],
       { correlation: "test", causation: {} }
     );
 
@@ -388,14 +392,13 @@ describe("close", () => {
     await drainAll();
 
     const originalCommit = store().commit.bind(store());
-    vi.spyOn(store(), "commit").mockImplementation(
-      async (stream, msgs, meta, expectedVersion) => {
-        if (msgs[0]?.name === TOMBSTONE_EVENT && stream === "race") {
-          throw new ConcurrencyError(stream, 0, msgs, expectedVersion ?? -1);
-        }
-        return originalCommit(stream, msgs, meta, expectedVersion);
+    vi.spyOn(store(), "commit").mockImplementation(async (writes, meta) => {
+      const [{ stream, msgs, expectedVersion }] = writes;
+      if (msgs[0]?.name === TOMBSTONE_EVENT && stream === "race") {
+        throw new ConcurrencyError(stream, 0, [...msgs], expectedVersion ?? -1);
       }
-    );
+      return originalCommit(writes, meta);
+    });
 
     const { truncated, skipped } = await app.close([{ stream: "race" }]);
     expect(skipped).toContain("race");
@@ -569,8 +572,7 @@ describe("close", () => {
     const noStateApp = act().build();
 
     await store().commit(
-      "raw-stream",
-      [{ name: "SomeEvent", data: { x: 1 } }],
+      [{ stream: "raw-stream", msgs: [{ name: "SomeEvent", data: { x: 1 } }] }],
       { correlation: "c1", causation: {} }
     );
 
@@ -588,10 +590,13 @@ describe("close", () => {
   });
 
   it("should truncate directly without meta (fallback)", async () => {
-    await store().commit("direct-trunc", [{ name: "Evt", data: { x: 1 } }], {
-      correlation: "c",
-      causation: {},
-    });
+    await store().commit(
+      [{ stream: "direct-trunc", msgs: [{ name: "Evt", data: { x: 1 } }] }],
+      {
+        correlation: "c",
+        causation: {},
+      }
+    );
     const result = await store().truncate([{ stream: "direct-trunc" }]);
     expect(result.get("direct-trunc")!.deleted).toBe(1);
     expect(result.get("direct-trunc")!.committed.meta.correlation).toBe("");

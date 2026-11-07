@@ -14,6 +14,7 @@ const sidebars: SidebarsConfig = {
         "guides/auto-generated-api",
         "guides/flow-animations",
         "guides/diagrams",
+        "guides/rules-across-streams",
         "guides/close-policies",
         "guides/sensitive-data",
         "guides/pii-encryption-at-rest",
@@ -25,6 +26,7 @@ const sidebars: SidebarsConfig = {
         "guides/writing-a-logger",
         "guides/tck-conformance",
         "guides/migrating-to-1.x",
+        "guides/migrating-to-2.x",
       ],
     },
     {
@@ -42,7 +44,7 @@ const sidebars: SidebarsConfig = {
     {
       type: "category",
       label: "Examples",
-      items: ["examples/calculator", "examples/wolfdesk"],
+      items: ["examples/calculator", "examples/wolfdesk", "examples/rules"],
     },
     {
       type: "category",

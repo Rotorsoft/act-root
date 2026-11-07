@@ -10,7 +10,7 @@ import { z } from "zod";
 
 const mustBeOpen = {
   description: "Ticket must be open",
-  valid: (state: any) => state.status === "open",
+  holds: (_: any, state: any) => state.status === "open",
 };
 
 export const Ticket = state({ Ticket: z.object({
@@ -25,7 +25,7 @@ export const Ticket = state({ Ticket: z.object({
   .on({ OpenTicket: z.object({ title: z.string() }) })
     .emit("TicketOpened")
   .on({ CloseTicket: z.object({ reason: z.string() }) })
-    .given([mustBeOpen])
+    .requires([mustBeOpen])
     .emit("TicketClosed")
   .build();`,
   },
@@ -340,16 +340,16 @@ const x = state({ X: z.object({}) }).init(() => ({})).emits({}).build();`,
     const files: FileTab[] = [
       {
         path: "src/guards.ts",
-        content: `import type { Invariant } from "@rotorsoft/act";
+        content: `import type { Precondition } from "@rotorsoft/act";
 
-export const mustBeOpen: Invariant<{ status: string }> = {
+export const mustBeOpen: Precondition<{ status: string }, unknown> = {
   description: "Ticket must be open",
-  valid: (state) => state.status === "open",
+  holds: (_, state) => state.status === "open",
 };
 
-export const mustBeAssigned: Invariant<{ assignedTo: string }> = {
+export const mustBeAssigned: Precondition<{ assignedTo: string }, unknown> = {
   description: "Must be assigned",
-  valid: (state) => !!state.assignedTo,
+  holds: (_, state) => !!state.assignedTo,
 };`,
       },
     ];

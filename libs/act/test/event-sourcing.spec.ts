@@ -117,8 +117,7 @@ describe("event-sourcing", () => {
 
   it("should persist snapshot event on snap success", async () => {
     const committed = await store().commit(
-      "s",
-      [{ name: "INCREMENT", data: { by: 1 } }],
+      [{ stream: "s", msgs: [{ name: "INCREMENT", data: { by: 1 } }] }],
       { correlation: "c", causation: {} }
     );
 
@@ -140,14 +139,20 @@ describe("event-sourcing", () => {
 
   it("should load from a snapshot event on cold start", async () => {
     const s = store();
-    await s.commit("s", [{ name: SNAP_EVENT, data: { count: 100 } }], {
-      correlation: "c",
-      causation: {},
-    });
-    await s.commit("s", [{ name: "INCREMENT", data: { by: 1 } }], {
-      correlation: "c",
-      causation: {},
-    });
+    await s.commit(
+      [{ stream: "s", msgs: [{ name: SNAP_EVENT, data: { count: 100 } }] }],
+      {
+        correlation: "c",
+        causation: {},
+      }
+    );
+    await s.commit(
+      [{ stream: "s", msgs: [{ name: "INCREMENT", data: { by: 1 } }] }],
+      {
+        correlation: "c",
+        causation: {},
+      }
+    );
 
     const snapshot = await load(me, { stream: "s" });
     expect(snapshot.state.count).toBe(101);
@@ -240,7 +245,7 @@ describe("event-sourcing", () => {
     const s = store();
     const original = s.commit.bind(s);
     vi.spyOn(s, "commit").mockImplementation((...args) =>
-      args[1][0]?.name === SNAP_EVENT
+      args[0][0].msgs[0]?.name === SNAP_EVENT
         ? Promise.reject(new Error("disk full"))
         : original(...args)
     );
@@ -323,14 +328,20 @@ describe("event-sourcing", () => {
 
   it("should call the load callback for each event", async () => {
     const s = store();
-    await s.commit("s", [{ name: "INCREMENT", data: { by: 1 } }], {
-      correlation: "c",
-      causation: {},
-    });
-    await s.commit("s", [{ name: "INCREMENT", data: { by: 2 } }], {
-      correlation: "c",
-      causation: {},
-    });
+    await s.commit(
+      [{ stream: "s", msgs: [{ name: "INCREMENT", data: { by: 1 } }] }],
+      {
+        correlation: "c",
+        causation: {},
+      }
+    );
+    await s.commit(
+      [{ stream: "s", msgs: [{ name: "INCREMENT", data: { by: 2 } }] }],
+      {
+        correlation: "c",
+        causation: {},
+      }
+    );
 
     const callback = vi.fn();
     await load(me, { stream: "s" }, callback);
@@ -359,10 +370,13 @@ describe("event-sourcing", () => {
 
   it("should use snapshot event version for commit", async () => {
     // Commit an event to establish a version number
-    await store().commit("s", [{ name: "INCREMENT", data: { by: 1 } }], {
-      correlation: "c",
-      causation: {},
-    });
+    await store().commit(
+      [{ stream: "s", msgs: [{ name: "INCREMENT", data: { by: 1 } }] }],
+      {
+        correlation: "c",
+        causation: {},
+      }
+    );
 
     const commitSpy = vi.spyOn(store(), "commit");
 
@@ -375,10 +389,8 @@ describe("event-sourcing", () => {
     );
 
     expect(commitSpy).toHaveBeenCalledWith(
-      "s",
-      expect.any(Array),
-      expect.any(Object),
-      0 // expectedVersion from snapshot.event.version
+      [{ stream: "s", msgs: expect.any(Array), expectedVersion: 0 }], // expectedVersion from snapshot.event.version
+      expect.any(Object)
     );
   });
 
@@ -410,10 +422,13 @@ describe("event-sourcing", () => {
 
   it("should use snapshot.event.version when reactingTo and expectedVersion are undefined", async () => {
     // Commit an initial event to ensure a snapshot.event.version exists
-    await store().commit("s", [{ name: "INITIAL_EVENT", data: {} }], {
-      correlation: "c",
-      causation: {},
-    });
+    await store().commit(
+      [{ stream: "s", msgs: [{ name: "INITIAL_EVENT", data: {} }] }],
+      {
+        correlation: "c",
+        causation: {},
+      }
+    );
 
     const commitSpy = vi.spyOn(store(), "commit");
 
@@ -428,10 +443,8 @@ describe("event-sourcing", () => {
     // The expectedVersion passed to commit should be the version from the snapshot.event
     // In this case, after the initial commit, the version would be 0.
     expect(commitSpy).toHaveBeenCalledWith(
-      "s",
-      expect.any(Array),
-      expect.any(Object),
-      0 // This should be snapshot.event?.version
+      [{ stream: "s", msgs: expect.any(Array), expectedVersion: 0 }], // This should be snapshot.event?.version
+      expect.any(Object)
     );
   });
 
@@ -449,10 +462,14 @@ describe("event-sourcing", () => {
       pii_aware: false,
     };
     await store().commit(
-      "stream-with-unknown",
       [
-        { name: "Known", data: {} },
-        { name: "Unknown", data: {} },
+        {
+          stream: "stream-with-unknown",
+          msgs: [
+            { name: "Known", data: {} },
+            { name: "Unknown", data: {} },
+          ],
+        },
       ],
       { correlation: "c", causation: {} }
     );
@@ -483,10 +500,13 @@ describe("event-sourcing", () => {
       message: (v: any) => v,
       pii_aware: false,
     };
-    await store().commit("stream", [{ name: "E", data: {} }], {
-      correlation: "c",
-      causation: {},
-    });
+    await store().commit(
+      [{ stream: "stream", msgs: [{ name: "E", data: {} }] }],
+      {
+        correlation: "c",
+        causation: {},
+      }
+    );
 
     await load(state, { stream: "stream" }, vi.fn());
   });

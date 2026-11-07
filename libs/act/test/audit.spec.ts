@@ -16,8 +16,7 @@ const meta = { correlation: "test-corr", causation: {} };
 /** Commits one event to `stream`, subscribes it marked, and leases it. */
 const claimed = async (stream: string) => {
   const [e] = await store().commit(
-    stream,
-    [{ name: "Repriced", data: { price: 1 } }],
+    [{ stream, msgs: [{ name: "Repriced", data: { price: 1 } }] }],
     meta
   );
   await store().subscribe([{ stream, source: stream, correlated_at: e.id }]);
@@ -106,8 +105,7 @@ describe("audit", () => {
       // Sneak in a raw event whose name the registry doesn't know.
       // Direct store write — the framework's `.do()` would refuse it.
       await store().commit(
-        "w1",
-        [{ name: "Vanished", data: { gone: true } }],
+        [{ stream: "w1", msgs: [{ name: "Vanished", data: { gone: true } }] }],
         meta
       );
 
@@ -128,8 +126,12 @@ describe("audit", () => {
       // the `reason` field the current schema requires. Bypass
       // `.do()` so we don't get blocked by client-side validation.
       await store().commit(
-        "w2",
-        [{ name: "Renamed_v2", data: { name: "no-reason-here" } }],
+        [
+          {
+            stream: "w2",
+            msgs: [{ name: "Renamed_v2", data: { name: "no-reason-here" } }],
+          },
+        ],
         meta
       );
 
@@ -148,10 +150,17 @@ describe("audit", () => {
     it("skips framework-internal events (__snapshot__, __tombstone__)", async () => {
       const app = act().withState(widget).build();
       await store().commit(
-        "w3",
         [
-          { name: "__snapshot__", data: { state: { name: "s", price: 1 } } },
-          { name: "__tombstone__", data: {} },
+          {
+            stream: "w3",
+            msgs: [
+              {
+                name: "__snapshot__",
+                data: { state: { name: "s", price: 1 } },
+              },
+              { name: "__tombstone__", data: {} },
+            ],
+          },
         ],
         meta
       );
@@ -173,20 +182,27 @@ describe("audit", () => {
       for (const stream of ["a", "b", "c"]) {
         for (let i = 0; i < 4; i++) {
           await store().commit(
-            stream,
-            [{ name: "Renamed", data: { name: `n${i}` } }],
+            [{ stream, msgs: [{ name: "Renamed", data: { name: `n${i}` } }] }],
             meta
           );
         }
       }
       await store().commit(
-        "a",
-        [{ name: "Renamed_v2", data: { name: "x", reason: "y" } }],
+        [
+          {
+            stream: "a",
+            msgs: [{ name: "Renamed_v2", data: { name: "x", reason: "y" } }],
+          },
+        ],
         meta
       );
       await store().commit(
-        "b",
-        [{ name: "Renamed_v2", data: { name: "x", reason: "y" } }],
+        [
+          {
+            stream: "b",
+            msgs: [{ name: "Renamed_v2", data: { name: "x", reason: "y" } }],
+          },
+        ],
         meta
       );
 
@@ -219,14 +235,12 @@ describe("audit", () => {
       // below the default 10% threshold.
       for (let i = 0; i < 100; i++) {
         await store().commit(
-          "s1",
-          [{ name: "Repriced", data: { price: i } }],
+          [{ stream: "s1", msgs: [{ name: "Repriced", data: { price: i } }] }],
           meta
         );
       }
       await store().commit(
-        "s1",
-        [{ name: "Renamed", data: { name: "rare" } }],
+        [{ stream: "s1", msgs: [{ name: "Renamed", data: { name: "rare" } }] }],
         meta
       );
 
@@ -241,8 +255,7 @@ describe("audit", () => {
       // via the registry rule, see count=0, and silently skip.
       const app = act().withState(widget).build();
       await store().commit(
-        "s1",
-        [{ name: "Repriced", data: { price: 1 } }],
+        [{ stream: "s1", msgs: [{ name: "Repriced", data: { price: 1 } }] }],
         meta
       );
 
@@ -254,14 +267,12 @@ describe("audit", () => {
       const app = act().withState(widget).build();
       for (let i = 0; i < 100; i++) {
         await store().commit(
-          "s1",
-          [{ name: "Repriced", data: { price: i } }],
+          [{ stream: "s1", msgs: [{ name: "Repriced", data: { price: i } }] }],
           meta
         );
       }
       await store().commit(
-        "s1",
-        [{ name: "Renamed", data: { name: "rare" } }],
+        [{ stream: "s1", msgs: [{ name: "Renamed", data: { name: "rare" } }] }],
         meta
       );
 
@@ -300,7 +311,10 @@ describe("audit", () => {
       // Approved is the ONLY version of its family within AStar.
       expect([...app.registry.deprecated_events("AStar")]).toEqual([]);
       for (let i = 0; i < 10; i++) {
-        await store().commit("a1", [{ name: "Approved", data: {} }], meta);
+        await store().commit(
+          [{ stream: "a1", msgs: [{ name: "Approved", data: {} }] }],
+          meta
+        );
       }
       const findings = await collect(app.audit(["deprecated-load"]));
       // No cross-state deprecation finding — Approved is current in AStar.
@@ -324,7 +338,10 @@ describe("audit", () => {
         .build();
       // Each state is valid in isolation, so build() accepts both.
       const app = act().withState(cStar).withState(dStar).build();
-      await store().commit("c1", [{ name: "Gadget_v2", data: {} }], meta);
+      await store().commit(
+        [{ stream: "c1", msgs: [{ name: "Gadget_v2", data: {} }] }],
+        meta
+      );
       // The global set {Gadget_v2, Gadget_v02} would trip the collision
       // guard; per-state classification never sees both together.
       const findings: AuditFinding[] = [];
@@ -342,11 +359,13 @@ describe("audit", () => {
     it("runs only the requested categories", async () => {
       const app = act().withState(widget).build();
       // Seed both a schema violation AND deprecated load.
-      await store().commit("w1", [{ name: "Vanished", data: {} }], meta);
+      await store().commit(
+        [{ stream: "w1", msgs: [{ name: "Vanished", data: {} }] }],
+        meta
+      );
       for (let i = 0; i < 5; i++) {
         await store().commit(
-          "w1",
-          [{ name: "Renamed", data: { name: "x" } }],
+          [{ stream: "w1", msgs: [{ name: "Renamed", data: { name: "x" } }] }],
           meta
         );
       }
@@ -366,8 +385,14 @@ describe("audit", () => {
       const app = act().withState(widget).build();
       // Two unrelated unknown-name events — iterator should yield
       // findings one at a time, and `break` should stop cleanly.
-      await store().commit("s1", [{ name: "Vanished", data: {} }], meta);
-      await store().commit("s2", [{ name: "Vanished", data: {} }], meta);
+      await store().commit(
+        [{ stream: "s1", msgs: [{ name: "Vanished", data: {} }] }],
+        meta
+      );
+      await store().commit(
+        [{ stream: "s2", msgs: [{ name: "Vanished", data: {} }] }],
+        meta
+      );
 
       const findings: AuditFinding[] = [];
       for await (const f of app.audit(["schema"])) {
@@ -382,15 +407,16 @@ describe("audit", () => {
     it("flags streams whose head event is in the operator's terminal list", async () => {
       const app = act().withState(order).build();
       await store().commit(
-        "o1",
-        [{ name: "OrderPlaced", data: { items: 3 } }],
+        [{ stream: "o1", msgs: [{ name: "OrderPlaced", data: { items: 3 } }] }],
         meta
       );
-      await store().commit("o1", [{ name: "OrderShipped", data: {} }], meta);
+      await store().commit(
+        [{ stream: "o1", msgs: [{ name: "OrderShipped", data: {} }] }],
+        meta
+      );
       // Active order whose head isn't terminal — should NOT be flagged.
       await store().commit(
-        "o2",
-        [{ name: "OrderPlaced", data: { items: 1 } }],
+        [{ stream: "o2", msgs: [{ name: "OrderPlaced", data: { items: 1 } }] }],
         meta
       );
 
@@ -413,8 +439,7 @@ describe("audit", () => {
     it("flags idle streams when the head event is older than idle_days", async () => {
       const app = act().withState(order).build();
       await store().commit(
-        "o1",
-        [{ name: "OrderPlaced", data: { items: 2 } }],
+        [{ stream: "o1", msgs: [{ name: "OrderPlaced", data: { items: 2 } }] }],
         meta
       );
       // Tiny sleep so the head's `created` is strictly less than
@@ -440,8 +465,7 @@ describe("audit", () => {
       // surface as a close-candidate with restart_supported: false.
       const app = act().withState(widget).build();
       await store().commit(
-        "w1",
-        [{ name: "Repriced", data: { price: 9 } }],
+        [{ stream: "w1", msgs: [{ name: "Repriced", data: { price: 9 } }] }],
         meta
       );
       await sleep(20);
@@ -461,10 +485,14 @@ describe("audit", () => {
     it("skips framework-marker heads (tombstoned / snapshot)", async () => {
       const app = act().withState(order).build();
       await store().commit(
-        "o1",
         [
-          { name: "OrderPlaced", data: { items: 1 } },
-          { name: "__tombstone__", data: {} },
+          {
+            stream: "o1",
+            msgs: [
+              { name: "OrderPlaced", data: { items: 1 } },
+              { name: "__tombstone__", data: {} },
+            ],
+          },
         ],
         meta
       );
@@ -550,8 +578,7 @@ describe("audit", () => {
     it("flags stuck-backoff for expired leases that weren't released", async () => {
       const app = act().withState(widget).build();
       const [e] = await store().commit(
-        "w1",
-        [{ name: "Repriced", data: { price: 1 } }],
+        [{ stream: "w1", msgs: [{ name: "Repriced", data: { price: 1 } }] }],
         meta
       );
       await store().subscribe([
@@ -581,8 +608,12 @@ describe("audit", () => {
       const app = act().withState(order).build();
       for (let i = 0; i < 30; i++) {
         await store().commit(
-          "big",
-          [{ name: "OrderPlaced", data: { items: i } }],
+          [
+            {
+              stream: "big",
+              msgs: [{ name: "OrderPlaced", data: { items: i } }],
+            },
+          ],
           meta
         );
       }
@@ -606,16 +637,27 @@ describe("audit", () => {
       // Sandwich: 5 events, 1 snapshot, 15 events.
       for (let i = 0; i < 5; i++) {
         await store().commit(
-          "s",
-          [{ name: "OrderPlaced", data: { items: i } }],
+          [
+            {
+              stream: "s",
+              msgs: [{ name: "OrderPlaced", data: { items: i } }],
+            },
+          ],
           meta
         );
       }
-      await store().commit("s", [{ name: "__snapshot__", data: {} }], meta);
+      await store().commit(
+        [{ stream: "s", msgs: [{ name: "__snapshot__", data: {} }] }],
+        meta
+      );
       for (let i = 0; i < 15; i++) {
         await store().commit(
-          "s",
-          [{ name: "OrderPlaced", data: { items: i + 100 } }],
+          [
+            {
+              stream: "s",
+              msgs: [{ name: "OrderPlaced", data: { items: i + 100 } }],
+            },
+          ],
           meta
         );
       }
@@ -640,8 +682,7 @@ describe("audit", () => {
       const app = act().withState(widget).build();
       for (let i = 0; i < 30; i++) {
         await store().commit(
-          "w1",
-          [{ name: "Repriced", data: { price: i } }],
+          [{ stream: "w1", msgs: [{ name: "Repriced", data: { price: i } }] }],
           meta
         );
       }
@@ -688,15 +729,23 @@ describe("audit", () => {
       const app = act().withState(order).build();
       for (let i = 0; i < 25; i++) {
         await store().commit(
-          "big",
-          [{ name: "OrderPlaced", data: { items: i } }],
+          [
+            {
+              stream: "big",
+              msgs: [{ name: "OrderPlaced", data: { items: i } }],
+            },
+          ],
           meta
         );
       }
       // Small stream → should NOT be flagged.
       await store().commit(
-        "small",
-        [{ name: "OrderPlaced", data: { items: 0 } }],
+        [
+          {
+            stream: "small",
+            msgs: [{ name: "OrderPlaced", data: { items: 0 } }],
+          },
+        ],
         meta
       );
 
@@ -720,8 +769,7 @@ describe("audit", () => {
       const app = act().withState(widget).build();
       for (let i = 0; i < 25; i++) {
         await store().commit(
-          "big",
-          [{ name: "Repriced", data: { price: i } }],
+          [{ stream: "big", msgs: [{ name: "Repriced", data: { price: i } }] }],
           meta
         );
       }
@@ -782,8 +830,7 @@ describe("audit", () => {
       // is "unrouted" from a reaction perspective.
       const app = act().withState(widget).build();
       await store().commit(
-        "w1",
-        [{ name: "Repriced", data: { price: 1 } }],
+        [{ stream: "w1", msgs: [{ name: "Repriced", data: { price: 1 } }] }],
         meta
       );
 
@@ -799,16 +846,22 @@ describe("audit", () => {
     it("flags events whose causation.event.id points at a missing parent", async () => {
       const app = act().withState(widget).build();
       // Event 1: a stand-alone event (no parent — fine).
-      await store().commit("w1", [{ name: "Repriced", data: { price: 1 } }], {
-        correlation: "c1",
-        causation: {},
-      });
+      await store().commit(
+        [{ stream: "w1", msgs: [{ name: "Repriced", data: { price: 1 } }] }],
+        {
+          correlation: "c1",
+          causation: {},
+        }
+      );
       // Event 2: a "reaction" event whose causation references id
       // 999 — doesn't exist. Audit should flag it.
-      await store().commit("w1", [{ name: "Repriced", data: { price: 2 } }], {
-        correlation: "c1",
-        causation: { event: { id: 999, stream: "fake", name: "fake" } },
-      } as unknown as { correlation: string; causation: object });
+      await store().commit(
+        [{ stream: "w1", msgs: [{ name: "Repriced", data: { price: 2 } }] }],
+        {
+          correlation: "c1",
+          causation: { event: { id: 999, stream: "fake", name: "fake" } },
+        } as unknown as { correlation: string; causation: object }
+      );
 
       const findings = await collect(app.audit(["correlation-gaps"]));
       expect(findings).toHaveLength(1);
@@ -823,8 +876,7 @@ describe("audit", () => {
       const meta = { correlation: "c1", causation: {} };
       for (let i = 0; i < 5; i++) {
         await store().commit(
-          "w1",
-          [{ name: "Repriced", data: { price: i } }],
+          [{ stream: "w1", msgs: [{ name: "Repriced", data: { price: i } }] }],
           meta
         );
       }
@@ -838,14 +890,12 @@ describe("audit", () => {
       const app = act().withState(widget).build();
       const meta = { correlation: "c1", causation: {} };
       await store().commit(
-        "w1",
-        [{ name: "Repriced", data: { price: 1 } }],
+        [{ stream: "w1", msgs: [{ name: "Repriced", data: { price: 1 } }] }],
         meta
       );
       await sleep(20);
       await store().commit(
-        "w1",
-        [{ name: "Repriced", data: { price: 2 } }],
+        [{ stream: "w1", msgs: [{ name: "Repriced", data: { price: 2 } }] }],
         meta
       );
       const findings = await collect(app.audit(["clock-anomalies"]));
@@ -856,8 +906,7 @@ describe("audit", () => {
       const app = act().withState(widget).build();
       const meta = { correlation: "c1", causation: {} };
       await store().commit(
-        "w1",
-        [{ name: "Repriced", data: { price: 1 } }],
+        [{ stream: "w1", msgs: [{ name: "Repriced", data: { price: 1 } }] }],
         meta
       );
       // Force the committed event's `created` 1 hour into the
@@ -883,13 +932,11 @@ describe("audit", () => {
       const app = act().withState(widget).build();
       const meta = { correlation: "c1", causation: {} };
       await store().commit(
-        "w1",
-        [{ name: "Repriced", data: { price: 1 } }],
+        [{ stream: "w1", msgs: [{ name: "Repriced", data: { price: 1 } }] }],
         meta
       );
       await store().commit(
-        "w1",
-        [{ name: "Repriced", data: { price: 2 } }],
+        [{ stream: "w1", msgs: [{ name: "Repriced", data: { price: 2 } }] }],
         meta
       );
       // Backdate event 2 so its `created` is earlier than event
@@ -948,10 +995,16 @@ describe("audit", () => {
       const app = act().withState(twoDeprecated).build();
       // Beta has more events than Alpha — both deprecated.
       for (let i = 0; i < 3; i++) {
-        await store().commit("s", [{ name: "Alpha", data: { a: i } }], meta);
+        await store().commit(
+          [{ stream: "s", msgs: [{ name: "Alpha", data: { a: i } }] }],
+          meta
+        );
       }
       for (let i = 0; i < 7; i++) {
-        await store().commit("s", [{ name: "Beta", data: { b: i } }], meta);
+        await store().commit(
+          [{ stream: "s", msgs: [{ name: "Beta", data: { b: i } }] }],
+          meta
+        );
       }
 
       const findings = await collect(
@@ -969,12 +1022,19 @@ describe("audit", () => {
       const app = act().withState(order).build();
       for (let i = 0; i < 25; i++) {
         await store().commit(
-          "tomb",
-          [{ name: "OrderPlaced", data: { items: i } }],
+          [
+            {
+              stream: "tomb",
+              msgs: [{ name: "OrderPlaced", data: { items: i } }],
+            },
+          ],
           meta
         );
       }
-      await store().commit("tomb", [{ name: "__tombstone__", data: {} }], meta);
+      await store().commit(
+        [{ stream: "tomb", msgs: [{ name: "__tombstone__", data: {} }] }],
+        meta
+      );
 
       const findings = await collect(
         app.audit(["restart-candidate"], {
@@ -990,8 +1050,12 @@ describe("audit", () => {
       // Exercises the "all checks fail" path through on_stream.
       const app = act().withState(widget).build();
       await store().commit(
-        "healthy",
-        [{ name: "Repriced", data: { price: 1 } }],
+        [
+          {
+            stream: "healthy",
+            msgs: [{ name: "Repriced", data: { price: 1 } }],
+          },
+        ],
         meta
       );
       await store().subscribe([{ stream: "healthy", source: "healthy" }]);
@@ -1004,12 +1068,19 @@ describe("audit", () => {
       const app = act().withState(order).build();
       for (let i = 0; i < 30; i++) {
         await store().commit(
-          "tomb",
-          [{ name: "OrderPlaced", data: { items: i } }],
+          [
+            {
+              stream: "tomb",
+              msgs: [{ name: "OrderPlaced", data: { items: i } }],
+            },
+          ],
           meta
         );
       }
-      await store().commit("tomb", [{ name: "__tombstone__", data: {} }], meta);
+      await store().commit(
+        [{ stream: "tomb", msgs: [{ name: "__tombstone__", data: {} }] }],
+        meta
+      );
 
       const findings = await collect(
         app.audit(["snapshot-drift"], {
@@ -1025,8 +1096,12 @@ describe("audit", () => {
       const app = act().withState(order).build();
       for (let i = 0; i < 3; i++) {
         await store().commit(
-          "tiny",
-          [{ name: "OrderPlaced", data: { items: i } }],
+          [
+            {
+              stream: "tiny",
+              msgs: [{ name: "OrderPlaced", data: { items: i } }],
+            },
+          ],
           meta
         );
       }
@@ -1044,17 +1119,28 @@ describe("audit", () => {
       // post-snapshot count is below threshold.
       for (let i = 0; i < 15; i++) {
         await store().commit(
-          "fresh",
-          [{ name: "OrderPlaced", data: { items: i } }],
+          [
+            {
+              stream: "fresh",
+              msgs: [{ name: "OrderPlaced", data: { items: i } }],
+            },
+          ],
           meta
         );
       }
-      await store().commit("fresh", [{ name: "__snapshot__", data: {} }], meta);
+      await store().commit(
+        [{ stream: "fresh", msgs: [{ name: "__snapshot__", data: {} }] }],
+        meta
+      );
       // Only a couple of events after the snapshot — not enough to flag.
       for (let i = 0; i < 2; i++) {
         await store().commit(
-          "fresh",
-          [{ name: "OrderPlaced", data: { items: 100 + i } }],
+          [
+            {
+              stream: "fresh",
+              msgs: [{ name: "OrderPlaced", data: { items: 100 + i } }],
+            },
+          ],
           meta
         );
       }
@@ -1069,8 +1155,12 @@ describe("audit", () => {
     it("routing-health ignores streams subscribed without a lane string", async () => {
       const app = act().withState(widget).build();
       await store().commit(
-        "nolane",
-        [{ name: "Repriced", data: { price: 1 } }],
+        [
+          {
+            stream: "nolane",
+            msgs: [{ name: "Repriced", data: { price: 1 } }],
+          },
+        ],
         meta
       );
       // Adapters can land rows with an empty lane after manual ops.
@@ -1090,8 +1180,12 @@ describe("audit", () => {
       // a lane lands on the default and should NOT be flagged.
       const app = act().withState(widget).build();
       await store().commit(
-        "defaultlane",
-        [{ name: "Repriced", data: { price: 1 } }],
+        [
+          {
+            stream: "defaultlane",
+            msgs: [{ name: "Repriced", data: { price: 1 } }],
+          },
+        ],
         meta
       );
       await store().subscribe([
@@ -1111,8 +1205,14 @@ describe("audit", () => {
       // domain-level); __tombstone__ still reaches the names map and
       // is filtered by the marker guard.
       const app = act().withState(widget).build();
-      await store().commit("w1", [{ name: "__snapshot__", data: {} }], meta);
-      await store().commit("w2", [{ name: "__tombstone__", data: {} }], meta);
+      await store().commit(
+        [{ stream: "w1", msgs: [{ name: "__snapshot__", data: {} }] }],
+        meta
+      );
+      await store().commit(
+        [{ stream: "w2", msgs: [{ name: "__tombstone__", data: {} }] }],
+        meta
+      );
 
       const findings = await collect(app.audit(["routing-health"]));
       const unrouted = findings.filter(
@@ -1151,8 +1251,7 @@ describe("audit", () => {
         .withProjection(tracked)
         .build();
       await store().commit(
-        "w1",
-        [{ name: "Repriced", data: { price: 1 } }],
+        [{ stream: "w1", msgs: [{ name: "Repriced", data: { price: 1 } }] }],
         meta
       );
 
@@ -1171,21 +1270,23 @@ describe("audit", () => {
       const app = act().withState(widget).build();
       // Commit parent event first.
       const [parent] = await store().commit(
-        "w1",
-        [{ name: "Repriced", data: { price: 1 } }],
+        [{ stream: "w1", msgs: [{ name: "Repriced", data: { price: 1 } }] }],
         { correlation: "c1", causation: {} }
       );
       // Child event whose causation.event.id points at the real parent.
-      await store().commit("w1", [{ name: "Repriced", data: { price: 2 } }], {
-        correlation: "c1",
-        causation: {
-          event: {
-            id: parent.id,
-            stream: parent.stream,
-            name: String(parent.name),
+      await store().commit(
+        [{ stream: "w1", msgs: [{ name: "Repriced", data: { price: 2 } }] }],
+        {
+          correlation: "c1",
+          causation: {
+            event: {
+              id: parent.id,
+              stream: parent.stream,
+              name: String(parent.name),
+            },
           },
-        },
-      } as unknown as { correlation: string; causation: object });
+        } as unknown as { correlation: string; causation: object }
+      );
 
       const findings = await collect(app.audit(["correlation-gaps"]));
       expect(findings).toEqual([]);
@@ -1370,8 +1471,12 @@ describe("audit", () => {
       // Commit past the builder so `plan` is the wrong type on disk — the
       // non-sensitive half of the payload must still be validated.
       await store().commit(
-        "s-bad",
-        [{ name: "SRegistered", data: { plan: 42 } }] as never,
+        [
+          {
+            stream: "s-bad",
+            msgs: [{ name: "SRegistered", data: { plan: 42 } }] as never,
+          },
+        ],
         { correlation: "c", causation: {}, stream: "s-bad" } as never
       );
       const out = (await collect(app.audit(["schema"]))).map(
@@ -1452,10 +1557,13 @@ describe("unreadable-events category", () => {
       await app.do("rename", { stream: "g1", actor }, { name });
     // An event the registry doesn't know, committed AFTER the poison row —
     // the schema pass only sees it if the scan resumed.
-    await store().commit("g1", [{ name: "Vanished", data: {} }], {
-      correlation: "c",
-      causation: {},
-    });
+    await store().commit(
+      [{ stream: "g1", msgs: [{ name: "Vanished", data: {} }] }],
+      {
+        correlation: "c",
+        causation: {},
+      }
+    );
 
     const scoped = act()
       .withState(gadget)

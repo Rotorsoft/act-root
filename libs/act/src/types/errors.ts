@@ -16,14 +16,11 @@ import type {
  *
  * - `ERR_VALIDATION`: Schema validation error
  * - `ERR_PRECONDITION`: A precondition refused the action
- * - `ERR_INVARIANT`: A deprecated `.given` rule refused the action
  * - `ERR_CONCURRENCY`: Optimistic concurrency validation error on commits
  */
 export const Errors = {
   ValidationError: "ERR_VALIDATION",
   PreconditionError: "ERR_PRECONDITION",
-  /** @deprecated `.given` rules are preconditions; use `PreconditionError`. Removed in 2.0. */
-  InvariantError: "ERR_INVARIANT",
   ConcurrencyError: "ERR_CONCURRENCY",
   StreamClosedError: "ERR_STREAM_CLOSED",
   NonRetryableError: "ERR_NON_RETRYABLE",
@@ -76,65 +73,6 @@ export class ValidationError extends Error {
 }
 
 /**
- * Thrown when a rule declared with the deprecated `.given([...])` refuses
- * an action, with the message `"<action> failed invariant: <description>"`.
- *
- * Those rules were always preconditions, not invariants: what must hold
- * after every action lives in the state's schema. {@link PreconditionError}
- * extends this class, so `instanceof InvariantError` still catches every
- * refused action.
- *
- * @deprecated Declare the rule with `.requires([...])` and catch
- * {@link PreconditionError}. Removed in 2.0.
- *
- * @template TState - State schema type
- * @template TEvents - Event schemas type
- * @template TActions - Action schemas type
- * @template TKey - Action name
- * @template TActor - Actor type extending base Actor
- */
-export class InvariantError<
-  TState extends Schema,
-  TEvents extends Schemas,
-  TActions extends Schemas,
-  TKey extends keyof TActions,
-  TActor extends Actor = Actor,
-> extends Error {
-  /** The action that was attempted */
-  readonly action: TKey;
-  /** The action payload that was provided */
-  readonly payload: Readonly<TActions[TKey]>;
-  /** The target stream and actor context */
-  readonly target: Target<TActor>;
-  /** The current state snapshot when the rule was checked */
-  readonly snapshot: Snapshot<TState, TEvents>;
-  /** Human-readable description of the rule that refused the action */
-  readonly description: string;
-
-  /**
-   * @param rule - Which layer refused the action: a `.given([...])` rule
-   *   (the default) or a precondition from `.requires([...])`. It names the
-   *   layer in the message.
-   */
-  constructor(
-    action: TKey,
-    payload: Readonly<TActions[TKey]>,
-    target: Target<TActor>,
-    snapshot: Snapshot<TState, TEvents>,
-    description: string,
-    rule: "invariant" | "precondition" = "invariant"
-  ) {
-    super(`${action as string} failed ${rule}: ${description}`);
-    this.name = Errors.InvariantError;
-    this.action = action;
-    this.payload = payload;
-    this.target = target;
-    this.snapshot = snapshot;
-    this.description = description;
-  }
-}
-
-/**
  * Thrown when a precondition from `.requires([...])` refuses an action,
  * with the message `"<action> failed precondition: <description>"`.
  *
@@ -143,9 +81,6 @@ export class InvariantError<
  * emits anything, so nothing is stored. Invariants (what must hold after
  * every action) live in the state's schema instead; a broken one throws
  * {@link ValidationError}.
- *
- * It extends the deprecated {@link InvariantError} until 2.0, so code that
- * catches `InvariantError` keeps catching every refused action.
  *
  * @template TState - State schema type
  * @template TEvents - Event schemas type
@@ -180,7 +115,18 @@ export class PreconditionError<
   TActions extends Schemas,
   TKey extends keyof TActions,
   TActor extends Actor = Actor,
-> extends InvariantError<TState, TEvents, TActions, TKey, TActor> {
+> extends Error {
+  /** The action that was attempted */
+  readonly action: TKey;
+  /** The action payload that was provided */
+  readonly payload: Readonly<TActions[TKey]>;
+  /** The target stream and actor context */
+  readonly target: Target<TActor>;
+  /** The current state snapshot when the precondition was checked */
+  readonly snapshot: Snapshot<TState, TEvents>;
+  /** Human-readable description of the precondition that refused the action */
+  readonly description: string;
+
   constructor(
     action: TKey,
     payload: Readonly<TActions[TKey]>,
@@ -188,8 +134,13 @@ export class PreconditionError<
     snapshot: Snapshot<TState, TEvents>,
     description: string
   ) {
-    super(action, payload, target, snapshot, description, "precondition");
+    super(`${action as string} failed precondition: ${description}`);
     this.name = Errors.PreconditionError;
+    this.action = action;
+    this.payload = payload;
+    this.target = target;
+    this.snapshot = snapshot;
+    this.description = description;
   }
 }
 

@@ -3,18 +3,22 @@
 A larger Act example — a help-desk ticketing system adapted from *Learning Domain-Driven Design* (Vlad Khononov). Wolfdesk shows how to compose a single aggregate from multiple **partial states** and **slices** (vertical slice architecture), with a Drizzle/SQLite read model, deferred-reaction timers for the ticket lifecycle, and a PostgreSQL event store.
 
 > Workspace package, not published. Run via `pnpm dev:wolfdesk` from the monorepo root.
+>
+> [Watch its flows play](https://rotorsoft.github.io/act-root/flows/wolfdesk.html), animated from its builders.
 
 ## What it demonstrates
 
 - **One aggregate, three slices** — `Ticket` is built from three partial states (creation, messaging, operations), each owning its own actions, events, patches, and reactions
 - **Slice merging** — different slices register patches for shared events; conflicts are detected at build time
 - **Per-slice reactions**:
-  - `TicketCreationSlice` — on `TicketOpened`, auto-assigns an agent
+  - `TicketCreationSlice` — on `TicketOpened`, assigns the agent with the fewest open tickets in the ticket's category, or waits until one is free
   - `TicketMessagingSlice` — on `MessageAdded`, calls `deliverMessage()` then dispatches `MarkMessageDelivered`
   - `TicketOpsSlice` — on `TicketEscalationRequested`, dispatches `EscalateTicket`
-- **Standalone projection** — `TicketProjection` writes a denormalized read model into a Drizzle/SQLite `tickets` table
+- **Standalone projections** — `TicketProjection` writes a denormalized read model into a Drizzle/SQLite `tickets` table, and `AgentProjection` keeps the `agents` table the reactions pick from
+- **A read model suggests, the commit decides** — the table can lag, so a pick may find a full agent; the commit refuses it, and the reaction's retry picks again
 - **Deferred-reaction timers** — escalate, reassign, and close-on-inactivity run as `.defer`-based reactions that sleep until each ticket's deadline and act when they wake, with no polling loop and no read-model scan
 - **Every business rule declared** — preconditions in `.requires`, on the state and actor (`mustBeOpen`, `mustBeUser`, the escalation and reassignment rules) and on the payload (`messageExists`, `mustBeReceiver`), shared across slices
+- **A limit across streams** — `Agent` caps an agent at 5 open tickets; assign, reassign, resolve and close load it and commit with the ticket (`src/agent.ts`)
 - **Correlation tracing** — the demo prints causation chains across reactions
 - **PostgreSQL event store** — uses `@rotorsoft/act-pg` for events, SQLite (libSQL via Drizzle) for the read model
 
@@ -30,9 +34,9 @@ pnpm dev:wolfdesk
 
 The `dev` script runs migrations first, then `tsx watch src/main.ts`. The demo:
 
-1. Resets the `act.wolfdesk` Postgres event store and the SQLite `tickets` table
+1. Resets the `act.wolfdesk` Postgres event store and the SQLite `tickets` and `agents` tables
 2. Starts the correlation pump — the escalate / reassign / close timers are deferred reactions already wired into the app, so there's no polling loop to start; they arm themselves as tickets emit their triggering events
-3. Opens a ticket, assigns an agent, adds two messages
+3. Adds two agents to the desk, opens a ticket for the assign reaction to pick from them, hands it to the second agent, adds two messages
 4. Prints the projection table after every drain (`app.on("acked", ...)`)
 5. Finally prints all events for the ticket grouped by correlation ID, indented by causation depth
 
@@ -45,19 +49,23 @@ packages/wolfdesk/
 │   ├── ticket-creation.ts       # TicketCreation partial + TicketCreationSlice (Open / Close / Resolve + auto-assign reaction)
 │   ├── ticket-messaging.ts      # TicketMessaging partial + TicketMessagingSlice (Add/Deliver/Ack + delivery reaction)
 │   ├── ticket-operations.ts     # TicketOperations partial + TicketOpsSlice (Assign / Escalate / Reassign + escalate reaction)
+│   ├── agent.ts                 # Agent state: the desk, open tickets per agent
 │   ├── ticket-preconditions.ts  # The business rules (preconditions)
 │   ├── ticket-projections.ts    # TicketProjection — Drizzle/SQLite read model updater
 │   ├── bootstrap.ts             # Composes act() with the slices + the projection
 │   ├── ticket-timers.ts         # TicketTimersSlice — deferred escalate / reassign / close timers
 │   ├── main.ts                  # Demo entrypoint
 │   ├── schemas/                 # Zod schemas (events, actions, partial state shapes)
-│   ├── services/                # External integrations (agent assignment, notifications)
+│   ├── services/                # Picking an agent from the agents table, notifications
 │   └── drizzle/                 # SQLite schema + migrations + db client
 ├── drizzle.config.ts            # drizzle-kit config (sqlite, file:local.db)
 └── test/
     ├── actions.ts               # Helpers for action dispatch in tests
     ├── ticket.spec.ts           # Single-ticket happy paths
     ├── tickets.spec.ts          # Multi-ticket scenarios + projection asserts + deferred timers
+    ├── agent.spec.ts            # The limit, moves, races
+    ├── agent-assign.spec.ts     # The assign reaction's retry with a full agent
+    ├── agent-pick.spec.ts       # Picking the least loaded agent, waiting when nobody is free
     └── preconditions.spec.ts    # Every rule's refusal
 ```
 

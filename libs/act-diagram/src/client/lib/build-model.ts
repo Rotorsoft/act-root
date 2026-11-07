@@ -61,15 +61,13 @@ function build_state(
     const emits: string[] =
       (raw_actions[`__emits_${action_name}`] as string[]) ?? [];
     const describe = (rule: any) => rule.description ?? "";
-    const invariants = (st.given?.[action_name] ?? []).map(describe);
-    const preconditions = [
-      ...invariants,
-      ...(st.requires?.[action_name] ?? []).map(describe),
-    ];
+    const preconditions = (st.requires?.[action_name] ?? []).map(describe);
+    // A load whose state didn't resolve (a broken import) names nothing to show.
+    const loads = (st.loads?.[action_name] ?? []).filter((l: any) => l.state);
     action_nodes.push({
       name: action_name,
       emits,
-      invariants,
+      ...(loads.length ? { loads } : {}),
       ...(preconditions.length ? { preconditions } : {}),
       zod: raw_actions[action_name],
     });

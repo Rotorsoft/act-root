@@ -59,12 +59,19 @@ export type EventNode = {
   zod?: unknown;
 };
 
+/** One `.loads(...)` of an action: another state its decision needs. */
+export type LoadNode = {
+  state: string; // the loaded state's name
+  name: string; // the key in `loaded`: the state's name, unless the load names itself
+  events: string[]; // events the action appends to that stream; none means a read, not guarded
+};
+
 export type ActionNode = {
   name: string;
-  emits: string[]; // event names this action emits
-  /** @deprecated The `.given([...])` rule descriptions, also listed in `preconditions`. Removed in 2.0. */
-  invariants: string[];
-  /** Descriptions of the action's preconditions in the order they run: the deprecated `.given([...])`, then `.requires([...])`. */
+  emits: string[]; // event names this action emits, to its own stream and to the streams it loads
+  /** The action's `.loads(...)` in declaration order; absent when there are none. */
+  loads?: LoadNode[];
+  /** Descriptions of the action's `.requires([...])` preconditions in the order they run; absent when there are none. */
   preconditions?: string[];
   line?: number;
   /**

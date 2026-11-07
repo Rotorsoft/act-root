@@ -33,6 +33,54 @@ const app = act().withState(Counter).withState(Note).build();
 const stream = () => "s-1";
 type Ctx = { user: string };
 
+describe("an app that loads across streams", () => {
+  const Seats = state({ Seats: z.object({ taken: z.number() }) })
+    .init(() => ({ taken: 0 }))
+    .emits({ SeatTaken: z.object({ student: z.string() }) })
+    .patch({ SeatTaken: (_, s) => ({ taken: s.taken + 1 }) })
+    .build();
+  const Enroll = z.object({ course: z.string(), student: z.string() });
+  const Enrollment = state({ Enrollment: Enroll })
+    .init(() => ({ course: "", student: "" }))
+    .emits({ Enrolled: Enroll })
+    .on({ Enroll })
+    .loads(Seats, (data) => data.course, ["SeatTaken"])
+    .emit((data) => [
+      ["Enrolled", data],
+      ["SeatTaken", { student: data.student }],
+    ])
+    .build();
+  const loading = act().withState(Seats).withState(Enrollment).build();
+  const actor = () => ({ id: "a", name: "a" });
+
+  it("types a mutation by its own state, not the loaded one", () => {
+    const router = trpc(loading, { actor, stream });
+    type In = inferRouterInputs<typeof router>;
+    type Out = inferRouterOutputs<typeof router>;
+    expectTypeOf<In["Enroll"]>().toEqualTypeOf<z.infer<typeof Enroll>>();
+    expectTypeOf<Out["Enroll"][number]["state"]>().toEqualTypeOf<
+      z.infer<typeof Enroll>
+    >();
+  });
+
+  it("types a route by its own state, not the loaded one", () => {
+    const client = testClient(hono(loading, { actor, stream }));
+    expectTypeOf(client.api.actions.Enroll.$post)
+      .parameter(0)
+      .toEqualTypeOf<{ json: z.infer<typeof Enroll> }>();
+  });
+
+  it("subscribes to the loaded state too", () => {
+    const router = trpc(loading, {
+      actor,
+      stream,
+      sse: { channel: new BroadcastChannel() },
+    });
+    type Frames = inferRouterOutputs<typeof router>["subscribe"];
+    expectTypeOf<keyof Frames>().toEqualTypeOf<"Seats" | "Enrollment">();
+  });
+});
+
 describe("trpc(app) types", () => {
   const router = trpc(app, {
     actor: (ctx: Ctx) => ({ id: ctx.user, name: ctx.user }),

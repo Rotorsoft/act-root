@@ -325,3 +325,16 @@ export type FoldConfig = z.infer<typeof FoldOptionsSchema>;
 export function resolveFoldConfig(options: FoldOptions): FoldConfig {
   return FoldOptionsSchema.parse(options);
 }
+
+/**
+ * Refuses a store written for `commit(stream, msgs, meta, expectedVersion)`,
+ * the shape before 2.0. Left alone, a wrapper of that shape forwards its
+ * arguments, so commits work, and then treats the appends as a stream name,
+ * sending events and their sensitive fields wherever that name goes.
+ */
+export function check_store(store: { commit: { length: number } }): void {
+  if (store.commit.length === 4)
+    throw new Error(
+      "This store's commit takes (stream, msgs, meta, expectedVersion), the shape before @rotorsoft/act 2.0. Upgrade it, and every @rotorsoft/act-* package, together: https://rotorsoft.github.io/act-root/docs/guides/migrating-to-2.x"
+    );
+}

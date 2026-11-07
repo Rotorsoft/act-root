@@ -50,6 +50,9 @@ export type Classification = {
   readonly event_to_lanes: ReadonlyMap<string, EventLaneSet>;
 };
 
+const describe_source = (source: string | undefined) =>
+  source === undefined ? "no source (every stream)" : `"${source}"`;
+
 /**
  * Walk the registry once to collect static reaction targets, the set of
  * reactive event names, the per-event lane fan-in, and the event-to-state
@@ -107,12 +110,15 @@ export function classify_registry<
         }
         // Keyed by target alone, because a subscription row IS keyed by
         // stream: every adapter sets `source` once at creation and ignores
-        // it thereafter, so a second entry for one target could only ever
-        // contribute its priority — and a batch carrying two would leave
-        // the merge to the adapter, which a single batched SQL statement
-        // cannot do. One entry per stream, max priority, so the
-        // highest-priority registrant sets the scheduling priority.
+        // it thereafter, so a second source is refused, and a second reaction
+        // on the same one contributes only its priority. One entry per
+        // stream, max priority, so the highest-priority registrant sets the
+        // scheduling priority.
         const existing = statics.get(target);
+        if (existing && existing.source !== source)
+          throw new Error(
+            `Target "${target}" has reactions on two sources, ${describe_source(existing.source)} and ${describe_source(source)}. A target reads one source, so the second would miss events or read too many. Give it its own target.`
+          );
         if (!existing) {
           statics.set(target, { stream: target, source, priority, lane });
         } else if (priority > (existing.priority as number)) {

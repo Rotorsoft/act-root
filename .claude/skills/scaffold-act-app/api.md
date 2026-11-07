@@ -200,7 +200,7 @@ function applyPresence(state: AppState, streamId: string): AppState {
 }
 ```
 
-Always use the short names (`overlay`, `state`, `online`, `isOnline`) — the snake_case names are deprecated aliases removed in the next major.
+Use the short names (`overlay`, `state`, `online`, `isOnline`). The snake_case names are gone in 2.0.
 
 ## packages/app/src/api/domain.routes.ts (domain commands + queries)
 

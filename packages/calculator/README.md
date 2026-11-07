@@ -3,6 +3,8 @@
 A minimal Act example — a calculator state machine built around a single aggregate, plus standalone demos for projection rebuild and close-the-books.
 
 > Workspace package, not published. Run via `pnpm dev:calculator` from the monorepo root.
+>
+> [Watch its flows play](https://rotorsoft.github.io/act-root/flows/calculator.html), animated from its builders.
 
 ## What it demonstrates
 

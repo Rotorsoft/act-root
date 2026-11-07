@@ -59,7 +59,7 @@ A rule that only checks the *input shape* ("name must be non-empty") belongs in 
 
 ### Preconditions
 
-Declare them with `.requires()`. `Precondition<S, P>` is `{ description: string; holds: (payload: Readonly<P>, state: Readonly<S>, actor?: Actor) => boolean }`. Type `S` and `P` with the minimal fields the rule reads (contravariance allows assignment to subtypes).
+Declare them with `.requires()`. `Precondition<S, P>` is `{ description: string; holds: (payload: Readonly<P>, state: Readonly<S>, actor: Actor | undefined, loaded) => boolean }`, and a rule may declare fewer parameters. Type `S` and `P` with the minimal fields the rule reads (contravariance allows assignment to subtypes).
 
 **On the state and actor.** A rule that ignores the payload is typed over `unknown`, so one rule serves every action that needs it. Use the actor for authorization ("only the assigned user can close this ticket"). In `packages/domain/src/preconditions.ts`:
 
@@ -101,11 +101,73 @@ const Ticket = z
 
 Every action checks the state its events fold into against that schema before the commit, and a state the schema rejects refuses the action with a `ValidationError`. Nothing is stored. There's nothing to turn on.
 
-Don't use `.given([...])`, `Invariant` or `InvariantError`: they're deprecated (the rules they declared were always preconditions) and go away in Act 2.0.
-
 Keep a `throw` inside `.emit()` only for rules that don't fit a predicate: a rule that branches on the state, or one that needs an app-specific error type.
 
 Keep this validation in the aggregate, not the router. The aggregate is the system of record for its rules — router-level checks are invisible to other callers (CLI, reactions, replays) and let bad events sneak in via internal `app.do()` calls.
+
+### Rules across streams
+
+When a spec states a rule across entities, generate `.loads` and the states behind it. Look for these in the spec: "unique", "one per", "at most N", "no overlapping", "both or neither", "only if the other one". Each value that must be unique and each shared limit is **a state of its own**, one stream per value or per resource, not a hidden index.
+
+| Spec says | Generate |
+|---|---|
+| The email must be unique | An `Email` state with `holder`, one stream per address. Every action that takes or frees an address loads it. |
+| A course holds at most 30 students | A `Seats` state with a count, whose schema caps it. `Enroll` loads it and lists `SeatTaken`. |
+| Move money between accounts, both or neither | `Transfer` loads `Account` twice, named `from` and `to`, and lists `Debited` and `Credited`. |
+| Stock must not go below zero | A `Product` state with `stock.min(0)`. `Reserve` loads it and lists `StockReserved`. |
+
+An action loads the states its decision needs. An event listed on a load goes to that stream, in the action's one commit, with each stream guarded by its version at load. If any moved, nothing is written and the action fails with `ConcurrencyError`; set `maxRetries` so it runs again with fresh loads and the rule sees the new state.
+
+```typescript
+import { createHmac } from "node:crypto";
+
+// A stream name can't be forgotten: key it by an HMAC of a sensitive value, never the value.
+// Changing the key means refilling these streams.
+const email = (value: string) =>
+  `email-${createHmac("sha256", process.env.EMAIL_HMAC_KEY!).update(value.trim().toLowerCase()).digest("hex")}`;
+
+export const Email = state({ Email: z.object({ holder: z.string().optional() }) })
+  .init(() => ({}))
+  .emits({ EmailTaken, EmailReleased })
+  .patch({
+    EmailTaken: ({ data }) => ({ holder: data.user }),
+    EmailReleased: () => ({ holder: undefined }),
+  })
+  .build();
+
+export const User = state({ User: z.object({ email: z.string() }) })
+  .init(() => ({ email: "" }))
+  .emits({ Registered: Register, EmailChanged: ChangeEmail })
+  .on({ Register }, { maxRetries: 2 })
+  .loads(Email, (data) => email(data.email), ["EmailTaken"])
+  .requires([{ description: "the email is free", holds: (_, __, ___, { Email }) => !Email.holder }])
+  .emit((data, _, { stream }) => [
+    ["Registered", data],
+    ["EmailTaken", { user: stream }],
+  ])
+  // One state loaded twice: name each load. The target also sees the action's own state.
+  .on({ ChangeEmail }, { maxRetries: 2 })
+  .loads(Email, (_, state) => email(state.email), ["EmailReleased"], "current")
+  .loads(Email, (data) => email(data.email), ["EmailTaken"], "next")
+  .requires([{ description: "the new email is free", holds: (_, __, ___, { next }) => !next.holder }])
+  .emit((data, _, { stream }) => [
+    ["EmailChanged", data],
+    ["EmailReleased", {}],
+    ["EmailTaken", { user: stream }],
+  ])
+  .build();
+```
+
+**Rules the generated code must keep:**
+
+- **Every action appends to its own stream too.** An action whose events all go to loaded streams doesn't compile, and neither does a static `.emit("X")` of a listed event. A change to one stream alone belongs on that stream's state.
+- **A load with no events is a read.** It isn't guarded, so the commit lands even if that stream moved. If the decision must be refused when it moves, list an event and append to it.
+- **Each event goes to one stream.** List it on one load of the action. A target that names no stream, the action's own stream, or a stream another load names refuses with `PreconditionError` before any rule runs, so a transfer to the same account or a change to the address it already has is a 409 for the client.
+- **Register every loaded state in the same Act**, with `.withState(...)` in a slice or the app, or `build()` throws. A commit is atomic only inside one store.
+- **Put a fixed limit in the loaded state's schema too**, so no action can break it. The precondition gives the caller a clear refusal; the schema is what holds. A limit that can be lowered stays a precondition only: with `taken <= capacity` in the schema, lowering it below the seats taken would be refused, and those enrolled should keep their seats.
+- **Reach for a reaction instead** when the other stream can catch up later, and the rule doesn't have to hold at the moment of the commit. A loaded stream every action writes to is a point of contention.
+
+Freeing a value is an action too (a logout, a deactivation): `app.close` runs no action, so free the value first, then close. [`recipes/rules-across-streams`](../../../recipes/rules-across-streams/README.md) has every scenario as a working state with tests.
 
 ## States
 
@@ -133,11 +195,11 @@ export const Item = state({ Item: ItemState })
   .build();
 ```
 
-**Builder chain**: `state({})` → `.init()` → `.emits({})` → optional `.patch({})` → `.on({})` → optional `.requires([])` → `.emit(handler | "EventName")` → `.build()`
+**Builder chain**: `state({})` → `.init()` → `.emits({})` → optional `.patch({})` → `.on({})` → optional `.loads(State, target, events?, name?)` (repeatable) → optional `.requires([])` → `.emit(handler | "EventName")` → `.build()`
 
 **Passthrough defaults**: `.emits()` creates default passthrough reducers (`({ data }) => data`) for all events. Use `.patch()` only to override events that need custom logic. Use `.emit("EventName")` when the action payload maps directly to event data.
 
-**Emit handler**: `(actionPayload, snapshot, target) => [EventName, data]` — destructure as `(data, { state }, { stream, actor })`.
+**Emit handler**: `(actionPayload, snapshot, target, loaded) => [EventName, data]` — destructure as `(data, { state }, { stream, actor }, { Seats })`.
 
 **Partial states**: Multiple states sharing the same name (e.g., `state({ Ticket: PartialA })` and `state({ Ticket: PartialB })`) merge automatically in slices/act. When a partial redeclares an event in `.emits()` without a `.patch()`, it gets a passthrough reducer that yields to any custom reducer from another partial. Two different custom patches for the same event throw at build time.
 
@@ -403,6 +465,6 @@ test("processes reactions and projections", async ({ app }) => {
 });
 ```
 
-To test a precondition by name, assert on the rule's description: `rejects.toMatchObject({ description: "Contribution must stay within the cap" })`.
+For a rule across streams, test the rule, the refusal storing nothing on either stream, and both streams after a commit (`app.load(Seats, stream)`). To test a precondition by name, assert on the rule's description: `rejects.toMatchObject({ description: "Contribution must stay within the cap" })`.
 
 **Test isolation**: `fixture(appBuilder)` gives each test a fresh, auto-seeded store + cache and disposes them automatically — no `store().seed()` / `dispose()()` boilerplate. Reach for `sandbox(appBuilder)` when you need `beforeAll`-shared setup, multiple Acts in one test, or direct `store`/`cache` handles. In-memory projections live outside the store, so still call `clear*()` at the start of any test that asserts on them. Legacy `store().seed()` + `dispose()()` stays valid only for tests that exercise the singleton port mechanism itself.

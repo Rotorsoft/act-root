@@ -129,13 +129,18 @@ const config: Config = {
           // stays the default served at `/docs/` so it always tracks the latest
           // API (docs are not frozen with library releases — see STABILITY.md).
           // When a new major ships, the previous line is snapshotted with
-          // `pnpm --filter docs exec docusaurus docs:version <line>`; add a
-          // `docsVersionDropdown` navbar item then.
+          // `pnpm --filter docs exec docusaurus docs:version <line>`, before the
+          // breaking edits reach `docs/docs`, and added to `versions` below.
           lastVersion: "current",
           versions: {
             current: {
               label: "Current",
               path: "",
+            },
+            "1.x": {
+              label: "1.x",
+              path: "1.x",
+              banner: "none",
             },
           },
         },
@@ -176,9 +181,9 @@ const config: Config = {
       { name: "twitter:card", content: "summary_large_image" },
     ],
     announcementBar: {
-      id: "act-book-2026",
+      id: "act-2-0",
       content:
-        '<strong>📖 New:</strong> Read the <a target="_blank" rel="noopener noreferrer" href="https://payhip.com/b/7ezLy">Act book</a> — a hands-on guide to functional event sourcing in TypeScript.',
+        '<strong>Act 2.0:</strong> <a href="/act-root/docs/guides/rules-across-streams">rules across streams</a>, in one atomic commit · <a href="/act-root/docs/guides/migrating-to-2.x">Upgrade</a> · <a target="_blank" rel="noopener noreferrer" href="https://payhip.com/b/7ezLy">Read the Act book</a>',
       backgroundColor: "transparent",
       textColor: "var(--ifm-navbar-link-color)",
       isCloseable: true,
@@ -192,6 +197,7 @@ const config: Config = {
         href: "/",
       },
       items: [
+        { type: "docsVersionDropdown", position: "right" },
         {
           type: "docSidebar",
           sidebarId: "docs",

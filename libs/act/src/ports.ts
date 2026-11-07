@@ -3,6 +3,7 @@ import { InMemoryCache } from "./adapters/in-memory-cache.js";
 import { InMemoryStore } from "./adapters/in-memory-store.js";
 import { config } from "./config.js";
 import { register_disposer, run_disposers } from "./disposers.js";
+import { check_store } from "./internal/config.js";
 import { current_ports } from "./scoped.js";
 import type {
   Cache,
@@ -138,6 +139,7 @@ export const log = port(function log(adapter?: Logger) {
 // ALS check lives outside `port()` — its cache fires only once, so the
 // per-call branch on a scoped Act has to be in the public wrapper.
 const _store = port(function store(adapter?: Store): Store {
+  if (adapter) check_store(adapter);
   return adapter ?? new InMemoryStore();
 });
 

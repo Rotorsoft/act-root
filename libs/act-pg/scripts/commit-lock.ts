@@ -19,7 +19,10 @@ const meta: EventMeta = { correlation: "bench", causation: {} };
 async function sequential(n: number) {
   const start = performance.now();
   for (let i = 0; i < n; i++) {
-    await store.commit("seq-1", [{ name: "Bench", data: { i } }], meta);
+    await store.commit(
+      [{ stream: "seq-1", msgs: [{ name: "Bench", data: { i } }] }],
+      meta
+    );
   }
   const ms = performance.now() - start;
   return { ms, rate: Math.round((n / ms) * 1000) };
@@ -33,7 +36,10 @@ async function concurrent(n: number, workers: number) {
   const start = performance.now();
   const worker = async (w: number) => {
     for (let i = 0; i < per_worker; i++) {
-      await store.commit(`con-${w}`, [{ name: "Bench", data: { i } }], meta);
+      await store.commit(
+        [{ stream: `con-${w}`, msgs: [{ name: "Bench", data: { i } }] }],
+        meta
+      );
     }
   };
   await Promise.all(Array.from({ length: workers }, (_, w) => worker(w)));

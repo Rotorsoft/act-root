@@ -15,7 +15,6 @@
 import {
   act,
   ConcurrencyError,
-  InvariantError,
   NonRetryableError,
   PreconditionError,
   StreamClosedError,
@@ -286,20 +285,6 @@ describe("trpc(app, options) — generated router", () => {
         label: "PreconditionError",
         throws: () =>
           new PreconditionError(
-            "PressKey",
-            { key: "5" },
-            { stream: "tenant-acme", actor: { id: "u-1", name: "alice" } },
-            {} as never,
-            "calculator must be open"
-          ),
-        trpcStatus: 409,
-        trpcCode: "CONFLICT",
-        sameAsHono: true,
-      },
-      {
-        label: "InvariantError",
-        throws: () =>
-          new InvariantError(
             "PressKey",
             { key: "5" },
             { stream: "tenant-acme", actor: { id: "u-1", name: "alice" } },

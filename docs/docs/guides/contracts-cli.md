@@ -51,6 +51,23 @@ event TicketOpened
 - **producers** — every action that emits this event, with its owning state and source location.
 - **consumers** — every reaction and projection that observes this event.
 
+An action with [`.loads`](../concepts/state-management.md#rules-across-streams-loads) shows what it loads and what lands in one commit:
+
+```
+Enroll
+  on:      Enrollment
+  loads:
+    - Seats: appends SeatTaken
+  preconditions:
+    - a free seat
+  emits:
+    - Enrolled
+    - SeatTaken to the Seats stream
+  commit:  one commit across 2 streams (Enrollment, Seats), each guarded by its version at load: all land or none do
+```
+
+A load that lists no events shows as `read, not guarded`, and stays out of the commit. A state lists who loads it under `loaded by`, and each of its events lists any action outside the state that appends it (`also emitted by Enrollment.Enroll`). The `--json` report carries `appends_to` on such a producer.
+
 ## Scripted usage
 
 The non-interactive `-q` mode is pipe-friendly:

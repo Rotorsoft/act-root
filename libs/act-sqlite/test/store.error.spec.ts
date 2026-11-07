@@ -142,10 +142,13 @@ describe("SqliteStore error paths", () => {
     async (url) => {
       const s = new SqliteStore({ url });
       await s.seed();
-      await s.commit("mem", [{ name: "E", data: { n: 1 } }], {
-        correlation: "",
-        causation: {},
-      });
+      await s.commit(
+        [{ stream: "mem", msgs: [{ name: "E", data: { n: 1 } }] }],
+        {
+          correlation: "",
+          causation: {},
+        }
+      );
       const read: unknown[] = [];
       await s.query((e) => read.push(e), { stream: "mem" });
       expect(read).toHaveLength(1);
@@ -160,7 +163,7 @@ describe("SqliteStore error paths", () => {
     // Parity with PG: a non-unique-violation driver error is wrapped in
     // StoreError('commit'), not rethrown raw.
     const err = await db
-      .commit("s", [{ name: "E", data: {} }], {
+      .commit([{ stream: "s", msgs: [{ name: "E", data: {} }] }], {
         correlation: "",
         causation: {},
       })
@@ -180,10 +183,13 @@ describe("SqliteStore error paths", () => {
     // ConcurrencyError, not the raw libsql error.
     const real = new SqliteStore({ url: tmp_db_url() });
     await real.seed();
-    await real.commit("collide", [{ name: "E", data: {} }], {
-      correlation: "",
-      causation: {},
-    });
+    await real.commit(
+      [{ stream: "collide", msgs: [{ name: "E", data: {} }] }],
+      {
+        correlation: "",
+        causation: {},
+      }
+    );
     const client = (real as unknown as { client: { transaction: unknown } })
       .client;
     const realTransaction = (
@@ -208,13 +214,98 @@ describe("SqliteStore error paths", () => {
       return tx;
     };
     const err = await real
-      .commit("collide", [{ name: "E", data: {} }], {
+      .commit([{ stream: "collide", msgs: [{ name: "E", data: {} }] }], {
         correlation: "",
         causation: {},
       })
       .catch((e) => e);
     expect(err).toBeInstanceOf(ConcurrencyError);
     await real.dispose();
+  });
+
+  describe("commit across streams, failing part-way", () => {
+    // A real DB whose transactions run every statement except the ones
+    // `fail` picks, so the first append's rows are inserted before the
+    // second append's insert fails.
+    async function store_failing(fail: (stmt: Stmt) => unknown) {
+      const real = new SqliteStore({ url: tmp_db_url() });
+      await real.seed();
+      const client = (real as unknown as { client: { transaction: unknown } })
+        .client;
+      const begin = (
+        client.transaction as (mode: string) => Promise<unknown>
+      ).bind(client);
+      (
+        client as { transaction: (mode: string) => Promise<unknown> }
+      ).transaction = async (mode: string) => {
+        const tx = (await begin(mode)) as {
+          execute: (stmt: Stmt) => Promise<unknown>;
+        };
+        const execute = tx.execute.bind(tx);
+        tx.execute = (stmt: Stmt) => {
+          const failure = fail(stmt);
+          return failure ? Promise.reject(failure) : execute(stmt);
+        };
+        return tx;
+      };
+      return real;
+    }
+    const inserts_into = (stmt: Stmt, stream: string) =>
+      typeof stmt !== "string" &&
+      stmt.sql.startsWith("INSERT INTO events") &&
+      stmt.args?.[0] === stream;
+    const appends = [
+      { stream: "first", msgs: [{ name: "E", data: {} }] },
+      { stream: "second", msgs: [{ name: "E", data: {} }] },
+    ];
+    const meta = { correlation: "", causation: {} };
+
+    it("wraps a BEGIN that fails, on a commit, a write and a restore", async () => {
+      const real = new SqliteStore({ url: tmp_db_url() });
+      await real.seed();
+      const client = (real as unknown as { client: { transaction: unknown } })
+        .client;
+      client.transaction = () => Promise.reject(new Error("SQLITE_BUSY"));
+      const failed = await real.commit(appends, meta).catch((e) => e);
+      expect(failed).toBeInstanceOf(StoreError);
+      expect(failed.operation).toBe("commit");
+      const claimed = await real.claim(1, 1, "w", 1000).catch((e) => e);
+      expect(claimed).toBeInstanceOf(StoreError);
+      expect(claimed.operation).toBe("claim");
+      const restored = await real.restore(async () => {}).catch((e) => e);
+      expect(restored).toBeInstanceOf(StoreError);
+      expect(restored.operation).toBe("restore");
+      await real.dispose();
+    });
+
+    it("rolls back the first append when the second append's insert fails", async () => {
+      const real = await store_failing(
+        (stmt) => inserts_into(stmt, "second") && new Error("disk full")
+      );
+      const err = await real.commit(appends, meta).catch((e) => e);
+      expect(err).toBeInstanceOf(StoreError);
+      expect((err.cause as Error).message).toBe("disk full");
+      const stored: unknown[] = [];
+      await real.query((e) => stored.push(e));
+      expect(stored).toEqual([]);
+      await real.dispose();
+    });
+
+    it("names the second stream when its insert hits a unique collision", async () => {
+      const collision = Object.assign(new Error("UNIQUE constraint failed"), {
+        code: "SQLITE_CONSTRAINT_UNIQUE",
+      });
+      const real = await store_failing(
+        (stmt) => inserts_into(stmt, "second") && collision
+      );
+      const err = await real.commit(appends, meta).catch((e) => e);
+      expect(err).toBeInstanceOf(ConcurrencyError);
+      expect((err as ConcurrencyError).stream).toBe("second");
+      const stored: unknown[] = [];
+      await real.query((e) => stored.push(e));
+      expect(stored).toEqual([]);
+      await real.dispose();
+    });
   });
 
   it("commit: throws ConcurrencyError when expectedVersion mismatches", async () => {
@@ -237,10 +328,8 @@ describe("SqliteStore error paths", () => {
     };
     await expect(
       db.commit(
-        "s",
-        [{ name: "E", data: {} }],
-        { correlation: "", causation: {} },
-        0
+        [{ stream: "s", msgs: [{ name: "E", data: {} }], expectedVersion: 0 }],
+        { correlation: "", causation: {} }
       )
     ).rejects.toThrow(ConcurrencyError);
     expect(tx.rollback).toHaveBeenCalled();
@@ -348,30 +437,5 @@ describe("SqliteStore error paths", () => {
     (db as unknown as { client: unknown }).client = client;
     const wiped = await db.forget_pii("never-existed");
     expect(wiped).toBe(0);
-  });
-
-  it("wraps a BEGIN that fails, on a commit, a write and a restore", async () => {
-    const real = new SqliteStore({ url: tmp_db_url() });
-    await real.seed();
-    const client = (real as unknown as { client: { transaction: unknown } })
-      .client;
-    client.transaction = () => Promise.reject(new Error("SQLITE_BUSY"));
-    for (const [operation, run] of [
-      [
-        "commit",
-        () =>
-          real.commit("s", [{ name: "E", data: {} }], {
-            correlation: "",
-            causation: {},
-          }),
-      ],
-      ["claim", () => real.claim(1, 1, "w", 1000)],
-      ["restore", () => real.restore(async () => {})],
-    ] as const) {
-      const failed = await (run() as Promise<unknown>).catch((e) => e);
-      expect(failed).toBeInstanceOf(StoreError);
-      expect((failed as StoreError).operation).toBe(operation);
-    }
-    await real.dispose();
   });
 });

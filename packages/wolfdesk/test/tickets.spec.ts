@@ -1,11 +1,11 @@
-import type { Cache, Store } from "@rotorsoft/act";
+import { type Cache, ConcurrencyError, type Store } from "@rotorsoft/act";
 import { sandbox } from "@rotorsoft/act/test";
 import { Chance } from "chance";
 import { eq } from "drizzle-orm";
 import { builder, tenantCorrelator } from "../src/bootstrap.js";
-import { db, init_tickets_db, tickets } from "../src/drizzle/index.js";
+import { db, tickets } from "../src/drizzle/index.js";
 import { Priority } from "../src/schemas/index.js";
-import { type Actions, makeActions, target } from "./actions.js";
+import { type Actions, addDesk, makeActions, target } from "./actions.js";
 
 const chance = new Chance();
 
@@ -49,9 +49,8 @@ describe("tickets", { timeout: 30_000 }, () => {
       markTicketResolved,
       openTicket,
       requestTicketEscalation,
-    } = makeActions(app));
+    } = makeActions(app, (await addDesk(app)).category));
 
-    await init_tickets_db();
     await db.delete(tickets).catch((e) => console.error(e));
     // app.on("acked", (leases) => console.log("acked", leases));
   });
@@ -130,8 +129,8 @@ describe("tickets", { timeout: 30_000 }, () => {
     );
     await assignTicket(t, chance.guid(), now, now);
     await addMessage(t, "first message");
-    await markTicketResolved(t);
     await settle(t.stream, (row) => !!row?.escalationId && !!row.reassignAfter);
+    await markTicketResolved(t);
     await closeTicket(t);
     await settle(t.stream, (row) => !!row?.closedById);
 
@@ -192,6 +191,21 @@ describe("tickets", { timeout: 30_000 }, () => {
       expect(snapshot.state.escalationId).toBeDefined();
     });
 
+    it("should escalate in its action after losing a race", async () => {
+      const t = target(chance.guid(), "race to escalate");
+      await openTicket(t, "race to escalate", "Hello");
+      const commit = store.commit.bind(store);
+      const spy = vi
+        .spyOn(store, "commit")
+        .mockImplementationOnce(async (a) => {
+          throw new ConcurrencyError(a[0].stream, 0, [], 0);
+        });
+      spy.mockImplementation(commit);
+      const [snap] = await escalateTicket(t);
+      spy.mockRestore();
+      expect(snap.state.escalationId).toBeDefined();
+    });
+
     it("should close ticket at its closeAfter", async () => {
       const t = target(chance.guid(), "auto close me");
       const now = new Date();
@@ -217,6 +231,18 @@ describe("tickets", { timeout: 30_000 }, () => {
 
       const snapshot = await app.load("Ticket", t.stream);
       expect(snapshot.state.closedById).toBeDefined();
+    });
+
+    it("should leave a resolved ticket unescalated", async () => {
+      const t = target(chance.guid(), "resolved first");
+      // Assigned before the first drain, so this due-now deadline is the one
+      // the escalate defer fires on.
+      await openTicket(t, "resolved first", "Hello");
+      await assignTicket(t, chance.guid(), new Date(), future());
+      await markTicketResolved(t);
+      await settle(t.stream, (row) => !!row?.resolvedById);
+      const ticket = await findTicket(t.stream);
+      expect(ticket?.escalationId).toBeNull();
     });
 
     it("should reassign an escalated, unanswered ticket", async () => {

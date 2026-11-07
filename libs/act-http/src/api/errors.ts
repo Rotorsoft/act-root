@@ -1,6 +1,5 @@
 import {
   ConcurrencyError,
-  InvariantError,
   NonRetryableError,
   PreconditionError,
   StreamClosedError,
@@ -47,8 +46,6 @@ export type ErrorMapEntry = {
 export const ERROR_MAP = {
   ValidationError: { status: 422, code: "VALIDATION" },
   PreconditionError: { status: 409, code: "PRECONDITION" },
-  /** @deprecated Thrown only by the deprecated `.given` rules. Removed in 2.0. */
-  InvariantError: { status: 409, code: "INVARIANT" },
   ConcurrencyError: { status: 412, code: "CONCURRENCY" },
   StreamClosedError: { status: 410, code: "STREAM_CLOSED" },
   NonRetryableError: { status: 400, code: "NON_RETRYABLE" },
@@ -58,9 +55,7 @@ const lookup_known = (
   err: unknown
 ): { name: keyof typeof ERROR_MAP } | null => {
   if (err instanceof ValidationError) return { name: "ValidationError" };
-  // Before `InvariantError`, which it extends.
   if (err instanceof PreconditionError) return { name: "PreconditionError" };
-  if (err instanceof InvariantError) return { name: "InvariantError" };
   if (err instanceof ConcurrencyError) return { name: "ConcurrencyError" };
   if (err instanceof StreamClosedError) return { name: "StreamClosedError" };
   if (err instanceof NonRetryableError) return { name: "NonRetryableError" };

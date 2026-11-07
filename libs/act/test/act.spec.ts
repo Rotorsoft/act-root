@@ -100,10 +100,13 @@ describe("act", () => {
       committed.length = 0;
       await quiet_app.do("noop", { stream: "q2", actor }, {});
       // cold stream (history written straight to the store)
-      await scoped.commit("q3", [{ name: "bumped", data: {} }], {
-        correlation: "q3",
-        causation: {},
-      });
+      await scoped.commit(
+        [{ stream: "q3", msgs: [{ name: "bumped", data: {} }] }],
+        {
+          correlation: "q3",
+          causation: {},
+        }
+      );
       const [cold] = await quiet_app.do("noop", { stream: "q3", actor }, {});
       expect(cold.state.n).toBe(1);
       expect(committed).toEqual([]);

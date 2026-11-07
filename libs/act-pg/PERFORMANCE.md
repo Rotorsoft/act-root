@@ -364,6 +364,8 @@ compares it against the checked-in `perf-baseline.json`.
 |---|---|
 | `commit: single event` | single-row durable write (INSERT + version bump + notify, one round trip) |
 | `commit: 50-event batch` | multi-row INSERT — guards against a per-event round-trip regression |
+| `commit: 2 streams`, `commit: 3 streams` | one event to each of 2 or 3 streams in one commit — prices each extra stream (one more head in the probe, one more row in the INSERT) |
+| `commit: hot shared stream (8 writers)` | 8 commits at once, each appending to its own stream and one shared stream, retried on `ConcurrencyError` until all land |
 | `load: cold replay over snapshot floor` | the **#1024 path** — cold `load()` must read only the snapshot + tail, not the whole stream |
 | `drain: correlate+drain 50 events` | `claim()` (FOR UPDATE SKIP LOCKED) + replay query + `ack()` competing-consumer loop |
 | `query_stats: page of 50 (count+names)` | the DISTINCT ON / CTE plan stays indexed as the streams table grows |
@@ -1435,3 +1437,19 @@ Commit is unchanged, as expected — the reviver only ever ran on read. The read
 path gains ~9%, far less than the isolated figure, because the database round
 trip dominates a real load. The micro-benchmark is the honest measure of the
 change; the end-to-end number is the honest measure of what an operator sees.
+
+## Commits across streams (2.0, `commit(appends, meta)`)
+
+2.0 changes `Store.commit` to take one append per stream, all landing or none ([RFC 2251](https://github.com/Rotorsoft/act-root/blob/master/rfcs/2251-rules-across-streams.md)). act-pg keeps its two round trips: one unlocked probe now reads every stream's head with `unnest`, and one statement still takes the advisory lock and inserts every append's rows. The question was whether the plain single-stream commit paid for it.
+
+Both columns come from the Perf Baseline workflow, dispatched on the same day on the same GitHub runner type: master (1.x) and the 2.0 branch. p50 in ms.
+
+| Scenario | 1.x (master) | 2.0 | Note |
+|---|---|---|---|
+| `commit: single event` | 1.256 | 1.165 | no regression |
+| `commit: 50-event batch` | 2.553 | 2.451 | no regression |
+| `commit: 2 streams` (one event each) | — | 1.337 | +0.17 ms over one stream |
+| `commit: 3 streams` | — | 1.305 | about the same as two: the extra head and row ride the same two round trips |
+| `commit: hot shared stream (8 writers)` | — | 22.5 (p95 34.5) | all 8 land; each lost race is a retry from a fresh probe |
+
+The other scenarios moved within noise (`notify` 1.89 → 1.42, `drain` 8.70 → 7.17). A hot shared stream serializes, as RFC 2251 § Trade-offs says it must: eight commits that all append to one stream take about eight round trips of retries between them.

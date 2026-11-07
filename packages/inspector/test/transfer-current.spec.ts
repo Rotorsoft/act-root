@@ -60,10 +60,14 @@ describe("transfer → current (write-mode enabled)", () => {
     await caller.connect({ adapter: "inmemory" });
     const store = getActiveStore()!;
     await store.commit(
-      "round-trip-stream",
       [
-        { name: "Opened", data: { id: 1 } },
-        { name: "Updated", data: { id: 1, field: "x" } },
+        {
+          stream: "round-trip-stream",
+          msgs: [
+            { name: "Opened", data: { id: 1 } },
+            { name: "Updated", data: { id: 1, field: "x" } },
+          ],
+        },
       ],
       { correlation: "round-trip", causation: {} }
     );
@@ -91,10 +95,13 @@ describe("transfer → current (write-mode enabled)", () => {
   it("records the destructive `current`-target path in the audit log", async () => {
     await caller.connect({ adapter: "inmemory" });
     const store = getActiveStore()!;
-    await store.commit("audited-stream", [{ name: "Tick", data: {} }], {
-      correlation: "audit",
-      causation: {},
-    });
+    await store.commit(
+      [{ stream: "audited-stream", msgs: [{ name: "Tick", data: {} }] }],
+      {
+        correlation: "audit",
+        causation: {},
+      }
+    );
     const backup = await caller.transfer({
       source: { adapter: "current" },
       target: { adapter: "download" },
@@ -119,10 +126,13 @@ describe("transfer → current (write-mode enabled)", () => {
     const file = await buildActFile();
     await caller.connect({ adapter: "sqlite", file });
     const store = getActiveStore()!;
-    await store.commit("sqlite-stream", [{ name: "Tick", data: { n: 1 } }], {
-      correlation: "sqlite-transfer",
-      causation: {},
-    });
+    await store.commit(
+      [{ stream: "sqlite-stream", msgs: [{ name: "Tick", data: { n: 1 } }] }],
+      {
+        correlation: "sqlite-transfer",
+        causation: {},
+      }
+    );
     const backup = await caller.transfer({
       source: { adapter: "current" },
       target: { adapter: "download" },

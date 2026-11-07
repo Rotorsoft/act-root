@@ -24,21 +24,6 @@ describe("PinoLogger", () => {
     process.stdout.write = originalWrite;
   });
 
-  it("honors a transport from options, outside production too", async () => {
-    const file = join(mkdtempSync(join(tmpdir(), "act-pino-")), "app.log");
-    const logger = new PinoLogger({
-      level: "info",
-      options: {
-        transport: { target: "pino/file", options: { destination: file } },
-      },
-    });
-    logger.info({ hello: 1 }, "to my transport");
-    await logger.dispose();
-    await vi.waitFor(() => {
-      expect(readFileSync(file, "utf8")).toContain("to my transport");
-    });
-  });
-
   it("creates with default options", () => {
     const logger = new PinoLogger({ pretty: false });
     expect(logger.level).toBe("fatal"); // test env default
@@ -124,15 +109,17 @@ describe("PinoLogger", () => {
     const logger = new PinoLogger({ pretty: true });
     // Wait for the base logger's own transport thread to appear, rather than
     // a fixed delay: on a slow runner it can start after any fixed wait.
-    for (let i = 0; i < 150 && worker_count() <= start; i++)
-      await new Promise((r) => setTimeout(r, 20));
+    await vi.waitFor(() => expect(worker_count()).toBeGreaterThan(start), {
+      timeout: 20_000,
+      interval: 20,
+    });
     const before = worker_count();
 
     for (let i = 0; i < 5; i++) logger.child({ i });
     await new Promise((r) => setTimeout(r, 300));
 
     expect(worker_count()).toBe(before);
-  });
+  }, 30_000);
 
   it("a child built without the constructor still logs and nests", () => {
     // `Object.create(prototype)` skips field initialization, so prove the
@@ -186,5 +173,22 @@ describe("PinoLogger", () => {
     });
     logger.info("no transport");
     expect(output).toHaveLength(1);
+  });
+
+  // Last: its transport thread exits on its own time, and the thread counts above
+  // would read that as a change.
+  it("honors a transport from options, outside production too", async () => {
+    const file = join(mkdtempSync(join(tmpdir(), "act-pino-")), "app.log");
+    const logger = new PinoLogger({
+      level: "info",
+      options: {
+        transport: { target: "pino/file", options: { destination: file } },
+      },
+    });
+    logger.info({ hello: 1 }, "to my transport");
+    await logger.dispose();
+    await vi.waitFor(() => {
+      expect(readFileSync(file, "utf8")).toContain("to my transport");
+    });
   });
 });

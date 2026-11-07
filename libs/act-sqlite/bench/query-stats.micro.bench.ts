@@ -36,7 +36,7 @@ beforeAll(async () => {
         name: "Incremented",
         data: { by: k + 1 },
       }));
-      await store.commit(stream, msgs, {
+      await store.commit([{ stream, msgs }], {
         correlation: "bench",
         causation: {},
       });

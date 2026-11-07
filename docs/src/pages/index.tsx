@@ -442,6 +442,70 @@ function SectionHead({ title, children }: { title: string; children: ReactNode }
   );
 }
 
+const RULES_ACROSS_STREAMS = `const Enrollment = state({ Enrollment: Enroll })
+  .init(() => ({ course: "", student: "" }))
+  .emits({ Enrolled: Enroll })
+  .on({ Enroll })
+  // Load the course's stream for this decision.
+  .loads(Seats, (data) => \`course-\${data.course}\`, ["SeatTaken"])
+  .requires([{
+    description: "the course has a free seat",
+    holds: (_, __, ___, { Seats }) => Seats.taken < 3,
+  }])
+  // Both events commit together, or neither does.
+  .emit((data) => [
+    ["Enrolled", data],
+    ["SeatTaken", { student: data.student }],
+  ])
+  .build();`;
+
+function RulesAcrossStreams() {
+  const guideUrl = useBaseUrl("/docs/guides/rules-across-streams");
+  const migrateUrl = useBaseUrl("/docs/guides/migrating-to-2.x");
+  const mapUrl = useBaseUrl("/flows/rules-across-streams.html");
+  return (
+    <section className={styles.section}>
+      <div className={styles.split}>
+        <div className={styles.splitText}>
+          <SectionHead title="New in 2.0: rules across streams">
+            A unique email, a limited number of seats, moving something between streams: a rule that
+            spans streams needs no saga. All of it lands, or none of it does.
+          </SectionHead>
+          <ol className={styles.steps}>
+            <li>
+              <b>Load.</b> <code>.loads</code> brings another stream's state into the decision.
+            </li>
+            <li>
+              <b>Decide.</b> Preconditions and the action see that state, so the rule reads like any
+              other.
+            </li>
+            <li>
+              <b>Commit.</b> Every stream's events land in one atomic commit, each guarded by the
+              version it was loaded at. A race retries with fresh state.
+            </li>
+          </ol>
+          <div className={styles.heroCtas}>
+            <Link className={`button button--primary ${styles.cta}`} to={guideUrl}>
+              Read the guide
+            </Link>
+            <Link className={`button button--secondary ${styles.cta}`} href={mapUrl}>
+              Watch it play
+            </Link>
+            <Link className={`button button--secondary ${styles.cta}`} to={migrateUrl}>
+              Upgrade to 2.0
+            </Link>
+          </div>
+        </div>
+        <div className={styles.codePanel}>
+          <CodeBlock language="typescript" title="enrollment.ts">
+            {RULES_ACROSS_STREAMS}
+          </CodeBlock>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function Quickstart() {
   const getStartedUrl = useBaseUrl("/docs/intro");
   const { siteConfig } = useDocusaurusContext();
@@ -676,6 +740,7 @@ export default function Home() {
     >
       <main className={styles.main}>
         <Hero />
+        <RulesAcrossStreams />
         <Quickstart />
         <CompositionPatterns />
         <GeneratedTransports />

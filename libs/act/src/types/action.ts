@@ -326,7 +326,8 @@ export type Snapshot<TState extends Schema, TEvents extends Schemas> = {
    * replayed event on cache miss, or from the just-committed event on
    * snapshots returned by `action()`. Use this instead of
    * `event?.version` when you need the version even after a cache hit
-   * skipped the event replay entirely.
+   * skipped the event replay entirely. When `.snap` fires after an action,
+   * this is the snapshot's version, so it's what to pin a later action to.
    */
   readonly version: number;
   /**
@@ -368,25 +369,6 @@ export type Snapshot<TState extends Schema, TEvents extends Schemas> = {
 };
 
 /**
- * A rule declared with the deprecated `.given([...])`: a condition the
- * current state (and the actor) must meet for an action to run now.
- *
- * Despite the name, it's a precondition, not an invariant: it guards one
- * action and is false at other times by design. What must hold after every
- * action belongs in the state's schema, which every action checks before it
- * commits.
- *
- * @deprecated Declare the rule with `.requires([...])` as a
- * {@link Precondition} that ignores the payload. Removed in 2.0.
- * @template TState - State schema.
- * @template TActor - Actor type extending base Actor.
- */
-export type Invariant<TState extends Schema, TActor extends Actor = Actor> = {
-  description: string;
-  valid: (state: Readonly<TState>, actor?: TActor) => boolean;
-};
-
-/**
  * A precondition is a named rule an action requires before it runs: what
  * the state, the actor and the payload must meet for the action to run now,
  * such as "the ticket must be open". Declared with `.requires([...])` and
@@ -404,18 +386,44 @@ export type Invariant<TState extends Schema, TActor extends Actor = Actor> = {
  * @template TState - State schema.
  * @template TPayload - The action payload, or the part of it the rule reads.
  * @template TActor - Actor type extending base Actor.
+ * @template TLoaded - The states the action loads, read in `holds`' fourth argument.
  */
 export type Precondition<
   TState extends Schema,
   TPayload,
   TActor extends Actor = Actor,
+  TLoaded extends Record<string, Schema | undefined> = {},
 > = {
   description: string;
   holds: (
     payload: Readonly<TPayload>,
     state: Readonly<TState>,
-    actor?: TActor
+    actor: TActor | undefined,
+    loaded: Readonly<TLoaded>
   ) => boolean;
+};
+
+/**
+ * One `.loads(...)` of an action: another state the decision needs, at the
+ * stream `target` names, and the events of that state the action may emit
+ * to that stream. A load without events is a read: nothing is appended
+ * to its stream, and it isn't guarded.
+ *
+ * Built by the state builder; resolved to the registered state by
+ * `act().build()`.
+ */
+export type Load = {
+  /** The loaded state; after build, the one registered under its name. */
+  readonly state: State<any, any, any>;
+  /**
+   * The stream to load, from the payload and the action's state; `undefined`
+   * skips this load.
+   */
+  readonly target: (payload: any, state: any) => string | undefined;
+  /** The loaded state's events the action may emit to that stream. */
+  readonly events: readonly string[];
+  /** The key of this load in `loaded`: the load's name, or the state's. */
+  readonly name: string;
 };
 
 /**
@@ -495,11 +503,17 @@ export type ActionHandler<
   TEvents extends Schemas,
   TActions extends Schemas,
   TKey extends keyof TActions,
+  TLoaded extends Record<string, Schema | undefined> = {},
+  TRouted extends Schemas = {},
 > = (
   action: Readonly<TActions[TKey]>,
   snapshot: Readonly<Snapshot<TState, TEvents>>,
-  target: Target
-) => Emitted<TEvents> | Emitted<TEvents>[] | undefined;
+  target: Target,
+  loaded: Readonly<TLoaded>
+) =>
+  | Emitted<TEvents & TRouted>
+  | readonly Emitted<TEvents & TRouted>[]
+  | undefined;
 
 /**
  * Maps action names to their handlers.
@@ -516,15 +530,6 @@ export type ActionHandlers<
 };
 
 /**
- * Maps action names to the deprecated `.given` rules checked before the action's handler runs.
- * @template TState - State schema.
- * @template TActions - Action schemas.
- */
-export type GivenHandlers<TState extends Schema, TActions extends Schemas> = {
-  [TKey in keyof TActions]?: Invariant<TState>[];
-};
-
-/**
  * Maps action names to the preconditions they require.
  * @template TState - State schema.
  * @template TActions - Action schemas.
@@ -533,7 +538,12 @@ export type RequiresHandlers<
   TState extends Schema,
   TActions extends Schemas,
 > = {
-  [TKey in keyof TActions]?: Precondition<TState, TActions[TKey]>[];
+  [TKey in keyof TActions]?: Precondition<
+    TState,
+    TActions[TKey],
+    Actor,
+    Schemas
+  >[];
 };
 
 // ---------------------------------------------------------------------------
@@ -739,8 +749,12 @@ export type State<
   init: () => Readonly<TState>;
   patch: PatchHandlers<TState, TEvents>;
   on: ActionHandlers<TState, TEvents, TActions>;
-  given?: GivenHandlers<TState, TActions>;
   requires?: RequiresHandlers<TState, TActions>;
+  /**
+   * The other states each action loads, keyed by action name. Set by
+   * `.loads(...)`; an action without an entry loads only its own stream.
+   */
+  loads?: { [TKey in keyof TActions]?: readonly Load[] };
   snap?: (snapshot: Snapshot<TState, TEvents>) => boolean;
   /**
    * Per-action retry policy keyed by action name. Set by

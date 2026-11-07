@@ -255,10 +255,13 @@ describe("correlate: the armed flag", () => {
 
       // Write straight to the store, the way another process would — nothing
       // arms this Act.
-      await raw.commit("remote-1", [{ name: "Ticked", data: {} }], {
-        correlation: "c",
-        causation: {},
-      });
+      await raw.commit(
+        [{ stream: "remote-1", msgs: [{ name: "Ticked", data: {} }] }],
+        {
+          correlation: "c",
+          causation: {},
+        }
+      );
       const idle = count_queries(raw);
       await app.correlate();
       expect(idle.n).toBe(0); // still parked — no local signal

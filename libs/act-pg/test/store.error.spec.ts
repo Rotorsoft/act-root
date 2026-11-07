@@ -54,12 +54,12 @@ describe("PostgresStore", () => {
   });
 
   describe("commit", () => {
-    it("returns [] for empty events", async () => {
-      // @ts-expect-error mock
-      vi.spyOn(pg.Pool.prototype, "query").mockResolvedValue({ rows: [] });
+    it("returns [] for no appends, without touching the database", async () => {
+      const connect = vi.spyOn(pg.Pool.prototype, "connect");
       await expect(
-        store.commit("stream", [], { correlation: "c", causation: {} })
+        store.commit([], { correlation: "c", causation: {} })
       ).resolves.toEqual([]);
+      expect(connect).not.toHaveBeenCalled();
     });
 
     it("wraps a driver error from the head probe in StoreError('commit')", async () => {
@@ -69,7 +69,7 @@ describe("PostgresStore", () => {
         makeClient(vi.fn().mockRejectedValue(cause))
       );
       const error = await store
-        .commit("stream", [{ name: "E", data: {} }], {
+        .commit([{ stream: "stream", msgs: [{ name: "E", data: {} }] }], {
           correlation: "c",
           causation: {},
         })
@@ -99,7 +99,7 @@ describe("PostgresStore", () => {
         notify: true,
       });
       const error = await notifying
-        .commit("stream", [{ name: "E", data: {} }], {
+        .commit([{ stream: "stream", msgs: [{ name: "E", data: {} }] }], {
           correlation: "c",
           causation: {},
         })
@@ -127,7 +127,7 @@ describe("PostgresStore", () => {
         makeClient(queryMock)
       );
       await expect(
-        store.commit("stream", [{ name: "E", data: {} }], {
+        store.commit([{ stream: "stream", msgs: [{ name: "E", data: {} }] }], {
           correlation: "c",
           causation: {},
         })
@@ -607,7 +607,7 @@ describe("PostgresStore", () => {
         StoreError
       );
       await expect(
-        store.commit("s", [{ name: "A", data: {} }], {
+        store.commit([{ stream: "s", msgs: [{ name: "A", data: {} }] }], {
           correlation: "",
           causation: {},
         })

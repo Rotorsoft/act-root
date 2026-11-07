@@ -13,6 +13,7 @@ import {
   run_close_cycle,
 } from "./internal/close-cycle.js";
 import {
+  check_store,
   DEFAULT_LEASE_MILLIS,
   MAX_SHUTDOWN_GRACE_MS,
   resolveAutocloseConfig,
@@ -224,8 +225,8 @@ export class Act<
    * event-specific payload.
    *
    * `committed` also takes a state, as a `State` or its name: the listener
-   * then hears only commits by that state's actions, with its snapshots
-   * typed from that state.
+   * then hears only commits to that state's streams, whichever action
+   * appended them, with its snapshots typed from that state.
    *
    * @example
    * ```typescript
@@ -349,6 +350,7 @@ export class Act<
     validate_only_lanes(options.onlyLanes, this._declared_lanes);
     // Every Act runs in its own ports frame (the singletons when unscoped),
     // so a shared Act never inherits its caller's frame.
+    if (options.scoped) check_store(options.scoped.store);
     this._ports = options.scoped ?? default_scope();
     const ports = this._ports;
     this._scoped = make_run_scoped({
@@ -679,7 +681,7 @@ export class Act<
    * Executes an action: validates the payload, loads the state, checks its
    * preconditions, runs the handler, folds the events it emits, checks the
    * state's invariants (its schema) on the result, and commits them with
-   * optimistic concurrency on the stream. The reactions to those events
+   * optimistic concurrency on every stream it appends to. The reactions to those events
    * settle on their own (unless `autoSettle: false`).
    *
    * @template TKey - Action name from registered actions
@@ -689,7 +691,8 @@ export class Act<
    * @param options - Per-call dispatch options ({@link DoOptions}) —
    *   `reactingTo` to thread correlation, `correlator` to override the
    *   framework or orchestrator-level correlator for this call only.
-   * @returns Array of snapshots for all affected states (usually one)
+   * @returns The snapshots of the action's own stream, one per event appended
+   *   to it; the loaded snapshot alone when the action commits nothing
    *
    * @throws {ValidationError} If the payload doesn't match the action schema,
    *   or the state the action leaves breaks the state schema
@@ -737,15 +740,30 @@ export class Act<
       );
       // An action that emits nothing returns the loaded snapshot, which has
       // no `patch`: nothing committed, so nothing to wake or announce.
+      // Snapshots of the streams its loads appended to follow its own.
       if (!snapshots[0].patch) return snapshots;
+      const me = this.registry.actions[action];
       // A local commit runs its reactions the way a remote one does.
       this._wake(snapshots.map((s) => s.event!.name as string));
-      this.emit("committed", snapshots);
-      this._notify(
-        `committed:${this.registry.actions[action].name}`,
-        snapshots
-      );
-      return snapshots;
+      // `committed` fires once per stream appended to, its own first, so a
+      // listener always gets one stream's snapshots, as without loads.
+      const by_stream = new Map<string, typeof snapshots>();
+      for (const s of snapshots) {
+        const of_stream = by_stream.get(s.event!.stream);
+        if (of_stream) of_stream.push(s);
+        else by_stream.set(s.event!.stream, [s]);
+      }
+      for (const [stream, of_stream] of by_stream) {
+        const owner =
+          stream === target.stream
+            ? me
+            : me.loads![action]!.find((l) =>
+                l.events.includes(of_stream[0].event!.name as string)
+              )!.state;
+        this.emit("committed", of_stream);
+        this._notify(`committed:${owner.name}`, of_stream);
+      }
+      return snapshots.filter((s) => s.event!.stream === target.stream);
     });
   }
 

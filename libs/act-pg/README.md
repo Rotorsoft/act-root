@@ -133,7 +133,7 @@ const app = act()
 app.on("notified", (n) => sse.broadcast(n)); // optional fan-out
 ```
 
-When `notify: true`: `commit()` issues one `NOTIFY act_commit_<schema>_<table>` per transaction with the full event batch as JSON. The store self-filters its own commits (per-instance UUID), so the `"notified"` lifecycle event surfaces only cross-process activity. Size your pool to account for one extra dedicated LISTEN client per process.
+When `notify: true`: `commit()` issues one `NOTIFY act_commit_<schema>_<table>` per stream it appends to, with that stream's events as JSON. The store self-filters its own commits (per-instance UUID), so the `"notified"` lifecycle event surfaces only cross-process activity. Size your pool to account for one extra dedicated LISTEN client per process.
 
 `notify` is a hint, not a contract — lost notifications fall back to the existing debounce/poll path. Correctness is preserved.
 
@@ -181,9 +181,9 @@ Both adapters pass the same conformance suite — your application code doesn't 
 
 ## Compatibility
 
-- **Node**: >=22.23.3
+- **Node**: >=22.23.4
 - **PostgreSQL**: >=14 (uses `FOR UPDATE SKIP LOCKED`, `LISTEN`/`NOTIFY`, JSONB)
-- **Peer**: `@rotorsoft/act` >=0.39.0, `zod` ^4.4.3
+- **Peer**: `@rotorsoft/act` of the same major, `zod` ^4.6.7
 - **Bundled deps**: `pg` ^8.20.0
 - **Module formats**: ESM + CJS
 

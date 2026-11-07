@@ -178,9 +178,7 @@ async function committer(s, deadline, m) {
   while (Date.now() < deadline) {
     await timed(m.commit, () =>
       s.commit(
-        `hot-${n % 50}`,
-        [{ name: "Opened", data: {} }],
-        { correlation: "c", causation: {} }
+        [{ stream: `hot-${n % 50}`, msgs: [{ name: "Opened", data: {} }] }], { correlation: "c", causation: {} }
       )
     ).catch(() => {});
     n++;

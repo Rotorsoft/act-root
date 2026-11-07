@@ -38,7 +38,15 @@ describe("NUL bytes are refused by Postgres, legibly", () => {
 
   it("translates the jsonb parser's refusal (22P05)", async () => {
     const err = await store
-      .commit("nul-data", [{ name: "Noted", data: { note: `a${NUL}b` } }], meta)
+      .commit(
+        [
+          {
+            stream: "nul-data",
+            msgs: [{ name: "Noted", data: { note: `a${NUL}b` } }],
+          },
+        ],
+        meta
+      )
       .catch((e) => e as Error);
 
     expect(err).toBeInstanceOf(ValidationError);
@@ -52,7 +60,10 @@ describe("NUL bytes are refused by Postgres, legibly", () => {
 
   it("translates a NUL in a stream name, which the head check reaches first", async () => {
     const err = await store
-      .commit(`nul${NUL}stream`, [{ name: "Noted", data: {} }], meta)
+      .commit(
+        [{ stream: `nul${NUL}stream`, msgs: [{ name: "Noted", data: {} }] }],
+        meta
+      )
       .catch((e) => e as Error);
 
     expect(err).toBeInstanceOf(ValidationError);
@@ -62,7 +73,10 @@ describe("NUL bytes are refused by Postgres, legibly", () => {
     // `name` is text, so this trips the UTF-8 decoder rather than the jsonb
     // parser — a different SQLSTATE for the same user mistake.
     const err = await store
-      .commit("nul-name", [{ name: `No${NUL}ted`, data: {} }], meta)
+      .commit(
+        [{ stream: "nul-name", msgs: [{ name: `No${NUL}ted`, data: {} }] }],
+        meta
+      )
       .catch((e) => e as Error);
 
     expect(err).toBeInstanceOf(ValidationError);
@@ -73,8 +87,12 @@ describe("NUL bytes are refused by Postgres, legibly", () => {
 
   it("control — the same payload without a NUL commits", async () => {
     const committed = await store.commit(
-      "nul-control",
-      [{ name: "Noted", data: { note: "ab" } }],
+      [
+        {
+          stream: "nul-control",
+          msgs: [{ name: "Noted", data: { note: "ab" } }],
+        },
+      ],
       meta
     );
     expect(committed.length).toBe(1);

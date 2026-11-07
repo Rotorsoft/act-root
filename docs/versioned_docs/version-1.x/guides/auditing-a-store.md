@@ -1,0 +1,221 @@
+---
+id: auditing-a-store
+title: Auditing a store
+sidebar_position: 9
+---
+
+# Auditing a store
+
+`app.audit(...)` is the operator's runbook in code form. Given a connected store, it answers the question **"what should I do with this store?"** by walking the relevant tables once and yielding per-category findings — each tagged with the remediation it suggests. Same operator-driven shape as `app.close()`, `app.reset()`, `app.unblock()`: never auto-invoked by the framework; you decide when to run it (CI gate, scheduled job, ad-hoc forensics) and what to do with the findings.
+
+## Why this lives on `IAct` and not a separate package
+
+Earlier drafts proposed a standalone `@rotorsoft/act-scan` tool. Reshaped because:
+
+- The orchestrator already has the schema registry, the lane registry, the state-to-snapshot map, and the event-loading machinery. A standalone tool would re-import the registry separately (drift opportunity) and re-implement validation (the exact surface we want to *not* fork).
+- Same operator-driven category as `app.close()` / `app.reset()` / `app.unblock()`. Each is "operator decides when this runs, framework never auto-invokes." Discipline lives in the calling pattern, not the packaging.
+- `app.audit()` is right there in autocomplete next to the other operator primitives.
+
+## The shape
+
+```typescript no-check
+import { app } from "./my-app.js";
+
+// Run everything
+for await (const finding of app.audit()) {
+  console.log(finding);
+}
+
+// Narrow scope — common in scheduled audits
+for await (const finding of app.audit(["schema", "deprecated-load"], {
+  query: { created_after: lastScanTimestamp },
+  thresholds: { deprecated_min: 0.10 },
+})) {
+  await escalate(finding);
+}
+```
+
+Returns an `AsyncIterable` so callers can `break` early. Each finding lands as soon as its category's pass completes; nothing buffers the full report in memory.
+
+## Single-scan multiplex
+
+Every requested category contributes a *pass* with optional per-row callbacks. The dispatcher determines the union of needed data sources (events / streams / stats), runs each **once**, and broadcasts each row to all interested passes. Worst case: three scans total no matter how many categories you ask for.
+
+The stream scan pages through the whole table with the keyset cursor, so stream-derived findings cover every subscription regardless of how many there are — one subscription per aggregate is normal with dynamic reaction targets. The event scan is the one you bound, via `AuditOptions.query`.
+
+Most categories share data — close-candidate, restart-candidate, snapshot-drift, deprecated-load, and routing-health all consume the same `query_stats` pass; schema, correlation-gaps, and clock-anomalies all hang off the same events walk. Categories that need follow-up work (snapshot-drift fetching the last `__snapshot__` per drifted stream, for example) do that in a `finalize` hook with targeted store calls.
+
+The shared stats pass excludes `__snapshot__`, so every head and count a category sees is a **domain** figure. This matters because a snapshot is committed immediately after the domain event that triggered it, which would otherwise make `__snapshot__` the head of every snapshotting stream — and the head-name check that recognizes an already-closed stream would then skip it. `__tombstone__` is deliberately *not* excluded: a tombstoned stream really is closed, and that check is what recognizes it. Snapshot tallies (`snaps`) come from per-candidate lookups in `finalize` rather than the shared histogram.
+
+## Categories
+
+Each category answers a different operational question and pairs with a remediation.
+
+### `schema` → "fix the data model"
+
+Walks every event in the audit window, parses against the Zod schema the registry currently declares for its name. Two failure modes:
+
+- **`unknown_event_name`** — event sits on disk, registry has no entry. Common after a rename in the builder without an `_v<n>` migration: events committed under the old name remain.
+- **`schema_validation_failed`** — event matches a known name but fails the current schema. Common after tightening a schema in-place (added a required field, narrowed a type).
+
+Findings carry the event id + stream so you can drill straight to the offending row. Zod's `error` object is forwarded for callers that want per-issue detail.
+
+`sensitive(...)` fields are masked off before the parse. Those keys live in the `pii` sidecar by design, so their absence from `data` is correct, not corruption — validating against the full schema reported every healthy sensitive event as invalid ([#1424](https://github.com/Rotorsoft/act-root/issues/1424)). The rest of the payload is still validated, so a genuinely malformed non-sensitive field is still caught. One case is skipped outright: an event whose schema is a `z.union` with sensitive fields in its variants, since the split keys can't be masked off a union — the pass reports nothing rather than a guaranteed false positive.
+
+**Remediation:** rewrite the affected reducers, version the event (`Foo` → `Foo_v2`), or `app.close()` the poisoned streams.
+
+### `deprecated-load` → "close the heaviest legacy carriers"
+
+Workspace-wide event-name histogram classified by the framework's `_v<digits>` rule (ACT-403). For each deprecated event whose share of the total store equals or exceeds `deprecated_min` (default 0.10), yields a finding with the top-10 stream carriers sorted by per-stream count.
+
+**Remediation:** `app.close([{stream}, ...])` on the heaviest carriers. The migration's already happened in the registry; this surfaces the rump on-disk that's still costing replay time.
+
+### `close-candidate` → `app.close(...)`
+
+Two flavours, evaluated per stream:
+
+- **`idle`** — stream's head event committed more than `idle_days` (default 90) ago. The "stream has gone quiet" signal.
+- **`terminal`** — stream's head event name is in the operator-supplied `terminal_events` list. The framework doesn't declare what's terminal for a domain (wrong scope); you pass a list like `["OrderShipped", "TicketClosed"]`.
+
+Each finding carries `restart_supported`, derived from whether the stream's owning state declares a `.snap()` reducer. Drives the choice between `app.close([{stream}])` (full tombstone) and `app.close([{stream, restart: true}])` (truncate + seed snapshot).
+
+### `restart-candidate` → `app.close([{stream, restart: true}])`
+
+Streams above `restart_min` (default 10,000) **domain** events whose owning state has a `.snap()` reducer — snapshots don't pad the count. Restart shrinks the working set without losing state. Streams whose state doesn't support snapshots are silently skipped (restart wouldn't work) — they belong in the close-candidate buckets instead.
+
+### `reaction-health` → `app.unblock(...)` / `app.reset(...)`
+
+Three sub-statuses, evaluated per stream position:
+
+- **`blocked`** — drain has given up on this stream. Remediation: fix the underlying issue, then `app.unblock(stream)` to resume from where it stopped. Use `app.reset` only to rebuild a projection: it replays every event (see [Blocked streams](../concepts/error-handling.md#blocked-streams)).
+- **`near-block`** — `retry >= near_block` (default 3) without yet being blocked. Heads-up that the stream is close to blocking (if `blockOnError` is set on the reaction).
+- **`stuck-backoff`** — `leased_until` is in the past but `leased_by` is still set: a worker took the lease and never released it, typically because it crashed mid-attempt, and no other worker has re-claimed the stream yet. Threshold: `stuck_minutes` (default 30).
+
+### `snapshot-drift` → `load({snap: true})` or wait
+
+Streams that have accumulated many events since their last `__snapshot__` marker. Cold loads without a snapshot pay the full replay cost on every load — operationally painful for hot read paths. Default threshold: `drift_min` (500 events). Skips streams whose owning state doesn't declare `.snap()`.
+
+### `routing-health` → restart-with-new-config
+
+- **`unknown-lane`** — stream subscription row's `lane` field isn't in the running registry's declared lane set. Happens when `withLane(...)` is renamed or removed but the streams table still pins existing streams to the deprecated name. Lane assignment is restart-driven (`subscribe()` UPSERTs lane on every call), so the resolution is "restart with the lane re-declared, or re-subscribe streams under the new name." The check compares against the app's **declared** lane universe (`default` plus every `.withLane` name), not the lanes whose controllers happen to be running on this instance — so a worker started with `onlyLanes: ["fast"]` does not false-flag a stream correctly assigned to the `slow` lane that a peer worker drains ([#1224](https://github.com/Rotorsoft/act-root/issues/1224)).
+- **`unrouted`** — events in the store whose name has no registered reaction. Could be intentional (pure-projection events) or a bug (resolver typo, removed reaction). The audit surfaces the count; you decide.
+
+### `correlation-gaps` → fix upstream correlator
+
+Events whose `meta.causation.event.id` references a parent id not present in the audit window. A close's own tombstone is left out. An event whose parent was on a stream later closed or pruned is still listed, and that isn't damage. Single-pass: collects ids and causation tuples during the shared event scan, post-processes in `drain`.
+
+**Remediation:** fix the correlator misconfig that's writing dangling parent references. Doesn't necessarily mean data is corrupted — but it does mean the causation chain breaks for some events.
+
+### `clock-anomalies` → infra remediation
+
+Future-dated `created` timestamps and per-stream out-of-order commits. Surfaces clock skew during deploys, NTP drift, or container clock-jumps. Framework can't act on these directly — remediation is infrastructure-layer — but operators tend to ask "is anything weird in this store?" and a clock check is cheap to fold in.
+
+### `unreadable-events` → repair or forget the row
+
+Events the store could not hand back at all. Today that means one thing: a `pii` payload the configured key cannot decrypt — corrupt ciphertext, bit-rot, a partial restore, or a [key rotation](./pii-encryption-at-rest.md) that outran a stream's correlate checkpoint.
+
+Every other category describes an event the audit could read. This one names the row that stopped it being read, which the failing read alone does not give: the read aborts, so nothing else reports the stream, and `blocked_streams()` is empty because nothing is blocked.
+
+The audit finds the row itself, with no help from the adapter. When its scan trips, it re-reads the single next row with `with_pii: false` — a read that declines the payload cannot fail on the same cause — which returns that row's stream and id. It reports the finding and resumes past it, so **one pass reports every unreadable row** rather than only the first.
+
+```typescript no-check
+for await (const f of app.audit(["unreadable-events"])) {
+  // { category: "unreadable-events", stream: "orders-42",
+  //   event_id: 90210, reason: "pii_decrypt_failed", error: … }
+  console.error(f);
+}
+```
+
+**Remediation:** restore the row from a backup taken under the key that wrote it, re-key it, or `app.forget()` the stream's sensitive payload if it is genuinely unrecoverable.
+
+Reactions are not blocked by such a row — the correlate scan declines the payload it does not need, so it reads past a corrupt one ([#1675](https://github.com/Rotorsoft/act-root/issues/1675)). Handlers that *do* read the payload will still fail on the affected stream, and that stream will block once the retry budget is spent and show up in `blocked_streams()` with the fetch error, which is the right blast radius. Because a failed read has no payload to say which reaction it was for, the budget used is the most conservative one across the app's reactions: the largest `maxRetries`, and no block at all if any reaction opted out with `blockOnError: false` ([#1774](https://github.com/Rotorsoft/act-root/issues/1774)).
+
+## Recipes
+
+### CI gate: fail the build on schema drift since the last release
+
+```typescript no-check
+import { app } from "./my-app.js";
+import { exit } from "node:process";
+
+const lastReleaseTime = new Date(process.env.LAST_RELEASE_AT!);
+const findings: unknown[] = [];
+for await (const f of app.audit(["schema"], {
+  query: { created_after: lastReleaseTime },
+})) {
+  findings.push(f);
+}
+if (findings.length > 0) {
+  console.error(`Schema drift since ${lastReleaseTime.toISOString()}:`);
+  for (const f of findings) console.error(f);
+  exit(1);
+}
+```
+
+### Nightly cron: surface migration backlog to Slack
+
+```typescript no-check
+const deprecatedFindings: unknown[] = [];
+for await (const f of app.audit(["deprecated-load"], {
+  thresholds: { deprecated_min: 0.05 },
+})) {
+  deprecatedFindings.push(f);
+}
+if (deprecatedFindings.length > 0) {
+  await slackPost("#ops", {
+    text: `Heads up — ${deprecatedFindings.length} deprecated event families ≥ 5% of the store.`,
+    attachments: deprecatedFindings.map((f) => ({ text: JSON.stringify(f) })),
+  });
+}
+```
+
+### Ad-hoc: which streams are ready to close?
+
+```typescript no-check
+for await (const f of app.audit(["close-candidate", "restart-candidate"], {
+  thresholds: {
+    idle_days: 60,
+    terminal_events: ["OrderShipped", "TicketClosed"],
+  },
+})) {
+  console.log(f);
+}
+```
+
+### Scheduled health check: drain, snapshots, correlation
+
+```typescript no-check
+for await (const f of app.audit([
+  "reaction-health",
+  "snapshot-drift",
+  "correlation-gaps",
+])) {
+  await emitMetric(f);
+}
+```
+
+## Thresholds
+
+All thresholds are operator-tunable per call:
+
+| Threshold | Default | Used by |
+|---|---|---|
+| `idle_days` | 90 | `close-candidate` (idle) |
+| `restart_min` | 10,000 | `restart-candidate` |
+| `stuck_minutes` | 30 | `reaction-health` (stuck-backoff) |
+| `near_block` | 3 | `reaction-health` (near-block) |
+| `deprecated_min` | 0.10 | `deprecated-load` |
+| `drift_min` | 500 | `snapshot-drift` |
+| `terminal_events` | (none) | `close-candidate` (terminal) |
+
+## What `app.audit()` does NOT do
+
+- **Auto-remediation.** Surfaces candidates; you decide. No "auto-close idle streams" toggle.
+- **Recurring scheduling.** You wire `app.audit()` into your own cron / CI / Slack-bot — the framework doesn't ship a scheduler.
+- **Physical store health.** Fragmentation, table bloat, `VACUUM` pressure, partition rotation — those are *store-operator* concerns, not framework concerns, and they're per-adapter. The audit covers framework-aware questions where Act has insight the store layer doesn't.
+
+## See also
+
+- [Event schema evolution](../architecture/event-schema-evolution.md) — the `_v<digits>` rule that `schema` and `deprecated-load` build on.
+- [Concurrency model](../architecture/concurrency-model.md) — how the streams table that `reaction-health` and `routing-health` read works.
+- [Cache and snapshots](../architecture/cache-and-snapshots.md) — why `snapshot-drift` matters for load latency.

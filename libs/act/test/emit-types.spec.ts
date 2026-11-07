@@ -1,0 +1,471 @@
+/**
+ * What the editor says about an action declaration. These run in the
+ * type-checker (`pnpm typecheck`). `@ts-expect-error` covers only the next
+ * line, so each one also pins where the mistake is marked: if errors move back
+ * to the word `emit`, the directive goes unused and the typecheck fails.
+ */
+import { describe, expect, expectTypeOf, it } from "vitest";
+import { z } from "zod";
+import {
+  type Actor,
+  type Precondition,
+  state,
+  ZodEmpty,
+} from "../src/index.js";
+
+const AgentLoad = state({ AgentLoad: z.object({ open: z.number() }) })
+  .init(() => ({ open: 0 }))
+  .emits({
+    Taken: z.object({
+      at: z.number(),
+      by: z.object({ id: z.string() }).optional(),
+    }),
+    Dropped: ZodEmpty,
+  })
+  .build();
+
+const Other = state({ Other: z.object({ o: z.string() }) })
+  .init(() => ({ o: "" }))
+  .emits({ Oed: ZodEmpty })
+  .build();
+
+const Move = z.object({ agent: z.string() });
+const ticket = () =>
+  state({ Ticket: z.object({ agent: z.string().optional() }) })
+    .init(() => ({}))
+    .emits({
+      Moved: Move,
+      Tagged: z.object({ tags: z.array(z.object({ t: z.string() })) }),
+      Open: z.object({ meta: z.unknown(), any: z.any() }),
+      Dated: z.object({
+        at: z.date(),
+        pair: z.tuple([z.number(), z.string()]),
+      }),
+      Contacted: z.union([
+        z.object({ kind: z.literal("a"), a: z.string() }),
+        z.object({ kind: z.literal("b"), b: z.string() }),
+      ]),
+    });
+const moving = () =>
+  ticket()
+    .on({ Move })
+    .loads(AgentLoad, (_, s) => `a-${s.agent}`, ["Dropped"], "current")
+    .loads(AgentLoad, (d) => `a-${d.agent}`, ["Taken"], "next");
+
+describe("what compiles", () => {
+  it("types a load as possibly missing only when its target can skip it", () => {
+    ticket()
+      .on({ Move })
+      .loads(AgentLoad, (_, s) => s.agent && `a-${s.agent}`, ["Dropped"], "old")
+      .loads(AgentLoad, (d) => `a-${d.agent}`, ["Taken"], "next")
+      .requires([
+        {
+          description: "typed in rules",
+          holds: (_, __, ___, loaded) => {
+            expectTypeOf(loaded.old).toEqualTypeOf<
+              { open: number } | undefined
+            >();
+            expectTypeOf(loaded.next).toEqualTypeOf<{ open: number }>();
+            // @ts-expect-error a load that can be skipped may be missing
+            return loaded.old.open < loaded.next.open;
+          },
+        },
+      ])
+      .emit((data, _, __, { old }) =>
+        old?.open === 0
+          ? [
+              ["Moved", data],
+              ["Taken", { at: 1 }],
+            ]
+          : ["Moved", data]
+      )
+      .build();
+    expect(true).toBe(true);
+  });
+
+  it("types the handler's arguments", () => {
+    moving().emit((data, { state }, { stream }, { current, next }) => {
+      expectTypeOf(data).toEqualTypeOf<Readonly<{ agent: string }>>();
+      expectTypeOf(state.agent).toEqualTypeOf<string | undefined>();
+      expectTypeOf(stream).toEqualTypeOf<string>();
+      expectTypeOf(current.open).toEqualTypeOf<number>();
+      expectTypeOf(next.open).toEqualTypeOf<number>();
+      return [["Moved", data]];
+    });
+  });
+
+  it("takes every form of return, with no cast", () => {
+    moving().emit((data) => ["Moved", data]);
+    moving().emit((data) => [["Moved", data]]);
+    moving().emit(() => undefined);
+    moving().emit(() => []);
+    // The action's own event needn't come first.
+    moving().emit((data) => [
+      ["Taken", { at: 1 }],
+      ["Moved", data],
+    ]);
+    moving().emit((data) => [
+      ["Moved", data],
+      ["Taken", { at: 1, by: { id: "x" } }],
+    ]);
+    moving().emit((data, { state }) =>
+      state.agent
+        ? [
+            ["Moved", data],
+            ["Dropped", {}],
+            ["Taken", { at: 1 }],
+          ]
+        : [
+            ["Moved", data],
+            ["Taken", { at: 1 }],
+          ]
+    );
+    moving().emit((data, { state }) => {
+      if (state.agent) return [["Moved", data]];
+      return undefined;
+    });
+    moving().emit(() => [
+      ["Tagged", { tags: [{ t: "x" }] }],
+      ["Contacted", { kind: "a", a: "x" }],
+    ]);
+    moving().emit(() => ["Open", { meta: { any: "thing" }, any: { x: 1 } }]);
+    moving().emit(() => ["Dated", { at: new Date(), pair: [1, "x"] }]);
+    moving().emit(() => {
+      throw new Error("refused");
+    });
+    ticket().on({ Move }).emit("Moved");
+    moving().emit("Moved");
+  });
+
+  it("keeps the types of a function with no parameters", () => {
+    ticket()
+      .on({ Clear: ZodEmpty })
+      .emit(() => ["Moved", { agent: "x" }]);
+  });
+});
+
+describe("a mistake is marked on the entry", () => {
+  it("a misspelled event", () => {
+    moving().emit((data) => [
+      // @ts-expect-error did you mean "Moved"?
+      ["Movedd", data],
+    ]);
+  });
+
+  it("a misspelled event listed on a load", () => {
+    moving().emit((data) => [
+      ["Moved", data],
+      // @ts-expect-error did you mean "Taken"?
+      ["Takenn", { at: 1 }],
+    ]);
+  });
+
+  it("an event no load lists", () => {
+    moving().emit((data) => [
+      ["Moved", data],
+      // @ts-expect-error not an event of this state or its loads
+      ["Unlisted", {}],
+    ]);
+  });
+
+  it("a wrong field type", () => {
+    moving().emit((data) => [
+      ["Moved", data],
+      // @ts-expect-error `at` is a number
+      ["Taken", { at: "x" }],
+    ]);
+  });
+
+  it("a missing field", () => {
+    moving().emit((data) => [
+      ["Moved", data],
+      // @ts-expect-error `at` is required
+      ["Taken", {}],
+    ]);
+  });
+
+  it("an extra field", () => {
+    moving().emit((data) => [
+      ["Moved", data],
+      // @ts-expect-error `extra` isn't in the schema
+      ["Taken", { at: 1, extra: 2 }],
+    ]);
+  });
+
+  it("an extra field in a nested object", () => {
+    moving().emit((data) => [
+      ["Moved", data],
+      // @ts-expect-error `extra` isn't in the schema
+      ["Taken", { at: 1, by: { id: "x", extra: 2 } }],
+    ]);
+  });
+
+  it("an extra field in an array", () => {
+    moving().emit((data) => [
+      ["Moved", data],
+      // @ts-expect-error `extra` isn't in the schema
+      ["Tagged", { tags: [{ t: "x", extra: 1 }] }],
+    ]);
+  });
+
+  it("a wrong type inside a tuple", () => {
+    moving().emit((data) => [
+      ["Moved", data],
+      // @ts-expect-error the pair is a number and a string
+      ["Dated", { at: new Date(), pair: [1, 2] }],
+    ]);
+  });
+
+  it("data on an event that takes none", () => {
+    moving().emit((data) => [
+      ["Moved", data],
+      // @ts-expect-error `Dropped` has no fields
+      ["Dropped", { x: 1 }],
+    ]);
+  });
+});
+
+describe("a mistake a list can't place on one entry", () => {
+  it("nothing for the action's own stream", () => {
+    // @ts-expect-error an action must append an event to its own stream
+    moving().emit(() => [["Taken", { at: 1 }]]);
+    // @ts-expect-error an action must append an event to its own stream
+    moving().emit(() => ["Taken", { at: 1 }]);
+  });
+
+  it("a state loading its own type, emitting only the listed event", () => {
+    const Account = state({ Account: z.object({ n: z.number() }) })
+      .init(() => ({ n: 0 }))
+      .emits({ Moved: Move, Noted: ZodEmpty })
+      .build();
+    const self = () =>
+      state({ Account: z.object({ n: z.number() }) })
+        .init(() => ({ n: 0 }))
+        .emits({ Moved: Move, Noted: ZodEmpty })
+        .on({ Go: Move })
+        .loads(Account, (d) => d.agent, ["Moved"]);
+    // @ts-expect-error the load gets `Moved`, so nothing goes to its own stream
+    self().emit((d) => [["Moved", d]]);
+    // @ts-expect-error the load gets `Moved`, so nothing goes to its own stream
+    self().emit((d) => ["Moved", d]);
+    self().emit((d) => [
+      ["Noted", {}],
+      ["Moved", d],
+    ]);
+  });
+
+  it("a mistake in one branch marks the whole ternary", () => {
+    moving().emit((data, { state }) =>
+      // @ts-expect-error `at` is a number
+      state.agent
+        ? [
+            ["Moved", data],
+            ["Taken", { at: "x" }],
+          ]
+        : [["Moved", data]]
+    );
+    moving().emit((data, { state }) =>
+      // @ts-expect-error one branch has nothing for its own stream
+      state.agent ? [["Dropped", {}]] : [["Moved", data]]
+    );
+  });
+
+  it("a mistake in a function with a body marks the function", () => {
+    // @ts-expect-error `at` is a number
+    moving().emit((data, { state }) => {
+      if (state.agent)
+        return [
+          ["Moved", data],
+          ["Taken", { at: "x" }],
+        ];
+      return [["Moved", data]];
+    });
+  });
+});
+
+describe("what a handler returns", () => {
+  it("refuses anything that isn't events", () => {
+    // @ts-expect-error not an event
+    moving().emit(() => 42);
+    // @ts-expect-error not an event
+    moving().emit(() => null);
+    // @ts-expect-error handlers aren't async
+    moving().emit(async (d) => ["Moved", d]);
+    // @ts-expect-error a tuple is a name and its data
+    moving().emit(() => ["Moved"]);
+    // @ts-expect-error a tuple is a name and its data
+    moving().emit((d) => ["Moved", d, 1]);
+  });
+
+  it("refuses a function that forgets to return", () => {
+    // @ts-expect-error return the events, or `undefined` to commit nothing
+    moving().emit(() => {
+      void 0;
+    });
+  });
+
+  it("takes a function that returns on only some paths", () => {
+    moving().emit((d) => {
+      if (d.agent) return [["Moved", d]];
+    });
+  });
+});
+
+describe("the name form", () => {
+  it("takes only the action's own events no load lists", () => {
+    // @ts-expect-error a load lists it, so it would go to the loaded stream
+    moving().emit("Taken");
+    // @ts-expect-error not an event of this state
+    ticket().on({ Move }).emit("Nope");
+  });
+});
+
+describe(".loads", () => {
+  const moving_once = () => ticket().on({ Move });
+
+  it("marks a second load with the same name on the call", () => {
+    expect(() =>
+      moving_once()
+        .loads(AgentLoad, (d) => d.agent)
+        // @ts-expect-error name each load of the same state
+        .loads(AgentLoad, (d) => d.agent)
+    ).toThrow("twice");
+  });
+
+  it("offers only the loaded state's events", () => {
+    expect(() =>
+      // @ts-expect-error `AgentLoad` doesn't emit it
+      moving_once().loads(AgentLoad, (d) => d.agent, ["Nope"])
+    ).toThrow("doesn't emit it");
+  });
+
+  it("types its target and marks what it can't read", () => {
+    // @ts-expect-error `Move` has no `nope`
+    moving_once().loads(AgentLoad, (d) => d.nope);
+    // @ts-expect-error a target returns a stream name
+    moving_once().loads(AgentLoad, () => 42);
+  });
+
+  it("types the loaded state in a rule", () => {
+    moving().requires([
+      {
+        description: "x",
+        // @ts-expect-error there's no load named `nope`
+        holds: (_, __, ___, { nope }) => !!nope,
+      },
+    ]);
+    moving().requires([
+      {
+        description: "x",
+        // @ts-expect-error `open` is a number
+        holds: (_, __, ___, { next }) => next.open === "x",
+      },
+    ]);
+  });
+
+  it("compiles on a state with a recursive event", () => {
+    const J = z.object({ j: z.json() });
+    const on_json = () =>
+      state({ OnJson: z.object({}) })
+        .init(() => ({}))
+        .emits({ Json: J, Plain: z.object({ a: z.string() }) })
+        .on({ Do: J });
+    on_json().emit(() => ["Plain", { a: "x" }]);
+    on_json().emit((d) => ["Json", d]);
+    on_json().emit(() => ["Json", { j: { deep: [1, "x", null] } }]);
+    // @ts-expect-error `extra` isn't in the schema
+    on_json().emit(() => ["Json", { j: 1, extra: 1 }]);
+    // @ts-expect-error `a` is a string
+    on_json().emit(() => ["Plain", { a: 1 }]);
+  });
+
+  it("refuses a handler with no return value", () => {
+    // @ts-expect-error return the events, or `undefined` to commit nothing
+    moving().emit(() => {});
+  });
+
+  it("checks a list of unknown length", () => {
+    const list = () =>
+      state({ Listed: z.object({}) })
+        .init(() => ({}))
+        .emits({ Base: z.object({ a: z.string() }) })
+        .on({ Do: z.object({ a: z.string() }) });
+    list().emit((d) => [d.a].map((a) => ["Base", { a }] as const));
+    // @ts-expect-error `extra` isn't in the schema
+    list().emit((d) => [d.a].map((a) => ["Base", { a, extra: 1 }] as const));
+    moving()
+      // @ts-expect-error nothing goes to its own stream
+      .emit(() => [1].map(() => ["Taken", { at: 1 }] as const));
+  });
+
+  it("offers the name form for a wider payload, whatever the event's fields", () => {
+    const wider = z.object({ a: z.string() });
+    state({ Wider: z.object({}) })
+      .init(() => ({}))
+      .emits({
+        Empty: z.object({}),
+        Maybe: z.object({ b: z.string().optional() }),
+      })
+      .on({ One: wider })
+      .emit("Empty")
+      .on({ Two: wider })
+      .emit("Maybe");
+  });
+
+  it("offers the name form only for an event the payload can satisfy", () => {
+    const named = () =>
+      state({ Named: z.object({}) })
+        .init(() => ({}))
+        .emits({ Base: z.object({ a: z.string() }) })
+        .on({ Wide: z.object({ a: z.string(), b: z.number() }) })
+        .emit("Base");
+    expect(named).toBeTypeOf("function");
+    state({ Named2: z.object({}) })
+      .init(() => ({}))
+      .emits({ Base: z.object({ a: z.string() }) })
+      .on({ Unrelated: z.object({ unrelated: z.number() }) })
+      // @ts-expect-error the payload has no `a`
+      .emit("Base");
+  });
+
+  it("lets .emit(name) pass through a union the event shares", () => {
+    const U = z.discriminatedUnion("k", [
+      z.object({ k: z.literal("a"), x: z.string() }),
+      z.object({ k: z.literal("b") }),
+    ]);
+    state({ S: z.object({ n: z.number() }) })
+      .init(() => ({ n: 0 }))
+      .emits({ E: U })
+      .patch({ E: (_, s) => s })
+      .on({ A: U })
+      .emit("E");
+  });
+
+  it("refuses .emit(name) on an empty action when the event requires a field", () => {
+    state({ S: z.object({ n: z.number() }) })
+      .init(() => ({ n: 0 }))
+      .emits({ E: z.object({ a: z.string() }) })
+      .patch({ E: (_, s) => s })
+      .on({ A: ZodEmpty })
+      // @ts-expect-error the empty action has no `a`
+      .emit("E");
+  });
+
+  it("takes readonly rules and a rule's own actor", () => {
+    const rules = [{ description: "x", holds: () => true }] as const;
+    moving().requires(rules);
+    type Me = Actor & { role: string };
+    const admin: Precondition<{ agent?: string }, unknown, Me> = {
+      description: "admin",
+      holds: (_, __, actor) => actor?.role === "admin",
+    };
+    moving().requires([admin]);
+  });
+
+  it("lets a load with a name known only at runtime come before others", () => {
+    const dynamic: string = `load-${1}`;
+    moving_once()
+      .loads(AgentLoad, () => "a", [], dynamic)
+      .loads(Other, () => "b", [], "other");
+  });
+});

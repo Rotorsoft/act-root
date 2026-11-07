@@ -32,13 +32,12 @@ const model: DomainModel = {
         {
           name: "placeOrder",
           emits: ["OrderPlaced_v2"],
-          invariants: [],
           line: 30,
         },
         {
           name: "shipOrder",
           emits: ["OrderShipped"],
-          invariants: ["paid"],
+          preconditions: ["paid"],
           line: 40,
         },
       ],

@@ -280,6 +280,16 @@ const API_ERROR_RESPONSE: OpenAPIResponse = {
   },
 };
 
+/** An error response with its own description, over the shared envelope. */
+const error_response = (description: string): OpenAPIResponse => ({
+  description,
+  content: {
+    "application/json": {
+      schema: { $ref: "#/components/schemas/ApiError" },
+    },
+  },
+});
+
 /**
  * Server URL refinement: OpenAPI permits `{variable}` template syntax
  * inside server URLs, so we substitute each capture with `x` before
@@ -374,21 +384,23 @@ function mark_sensitive_fields(
 ): Record<string, unknown> {
   const fields = pii_fields(zod_schema);
   if (fields.length === 0) return body_schema;
-  const properties = body_schema.properties as Record<
-    string,
-    Record<string, unknown>
-  >;
-  const next_properties: Record<string, Record<string, unknown>> = {
-    ...properties,
-  };
-  for (const field of fields) {
-    next_properties[field] = {
-      ...properties[field],
-      writeOnly: true,
-      format: "password",
+  return at_root(body_schema, (root) => {
+    const properties = root.properties as Record<
+      string,
+      Record<string, unknown>
+    >;
+    const next_properties: Record<string, Record<string, unknown>> = {
+      ...properties,
     };
-  }
-  return { ...body_schema, properties: next_properties };
+    for (const field of fields) {
+      next_properties[field] = {
+        ...properties[field],
+        writeOnly: true,
+        format: "password",
+      };
+    }
+    return { ...root, properties: next_properties };
+  });
 }
 
 /** Emit a Zod schema as JSON Schema: what the API sends (`output`) or takes (`input`). */
@@ -399,16 +411,115 @@ function json_schema(
   // `unrepresentable: "any"` emits an open (`{}`) schema for a Zod type with
   // no JSON-Schema form (z.date/z.bigint/z.map/z.set/...) instead of Zod 4's
   // default `"throw"`, which would abort the whole document over one field.
-  return strip_json_schema_meta(
-    z.toJSONSchema(schema, { unrepresentable: "any", io }) as Record<
-      string,
-      unknown
-    >
+  return name_root(
+    strip_json_schema_meta(
+      z.toJSONSchema(schema, { unrepresentable: "any", io }) as Record<
+        string,
+        unknown
+      >
+    )
   );
+}
+
+/** Replaces each `$ref` in a schema tree that `refs` maps. */
+function rewrite_refs(node: unknown, refs: ReadonlyMap<string, string>): void {
+  if (Array.isArray(node)) {
+    for (const item of node) rewrite_refs(item, refs);
+  } else if (node && typeof node === "object") {
+    const object = node as Record<string, unknown>;
+    const to = refs.get(object.$ref as string);
+    if (to) object.$ref = to;
+    for (const value of Object.values(object)) rewrite_refs(value, refs);
+  }
+}
+
+const ROOT_REF = "#/$defs/__root";
+
+/**
+ * A schema that refers to itself has `$ref: "#"`, which in a bigger document is
+ * that document. It moves into `$defs`, so {@link hoist_defs} can name it.
+ */
+function name_root(schema: Record<string, unknown>): Record<string, unknown> {
+  if (!has_root_ref(schema)) return schema;
+  const { $defs, ...root } = schema;
+  rewrite_refs(root, new Map([["#", ROOT_REF]]));
+  rewrite_refs($defs, new Map([["#", ROOT_REF]]));
+  return {
+    $ref: ROOT_REF,
+    $defs: { ...($defs as object), __root: root },
+  };
+}
+
+function has_root_ref(node: unknown): boolean {
+  if (Array.isArray(node)) return node.some(has_root_ref);
+  if (!node || typeof node !== "object") return false;
+  const object = node as Record<string, unknown>;
+  return object.$ref === "#" || Object.values(object).some(has_root_ref);
+}
+
+/**
+ * Zod refers to a shared or recursive schema with `$ref: "#/$defs/x"`, which
+ * resolves only when the schema is its own document. Each entry moves up to
+ * `components.schemas` under a name no other schema took, its refs following.
+ */
+function hoist_defs(
+  node: unknown,
+  schemas: Record<string, Record<string, unknown>>,
+  // Inside `properties` a key is a field's name, so `$defs` there is a field.
+  is_map = false
+): void {
+  if (Array.isArray(node)) {
+    for (const item of node) hoist_defs(item, schemas);
+    return;
+  }
+  if (!node || typeof node !== "object") return;
+  const object = node as Record<string, unknown>;
+  if (!is_map && object.$defs) {
+    const defs = object.$defs as Record<string, Record<string, unknown>>;
+    delete object.$defs;
+    const refs = new Map<string, string>();
+    const moved: [string, Record<string, unknown>][] = [];
+    for (const [name, def] of Object.entries(defs)) {
+      const base = name.replace(/[^a-zA-Z0-9._-]/g, "_");
+      let key = base;
+      for (let i = 1; key in schemas; i++) key = `${base}_${i}`;
+      schemas[key] = def;
+      moved.push([key, def]);
+      const pointer = name.replaceAll("~", "~0").replaceAll("/", "~1");
+      refs.set(`#/$defs/${pointer}`, `#/components/schemas/${key}`);
+    }
+    rewrite_refs(object, refs);
+    for (const [, def] of moved) {
+      rewrite_refs(def, refs);
+      hoist_defs(def, schemas);
+    }
+  }
+  for (const [key, value] of Object.entries(object))
+    hoist_defs(value, schemas, !is_map && key === "properties");
+}
+
+/**
+ * Apply `change` to the object a schema describes, which {@link name_root} may
+ * have moved into `$defs`.
+ */
+function at_root(
+  schema: Record<string, unknown>,
+  change: (root: Record<string, unknown>) => Record<string, unknown>
+): Record<string, unknown> {
+  if (schema.$ref !== ROOT_REF) return change(schema);
+  const $defs = schema.$defs as Record<string, Record<string, unknown>>;
+  return { ...schema, $defs: { ...$defs, __root: change($defs.__root) } };
 }
 
 /** Let each named property, or every one, also read as a redaction marker. */
 function allow_markers(
+  schema: Record<string, unknown>,
+  fields: readonly string[] | "all"
+): Record<string, unknown> {
+  return at_root(schema, (root) => allow_root_markers(root, fields));
+}
+
+function allow_root_markers(
   schema: Record<string, unknown>,
   fields: readonly string[] | "all"
 ): Record<string, unknown> {
@@ -522,9 +633,13 @@ function build_operation(
         },
       },
       "400": { $ref: "#/components/responses/ApiError" },
-      "409": { $ref: "#/components/responses/ApiError" },
+      "409": error_response(
+        "A precondition refused the action, and `detail` names the action and the rule (`PRECONDITION`); or an idempotency key was reused (`CONFLICT`). Nothing was committed."
+      ),
       "410": { $ref: "#/components/responses/ApiError" },
-      "412": { $ref: "#/components/responses/ApiError" },
+      "412": error_response(
+        "A stream the action appends to moved since it was loaded, or a pinned expected version is stale (`CONCURRENCY`), and `detail` names the stream. Nothing was committed on any stream."
+      ),
       "422": { $ref: "#/components/responses/ApiError" },
       "500": { $ref: "#/components/responses/ApiError" },
       ...(options.idempotency
@@ -588,17 +703,21 @@ export function openapi<TApp extends Pick<ActSurface, "registry">>(
     };
   }
 
+  const schemas: Record<string, Record<string, unknown>> = {
+    ApiError: API_ERROR_SCHEMA,
+    SnapshotArray: SNAPSHOT_ARRAY_SCHEMA,
+    ...state_schemas,
+  };
+  hoist_defs(paths, schemas);
+  hoist_defs(state_schemas, schemas);
+
   return {
     openapi: "3.1.0",
     info: options.info,
     ...(options.servers ? { servers: options.servers } : {}),
     paths,
     components: {
-      schemas: {
-        ApiError: API_ERROR_SCHEMA,
-        SnapshotArray: SNAPSHOT_ARRAY_SCHEMA,
-        ...state_schemas,
-      },
+      schemas,
       responses: {
         ApiError: API_ERROR_RESPONSE,
       },

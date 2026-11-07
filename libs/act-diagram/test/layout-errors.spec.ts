@@ -58,7 +58,7 @@ describe("error slice box", () => {
           name: "S",
           varName: "S",
           events: [{ name: "Evt", hasCustomPatch: false }],
-          actions: [{ name: "a", emits: ["Evt"], invariants: [] }],
+          actions: [{ name: "a", emits: ["Evt"] }],
         },
       ],
       slices: [
@@ -101,12 +101,10 @@ describe("projection nodes below events", () => {
             {
               name: "OpenTicket",
               emits: ["TicketOpened"],
-              invariants: [],
             },
             {
               name: "CloseTicket",
               emits: ["TicketClosed"],
-              invariants: [],
             },
           ],
         },
@@ -150,8 +148,8 @@ describe("projection nodes below events", () => {
             { name: "E2", hasCustomPatch: false },
           ],
           actions: [
-            { name: "a1", emits: ["E1"], invariants: [] },
-            { name: "a2", emits: ["E2"], invariants: [] },
+            { name: "a1", emits: ["E1"] },
+            { name: "a2", emits: ["E2"] },
           ],
         },
       ],
@@ -184,7 +182,7 @@ describe("projection and reaction metadata on event nodes", () => {
           name: "S",
           varName: "S",
           events: [{ name: "Evt", hasCustomPatch: false }],
-          actions: [{ name: "doIt", emits: ["Evt"], invariants: [] }],
+          actions: [{ name: "doIt", emits: ["Evt"] }],
         },
       ],
       projections: [{ name: "myProj", varName: "myProj", handles: ["Evt"] }],
@@ -201,7 +199,7 @@ describe("projection and reaction metadata on event nodes", () => {
           name: "S",
           varName: "S",
           events: [{ name: "Evt", hasCustomPatch: false }],
-          actions: [{ name: "doIt", emits: ["Evt"], invariants: [] }],
+          actions: [{ name: "doIt", emits: ["Evt"] }],
         },
       ],
       reactions: [

@@ -59,12 +59,16 @@ describe("SqliteStore pii_encryption", () => {
     const stream = `roundtrip-${chance.guid()}`;
 
     const committed = await store.commit(
-      stream,
       [
         {
-          name: "UserRegistered",
-          data: { plan: "gold" },
-          pii: { email: "alice@example.com", name: "Alice" },
+          stream,
+          msgs: [
+            {
+              name: "UserRegistered",
+              data: { plan: "gold" },
+              pii: { email: "alice@example.com", name: "Alice" },
+            },
+          ],
         },
       ],
       { correlation: "c1", causation: {} }
@@ -105,17 +109,21 @@ describe("SqliteStore pii_encryption", () => {
     const stream = `forget-${chance.guid()}`;
 
     await store.commit(
-      stream,
       [
         {
-          name: "UserRegistered",
-          data: {},
-          pii: { email: "bob@example.com" },
-        },
-        {
-          name: "UserUpdated",
-          data: {},
-          pii: { email: "bob+new@example.com" },
+          stream,
+          msgs: [
+            {
+              name: "UserRegistered",
+              data: {},
+              pii: { email: "bob@example.com" },
+            },
+            {
+              name: "UserUpdated",
+              data: {},
+              pii: { email: "bob+new@example.com" },
+            },
+          ],
         },
       ],
       { correlation: "c2", causation: {} }
@@ -141,7 +149,7 @@ describe("SqliteStore pii_encryption", () => {
     track(store, raw);
     const stream = `none-${chance.guid()}`;
 
-    await store.commit(stream, [{ name: "Ping", data: { n: 1 } }], {
+    await store.commit([{ stream, msgs: [{ name: "Ping", data: { n: 1 } }] }], {
       correlation: "c3",
       causation: {},
     });
@@ -168,12 +176,16 @@ describe("SqliteStore pii_encryption", () => {
     const stream = `wrongkey-${chance.guid()}`;
 
     await writer.store.commit(
-      stream,
       [
         {
-          name: "UserRegistered",
-          data: {},
-          pii: { email: "x@example.com" },
+          stream,
+          msgs: [
+            {
+              name: "UserRegistered",
+              data: {},
+              pii: { email: "x@example.com" },
+            },
+          ],
         },
       ],
       { correlation: "c4", causation: {} }
@@ -204,12 +216,16 @@ describe("SqliteStore pii_encryption", () => {
     const stream = `tamper-${chance.guid()}`;
 
     await store.commit(
-      stream,
       [
         {
-          name: "UserRegistered",
-          data: {},
-          pii: { email: "y@example.com" },
+          stream,
+          msgs: [
+            {
+              name: "UserRegistered",
+              data: {},
+              pii: { email: "y@example.com" },
+            },
+          ],
         },
       ],
       { correlation: "c5", causation: {} }
@@ -238,12 +254,16 @@ describe("SqliteStore pii_encryption", () => {
     await plain.seed();
     const stream = `mixed-${chance.guid()}`;
     await plain.commit(
-      stream,
       [
         {
-          name: "UserRegistered",
-          data: {},
-          pii: { email: "legacy@example.com" },
+          stream,
+          msgs: [
+            {
+              name: "UserRegistered",
+              data: {},
+              pii: { email: "legacy@example.com" },
+            },
+          ],
         },
       ],
       { correlation: "c6a", causation: {} }
@@ -259,12 +279,16 @@ describe("SqliteStore pii_encryption", () => {
     });
     cleanup.push(() => enc.dispose());
     await enc.commit(
-      stream,
       [
         {
-          name: "UserUpdated",
-          data: {},
-          pii: { email: "current@example.com" },
+          stream,
+          msgs: [
+            {
+              name: "UserUpdated",
+              data: {},
+              pii: { email: "current@example.com" },
+            },
+          ],
         },
       ],
       { correlation: "c6b", causation: {} }
@@ -335,14 +359,18 @@ describe("SqliteStore pii_encryption", () => {
     const when = new Date("2024-03-01T10:20:30.000Z");
 
     await store.commit(
-      stream,
       [
         {
-          name: "UserRegistered",
-          data: { at: when },
-          pii: { born: when },
+          stream,
+          msgs: [
+            {
+              name: "UserRegistered",
+              data: { at: when },
+              pii: { born: when },
+            },
+          ] as never,
         },
-      ] as never,
+      ],
       { correlation: chance.guid(), causation: {} }
     );
 

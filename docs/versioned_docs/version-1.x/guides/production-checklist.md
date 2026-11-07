@@ -1,0 +1,392 @@
+---
+id: production-checklist
+title: Production checklist
+sidebar_position: 3
+---
+
+# Production checklist
+
+A walk-through of the wiring you actually need to run an Act app in production. This is the page to consult when moving from `pnpm dev` to a deployed service. Each section is the minimum that's not negotiable, plus the knobs you'll tune in the next 90 days of operating.
+
+## 1. Pick a real store
+
+The default `InMemoryStore` is a no-op on `seed()` and loses everything on restart. Production needs a persistent store:
+
+```typescript
+import { store } from "@rotorsoft/act";
+import { PostgresStore } from "@rotorsoft/act-pg";
+
+store(new PostgresStore({
+  host: process.env.DB_HOST,
+  port: Number(process.env.DB_PORT ?? 5432),
+  database: process.env.DB_NAME,
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+  schema: process.env.DB_SCHEMA ?? "public",
+  table: process.env.DB_TABLE ?? "events",
+}));
+```
+
+A few production-relevant defaults to override depending on workload:
+
+- **Connection pool.** `PostgresStore` ships opinionated pool defaults: `max: 20`, `connectionTimeoutMillis: 10000` (a saturated pool fails fast as `StoreError` with the starved operation as context, instead of hanging), `idleTimeoutMillis: 30000`, `statement_timeout: 60000`. All are plain `pg.PoolConfig` fields — override any of them in the constructor. Size `max` per process as `Σ(streamLimit per lane) + peak concurrent API commits + (notify ? 1 : 0) + headroom (2–4)`: every lane's `DrainController` drains in parallel and runs up to `streamLimit` (default 10) handlers concurrently, each holding a client during its commit; every in-flight API action holds one too. Keep the sum across all workers under your Postgres `max_connections` budget.
+- **`schema` and `table`.** Multi-tenant apps often want one schema per tenant. The store accepts both — use them rather than namespacing stream IDs.
+- **Initialize the schema.** Run `await store().seed()` once on first deploy (creates the `events` and `_streams` tables, indexes, etc.). Idempotent — safe to keep in your bootstrap. **There is no migration step, ever:** `seed()` at boot is the entire schema story; upgrades apply additively on the next boot, and concurrent cold boots serialize (advisory-locked on Postgres). Your own projection tables outside Act's store are the only thing you migrate.
+
+`SqliteStore` from `@rotorsoft/act-sqlite` is the right choice for embedded / single-node deployments. Same interface; no pool tuning.
+
+## 2. Reactions settle on their own
+
+There is nothing to wire. A commit whose events have a reaction in this app schedules `settle()`, and so does a commit from another process (through `Store.notify`). Call `app.settle()` once at startup, after `seed()`: it runs the work left pending by the last shutdown, including deferred and backed-off streams, which otherwise wait until something drains their lane. See [Event sourcing § settle()](../concepts/event-sourcing.md#settle) for the rule.
+
+`settle()` is debounced and non-blocking: listen for the `"settled"` event when you need to know the framework is idle, and raise `settleDebounceMs` if commits come in tight bursts (fewer, larger batches).
+
+A process that only writes (an API pod in a writer/worker split, a seed or migration script, an admin CLI) should build with `drain: false`, or it runs reactions too.
+
+## 3. Listen for `"blocked"`
+
+When a reaction handler exceeds its retry budget, Act marks the stream `blocked: true` and stops processing it. Without an alert, you'll discover the problem when a customer notices their projection is stale.
+
+```typescript no-check
+app.on("blocked", (blocked) => {
+  for (const { stream, error, retry } of blocked) {
+    logger.error({ stream, error, retry }, "stream blocked");
+    metrics.increment("act.streams.blocked", { stream });
+  }
+});
+```
+
+Pair with monitoring: `act.streams.blocked` should be a 0-floor counter, and any non-zero is a paging condition. The recovery playbook (`app.blocked_streams()`, then `app.unblock(...)` after the fix; never `app.reset` unless rebuilding) is in [Blocked streams](../concepts/error-handling.md#blocked-streams).
+
+Per-reaction defaults: `maxRetries: 3`, `blockOnError: true`. Tune via `.do(handler, { maxRetries: 5, blockOnError: false })` per handler — see [Error handling → Per-reaction options](../concepts/error-handling.md#per-reaction-options).
+
+## 4. Set a snapshot policy
+
+On cold start (process restart or LRU eviction), `load()` replays every event in the stream. For a 50,000-event stream, that's a perceptible delay. Snapshots cap the replay distance — define a snap predicate per state:
+
+```typescript no-check
+const Counter = state(/* … */)
+  .init(/* … */)
+  .emits(/* … */)
+  .patch(/* … */)
+  .on(/* … */)
+  .snap((s) => s.patches >= 50)
+  .build();
+```
+
+The framework calls your predicate after each commit. When it returns true, Act writes a `__snapshot__` event containing the current state. On the next cold load, the replay starts from the most recent snapshot — never further back than `s.patches` events.
+
+Reasonable starting policies:
+
+- **`s.patches >= 50`** for short-lived streams (orders, user sessions): bounds replay to ~50 events.
+- **`s.patches >= 500`** for long-lived streams (counters, inventory items): fewer snapshots, smaller event log.
+- **No snap policy** for streams with bounded length (single-day TTLs, capped event count): cheaper than snapping.
+
+Snapshot writes are fire-and-forget; they don't block the action's return. Failures log at **warn** level (stream, reason, and the full-replay consequence) but never propagate — alert on that line, because persistent snapshot failures degrade every cold start to full replay.
+
+## 5. Idempotency at the API edge
+
+Act's optimistic concurrency catches stream-version conflicts (`ConcurrencyError`) but doesn't dedupe API requests. If a client retries a network-failed `POST`, you can commit the same domain event twice.
+
+This is a **caller** concern — typically a tRPC/Express middleware that caches responses by an `idempotencyKey` header:
+
+```typescript no-check
+const seen = new Map<string, { body: unknown; expiresAt: number }>();
+
+const idempotent = t.middleware(async ({ rawInput, next }) => {
+  const key = (rawInput as any)?.idempotencyKey;
+  if (key) {
+    const cached = seen.get(key);
+    if (cached && cached.expiresAt > Date.now()) {
+      return { ok: true, data: cached.body };
+    }
+  }
+  const result = await next();
+  if (key && result.ok) {
+    seen.set(key, { body: result.data, expiresAt: Date.now() + 86_400_000 });
+  }
+  return result;
+});
+```
+
+For multi-instance deployments, swap the in-memory `Map` for Redis. The point is to keep "have I seen this request before?" out of the event log — correlation IDs there are for tracing, not deduplication.
+
+## 6. Graceful shutdown
+
+Signal handling is built in. Importing the framework registers `process.once` handlers for `SIGINT`, `SIGTERM`, `uncaughtException`, and `unhandledRejection`, all routed through `disposeAndExit`. You don't bind signal handlers yourself — register the cleanup that's specific to your application:
+
+```typescript no-check
+import { dispose } from "@rotorsoft/act";
+
+dispose(async () => {
+  await httpServer.close();
+});
+
+dispose(async () => {
+  await redis.quit();
+});
+```
+
+When a signal fires, the shutdown sequence runs in this order: custom disposers in reverse registration order, then port adapters (logger, store, cache) in reverse registration order, then `process.exit`. Reverse order matters — the HTTP server stops accepting connections before the store closes, so an in-flight request can still finish its commit.
+
+### In-flight reactions and the grace budget
+
+An in-flight *reaction* is a different case from an in-flight request, and it is the one that costs you on a rolling deploy. A handler parked on an `await` — an HTTP call to a payment provider, a write to a reporting database — holds its stream's lease until it acks. `Act.shutdown()` stops scheduling new cycles, then waits for the cycles already running, so that handler reaches its ack and releases the lease:
+
+```typescript no-check
+// Wait up to the derived budget (the default).
+await app.shutdown();
+
+// Or set it explicitly.
+await app.shutdown({ graceMs: 15_000 });
+```
+
+The default budget is derived from the lanes that actually have a cycle in flight: each contributes its configured `leaseMillis` (or the 10s `drain()` fallback if it pinned none), the largest wins, and the result is capped at 30 seconds. The reasoning is that `leaseMillis` is already your statement of how long one of that lane's handlers may legitimately hold a stream, so it is the right ceiling for how long teardown should wait for one.
+
+The budget is a ceiling, not a delay — teardown continues the moment the last cycle finishes. When it is exhausted, teardown proceeds anyway: a single stuck handler must never hang a deploy.
+
+What you give up by shortening it, and what you pay for by lengthening it:
+
+| `graceMs` | Rolling-deploy behavior |
+|---|---|
+| `0` | Teardown returns immediately. Every in-flight stream stays leased until `leaseMillis` expires, so the replacement worker cannot claim it for up to that long, and each abandoned handler's round of work is discarded and redelivered. |
+| derived (default) | In-flight handlers finish and release their leases; the replacement worker picks the streams up immediately. Teardown takes as long as the slowest in-flight handler, bounded. |
+| long, explicit | Same, with more patience for genuinely slow integrations. Your orchestrator's own termination grace period (`terminationGracePeriodSeconds` on Kubernetes) should exceed it, or the process is killed mid-wait and you are back to the `0` row. |
+
+Set `graceMs: 0` only if you have decided that redelivery is cheaper than waiting — which it can be for idempotent handlers with a short `leaseMillis`.
+
+Lifecycle listeners are removed *after* the wait, so an `acked` or `blocked` subscriber still observes work that completes during the window. Anything still running when the budget expires is abandoned exactly as before: its ack lands after teardown and is dropped, and the work is redelivered on the next claim.
+
+`dispose()` called with no argument returns the trigger function, useful for manual shutdown or tests:
+
+```typescript no-check
+afterAll(async () => {
+  await dispose()();
+});
+```
+
+In production, `disposeAndExit("ERROR")` from an uncaught promise is deliberately suppressed (logged as a warning, process kept alive) so a transient failure in a non-critical path doesn't kill the service. SIGINT/SIGTERM still exit cleanly.
+
+## 7. Logging
+
+Default is `ConsoleLogger` — one JSON line per event in production (set `NODE_ENV=production`), colorized human output in dev. For pino's transport ecosystem (file rotation, OpenTelemetry, etc.):
+
+```typescript
+import { log } from "@rotorsoft/act";
+import { PinoLogger } from "@rotorsoft/act-pino";
+
+log(new PinoLogger({ level: process.env.LOG_LEVEL ?? "info" }));
+```
+
+`LOG_LEVEL=trace` enables breadcrumb logging across `load`, `action`, `claim`, `ack`, `block` — useful for debugging a specific stream's drain trajectory. Don't ship `trace` to production unless you've sized your log pipeline for it.
+
+## 8. Observability
+
+Three counters cover most operational questions:
+
+| Metric | When to alert |
+|---|---|
+| `act.streams.blocked` (gauge) | `> 0` for more than 1 minute |
+| `act.commit.concurrency_error` (counter) | sustained rate above ~1% of commits |
+| `act.settle.duration_ms` (histogram) | p99 above your tolerable lag |
+
+All three hook off the lifecycle-event emitter — observability is deliberately not a framework feature, so there's no metrics client to configure, just listeners to attach. The canonical wiring lives in the [Observability guide](./observability.md): every lifecycle event mapped to a prom-client counter/histogram, a polled `app.blocked_streams()` gauge, concurrency-error instrumentation at the API edge, pino → OpenTelemetry log shipping, and which of these signals should page versus sit on a dashboard.
+
+## 9. Restoring a store (rare, deliberate)
+
+`app.restore(source, opts?, sink?)` is the offline wipe-and-rebuild path: atomic replacement of a store's contents from an event source. Most production teams never call this from application code — they use the inspector's transfer dialog (or a one-off `node` script) to operate it as a tool. What matters in production is knowing when *not* to reach for it.
+
+**Restore is not your disaster-recovery plan.** `pg_dump` / `pg_restore` for Postgres and a periodic SQLite file copy are still the right tools for recovering from a lost server. They preserve every byte, run at the storage layer, and don't require the application to be running. `app.restore` is for *content-level* operations:
+
+- **Cross-adapter migration** (PG → SQLite for a customer extract, or vice versa)
+- **Compaction** — drop `__snapshot__` events (`drop_snapshots`) so the next snap policy regenerates them, drop entire closed streams (`drop_closed_streams`) so the new store contains only currently-live streams
+- **Schema migration** — schema-guarded event rewrites via `event_migrations` (rename + transform old payloads into their current-version shape), bulk stream rename via `stream_rename` (tenant relocation, prefix cleanup). All transfer-time only; the connected store is never modified
+- **Validated re-imports** from a curated CSV
+
+If your goal is "rebuild from yesterday's snapshot because the database disk died," skip restore and use the storage-level tools.
+
+When you do use restore, plan around three follow-ups:
+
+```typescript no-check
+import { CsvFile, cache } from "@rotorsoft/act";
+
+// 1. Run the destructive restore. Connect to the target store first; restore
+//    wipes whatever's connected before rewriting.
+const result = await app.restore(new CsvFile({ path: "./backup.csv" }));
+logger.info({ kept: result.kept, duration_ms: result.duration_ms }, "restored");
+
+// 2. Clear the cache — restore does NOT touch the Cache port. Entries from
+//    before the restore are now pointing at stale (or renumbered) ids.
+await cache().clear();
+
+// 3. Rebuild projections. Restore replaces events; it does not replay them
+//    through reactions. If any projection lives in a database/cache outside
+//    the event log, you need an explicit reset for it.
+await app.reset({ stream: "^proj-" }); // settles the replay on its own
+app.settle({ eventLimit: 1000 });      // optional: bigger batches
+```
+
+Operator-side guardrails:
+
+- **Dry-run before destructive.** `app.restore(source, { dry_run: true })` runs the same validator, counts the same kept/dropped, but never opens the sink's transaction. Pre-flight every restore the first time you run it against a new source. The inspector's transfer dialog does this automatically via the "Preview" button.
+- **Inspector writes gated.** The inspector's transfer dialog runs the destructive path only when `ACT_INSPECTOR_WRITE=1`. Default-deny; flip it on for the duration of the migration, then flip it off.
+- **Audit the run.** The inspector audit log records every destructive transfer with `kept`, `duration_ms`, and the adapter pair. Application code calling `app.restore` directly should log the result the same way.
+- **Reactions resubscribe.** After restore, the orchestrator's next settle picks up the rewritten event log, and `subscribe()` UPSERTs every stream's watermark. No manual intervention.
+
+When a restore is genuinely the right tool — for example, "migrate the wolfdesk app from Postgres to a partitioned SQLite cluster" — the path is: stop writes to the source, run `app.restore(pgStore, {}, sqliteStore)`, flip the connection string, run `cache().clear()`, run `app.reset` against any DB-backed projections, restart. The framework owns the cross-adapter shape so the operation is the same regardless of which adapters sit on either end.
+
+See [Concepts → Restoring a store](../concepts/event-sourcing.md#restoring-a-store) for the primitive itself and how it compares with `reset` / `truncate` / `close`.
+
+## 10. Closing the books
+
+For long-running streams that accumulate events you'll never replay (year-old order history, archived chat sessions), use `app.close()` to archive and truncate:
+
+```typescript no-check
+const result = await app.close([
+  {
+    stream: "order-2024-12345",
+    archive: async () => {
+      const events = await app.query_array({
+        stream: "order-2024-12345",
+        stream_exact: true,
+      });
+      await s3.putObject({
+        Key: "orders/2024-12345.json",
+        Body: JSON.stringify(events),
+      });
+    },
+  },
+]);
+
+app.on("closed", ({ truncated, skipped }) => {
+  logger.info({ truncated: truncated.size, skipped }, "books closed");
+});
+```
+
+Closed streams are tombstoned — `app.do()` against them throws `StreamClosedError`. To re-open with a fresh starting state, `close()` with `restart: true`. See [Architecture → Close cycle](../architecture/close-cycle.md) for the full safety semantics.
+
+**Don't reach for `events`-table partitioning before exhausting `close()`.** Partitioning is an extreme-case escape valve for workloads where `close()` genuinely can't keep the table in steady state (regulated append-only audit logs, single-aggregate giants, retention-window bulk archival). It fights against event sourcing's global-`id` ordering on the cross-stream read path — every drain query and every `app.reset()` pays MergeAppend across partitions. For the dominant Act workload it costs more than it saves. If you've ruled close out and still believe you need to partition, see `libs/act-pg/PARTITIONING.md` — the page leads with reasons not to.
+
+## 11. Sizing lanes
+
+If reactions in this app have heterogeneous timing profiles — webhook delivery measured in seconds alongside metric emission measured in microseconds — split them across lanes (ACT-1103). Without lanes, every reaction shares one `leaseMillis` and one `streamLimit`, and the slowest handler dictates the budget for everyone.
+
+```typescript no-check
+const app = act()
+  .withState(Ticket)
+  .withLane({ name: "webhooks", leaseMillis: 30_000, streamLimit: 5 })
+  .withLane({ name: "metrics",  leaseMillis: 1_000,  streamLimit: 50 })
+  .on("OrderConfirmed").do(deliverWebhook).to({ target: "webhooks-out", lane: "webhooks" })
+  .on("OrderConfirmed").do(emitMetric).to({ target: "metrics-out",  lane: "metrics" })
+  .build();
+```
+
+**Sizing each field:**
+
+- **`leaseMillis`** — set to the longest expected handler invocation in the lane plus headroom (50–100%). A lease shorter than the handler causes premature re-claim and double dispatch; a lease far longer than the handler delays crash recovery (a dead worker's leases stay parked until expiry; then the next commit or notification on that lane, or a `start_correlations` tick, reclaims them). For webhook lanes, match your HTTP client timeout. For best-effort lanes, sub-second is usually right.
+- **`streamLimit`** — bounds the per-cycle parallel handler budget. With slow handlers (100 ms+), keep this low so an erroring batch doesn't tie up a wide pool of leases. With fast handlers, raise it to amortize the claim round-trip.
+- **`cycleMs`** — leave it unset with the default `autoSettle`; see [configuration § `LaneConfig` fields](../concepts/configuration.md#laneconfig-fields). Deferred and backed-off streams don't need it either: each worker wakes its own drain at their due time.
+
+**Process-per-lane and the coverage invariant.** When you deploy one process per lane with `onlyLanes`, no single instance drains every lane — that's the point. What each instance can't see is whether some *other* instance is covering the lanes it skipped. The cluster invariant is that the union of every worker's `onlyLanes` must cover every declared lane: `∪ onlyLanes ⊇ declared lanes`. A lane left out of every worker's set has no `DrainController` anywhere, so its streams are subscribed but never claimed, and its reactions silently stall.
+
+To catch a half-configured rollout early, each instance logs a one-line startup advisory when its `onlyLanes` excludes a declared lane (the default lane or any `.withLane` name) — `Act declared N orphaned lane(s) on this instance: "slow", …`. On a correctly sharded cluster this line is expected on each instance (every worker orphans the lanes its peers own), so treat it as a per-instance signal, not a per-cluster alarm: reconcile the advisories across all your instances and confirm the union covers every declared lane. An orphaned lane that appears on *every* instance's advisory is the real bug. The advisory stays silent when `onlyLanes` is unset or already covers every declared lane.
+
+**Sanity checks for the sizing:**
+
+- [ ] Slow lane's `leaseMillis` ≥ the longest expected handler runtime in that lane
+- [ ] No reaction targets the same stream via two reactions with different lanes (the build-time scan throws on this)
+- [ ] If running process-per-lane, `ActOptions.onlyLanes` is wired from an environment variable of your choosing so the same image deploys to every lane
+- [ ] Across the whole cluster, the union of every worker's `onlyLanes` covers every declared lane (`∪ onlyLanes ⊇ declared lanes`) — reconcile the per-instance orphaned-lane advisories to confirm
+- [ ] Inspector / dashboards filter by `lease.lane` and `position.lane` — every lifecycle event now carries it
+
+See [Configuration → Lanes](../concepts/configuration.md#lanes) for the full API surface, and `libs/act/PERFORMANCE.md § Lane Fan-out` for the headline number: ~7× faster fast-event latency under slow-lane backpressure on Postgres.
+
+## 12. Upgrading an install that predates the work mark
+
+Only relevant once, when moving an existing deployment onto a build that carries [#1488](https://github.com/Rotorsoft/act-root/issues/1488). New installs need nothing here.
+
+`claim` no longer reads the event log. A subscription is claimable while its watermark sits below its **work mark** (`correlated_at`), and only `correlate` raises a mark — so a row that has never been correlated is, by definition, not claimable.
+
+Rows created before the column existed have no mark, and `correlate` cannot rescue them: its checkpoint is far past the events those rows are waiting on. **`seed()` handles this for you.** It marks every unmarked row at the log's head — deliberately an over-estimate, meaning "worth one look" rather than "there is work here". The first drain claims each such stream once, fetches its window, handles whatever is genuinely there, acks, and the row settles at an honest position.
+
+What that costs is **one extra drain cycle per pre-existing subscription**, paid once. On an install with a large number of subscribed streams, expect the first settle after the upgrade to be busier than usual and to mostly do nothing — those are the empty fetches converting guesses into real watermarks.
+
+What to check afterwards:
+
+- Reactions resume. `app.blocked_streams()` should be no longer than it was before the upgrade.
+- The first settle drains to quiescence rather than looping. If it does not, the streams still moving are the ones with real backlog.
+- Nothing needs rewinding by hand. If you find yourself reaching for `app.reset(...)` to "wake up" a stream, stop — `reset` sets the watermark to `-1` and replays *everything*, which on a webhook target means re-firing its entire history. The mark, not the watermark, is what decides claimability.
+
+Run `seed()` as part of the deploy, the way you already do for schema sync — there is no separate migration step and no operator-invoked sweep.
+
+## 13. Reindex the subscriptions table periodically
+
+The subscriptions table is small and updated constantly — every claim and every ack rewrites a row. Postgres answers an update by writing a new copy of the row and leaving the old one for autovacuum to reclaim, so the table and its indexes accumulate dead space under steady drain traffic.
+
+The table itself is fine. Autovacuum keeps up with it, and its size holds flat. **The indexes are what drift**: they keep growing and their pages end up roughly half empty, because `ack` moves `at`, and `at` is both a key column of the claim index and part of the condition deciding which rows belong in it. That combination stops Postgres from taking its cheaper update path, so most acks leave index work behind.
+
+This is housekeeping, not a design problem — the fix is one command, run on whatever cadence your monitoring justifies:
+
+```sql
+REINDEX INDEX CONCURRENTLY <table>_streams_at_ix;
+REINDEX INDEX CONCURRENTLY <table>_streams_claim_ix;
+```
+
+`CONCURRENTLY` keeps the table readable and writable throughout, so this is safe to run against a live system.
+
+**Whether you need it at all depends on your drain volume.** A deployment acking a few hundred times a second will not notice for a very long time. If you want the number rather than a rule of thumb, watch `pg_stat_user_tables.n_dead_tup` (it should hold flat, not climb) and `pgstatindex(...).avg_leaf_density` on the claim index (falling well below ~60% is the signal), or run [`libs/act-pg/scripts/bloat-soak.bench.mjs`](https://github.com/Rotorsoft/act-root/blob/master/libs/act-pg/scripts/bloat-soak.bench.mjs) against a copy of your workload.
+
+This is the only ongoing maintenance the subscription side asks for, and it is why Act stays on Postgres for subscriptions rather than reaching for a store without this behaviour — a scheduled reindex is a much smaller thing to operate than a second database.
+
+## 14. Retired streams leave their subscriptions behind
+
+Closing a stream for good deletes its events and seeds a tombstone. It does **not** delete the stream's subscription row, and that is deliberate ([#1527](https://github.com/Rotorsoft/act-root/issues/1527)).
+
+Removing it was the only operation that reached across both the event log and the subscription table. That is fine when they share a database and impossible when they do not, so it ruled out running the two halves on separate systems — see the [hybrid store recipe](https://github.com/Rotorsoft/act-root/tree/master/recipes/scaling/hybrid-store). Dropping the step makes every store operation belong to exactly one half.
+
+**The leftover row is inert, not a leak in waiting.** A tombstoned stream refuses new commits, so nothing can ever mark it as having work again, and no worker will ever pick it up. It is also not purely dead weight: it preserves each consumer's final watermark, a record of how far every reaction got before the stream was retired, which outlives the events it was reading.
+
+**If you want the space back**, delete them on whatever schedule suits you. There is no framework API for this on purpose — it is housekeeping, it never needs to be timely, and it is one statement:
+
+```sql
+DELETE FROM <table>_streams s
+ WHERE EXISTS (SELECT 1 FROM <table> e WHERE e.stream = s.stream)
+   AND NOT EXISTS (
+     SELECT 1 FROM <table> e
+      WHERE e.stream = s.stream AND e.name <> '__tombstone__'
+   );
+```
+
+Read the predicate as "every event this stream has left is a tombstone." It is narrow on purpose, and the three cases it deliberately spares are the ones that would hurt:
+
+| Kind of row | Why it survives |
+|---|---|
+| A **restarted** stream | Holds a `__snapshot__`, not a tombstone. The stream is alive and still consuming. |
+| A stream **guarded by a failed close** | Its real events are still there alongside the guard tombstone, and its reactions may still have work pending. |
+| A **pure reaction target** (`handled-orders`, a projection) | Has no events of its own at all, so the first `EXISTS` never matches. |
+
+Deleting any of those throws away a live watermark, and the next `subscribe` would restart that stream from `-1` — replaying its entire history, which for a webhook target means re-firing every call it ever made.
+
+**Scale before you bother.** One row per permanently-retired stream is the same order as the tombstone event that also stays forever. If you are not closing streams for good in volume, there is nothing here to reclaim.
+
+**The inspector counts them for you.** Its Monitor tab carries a "Retired" card next to the health counts — that number is how many rows the statement above would delete, so the decision to run it is a number rather than a guess. Retired streams are kept out of every health signal there (the lag histogram, the healthy/lagging tallies, the blocked list), and the Streams tab hides them by default behind a filter that can also show only them, for when you are auditing what was closed rather than chasing delivery.
+
+## Pre-deploy quick check
+
+Before pushing to production, walk this list mentally:
+
+- [ ] `store(new PostgresStore({…}))` (or SqliteStore) configured before any state is loaded
+- [ ] `await store().seed()` runs at bootstrap (idempotent)
+- [ ] `app.settle()` runs once at startup, after `seed()`
+- [ ] `app.on("blocked", …)` wired to monitoring
+- [ ] Snap policies set on long-lived states
+- [ ] Idempotency middleware on mutation endpoints
+- [ ] `dispose()` wired to SIGINT/SIGTERM
+- [ ] `LOG_LEVEL` and `NODE_ENV` set appropriately
+- [ ] Lifecycle metrics exported (blocked, settled, concurrency)
+- [ ] Lanes sized per latency class (or all reactions sharing one timing budget is genuinely fine)
+- [ ] Disaster-recovery plan is `pg_dump` / file copy — not `app.restore` (which is for content-level migration / compaction, not DR)
+- [ ] Periodic `REINDEX INDEX CONCURRENTLY` on the subscription indexes, if drain volume is high
+- [ ] A plan for retired streams' leftover subscription rows, if you close streams for good in volume (or a deliberate decision to keep them as a record)
+
+Once these are in place, the framework runs itself.

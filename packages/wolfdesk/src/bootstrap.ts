@@ -1,12 +1,13 @@
 import { act, type Correlator } from "@rotorsoft/act";
 import {
+  AgentSlice,
   TicketCreationSlice,
   TicketMessagingSlice,
   TicketOpsSlice,
   TicketTimersSlice,
   TicketWebhooksSlice,
 } from "./ticket.js";
-import { TicketProjection } from "./ticket-projections.js";
+import { AgentProjection, TicketProjection } from "./ticket-projections.js";
 
 export * from "./ticket.js";
 
@@ -39,12 +40,14 @@ const tenantCorrelator: Correlator = ({ state, action, actor }) => {
  */
 // prettier-ignore
 export const builder = act()
+  .withSlice(AgentSlice)
   .withSlice(TicketCreationSlice)
   .withSlice(TicketMessagingSlice)
   .withSlice(TicketOpsSlice)
   .withSlice(TicketTimersSlice)
   .withSlice(TicketWebhooksSlice)
-  .withProjection(TicketProjection);
+  .withProjection(TicketProjection)
+  .withProjection(AgentProjection);
 
 /** Production singleton (used by `main.ts`). */
 export const app = builder.build({ correlator: tenantCorrelator });

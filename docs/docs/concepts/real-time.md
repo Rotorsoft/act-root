@@ -82,16 +82,27 @@ const broadcast = new BroadcastChannel<AppState>({
 ```
 
 :::note
-The snake_case member names these classes originally shipped with (`publish_overlay`, `get_state`, `get_subscriber_count`, `cache_size`, `get_online`, `is_online`) still work but are deprecated aliases — scheduled for removal in the next major. Use the short names shown here (`overlay`, `state`, `subscriberCount`, `cacheSize`, `online`, `isOnline`).
+The snake_case member names these classes originally shipped with (`publish_overlay`, `get_state`, `get_subscriber_count`, `cache_size`, `get_online`, `is_online`) are gone in 2.0; the [migration guide](../guides/migrating-to-2.x.md) lists their replacements.
 :::
 
 :::caution[A restart close]
-`close({ restart: true })` starts a stream's versions over, and a client's patches then read as `stale` until the versions pass where it was. A client on such a stream needs to reconnect.
+`close({ restart: true })` starts a stream's versions over, and a client ahead of them would read every patch as `stale`. Tell clients to refetch, and publish the seed, or a client that has only the SSE stream has no state to come back to. A windowed prune keeps its versions, so skip it:
+
+```typescript no-check
+app.on("closed", ({ truncated }) => {
+  for (const [stream, { before, committed }] of truncated) {
+    if (before) continue;
+    broadcast.resync(stream);
+    if (committed.name === SNAP_EVENT)
+      broadcast.publish(stream, { ...committed.data, _v: committed.version });
+  }
+});
+```
 :::
 
 ### Broadcasting a commit
 
-After every `app.do()`, forward each emitted snapshot's domain patch:
+After every `app.do()`, forward each emitted snapshot's domain patch. An action with [`.loads`](state-management.md#rules-across-streams-loads) also appends to other streams, and `app.do()` returns only its own; broadcast from a `committed` listener instead (as `packages/server` does), which fires once per stream appended to:
 
 ```typescript no-check
 const snaps = await app.do("CreateItem", target, input);

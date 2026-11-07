@@ -20,11 +20,12 @@ bootstrap.ts          → act().withSlice(Creation).withSlice(Messaging).withSli
 ticket-creation.ts    → TicketCreation state + TicketCreationSlice
 ticket-messaging.ts   → TicketMessaging state + TicketMessagingSlice
 ticket-operations.ts  → TicketOperations state + TicketOpsSlice
+agent.ts              → Agent state (the desk, open tickets per agent), its slice, and the slices that load it
 ticket-timers.ts      → TicketTimersSlice (deferred escalate / reassign / close timers)
 ticket-projections.ts → TicketProjection (read model)
 ticket-preconditions.ts  → Business rules (preconditions)
 schemas/              → Zod schemas for actions, events, state
-services/             → External service stubs (agent assignment, notifications)
+services/             → Picking an agent from the agents table, notification stub
 ```
 
 ## Patterns Demonstrated
@@ -62,7 +63,7 @@ export const TicketCreationSlice = slice()
   .withState(TicketOperations)    // included so the reaction can dispatch AssignTicket
   .on("TicketOpened")
     .do(async function assign(event, _stream, app) {
-      const agent = assignAgent(
+      const agent = await assignAgent(
         event.stream,
         event.data.supportCategoryId,
         event.data.priority,
@@ -192,6 +193,32 @@ Escalation is a one-shot that reacts to `TicketAssigned` and defers to the event
 ```
 
 Reassignment is a recurring chain. Both `TicketEscalated` and `TicketReassigned` land on the `reassign:<id>` target; because the escalation event carries no deadline, the handler reads `reassignAfter` from live state and re-arms imperatively with `throw new DeferSignal({ at: state.reassignAfter })`. Each `ReassignTicket` moves the deadline forward, so the resulting `TicketReassigned` schedules the next wait, and the loop stops once the user is answered or the ticket closes. Close-on-inactivity reacts to `TicketOpened` and defers to the open event's optional `closeAfter`, closing the ticket on waking if it's still open.
+
+### A Limit Across Streams
+
+An agent holds at most 5 open tickets. The count is a state of its own, `Agent`, one stream per agent, whose schema holds the limit. Assigning, reassigning, resolving and closing a ticket load it, and the event lands in the same commit as the ticket's own:
+
+```typescript no-check
+.on({ ReassignTicket }, { maxRetries: 4 })
+.loads(Agent, (_, state) => state.agentId && agentStream(state.agentId), ["TicketDropped"], "current")
+.loads(Agent, (data) => agentStream(data.agentId), ["TicketTaken"], "next")
+.requires([mustBeOpen, mustBeEscalated, mustBeDueForReassignment, mustNotBeAcknowledgedByAgent])
+.emit((data) => [
+  ["TicketReassigned", data],
+  ["TicketDropped", {}],
+  ["TicketTaken", {}],
+])
+```
+
+A ticket with no agent has no slot to free, so its `current` load returns `undefined`: nothing is loaded, and `TicketDropped` is dropped from the commit. The ticket's own version guards that fact, so if someone assigns it first, this action's retry sees the agent and loads them. When a pick finds a full agent, the assign reaction fails, and its retry (10 seconds later, by default) asks `assignAgent` for another agent. If every attempt finds a full agent, the ticket's reaction stream blocks after 4 tries, and `app.unblock` resumes it. A ticket holds its slot until it's resolved or closed, whichever comes first, and frees it once, so a resolved ticket retired by `.autocloses` doesn't keep one. A resolved ticket can't be assigned or reassigned. [Rules across streams](rules.md) has the pattern on its own.
+
+### Picking an Agent
+
+`AddAgent` puts an agent on the desk, in one support category, and `AgentProjection` keeps an `agents` table with each agent's open tickets. The assign and reassign reactions ask that table for the agent with the fewest open tickets in the ticket's category.
+
+The table only suggests. It can lag an agent's stream, and two tickets can pick the same last slot, so the commit decides: the loser's load sees the real count, `Agent`'s schema refuses it, and the reaction's retry picks again from a table that has caught up.
+
+When nobody is free, nothing has failed, so the reaction throws a `DeferSignal` and looks again in a minute. The ticket waits, unassigned, without blocking anything, because the reaction runs on its own target. It stops looking if the ticket is closed, resolved or assigned by hand meanwhile.
 
 ### Composition
 

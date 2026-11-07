@@ -73,13 +73,6 @@ describe("invariants", () => {
     expect((caught as ValidationError).target).toBe("Calc.divide");
   });
 
-  it("is always on: the deprecated validateFoldedState: false changes nothing", async () => {
-    const app = act().withState(calc()).build({ validateFoldedState: false });
-    await expect(
-      app.do("divide", { stream: "c2", actor }, {})
-    ).rejects.toBeInstanceOf(ValidationError);
-  });
-
   it("checks the state the action leaves, not the states between its events", async () => {
     // `n` is -1 between the two events, and 1 when the action ends.
     const counter = state({ Counter: z.object({ n: z.number().min(0) }) })
@@ -114,10 +107,13 @@ describe("invariants", () => {
   it("loads and replays don't check", async () => {
     const app = act().withState(calc()).build();
     // An event already in the store from before the check existed.
-    await store().commit("c6", [{ name: "dividedByZero", data: {} }], {
-      correlation: "c6",
-      causation: {},
-    });
+    await store().commit(
+      [{ stream: "c6", msgs: [{ name: "dividedByZero", data: {} }] }],
+      {
+        correlation: "c6",
+        causation: {},
+      }
+    );
     const snap = await app.load("Calc", "c6");
     expect(Number.isNaN(snap.state.result)).toBe(true);
   });

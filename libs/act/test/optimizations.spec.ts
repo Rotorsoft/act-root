@@ -61,8 +61,8 @@ describe("optimization guards", () => {
         const stream = "snap-cadence";
         const commitSpy = vi.spyOn(store, "commit");
         const snapCommits = () =>
-          commitSpy.mock.calls.filter(([, events]) =>
-            (events as { name: string }[]).some((e) => e.name === SNAP_EVENT)
+          commitSpy.mock.calls.filter(([writes]) =>
+            writes.some((w) => w.msgs.some((e) => e.name === SNAP_EVENT))
           ).length;
 
         // The durable resume floor: a `with_snaps` query resumes at the

@@ -113,12 +113,12 @@ describe("lanes", () => {
         .do(function reactSlow() {
           return Promise.resolve();
         })
-        .to({ target: "shared", source: "sB", priority: 1, lane: "slow" })
+        .to({ target: "shared", source: "sA", priority: 1, lane: "slow" })
         .build()
     ).toThrow(/conflicting lane assignments/);
   });
 
-  it("accepts same-target reactions on the SAME lane across sources", () => {
+  it("accepts same-target reactions on the SAME lane", () => {
     const app = act()
       .withState(Counter)
       .withLane({ name: "fast" })
@@ -131,7 +131,7 @@ describe("lanes", () => {
       .do(function reactB() {
         return Promise.resolve();
       })
-      .to({ target: "shared", source: "sB", priority: 7, lane: "fast" })
+      .to({ target: "shared", source: "sA", priority: 7, lane: "fast" })
       .build();
     // Same lane target-wide is fine; the build succeeds.
     expect(app.lanes.map((l) => l.name)).toContain("fast");
@@ -154,7 +154,7 @@ describe("lanes", () => {
       .do(function reactOmitB() {
         return Promise.resolve();
       })
-      .to({ target: "shared", source: "sB" })
+      .to({ target: "shared", source: "sA" })
       .build();
     expect(app.lanes).toEqual([]);
   });
@@ -171,7 +171,7 @@ describe("lanes", () => {
       .do(function reactDefaultB() {
         return Promise.resolve();
       })
-      .to({ target: "shared", source: "sB", lane: "default" })
+      .to({ target: "shared", source: "sA", lane: "default" })
       .build({ autoSettle: false });
     expect(app.lanes).toEqual([]);
   });
@@ -188,7 +188,7 @@ describe("lanes", () => {
       .do(function reactOmittedSecond() {
         return Promise.resolve();
       })
-      .to({ target: "shared", source: "sB" })
+      .to({ target: "shared", source: "sA" })
       .build({ autoSettle: false });
     expect(app.lanes).toEqual([]);
   });
@@ -205,7 +205,7 @@ describe("lanes", () => {
       .do(function reactExplicitSecond() {
         return Promise.resolve();
       })
-      .to({ target: "shared", source: "sB", lane: "default" })
+      .to({ target: "shared", source: "sA", lane: "default" })
       .build({ autoSettle: false });
     expect(app.lanes).toEqual([]);
   });
@@ -224,7 +224,7 @@ describe("lanes", () => {
         .do(function reactImplicitDefault() {
           return Promise.resolve();
         })
-        .to({ target: "shared", source: "sB" })
+        .to({ target: "shared", source: "sA" })
         .build()
     ).toThrow(
       'Stream "shared" has conflicting lane assignments ("slow" vs "default")'

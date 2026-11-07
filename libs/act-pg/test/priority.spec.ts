@@ -15,11 +15,10 @@ const _SCHEMA = schema("act_priority_test");
 const TABLE = "events";
 
 /**
- * The app-level path into the duplicate-batch merge. Two static
- * reactions to one target from different sources are a supported shape
- * (`lanes.spec.ts` "accepts same-target reactions on the SAME lane across
- * sources"), `classify_registry` keys them separately, and correlate's init
- * passes the whole list to one `subscribe` call.
+ * The app-level path into the duplicate-batch merge. Two static reactions to
+ * one target are a supported shape (`lanes.spec.ts` "accepts same-target
+ * reactions on the SAME lane"), and correlate's init passes the merged list to
+ * one `subscribe` call.
  */
 describe("static-target batch after a lower stored priority", () => {
   const Counter = state({ Counter: z.object({ n: z.number() }) })
@@ -62,7 +61,7 @@ describe("static-target batch after a lower stored priority", () => {
       .do(function reactB() {
         return Promise.resolve();
       })
-      .to({ target: "shared", source: "sB", priority: 7 })
+      .to({ target: "shared", source: "sA", priority: 7 })
       .build({ autoSettle: false });
     // Forces correlate's init, which subscribes the static batch.
     await app.correlate();

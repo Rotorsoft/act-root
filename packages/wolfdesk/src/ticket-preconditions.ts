@@ -39,6 +39,14 @@ export const mustBeUserOrAgent: Precondition<
     state.userId === actor?.id || state.agentId === actor?.id,
 };
 
+export const mustNotBeResolved: Precondition<
+  { resolvedById?: string },
+  unknown
+> = {
+  description: "Ticket must not be resolved",
+  holds: (_, state) => !state.resolvedById,
+};
+
 export const mustNotBeOpen: Precondition<{ productId: string }, unknown> = {
   description: "Cannot open twice",
   holds: (_, state) => !state.productId,

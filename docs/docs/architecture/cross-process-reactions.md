@@ -121,7 +121,7 @@ healthy after it, no restart required.
 
 | Adapter | `notify` | Why |
 | --- | --- | --- |
-| `PostgresStore` | implemented (opt-in via `notify: true`) | `LISTEN`/`NOTIFY` on a per-`(schema, table)` channel (`act_commit_<schema>_<table>`). One NOTIFY per commit transaction with the full event batch as JSON payload. Default off — single-instance deployments pay zero overhead, existing callers keep their current behavior on upgrade. |
+| `PostgresStore` | implemented (opt-in via `notify: true`) | `LISTEN`/`NOTIFY` on a per-`(schema, table)` channel (`act_commit_<schema>_<table>`). One NOTIFY per stream a commit appends to, with that stream's events as JSON payload. Default off — single-instance deployments pay zero overhead, existing callers keep their current behavior on upgrade. |
 | `InMemoryStore` | not implemented | Single-process by definition — there is no remote writer. |
 | `SqliteStore` | not implemented | Single-node by design. Use `@rotorsoft/act-pg` for multi-process. |
 

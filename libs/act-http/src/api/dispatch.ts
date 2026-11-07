@@ -28,6 +28,19 @@ export type ActSurface = {
         /** The state's schema and its events', which the OpenAPI doc describes responses with. */
         readonly state?: ZodType;
         readonly events?: Readonly<Record<string, ZodType>>;
+        /** The states its actions load, which appear in no action of their own. */
+        readonly loads?: Readonly<
+          Record<
+            string,
+            | readonly {
+                readonly state: {
+                  readonly name: string;
+                  readonly events: Readonly<Record<string, ZodType>>;
+                };
+              }[]
+            | undefined
+          >
+        >;
       }
     >;
   };

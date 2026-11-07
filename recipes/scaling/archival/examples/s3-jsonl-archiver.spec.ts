@@ -27,13 +27,25 @@ describe("archiving a stream to S3", () => {
       data: { who: "ann" },
       pii: { email: "ann@x.io" },
     };
-    await store().commit("room-1", [event], meta);
-    await store().commit("room-10", [event], meta);
+    await store().commit([{ stream: "room-1", msgs: [event] }], meta);
+    await store().commit([{ stream: "room-10", msgs: [event] }], meta);
 
-    await archiveStreamToS3("room-1");
+    await archiveStreamToS3("room-1", { id: 7 });
 
     const lines = sent[0].Body.split("\n").map((line) => JSON.parse(line));
     expect(lines.map((e) => e.stream)).toEqual(["room-1"]);
     expect(sent[0].Body).not.toContain("ann@x.io");
+  });
+
+  it("keeps the copy of an earlier prune when the stream is archived again", async () => {
+    sent.length = 0;
+    await archiveStreamToS3("room-1", { id: 7 });
+    await archiveStreamToS3("room-1", { id: 7 });
+    await archiveStreamToS3("room-1", { id: 9 });
+    expect(sent.map((p) => p.Key)).toEqual([
+      "room-1-7.jsonl",
+      "room-1-7.jsonl",
+      "room-1-9.jsonl",
+    ]);
   });
 });
