@@ -1236,6 +1236,17 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         expect(leases.filter((l) => l.stream === s)).toHaveLength(0);
       });
 
+      it("takes a target reading itself, whatever its name holds", async () => {
+        const name = `self-a+b(${uid()}`;
+        await store.subscribe([{ stream: name, source: name }]);
+        const found: string[] = [];
+        await store.query_streams((p) => found.push(p.stream), {
+          stream: name,
+          stream_exact: true,
+        });
+        expect(found).toEqual([name]);
+      });
+
       it("claims a fresh subscription as soon as its first event is marked", async () => {
         const s = `fresh-first-${uid()}`;
         const src = `fresh-first-src-${uid()}`;
