@@ -284,7 +284,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           row.source !== undefined
             ? {
                 stream: row.source,
-                stream_exact: is_literal_source(row.source),
+                stream_exact: is_literal_source(row.source, row.stream),
               }
             : {}
         );
@@ -1564,6 +1564,17 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         await correlate();
         const leases = await store.claim(5, 5, `w-${uid()}`, 5_000);
         expect(leases.filter((l) => l.stream === s)).toHaveLength(0);
+      });
+
+      it("takes a target reading itself, whatever its name holds", async () => {
+        const name = `self-a+b(${uid()}`;
+        await store.subscribe([{ stream: name, source: name }]);
+        const found: string[] = [];
+        await store.query_streams((p) => found.push(p.stream), {
+          stream: name,
+          stream_exact: true,
+        });
+        expect(found).toEqual([name]);
       });
 
       it("claims a fresh subscription as soon as its first event is marked", async () => {
