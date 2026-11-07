@@ -90,6 +90,9 @@ export async function sleep(ms?: number) {
  * `user+tag@example.com` and `order(1)` are names, and a pattern always says
  * that it is one.
  *
+ * Pass the subscription's `target` too when it's known: a target reading itself
+ * holds a stream's name, whatever characters that name has.
+ *
  * The single source of truth for this across correlate (which decides what a
  * source marks), the drain fetch path, the close check, and the adapters, so
  * they all agree.
@@ -101,8 +104,10 @@ export async function sleep(ms?: number) {
  * is_literal_source("^(A|B)$");  // → false (compile as RegExp)
  * ```
  */
-export function is_literal_source(source: string): boolean {
-  return !source.startsWith("^") && !source.endsWith("$");
+export function is_literal_source(source: string, target?: string): boolean {
+  return (
+    source === target || (!source.startsWith("^") && !source.endsWith("$"))
+  );
 }
 
 /**
@@ -125,3 +130,25 @@ const ISO_8601 =
  */
 export const dateReviver = (_key: string, value: unknown): unknown =>
   typeof value === "string" && ISO_8601.test(value) ? new Date(value) : value;
+
+/**
+ * What every store refuses in a `commit`: an append with no events, and a
+ * stream named twice. In core so each adapter calls the one rule.
+ *
+ * @internal
+ */
+export function check_appends(
+  appends: readonly {
+    readonly stream: string;
+    readonly msgs: readonly unknown[];
+  }[]
+): void {
+  const seen = new Set<string>();
+  for (const { stream, msgs } of appends) {
+    if (!msgs.length)
+      throw new Error(`commit: the append to "${stream}" has no events`);
+    if (seen.has(stream))
+      throw new Error(`commit: stream "${stream}" is named twice`);
+    seen.add(stream);
+  }
+}

@@ -440,15 +440,15 @@ async function probe_min_watermarks(
         }
       }
     },
-    { limit: page_size, source_matches: streams }
+    { limit: page_size }
   );
   return min_at;
 }
 
 /**
  * Does a subscription with this `source` consume from `stream`? No source
- * consumes every stream; a target reading itself, or a literal source, consumes
- * only that name. Compiled patterns are cached per matcher.
+ * consumes every stream; a literal source consumes only that name. Compiled
+ * patterns are cached per matcher.
  */
 function source_matcher(): (
   source: string | undefined,
@@ -458,8 +458,7 @@ function source_matcher(): (
   const compiled = new Map<string, RegExp>();
   return (source, target, stream) => {
     if (!source) return true;
-    if (source === target || is_literal_source(source))
-      return source === stream;
+    if (is_literal_source(source, target)) return source === stream;
     let re = compiled.get(source);
     if (!re) {
       re = new RegExp(source);
@@ -532,12 +531,6 @@ async function partition_by_safety(
   const pending_set = new Set<string>();
   const matches = source_matcher();
 
-  // `source_matches` narrows the probe server-side to subscriptions that
-  // could consume from a stream we're closing — a best-effort hint, so
-  // the per-position source/target re-check below still runs and keeps
-  // the result correct even when a store returns a superset.
-  const targets = [...stream_info.keys()];
-
   // Every page, so a lagging reaction past the first one still counts.
   await walk_streams(
     store(),
@@ -560,7 +553,7 @@ async function partition_by_safety(
           pending_set.add(stream);
       }
     },
-    { limit: page_size, source_matches: targets }
+    { limit: page_size }
   );
 
   const safe: string[] = [];

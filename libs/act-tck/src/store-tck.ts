@@ -2,6 +2,7 @@ import {
   act,
   ConcurrencyError,
   InMemoryCache,
+  is_literal_source,
   PreconditionError,
   SNAP_EVENT,
   sensitive,
@@ -243,9 +244,6 @@ export const runStoreTck = (options: StoreTckOptions): void => {
     // is a runtime no-op that yields `{}`.
     const caps: StoreCapabilities = { ...options.capabilities };
 
-    const is_literal = (source: string) =>
-      !source.startsWith("^") && !source.endsWith("$");
-
     // Stand in for `correlate`, which a store test has no orchestrator to
     // run. `claim` follows marks — committing an event is not
     // enough to make a stream claimable — so a test that expects work to be
@@ -284,7 +282,10 @@ export const runStoreTck = (options: StoreTckOptions): void => {
             mark = Math.max(mark, e.id);
           },
           row.source !== undefined
-            ? { stream: row.source, stream_exact: is_literal(row.source) }
+            ? {
+                stream: row.source,
+                stream_exact: is_literal_source(row.source),
+              }
             : {}
         );
         if (mark > row.at)
@@ -4735,22 +4736,6 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           expect(both.sort()).toEqual(
             [subConcreteA, subConcreteB, subRegex, subNoSource].sort()
           );
-        });
-
-        it("reads a target's own source as its name, never as a pattern", async () => {
-          const tag = uid();
-          const plus = `sm-${tag}-a+b`;
-          const broken = `sm-${tag}-a(`;
-          await store.subscribe([
-            { stream: plus, source: plus },
-            { stream: broken, source: broken },
-          ]);
-          const seen: string[] = [];
-          await store.query_streams((p) => seen.push(p.stream), {
-            stream: `sm-${tag}-a`,
-            source_matches: [plus],
-          });
-          expect(seen).toEqual([plus]);
         });
       }
     );

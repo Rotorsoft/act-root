@@ -24,6 +24,7 @@ import type {
 } from "@rotorsoft/act";
 import {
   ConcurrencyError,
+  check_appends,
   log,
   SNAP_EVENT,
   StoreError,
@@ -95,18 +96,6 @@ type Config = Readonly<{
   pii_encryption?: Encryption;
 }> &
   pg.PoolConfig;
-
-// A commit names each stream once, and every append carries events.
-function check_appends<E extends Schemas>(appends: readonly Append<E>[]) {
-  const seen = new Set<string>();
-  for (const { stream, msgs } of appends) {
-    if (!msgs.length)
-      throw new Error(`commit: the append to "${stream}" has no events`);
-    if (seen.has(stream))
-      throw new Error(`commit: stream "${stream}" is named twice`);
-    seen.add(stream);
-  }
-}
 
 const SAFE_IDENTIFIER = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
 
@@ -1618,19 +1607,12 @@ export class PostgresStore implements Store {
       // The stored `source` is treated as the regex pattern, and a row
       // qualifies when any supplied candidate name matches it (`n ~ source`).
       // A NULL/empty source has no source constraint — it consumes from
-      // every stream, so it always qualifies. A target reading itself, or a
-      // source with no anchor, holds a name, which may not even compile as a
-      // pattern. `CASE` is what keeps Postgres from compiling it. Composes
-      // (AND) with others.
+      // every stream, so it always qualifies. Composes (AND) with others.
       values.push(query.source_matches);
       conditions.push(
-        `(source IS NULL OR source = '' OR CASE
-          WHEN source = stream OR (left(source, 1) <> '^' AND right(source, 1) <> '$')
-            THEN source = ANY($${values.length}::text[])
-          ELSE EXISTS (
-            SELECT 1 FROM unnest($${values.length}::text[]) AS n WHERE n ~ source
-          )
-        END)`
+        `(source IS NULL OR source = '' OR EXISTS (
+          SELECT 1 FROM unnest($${values.length}::text[]) AS n WHERE n ~ source
+        ))`
       );
     }
     if (query?.after !== undefined) {

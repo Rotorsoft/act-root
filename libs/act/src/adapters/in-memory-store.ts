@@ -27,19 +27,7 @@ import type {
   SubscribeInput,
 } from "../types/index.js";
 import { DEFAULT_LANE, SNAP_EVENT, TOMBSTONE_EVENT } from "../types/index.js";
-import { is_literal_source, sleep } from "../utils.js";
-
-// A commit names each stream once, and every append carries events.
-function check_appends<E extends Schemas>(appends: readonly Append<E>[]) {
-  const seen = new Set<string>();
-  for (const { stream, msgs } of appends) {
-    if (!msgs.length)
-      throw new Error(`commit: the append to "${stream}" has no events`);
-    if (seen.has(stream))
-      throw new Error(`commit: stream "${stream}" is named twice`);
-    seen.add(stream);
-  }
-}
+import { check_appends, sleep } from "../utils.js";
 
 /**
  * One subscription row: watermark, lease, retry and schedule. Its state is
@@ -675,14 +663,9 @@ export class InMemoryStore implements Store {
     const source_matches = query?.source_matches;
     const matches = this._filter_predicate(query ?? {});
     // Reverse-match: the stored `source` pattern must match a requested name.
-    const reverse_cache = new Map<string, RegExp>();
     const reverse_match = (source: string): boolean => {
-      let re = reverse_cache.get(source);
-      if (!re) {
-        re = new RegExp(source);
-        reverse_cache.set(source, re);
-      }
-      return source_matches!.some((name) => re!.test(name));
+      const re = new RegExp(source);
+      return source_matches!.some((name) => re.test(name));
     };
 
     // The default sort is code-unit order, which agrees with the `<=`
@@ -696,14 +679,8 @@ export class InMemoryStore implements Store {
       if (after !== undefined && s.stream <= after) continue;
       if (!matches(s)) continue;
       if (source_matches !== undefined) {
-        // No source consumes every stream, so it matches any name. A target
-        // reading itself, or a literal source, consumes only that name.
-        if (
-          s.source === s.stream ||
-          (s.source && is_literal_source(s.source))
-        ) {
-          if (!source_matches.includes(s.source)) continue;
-        } else if (s.source && !reverse_match(s.source)) continue;
+        // No source consumes every stream, so it matches any name.
+        if (s.source && !reverse_match(s.source)) continue;
       }
       // Before emitting, so `limit: 0` returns none.
       if (count >= limit) break;

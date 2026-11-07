@@ -25,6 +25,7 @@ import type {
 } from "@rotorsoft/act";
 import {
   ConcurrencyError,
+  check_appends,
   is_literal_source,
   StoreError,
   ValidationError,
@@ -105,18 +106,6 @@ export interface SqliteConfig {
  * by "no such table: events" on readback.
  * @internal
  */
-// A commit names each stream once, and every append carries events.
-function check_appends<E extends Schemas>(appends: readonly Append<E>[]) {
-  const seen = new Set<string>();
-  for (const { stream, msgs } of appends) {
-    if (!msgs.length)
-      throw new Error(`commit: the append to "${stream}" has no events`);
-    if (seen.has(stream))
-      throw new Error(`commit: stream "${stream}" is named twice`);
-    seen.add(stream);
-  }
-}
-
 const SHARED_MEMORY_URL = "file::memory:?cache=shared";
 
 /**
@@ -803,14 +792,9 @@ export class SqliteStore implements Store {
     // subset (e.g. `^(A|B)$`) would otherwise silently never claim its
     // stream, so `streamPatternToGlob` throws `ValidationError` here —
     // pointing operators to InMemory/PG for full regex claim sources —
-    // before any row is written. Literal sources skip the check entirely, and
-    // so does a target reading itself: that source is a name, never a pattern.
+    // before any row is written. Literal sources skip the check entirely.
     for (const { stream, source } of streams) {
-      if (
-        source !== undefined &&
-        source !== stream &&
-        !is_literal_source(source)
-      )
+      if (source !== undefined && !is_literal_source(source, stream))
         streamPatternToGlob(source);
     }
     return this._tx("subscribe", async (tx) => {

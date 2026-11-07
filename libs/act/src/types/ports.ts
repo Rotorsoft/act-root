@@ -253,15 +253,14 @@ export type StreamPosition = {
  *   of the given names (i.e. `name ~ source`, the inverse of `source`
  *   above which is `source ~ pattern`). A subscription with an absent or
  *   empty `source` (no source constraint — it consumes from every
- *   stream) ALWAYS qualifies, regardless of the names. Used by the
- *   close-cycle safety probe to fetch only the subscriptions that could
- *   consume from a set of close-target streams instead of scanning the
- *   whole subscriptions table. **Callers must treat it as a hint, not an
- *   exact filter:** a
+ *   stream) ALWAYS qualifies, regardless of the names. For a caller that
+ *   wants only the subscriptions that could consume from a set of streams;
+ *   the framework itself doesn't use it. **Callers must treat it as a hint,
+ *   not an exact filter:** a
  *   store that can't express reverse-regex (e.g. an anchor-aware `LIKE`
  *   approximation) MAY return a superset — typically by ignoring the
  *   filter entirely — so callers that need exactness re-verify in
- *   process (the probe already does). Stores that honor it server-side
+ *   process. Stores that honor it server-side
  *   advertise `source_matches` in the TCK's `StoreCapabilities`, which
  *   gates the narrowing-behavior tests; correctness never depends on the
  *   flag, only the row count fetched.

@@ -50,12 +50,11 @@ export async function fetch<TEvents extends Schemas>(
     leased.map(async ({ stream, source, at, lagging }) => {
       const events: Committed<TEvents, keyof TEvents>[] = [];
       // A literal `source` fetches with `stream_exact` so an exact name
-      // like "s1" reads only "s1" — never a sibling prefix "s12". So does a
-      // target reading itself: that source is a stream's name, whatever
-      // characters it holds. A pattern source (e.g. `^(A|B)$`) stays a regex
-      // query, matching the same streams correlate resolved it for.
+      // like "s1" reads only "s1" — never a sibling prefix "s12". A
+      // pattern source (e.g. `^(A|B)$`) stays a regex query, matching the
+      // same streams correlate resolved it for.
       const stream_exact =
-        source !== undefined && (source === stream || is_literal_source(source))
+        source !== undefined && is_literal_source(source, stream)
           ? true
           : undefined;
       try {

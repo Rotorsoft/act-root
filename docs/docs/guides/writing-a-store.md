@@ -40,7 +40,7 @@ await store.commit(stream, msgs, meta, expectedVersion);
 await store.commit([{ stream, msgs, expectedVersion }], meta);
 ```
 
-A commit across streams notifies once per stream, with that stream's events. The TCK's `commit across streams` block matches the refusal messages exactly, so take their text from it.
+A commit across streams notifies once per stream, with that stream's events. Call `check_appends(appends)` from `@rotorsoft/act` first: it's the framework's rule for what a commit may hold, and the TCK's `commit across streams` block matches its messages exactly.
 
 An adapter checks every append's version before inserting anything, inserts every append inside the transaction it already opens, and lets the unique `(stream, version)` constraint catch a race on any stream appended to. The TCK's "commit across streams" block is the checklist: stale first, middle and last appends, a stream named twice, an append with no events, an unguarded append beside guarded ones, and two commits racing on a shared stream.
 

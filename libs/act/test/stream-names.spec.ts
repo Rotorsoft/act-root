@@ -102,6 +102,38 @@ describe("default reactions on any stream name", () => {
     expect((await app.close([{ stream: "user+tag" }])).skipped).toEqual([]);
   });
 
+  it("a close waits for reactions reading through a written pattern", async () => {
+    const seen: string[] = [];
+    const app = act()
+      .withState(Thing)
+      .on("Done")
+      .do(async function one(e) {
+        seen.push(`one:${e.stream}`);
+      })
+      .to({ target: "one", source: "^(A|B)$" })
+      .on("Done")
+      .do(async function two(e) {
+        seen.push(`two:${e.stream}`);
+      })
+      .to({ target: "two", source: "^(A|B)$" })
+      .build({
+        autoSettle: false,
+        scoped: { store: new InMemoryStore(), cache: new InMemoryCache() },
+      });
+    for (const stream of ["A", "B", "C"])
+      await app.do("go", { stream, actor }, {});
+    await app.correlate();
+
+    const behind = await app.close([{ stream: "A" }, { stream: "B" }]);
+    expect(behind.skipped.sort()).toEqual(["A", "B"]);
+    expect((await app.close([{ stream: "C" }])).skipped).toEqual([]);
+
+    await app.drain();
+    expect(seen).toHaveLength(4);
+    const caught_up = await app.close([{ stream: "A" }, { stream: "B" }]);
+    expect(caught_up.skipped).toEqual([]);
+  });
+
   it("a name that can't compile as a pattern doesn't break a close elsewhere", async () => {
     const { app } = app_with_default_reaction();
     await app.do("go", { stream: "a(", actor }, {});
