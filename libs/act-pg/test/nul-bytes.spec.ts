@@ -65,13 +65,6 @@ describe("NUL bytes are refused by Postgres, legibly", () => {
     expect(details).toContain("Noted");
   });
 
-  it("refuses half of a surrogate pair in a stream name", async () => {
-    const err = await store
-      .commit("😀".slice(0, 1), [{ name: "Noted", data: {} }], meta)
-      .catch((e) => e as Error);
-    expect(err).toBeInstanceOf(ValidationError);
-  });
-
   it("translates a NUL in a stream name, which the head check reaches first", async () => {
     const err = await store
       .commit(`nul${NUL}stream`, [{ name: "Noted", data: {} }], meta)

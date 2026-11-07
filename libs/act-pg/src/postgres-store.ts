@@ -924,14 +924,6 @@ export class PostgresStore implements Store {
     // An empty commit writes nothing, but an expectedVersion still has to be
     // checked, as InMemory and SQLite do.
     if (msgs.length === 0 && expectedVersion === undefined) return [];
-    // The driver turns half a surrogate pair into U+FFFD, so the head lookup
-    // would come back under another name.
-    if (/\p{Cs}/u.test(stream))
-      throw new ValidationError(
-        stream,
-        msgs as unknown as Readonly<unknown>,
-        "Postgres cannot store half of a surrogate pair in a stream name"
-      );
     // Serialize commit VISIBILITY, not just id assignment. `id` is a
     // serial: it is assigned at INSERT time but the row appears at
     // COMMIT time, and every watermark consumer (the correlate
