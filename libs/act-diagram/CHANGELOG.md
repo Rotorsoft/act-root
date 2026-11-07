@@ -1,3 +1,179 @@
+# [@rotorsoft/act-diagram-v2.0.0](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-diagram-v1.4.2...@rotorsoft/act-diagram-v2.0.0) (2026-11-07)
+
+
+* feat(act)!: .loads loads other streams and appends their events in the same commit ([#2306](https://github.com/Rotorsoft/act-root/issues/2306)) ([5f33d11](https://github.com/Rotorsoft/act-root/commit/5f33d119264ccd285002a7d34ed8634c1cc83df5)), closes [#2183](https://github.com/Rotorsoft/act-root/issues/2183)
+* refactor(act)!: remove the deprecated invariant surface ([#2302](https://github.com/Rotorsoft/act-root/issues/2302)) ([64a1af0](https://github.com/Rotorsoft/act-root/commit/64a1af02b92248152ce1471c267e2034f9adc753)), closes [#2183](https://github.com/Rotorsoft/act-root/issues/2183)
+
+
+### Bug Fixes
+
+* **act:** fix what the 2.0 release audit found ([#2336](https://github.com/Rotorsoft/act-root/issues/2336)) ([6f09d48](https://github.com/Rotorsoft/act-root/commit/6f09d48d2632acad48d1e5edda1f22d72c98242f))
+
+
+### Features
+
+* **act-diagram:** show loaded states and commit boundaries in the CLI, diagram and animations ([#2307](https://github.com/Rotorsoft/act-root/issues/2307)) ([676f10b](https://github.com/Rotorsoft/act-root/commit/676f10b656d65312431d0d344ee0b22d31433f64))
+
+
+### BREAKING CHANGES
+
+* `.given(rules)` is gone; write it as `.requires(rules)`
+with `valid: (state, actor)` becoming `holds: (_, state, actor)`, and type
+a shared rule `Precondition<S, unknown>` instead of `Invariant<S>`. Catch
+`PreconditionError` instead of `InvariantError` (`Errors.InvariantError`
+and act-http's `INVARIANT` code are gone). Remove `validateFoldedState`
+from `act().build(...)`. act-diagram's `ActionNode.invariants` is gone;
+read `preconditions`.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+* fix(act-sqlite): run the store's statements one at a time, so concurrent calls wait, not fail
+
+One SqliteStore owns one libSQL connection, and a second statement while
+a write transaction is open on it failed at once: TRANSACTION_ACTIVE in
+memory, SQLITE_BUSY on a file. Two requests committing together, or a
+commit beside the drain's claim, refused one of them. Every statement and
+transaction now takes its turn in an in-process queue; a query's row
+callback runs outside it, so a callback that writes can't wait on itself.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+* feat(act)!: commit(writes, meta) commits to several streams atomically
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+* test(act-pg,act-sqlite): bench multi-stream commits and fail a write part-way
+
+The perf harnesses gain three scenarios: a two- and a three-stream
+commit beside the single-event one, and eight writers racing on a hot
+shared stream. New tests fail the second of two writes after the head
+probe passed (a rival commit, a NUL byte, a dropped connection, a
+failed insert, a unique collision) and check that nothing is stored and
+the failing stream is named.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+* feat(act): .loads loads other streams and routes their events into one commit
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+* refactor(act)!: name each part of a commit an Append, and the argument appends
+
+A commit appends events to streams, so the per-stream item is an
+Append and the argument is `appends`: `commit(appends, meta)`. The
+store's error messages say "the append to" and "is named twice".
+* Store.commit takes `(appends: Append[], meta)`; the
+type 1.x callers never saw as StreamWrite is now Append.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+* docs(act): .loads in state-management, and the RFC 2251 scenarios as tests
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+* feat(act)!: .loads, the stability snapshot, contract rows and the RFC decision
+
+Settles RFC 2251's open question (positional .loads), adds a
+behavior-contract row per .loads guarantee and a CLAUDE.md one-liner,
+and regenerates the stability snapshot.
+* Precondition.holds is typed (payload, state, actor,
+loaded); a direct call passes all four. A rule that leaves the last
+parameters out still fits every action.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+* docs(act-pg,act-sqlite): record the multi-stream commit benches against 1.x
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+* fix(act): four .loads defects from the PR audit
+
+- A caller's expectedVersion now refuses an action that appends only to
+  loaded streams when its own stream moved, as it does for any action
+  that appends to its own stream.
+- A load target that names no stream throws, instead of loading the
+  whole store as stream "".
+- build() resolves loads onto a copy the Act owns, so a second Act that
+  registers other partials of the loaded state no longer changes what
+  the first one loads.
+- The trace log names each committed event with the stream it went to.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+* fix(act): fire committed once per stream an action appends to; the diagram learns .loads
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+* docs(act): committed fires once per stream; broadcast loaded streams from a committed listener
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+* fix(act): a deprecated event listed on a load throws at build
+
+An event listed on a load is emitted as statically as .emit("X"), so
+listing a deprecated version now throws the same way at build instead of
+writing legacy events into the loaded stream.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+* fix(act): an action with loads appends to its own stream too
+
+An action whose events all went to loaded streams left no record of its
+decision, and a pinned own version was then checked only at load, so a
+write to the own stream between load and commit was missed. The action
+now throws unless it appends to its own stream, which also puts the pin
+in the store's atomic check. Drops the special cases for a missing own
+append.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+* fix(act): a static emit of an event a load lists fails to compile and throws at build
+
+A listed event goes to the loaded stream, so a static .emit of one sends
+nothing to the action's own stream and always threw at the call. The
+passthrough form now accepts only events no load lists, and the build
+rejects it for plain JavaScript.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+* test(act-pg,act-sqlite): run .loads through whole actions on the real stores
+
+Covers the routing, the guard on each stream, a rival on a loaded stream
+and racing actions on real transactions. The core suite only ran these
+on the in-memory store.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+* fix(act-http): open SSE subscriptions for states reached only through .loads
+
+sse_state_names walked only states with actions, so a loaded state got no
+subscription though its router type promised one, and a sensitive loaded
+state skipped the check that refuses sse. It now walks each state's loads
+too. Also corrects the app.on JSDoc, lists .loads and the per-stream
+committed in STABILITY.md, and tells direct callers of holds and handlers
+to pass the new argument.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+* chore(act): finish the .loads review: contract rows, Load's doc, diagram mock
+
+Cites the two remaining runtime claims in the contract rows, says in the
+observability guide that committed can fire more than once per app.do,
+drops the misleading @internal tag from the exported Load type, and stops
+the diagram mock recording load fields nothing reads.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+* `.given(rules)` is gone; write it as `.requires(rules)`
+with `valid: (state, actor)` becoming `holds: (_, state, actor)`, and type
+a shared rule `Precondition<S, unknown>` instead of `Invariant<S>`. Catch
+`PreconditionError` instead of `InvariantError` (`Errors.InvariantError`
+and act-http's `INVARIANT` code are gone). Remove `validateFoldedState`
+from `act().build(...)`. act-diagram's `ActionNode.invariants` is gone;
+read `preconditions`.
+
+Co-authored-by: rotorsoft <rotorsoft@outlook.com>
+Co-authored-by: Claude Opus 5.5 <noreply@anthropic.com>
+
 # [@rotorsoft/act-diagram-v1.4.2](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-diagram-v1.4.1...@rotorsoft/act-diagram-v1.4.2) (2026-11-02)
 
 
