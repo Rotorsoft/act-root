@@ -1,3 +1,181 @@
+# [@rotorsoft/act-http-v2.0.0](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-http-v1.12.5...@rotorsoft/act-http-v2.0.0) (2026-11-07)
+
+
+* feat(act)!: .loads loads other streams and appends their events in the same commit ([#2306](https://github.com/Rotorsoft/act-root/issues/2306)) ([5f33d11](https://github.com/Rotorsoft/act-root/commit/5f33d119264ccd285002a7d34ed8634c1cc83df5)), closes [#2183](https://github.com/Rotorsoft/act-root/issues/2183)
+* refactor(act)!: remove the deprecated invariant surface ([#2302](https://github.com/Rotorsoft/act-root/issues/2302)) ([64a1af0](https://github.com/Rotorsoft/act-root/commit/64a1af02b92248152ce1471c267e2034f9adc753)), closes [#2183](https://github.com/Rotorsoft/act-root/issues/2183)
+
+
+### Bug Fixes
+
+* **act:** fix the practical 2.0 bugs from the pre-release audit ([03b4404](https://github.com/Rotorsoft/act-root/commit/03b4404efc5099ba655797ca8f20af92cec71736)), closes [#2360](https://github.com/Rotorsoft/act-root/issues/2360) [#2371](https://github.com/Rotorsoft/act-root/issues/2371) [#2372](https://github.com/Rotorsoft/act-root/issues/2372) [#2373](https://github.com/Rotorsoft/act-root/issues/2373) [#2374](https://github.com/Rotorsoft/act-root/issues/2374) [#2375](https://github.com/Rotorsoft/act-root/issues/2375) [#2376](https://github.com/Rotorsoft/act-root/issues/2376) [#2377](https://github.com/Rotorsoft/act-root/issues/2377) [#2378](https://github.com/Rotorsoft/act-root/issues/2378) [#2335](https://github.com/Rotorsoft/act-root/issues/2335)
+* **act:** fix the real 2.0 bugs from debug wave 29 ([#2359](https://github.com/Rotorsoft/act-root/issues/2359)) ([a71b3f8](https://github.com/Rotorsoft/act-root/commit/a71b3f888e6f1f99504f4c3c9f6ec4a67919cde5))
+* **act:** fix what the 2.0 release audit found ([#2336](https://github.com/Rotorsoft/act-root/issues/2336)) ([6f09d48](https://github.com/Rotorsoft/act-root/commit/6f09d48d2632acad48d1e5edda1f22d72c98242f))
+
+
+### Features
+
+* **act-http:** cover .loads in the generated APIs and the scaffold skill ([#2308](https://github.com/Rotorsoft/act-root/issues/2308)) ([170984a](https://github.com/Rotorsoft/act-root/commit/170984a2733418e80385e965188a95386b66ad07))
+
+
+### BREAKING CHANGES
+
+* `.given(rules)` is gone; write it as `.requires(rules)`
+with `valid: (state, actor)` becoming `holds: (_, state, actor)`, and type
+a shared rule `Precondition<S, unknown>` instead of `Invariant<S>`. Catch
+`PreconditionError` instead of `InvariantError` (`Errors.InvariantError`
+and act-http's `INVARIANT` code are gone). Remove `validateFoldedState`
+from `act().build(...)`. act-diagram's `ActionNode.invariants` is gone;
+read `preconditions`.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+* fix(act-sqlite): run the store's statements one at a time, so concurrent calls wait, not fail
+
+One SqliteStore owns one libSQL connection, and a second statement while
+a write transaction is open on it failed at once: TRANSACTION_ACTIVE in
+memory, SQLITE_BUSY on a file. Two requests committing together, or a
+commit beside the drain's claim, refused one of them. Every statement and
+transaction now takes its turn in an in-process queue; a query's row
+callback runs outside it, so a callback that writes can't wait on itself.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+* feat(act)!: commit(writes, meta) commits to several streams atomically
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+* test(act-pg,act-sqlite): bench multi-stream commits and fail a write part-way
+
+The perf harnesses gain three scenarios: a two- and a three-stream
+commit beside the single-event one, and eight writers racing on a hot
+shared stream. New tests fail the second of two writes after the head
+probe passed (a rival commit, a NUL byte, a dropped connection, a
+failed insert, a unique collision) and check that nothing is stored and
+the failing stream is named.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+* feat(act): .loads loads other streams and routes their events into one commit
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+* refactor(act)!: name each part of a commit an Append, and the argument appends
+
+A commit appends events to streams, so the per-stream item is an
+Append and the argument is `appends`: `commit(appends, meta)`. The
+store's error messages say "the append to" and "is named twice".
+* Store.commit takes `(appends: Append[], meta)`; the
+type 1.x callers never saw as StreamWrite is now Append.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+* docs(act): .loads in state-management, and the RFC 2251 scenarios as tests
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+* feat(act)!: .loads, the stability snapshot, contract rows and the RFC decision
+
+Settles RFC 2251's open question (positional .loads), adds a
+behavior-contract row per .loads guarantee and a CLAUDE.md one-liner,
+and regenerates the stability snapshot.
+* Precondition.holds is typed (payload, state, actor,
+loaded); a direct call passes all four. A rule that leaves the last
+parameters out still fits every action.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+* docs(act-pg,act-sqlite): record the multi-stream commit benches against 1.x
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+* fix(act): four .loads defects from the PR audit
+
+- A caller's expectedVersion now refuses an action that appends only to
+  loaded streams when its own stream moved, as it does for any action
+  that appends to its own stream.
+- A load target that names no stream throws, instead of loading the
+  whole store as stream "".
+- build() resolves loads onto a copy the Act owns, so a second Act that
+  registers other partials of the loaded state no longer changes what
+  the first one loads.
+- The trace log names each committed event with the stream it went to.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+* fix(act): fire committed once per stream an action appends to; the diagram learns .loads
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+* docs(act): committed fires once per stream; broadcast loaded streams from a committed listener
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+* fix(act): a deprecated event listed on a load throws at build
+
+An event listed on a load is emitted as statically as .emit("X"), so
+listing a deprecated version now throws the same way at build instead of
+writing legacy events into the loaded stream.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+* fix(act): an action with loads appends to its own stream too
+
+An action whose events all went to loaded streams left no record of its
+decision, and a pinned own version was then checked only at load, so a
+write to the own stream between load and commit was missed. The action
+now throws unless it appends to its own stream, which also puts the pin
+in the store's atomic check. Drops the special cases for a missing own
+append.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+* fix(act): a static emit of an event a load lists fails to compile and throws at build
+
+A listed event goes to the loaded stream, so a static .emit of one sends
+nothing to the action's own stream and always threw at the call. The
+passthrough form now accepts only events no load lists, and the build
+rejects it for plain JavaScript.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+* test(act-pg,act-sqlite): run .loads through whole actions on the real stores
+
+Covers the routing, the guard on each stream, a rival on a loaded stream
+and racing actions on real transactions. The core suite only ran these
+on the in-memory store.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+* fix(act-http): open SSE subscriptions for states reached only through .loads
+
+sse_state_names walked only states with actions, so a loaded state got no
+subscription though its router type promised one, and a sensitive loaded
+state skipped the check that refuses sse. It now walks each state's loads
+too. Also corrects the app.on JSDoc, lists .loads and the per-stream
+committed in STABILITY.md, and tells direct callers of holds and handlers
+to pass the new argument.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+* chore(act): finish the .loads review: contract rows, Load's doc, diagram mock
+
+Cites the two remaining runtime claims in the contract rows, says in the
+observability guide that committed can fire more than once per app.do,
+drops the misleading @internal tag from the exported Load type, and stops
+the diagram mock recording load fields nothing reads.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+* `.given(rules)` is gone; write it as `.requires(rules)`
+with `valid: (state, actor)` becoming `holds: (_, state, actor)`, and type
+a shared rule `Precondition<S, unknown>` instead of `Invariant<S>`. Catch
+`PreconditionError` instead of `InvariantError` (`Errors.InvariantError`
+and act-http's `INVARIANT` code are gone). Remove `validateFoldedState`
+from `act().build(...)`. act-diagram's `ActionNode.invariants` is gone;
+read `preconditions`.
+
+Co-authored-by: rotorsoft <rotorsoft@outlook.com>
+Co-authored-by: Claude Opus 5.5 <noreply@anthropic.com>
+
 # [@rotorsoft/act-http-v1.12.5](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-http-v1.12.4...@rotorsoft/act-http-v1.12.5) (2026-11-06)
 
 
