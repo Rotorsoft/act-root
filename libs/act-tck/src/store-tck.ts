@@ -283,7 +283,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           row.source !== undefined
             ? {
                 stream: row.source,
-                stream_exact: is_literal_source(row.source),
+                stream_exact: is_literal_source(row.source, row.stream),
               }
             : {}
         );
