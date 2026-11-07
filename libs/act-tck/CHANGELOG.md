@@ -1,3 +1,100 @@
+# [@rotorsoft/act-tck-v2.0.0](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.41.4...@rotorsoft/act-tck-v2.0.0) (2026-11-07)
+
+
+* feat(act)!: commit(appends, meta) appends to several streams atomically ([#2304](https://github.com/Rotorsoft/act-root/issues/2304)) ([efebf3f](https://github.com/Rotorsoft/act-root/commit/efebf3fe117c3030059689c8786cb8ea4f806cf6)), closes [#2183](https://github.com/Rotorsoft/act-root/issues/2183)
+* feat(act)!: mark mistakes in .emit and .loads on the mistake, and catch extra fields ([#2312](https://github.com/Rotorsoft/act-root/issues/2312)) ([164c3f9](https://github.com/Rotorsoft/act-root/commit/164c3f97e972958f357e9080347465b4059ee511))
+
+
+### Bug Fixes
+
+* **act:** fix the practical 2.0 bugs from the pre-release audit ([03b4404](https://github.com/Rotorsoft/act-root/commit/03b4404efc5099ba655797ca8f20af92cec71736)), closes [#2360](https://github.com/Rotorsoft/act-root/issues/2360) [#2371](https://github.com/Rotorsoft/act-root/issues/2371) [#2372](https://github.com/Rotorsoft/act-root/issues/2372) [#2373](https://github.com/Rotorsoft/act-root/issues/2373) [#2374](https://github.com/Rotorsoft/act-root/issues/2374) [#2375](https://github.com/Rotorsoft/act-root/issues/2375) [#2376](https://github.com/Rotorsoft/act-root/issues/2376) [#2377](https://github.com/Rotorsoft/act-root/issues/2377) [#2378](https://github.com/Rotorsoft/act-root/issues/2378) [#2335](https://github.com/Rotorsoft/act-root/issues/2335)
+* **act:** fix what the 2.0 release audit found ([#2336](https://github.com/Rotorsoft/act-root/issues/2336)) ([6f09d48](https://github.com/Rotorsoft/act-root/commit/6f09d48d2632acad48d1e5edda1f22d72c98242f))
+
+
+### BREAKING CHANGES
+
+* a field an event's schema doesn't declare, which Zod used to
+drop silently, now fails to compile, as does an action that appends only to
+loaded streams. An .emit inside a generic helper may need the name form.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+* refactor(act): shorten the checks behind .emit
+
+Same mistakes caught at the same places, in 29 fewer lines: aliases for the
+repeated handler and result types, and fewer branches in the checks.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+* refactor(act): move .emit's checks out of builders.ts into types/emit.ts
+
+The builder keeps only the .emit declaration. The checks aren't re-exported,
+so they add no public names.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+* fix(act): keep .emit's checks fast, and accept open fields and dynamic names
+
+From the audit. Returning the check alone, not intersected with the inferred
+type, brings a 120-event state back to v2's compile time. A z.unknown() field
+takes any object, an event name only known at runtime is left to the runtime,
+and a wrong type inside a z.tuple is caught.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+* refactor(act): move the .emit declaration into types/emit.ts
+
+builders.ts now only points at it, so this PR adds almost nothing there.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+* refactor(act): move ActionEmit out of builders.ts into types/emit.ts
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+* fix(act): an event a load lists doesn't count as the action's own
+
+A state loading its own type could emit only the listed event: it compiled,
+and threw at the call because the event went to the loaded stream. Tests also
+pin what a handler may return, including one that never returns.
+* a handler that never returns anything now fails to compile.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+* `.given(rules)` is gone; write it as `.requires(rules)`
+with `valid: (state, actor)` becoming `holds: (_, state, actor)`, and type
+a shared rule `Precondition<S, unknown>` instead of `Invariant<S>`. Catch
+`PreconditionError` instead of `InvariantError` (`Errors.InvariantError`
+and act-http's `INVARIANT` code are gone). Remove `validateFoldedState`
+from `act().build(...)`. act-diagram's `ActionNode.invariants` is gone;
+read `preconditions`.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+* fix(act-sqlite): run the store's statements one at a time, so concurrent calls wait, not fail
+
+One SqliteStore owns one libSQL connection, and a second statement while
+a write transaction is open on it failed at once: TRANSACTION_ACTIVE in
+memory, SQLITE_BUSY on a file. Two requests committing together, or a
+commit beside the drain's claim, refused one of them. Every statement and
+transaction now takes its turn in an in-process queue; a query's row
+callback runs outside it, so a callback that writes can't wait on itself.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+* feat(act)!: commit(writes, meta) commits to several streams atomically
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+* refactor(act)!: name each part of a commit an Append, and the argument appends
+
+A commit appends events to streams, so the per-stream item is an
+Append and the argument is `appends`: `commit(appends, meta)`. The
+store's error messages say "the append to" and "is named twice".
+* Store.commit takes `(appends: Append[], meta)`; the
+type 1.x callers never saw as StreamWrite is now Append.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
 # [@rotorsoft/act-tck-v1.41.4](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.41.3...@rotorsoft/act-tck-v1.41.4) (2026-11-07)
 
 
