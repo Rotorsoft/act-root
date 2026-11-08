@@ -9,23 +9,23 @@ Least recently run goes next. A lens with no accepted proposal in its last three
 | lens | last run | runs | accepted | status |
 |---|---|---|---|---|
 | Public surface | 2026-11-03 | 9 | 2 | active (no surface growth; `Store.query`'s published doc still describes adapter-side date revival, #2284) |
-| Dead code (tool) | 2026-10-31 | 9 | 10 | active (two `sensitive()` markers where one covers every case; act-diagram's CLI defines four helpers twice; knip clean in core) |
+| Dead code (tool) | 2026-11-08 | 10 | 10 | active (an autoclose field written in two places and read nowhere since #2337; four act-diagram exports used only in their file; knip clean in core) |
 | Hotspots (tool) | 2026-10-20 | 5 | 1 | retired 2026-10-20: two runs with no proposal; every branch in the hot functions (correlate, action, drain) is a separate rule |
 | File budget | 2026-11-03 | 10 | 1 | active (9 over 300 code lines; act.ts 857 with #2228's overloads; no split subtracts) |
-| Comment noise | 2026-10-31 | 9 | 11 | active (29 ticket refs outside core; act-ops' published doc names shipped tickets in future tense; the stacked-doc awk missed one-line blocks) |
+| Comment noise | 2026-11-08 | 10 | 11 | active (28% / 14%, 0 ticket refs; one stale header in `zod.ts` my #2379 missed; two published doc paragraphs mis-wrapped by word swaps) |
 | Concepts and options | 2026-11-03 | 10 | 3 | active (RFC 2251 reviewed before it is built: five cuts, #2289–#2293) |
 | Core or decorator? | 2026-10-15 | 3 | 0 | retired 2026-10-15: three runs, findings only (PII, audit, breaker, lanes stay; priority is a major-version question) |
-| DRY across adapters and builders | 2026-10-31 | 9 | 15 | active (#2230's warning re-walks the event schemas `build_events` walks; Zod definitions read three ways, and `is_pii`'s missed `.transform`/`.pipe`) |
+| DRY across adapters and builders | 2026-11-08 | 10 | 15 | active (the version check, truncate seed and notification parser still written per store; four adapter specs re-test core rules) |
 | Reading path | 2026-11-03 | 9 | 3 | active (13 files, ~33 names; #2263 adds `zod.ts` to the build path only) |
 | Newcomer test (quarterly) | 2026-10-17 | 2 | 0 | active (21 concepts, 3 imports; a package.json without name/version crashes) |
-| Tests by concept | 2026-10-31 | 9 | 18 | active (row 261's test never blocks; the partial options merge survives a mutation; four defer tests in real-clock windows) |
+| Tests by concept | 2026-11-08 | 10 | 18 | active (Wolfdesk's 10 s stalls are one shared SQLite file; a duplicated test from a merge; two recipe timer tests that can't fail) |
 | Mutation evidence (monthly, CI) | never | 0 | 0 | retired: setup removed (#1805), see baselines below |
 | Packages earn their place | 2026-10-15 | 4 | 0 | retired 2026-10-15: four runs, no proposal (removal is ruled out; act-tck churn is the snapshot, now P2026-10-15p-1) |
 | Infra | 2026-11-03 | 10 | 2 | active (the act `./types` snapshot block repeats root, #2288; Renovate's dev-deps splitter and its three undo rules, backlog) |
 | One source of truth | 2026-11-03 | 10 | 8 | active (`Store.query` and `pii_schemas` docs contradict their owners, #2284) |
 | Examples | 2026-11-03 | 9 | 3 | active (5 of 5 runnable recipes green; the RFC 2251 preview loses its label when embedded, #2285) |
 | Process | 2026-11-03 | 9 | 9 | active (/pr asks for two body shapes and 36 PRs used ~20, backlog; the context hook's separator, #2286) |
-| Feature interactions | 2026-10-31 | 9 | 20 | active (SSE broadcasts the committer's view; three owners decide which state fields can read as a marker; the actor-gated fold meets every new reader) |
+| Feature interactions | 2026-11-08 | 10 | 20 | active (.loads meets everything through shared primitives; snapshots × SSE versions is the one accidental meeting) |
 
 ## Interaction register
 
@@ -78,6 +78,18 @@ Where two features meet, and why. The Feature interactions lens reads this first
 | action retry, reaction retry | a reaction's `do()` that loses a race retries in `action()` (its `maxRetries`), then fails the handler into the reaction's retry and backoff | justified | the two decide different things: the action re-decides on fresh state at once, the reaction treats the whole handler as failed (10 s fixed backoff by default); they multiply, (N+1)(M+1) attempts, only on a conflict that never clears (probed 2026-10-30) |
 | `reactingTo`, version guard | resolved by #2201: `reactingTo` only builds correlation and causation | resolved | #2201; the ambient box clearing in `scoped.ts` stays for causation (simulated: one test fails without it) |
 | empty action, `committed` / wake | `Act.do` read `s.event` on every snapshot, including the loaded one an action that emits nothing returns | accidental, a bug | P2026-10-30 r-1 → #2210 / #2213 (probed in the main loop) |
+| `.loads`, optimistic concurrency | every written stream gets its version at load in one `commit`; a read-only load isn't guarded; a conflict drops only that stream's cache entry; a version the caller pins is never retried on its own stream, but is retried on a loaded one | shared primitive | the version guard (#2289); `loads.spec` pins every case |
+| `.loads`, snapshots | each written stream runs its own state's `.snap` in the same per-append loop; the result's `version` is the snapshot head | shared primitive | probed: with snaps, the version the listener hears on the loaded stream, pinned on the owner's next action, commits; `taken` = 5 both ways (`probe-loads-snap.spec.ts`) |
+| `.loads`, sensitive fields | a loaded stream loads with the caller's actor; `check_invariants` gets the loaded state's `pii_aware`; a sensitive state isn't cached and can't `.snap`, both through the same rules | shared primitive | `loads.spec` "loads with the caller's actor" |
+| `.loads`, state-schema check | each written stream is checked once, on its own state's schema; a read-only load isn't checked | shared primitive | the decider rule; reads aren't writes |
+| `.loads`, `committed` / state-scoped `committed` | `Act.do` groups by stream, its own first, and finds a loaded stream's state from the load that lists its first event | justified | `action()` already knows each append's state, but returning it changes `EsOps.action` (trace seam) and about 10 direct `action(...)` test calls, to save about 6 lines. Not worth it |
+| `.loads`, reactions / lanes / priority / autoclose | events appended to a loaded stream wake by event name (`_wake` gets every name); the default target and autoclose resolve from `e.stream` | shared primitive | nothing in those features reads `.loads` |
+| `.loads`, act-http APIs / SSE | `app.do` returns its own snapshots, so generated APIs stay typed as without loads; SSE broadcasts from `committed`, once per stream (real-time.md:105) | shared primitive | the per-stream `committed` listener |
+| `.loads`, close | a load of a closed stream throws `StreamClosedError`; a close racing a commit loses on the version guard | shared primitive | `loads.spec` "a load of a closed stream refuses the whole commit" |
+| `.loads`, act-otel | `act_events_committed_total` counts per event across the per-stream `committed` calls | shared primitive | correct with per-stream calls |
+| source rule, a target reading itself | `is_literal_source(source, target)`: `source === target` is literal | justified, nearly unused since 03b4404ef | #2379 added `target` when every metacharacter made a pattern; 03b4404ef made only `^…`/`…$` patterns, so `target` now matters only for a stream name that starts with `^` or ends with `$`. It is published (`utils.ts`), so it stays (rule 2) |
+| source rule, autoclose | the resolver skips a stream whose name would read as a pattern | justified, same reach | since 03b4404ef it skips only `^…`/`…$` names; `app.close` still closes them |
+| snapshots, SSE versions | a `__snapshot__` takes a stream version the wiring never sends | accidental, a bug | i-D1 |
 | per-call correlator, app correlator | `{ correlator, ...options }` let an explicit `undefined` win | accidental, a bug | r-2 → #2211 / #2213 (probed in the main loop) |
 | SSE broadcast, sensitive states | the cached state is the committer's view, served to every subscriber; another actor's commit overwrites it with markers | accidental, a bug | P2026-10-31 i-1 → #2232 (probed in the main loop) |
 | marker-capable state fields: state check, sensitive-type warning, OpenAPI | the check filters by value; the warning and `<State>Snapshots` match by name and miss renamed copies | accidental (three owners) | i-2, i-3 → #2233 |
@@ -126,6 +138,8 @@ Sound proposals that missed a run's cut. The next run ranks these before looking
 - Workflow and Renovate comments cut to their why: workflow comment lines 164 → 43, `renovate.json` 5.1 → 2.8 KB (ticket-history rule descriptions). Same kind as #2075, outside core. (P2026-10-23p-2)
 
 ## Self-changes
+
+- 2026-11-08: the Tests by concept lens reads test durations against the framework's defaults (the 10 s backoff and lease, 30 s timers): a test that takes almost exactly one isn't slow, it's stalled. Wolfdesk's 10 s tests hid two real stalls for weeks (`EscalateTicket` with no action retries, fixed 2026-11-07; one shared SQLite file, #2383). The Dead code lens lists the rules recipe's `tour.ts` with knip's known false positives.
 
 - 2026-11-03: the Specialists section resizes the main pane to half the window right after spawning (the user: "the skill didnt remember to set the panel width to half the screen"; the rule lived only in memory). Specialists write their final report into their notes file: three of four reports arrived cut off in the idle notification, and two specialists stopped on the usage limit and were resumed from their notes. `metrics.sh` counts an RFC only if `rfcs/` has it: "RFC 4180" (the CSV standard) in an inspector test name read as a ticket ref.
 
@@ -909,3 +923,40 @@ Findings, not proposed: wolfdesk's `tickets.spec` `busy()` reads six subscriptio
 Lens metrics: files over 300 code lines 9 (act.ts 857, in-memory-store 730, audit 566, event-sourcing 504, types/builders 464, drain-cycle 457, close-cycle 450, correlate-cycle 418, types/action 325); reading path 13 files, ~33 names; RFC 2251 planned additions: 1 port signature, 1 builder step, 1 handler argument, ~7 build checks, 1 act-crypto export, 13 scenarios × 4 places (c-1–c-5 remove the export, the chaining rule, the read-only guard and ~8 scenario copies); CI-CD reds 4 of 73 (3 the tRPC split #2283 fixed, 1 snapshot-only); runnable recipes 5 of 5 green.
 
 Tickets: #2284–#2293.
+
+### 2026-11-08 — full run (four specialists: dead code + comment noise, DRY across adapters and builders, tests by concept, feature interactions + field)
+
+| metric | 2026-11-03 | now | why |
+|---|---|---|---|
+| core lines (libs/act/src) | 17873 | 18463 | 2.0: `commit(appends)` (#2304), `.loads` (#2306, #2315), `.emit` checks (#2312), the invariant surface removed (#2302), and four fix rounds (#2336, #2357, #2359, #2379) |
+| runtime exports | 52 | 54 | −`InvariantError`; +`check_appends`, `fair_slots`, `DEFAULT_QUERY_STREAMS_LIMIT`, all `@internal`, each called by the three stores (the maintainer's rule: a framework rule lives once in core) |
+| ActOptions | 11 | 10 | `validateFoldedState` removed |
+| files over 300 code lines | 9 | 10 | event-sourcing.ts with `.loads` |
+| spec files / test lines | 221 / 61129 | 250 / 66526 | 32 new specs, several named after fixes (P2026-11-08-3, -4) |
+| docs lines / CLAUDE.md | 9428 / 27 KB | 10039 / 28 KB | the rules guide, the migration guide, recipes |
+| everything else | | unchanged | 0 ticket refs in core, 41% (28% / 14%) comments, 10 files touching 5+ features, 5 workflows / 579 lines |
+
+Audit: 29 PRs since the last run plus seven direct commits on `v2`; Act 2.0 released 2026-11-07 (#2317). All of 2.0 is the assistant's, and it shipped through four fix rounds in four days (#2336 → #2357 → #2359 → #2379, then 03b4404ef). The fix chain left three things this run found: #2354 changed a snapshot's `version` and left the SSE docs pinning `event.version` (i-D1); #2337 left `autoclose_after_days` with no reader (dc-1); #2379 dropped the lazy note from `date-reviver.ts` and left its copy in `zod.ts`. The source rule changed three times in five days (#2357, #2379, 03b4404ef); the anchored rule alone was the fix, and `target` now matters only for `^…`/`…$` names (kept: published and cheap). #2357 removing #2337's Postgres lookup was a subtraction.
+
+Decisions on P2026-11-03*: all shipped (#2284–#2293; c-1–c-5 cut RFC 2251 before it was built). Promises kept: sb-P1 ~−3 → +13 (#2295 also fixed two published docs); p-1 −4,635 → −4,638 (#2296).
+
+Verified in the main loop before ranking: the SSE probe (control no `.snap` 0 resyncs; docs wiring and head version red; the padded fix 0); `merge.ts` value vs list (red; control string vs number throws); Wolfdesk 5 default runs (1 red; tests at 10.1, 10.0, 15.3, 20.0 s); the duplicate test at `stream-names.spec.ts:105` and `:177`; `zod.ts:9` against `date-reviver.ts:161`; no reader of `autoclose_after_days` in `libs/act/src`; act-diagram's four exports used only in their files.
+
+Proposals, ticketed when the report was done. Defects first:
+- D1. Wolfdesk's specs share one SQLite file; a failed projection write waits out the 10 s backoff, and runs go red; a `TRUNCATE` never runs → #2383.
+- D2 (i-D1). A snapshot makes every live SSE client resync; the documented wiring and the head both hit it → #2384.
+- D3 (dry-D1). The merge check reads an array as its element, so a value vs a list builds → #2385.
+- D4. Two recipe timer tests can't fail, a test runs twice, a test can't fail for its name, and a stale header → #2386.
+Simplifications:
+- 1 (dry-3). The version check and truncate seed once in core, with guard rules (net −3; the guard is the gain) → #2387.
+- 2 (dry-2). One notification parser in core (−12) → #2388.
+- 3 (dry-1 + t-2). Four adapter specs that re-test core rules (−4 files, −282) → #2389.
+- 4 (t-1 + t-3 + t-4). The fix-named 2.0 specs into their concepts (−6 files, ~−340) → #2390.
+- 5 (dc-1). `autoclose_after_days` from the windows (−16) → #2391.
+- 6 (dc-2). Four act-diagram exports, two mis-wrapped published docs, `check_store`'s home → #2392.
+
+Findings, not proposed: `.loads` meets snapshots, sensitive fields, the schema check, reactions, lanes, priority, autoclose, close, act-otel and act-http through shared primitives (twelve register rows); returning each append's state from `action()` would touch the `EsOps` trace seam for ~−6. The 2.0 audit's practical filter (the maintainer, 2026-11-07) was briefed to every specialist; none reported a contrived finding.
+
+Lens metrics: knip 39 unused files, all known false positives plus the rules recipe's `tour.ts`; comments 28% / 14%; ticket refs 0; adapter suites repeating core rules 4 files; tests over 2 s that were stalls 4 (all Wolfdesk).
+
+Tickets: #2383–#2392.

@@ -75,6 +75,7 @@ What building Act has taught, as rules to check a design or a fix against. Read 
 - A safety-net timer must restart every stage that can go idle, not only the first: the `start_correlations` tick re-armed correlation, but lanes disarmed on an empty claim never claimed a dead worker's expired lease. (2026-10-18 probe)
 - Several loops that feed one failure counter need the same recovery: #1928 made a failed drain pass retry and left a failed settle pass waiting for the breaker to open. Fix the class, then probe each loop.
 
+- A change to a value's meaning must reach every reader, docs included: #2354 made a snapshot's `version` the head, its code readers followed, and the SSE wiring kept pinning `event.version`, so every live client resyncs at each snapshot (#2384). Grep the docs and examples for the old meaning in the same change.
 ## Contracts and tests
 
 - A port is its interface plus its TCK; behavior the TCK doesn't pin is undefined. Optional methods are gated by capabilities. (#302)
@@ -96,6 +97,8 @@ What building Act has taught, as rules to check a design or a fix against. Read 
 - Making the test seam the API can be the right call. (#402: `act -q`)
 - Benchmark on real adapters; InMemory understates every win. (#102)
 - A performance mechanism serves a bench, not a contract row; "no row needs it" is no reason to remove it. Measure on a real adapter first. (#1923, closed)
+- A test that takes almost exactly a framework default (10 s backoff, 10 s lease) is stalled, not slow, and a generous budget hides it until a slow runner tips it over: Wolfdesk's 10 s tests were a lost race with no action retries and a shared SQLite file (#2383). Fix each cause, then rerun the whole suite several times: one fix removed one stall, not the symptom. (2026-11-07, 2026-11-08)
+- Merging two branches that both added a test keeps both copies with no conflict: `stream-names.spec.ts` ran one test twice after the 1.x fixes merged into `v2`. Diff test names after a merge of related branches. (#2386)
 
 ## Hunting and fixing
 
