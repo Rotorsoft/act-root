@@ -843,10 +843,10 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
     const reads = at >= 0 ? loadsAt(sc.steps[at]).filter(x => !x.load.events?.length).map(x => ({ t: `${x.stream} not checked (read)`, k: "skip" })) : [];
     return { rows: [...rows, ...reads], fail: fail?.t };
   }
-  // every stream the scenario holds or writes, its own first
+  // every stream the scenario holds or writes, its own first (a skipped load is null, and holds none)
   function streamsOf(sc) {
     const own = sc.stream || "stream";
-    return [...new Set([own, ...Object.keys(sc.initials ?? {}), ...sc.steps.flatMap(x => [...(x.stream ? [x.stream] : []), ...(x.loads || [])])])];
+    return [...new Set([own, ...Object.keys(sc.initials ?? {}), ...sc.steps.flatMap(x => [...(x.stream ? [x.stream] : []), ...(x.loads || []).filter(Boolean)])])];
   }
   // the streams step k-1 works on: what it loads, or what its commit appends to, with the action's own
   function streamsAt(sc, k) {
