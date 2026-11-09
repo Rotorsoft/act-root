@@ -1,3 +1,10 @@
+# [@rotorsoft/act-http-v2.0.3](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-http-v2.0.2...@rotorsoft/act-http-v2.0.3) (2026-11-09)
+
+
+### Bug Fixes
+
+* **deps:** update trpc to v11.24.0 ([#2403](https://github.com/Rotorsoft/act-root/issues/2403)) ([11e7636](https://github.com/Rotorsoft/act-root/commit/11e7636f7c555c1b221d76d081bf5455c8c46d5c))
+
 # [@rotorsoft/act-http-v2.0.2](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-http-v2.0.1...@rotorsoft/act-http-v2.0.2) (2026-11-09)
 
 
