@@ -1,7 +1,7 @@
 import { PreconditionError, ValidationError } from "@rotorsoft/act";
 import { describe, expect, vi } from "vitest";
 import { Bike, Invoice, Order, Product, Room } from "./index.js";
-import { at, events, test } from "./setup.js";
+import { acked, at, events, test } from "./setup.js";
 
 describe("room booking", () => {
   const book = (from: number, to: number) => ({ room: "r1", from, to });
@@ -64,11 +64,11 @@ describe("inventory", () => {
   test("a confirmed order keeps its stock when the timer comes due", async ({
     app,
   }) => {
+    const timer = acked(app, "hold-o-1");
     await app.do("Restock", at("p-7"), { qty: 3 });
     await app.do("ReserveItem", at("o-1"), reserve(2, Date.now() + 40));
     await app.do("ConfirmOrder", at("o-1"), {});
-    await new Promise((resolve) => setTimeout(resolve, 200));
-    await app.settle();
+    await timer;
     expect((await app.load(Order, "o-1")).state.status).toBe("confirmed");
     expect((await app.load(Product, "p-7")).state.stock).toBe(1);
   });

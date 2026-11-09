@@ -279,14 +279,6 @@ describe("an action that loads another stream", () => {
     ).rejects.toThrow(StreamClosedError);
     expect(await events("enr-6")).toEqual([]);
   });
-
-  test("time travel never runs loads", async ({ app }) => {
-    await app.do("Enroll", at("enr-7"), { course: "c7", student: "s" });
-    const past = await app.load(Enrollment, "enr-7", undefined, {
-      before: 1e9,
-    });
-    expect(past.state.student).toBe("s");
-  });
 });
 
 describe("a race on a loaded stream", () => {

@@ -9,7 +9,7 @@ import {
   sessionsStream,
   studentStream,
 } from "./index.js";
-import { at, events, test } from "./setup.js";
+import { acked, at, events, test } from "./setup.js";
 
 const enroll = (student: string, course = "c1") => ({ course, student });
 
@@ -135,10 +135,10 @@ describe("sessions per user", () => {
   });
 
   test("the timer finds nothing to free after a logout", async ({ app }) => {
+    const timer = acked(app, "expire-s-1");
     await app.do("OpenSession", at("s-1"), open(Date.now() + 40));
     await app.do("Logout", at("s-1"), {});
-    await new Promise((resolve) => setTimeout(resolve, 200));
-    await app.settle();
+    await timer;
     expect(await events("s-1")).toEqual(["SessionStarted", "LoggedOut"]);
     expect(await events(sessionsStream("u1"))).toHaveLength(2);
   });

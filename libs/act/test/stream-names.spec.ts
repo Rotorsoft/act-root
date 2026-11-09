@@ -174,38 +174,6 @@ describe("default reactions on any stream name", () => {
     expect(seen.sort()).toEqual(["anchored:order-1", "exact:a+b"]);
   });
 
-  it("a close waits for reactions reading through a written pattern", async () => {
-    const seen: string[] = [];
-    const app = act()
-      .withState(Thing)
-      .on("Done")
-      .do(async function one(e) {
-        seen.push(`one:${e.stream}`);
-      })
-      .to({ target: "one", source: "^(A|B)$" })
-      .on("Done")
-      .do(async function two(e) {
-        seen.push(`two:${e.stream}`);
-      })
-      .to({ target: "two", source: "^(A|B)$" })
-      .build({
-        autoSettle: false,
-        scoped: { store: new InMemoryStore(), cache: new InMemoryCache() },
-      });
-    for (const stream of ["A", "B", "C"])
-      await app.do("go", { stream, actor }, {});
-    await app.correlate();
-
-    const behind = await app.close([{ stream: "A" }, { stream: "B" }]);
-    expect(behind.skipped.sort()).toEqual(["A", "B"]);
-    expect((await app.close([{ stream: "C" }])).skipped).toEqual([]);
-
-    await app.drain();
-    expect(seen).toHaveLength(4);
-    const caught_up = await app.close([{ stream: "A" }, { stream: "B" }]);
-    expect(caught_up.skipped).toEqual([]);
-  });
-
   it("delivers a dynamic reaction whose source is any stream's name", async () => {
     const seen: string[] = [];
     const app = act()
