@@ -12,8 +12,8 @@
     "@rotorsoft/act": "workspace:^",
     "@rotorsoft/act-http": "workspace:^",
     "@tanstack/react-query": "^5.106.1",
-    "@trpc/client": "11.22.1",
-    "@trpc/react-query": "11.22.1",
+    "@trpc/client": "11.24.0",
+    "@trpc/react-query": "11.24.0",
     "hono": "^4.13.16",
     "react": "^19.3.1",
     "react-dom": "^19.3.1"

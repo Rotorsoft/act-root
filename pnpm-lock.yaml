@@ -453,8 +453,8 @@ importers:
         specifier: workspace:^
         version: link:../act-ops
       '@trpc/server':
-        specifier: ^11.22.1
-        version: 11.22.1(typescript@7.0.2)
+        specifier: ^11.24.0
+        version: 11.25.1(@types/express@5.0.6)(@types/ws@8.18.1)(fastify@5.12.8)(typescript@7.0.2)
       '@types/express':
         specifier: ^5.0.6
         version: 5.0.6
@@ -606,11 +606,11 @@ importers:
         specifier: ^5.106.1
         version: 5.107.1(@types/react@19.3.0)(react@19.3.1)
       '@trpc/client':
-        specifier: 11.22.1
-        version: 11.22.1(@trpc/server@11.22.1(typescript@7.0.2))(typescript@7.0.2)
+        specifier: 11.24.0
+        version: 11.24.0(@trpc/server@11.24.0(@types/express@5.0.6)(@types/ws@8.18.1)(fastify@5.12.8)(typescript@7.0.2))(typescript@7.0.2)
       '@trpc/react-query':
-        specifier: 11.22.1
-        version: 11.22.1(@tanstack/react-query@5.107.1(@types/react@19.3.0)(react@19.3.1))(@trpc/client@11.22.1(@trpc/server@11.22.1(typescript@7.0.2))(typescript@7.0.2))(@trpc/server@11.22.1(typescript@7.0.2))(react@19.3.1)(typescript@7.0.2)
+        specifier: 11.24.0
+        version: 11.24.0(@tanstack/react-query@5.107.1(@types/react@19.3.0)(react@19.3.1))(@trpc/client@11.24.0(@trpc/server@11.24.0(@types/express@5.0.6)(@types/ws@8.18.1)(fastify@5.12.8)(typescript@7.0.2))(typescript@7.0.2))(@trpc/server@11.24.0(@types/express@5.0.6)(@types/ws@8.18.1)(fastify@5.12.8)(typescript@7.0.2))(react@19.3.1)(typescript@7.0.2)
       hono:
         specifier: ^4.13.16
         version: 4.13.17
@@ -658,14 +658,14 @@ importers:
         specifier: ^5.106.1
         version: 5.107.1(@types/react@19.3.0)(react@19.3.1)
       '@trpc/client':
-        specifier: 11.22.1
-        version: 11.22.1(@trpc/server@11.22.1(typescript@7.0.2))(typescript@7.0.2)
+        specifier: 11.24.0
+        version: 11.24.0(@trpc/server@11.24.0(@types/express@5.0.6)(@types/ws@8.18.1)(fastify@5.12.8)(typescript@7.0.2))(typescript@7.0.2)
       '@trpc/react-query':
-        specifier: 11.22.1
-        version: 11.22.1(@tanstack/react-query@5.107.1(@types/react@19.3.0)(react@19.3.1))(@trpc/client@11.22.1(@trpc/server@11.22.1(typescript@7.0.2))(typescript@7.0.2))(@trpc/server@11.22.1(typescript@7.0.2))(react@19.3.1)(typescript@7.0.2)
+        specifier: 11.24.0
+        version: 11.24.0(@tanstack/react-query@5.107.1(@types/react@19.3.0)(react@19.3.1))(@trpc/client@11.24.0(@trpc/server@11.24.0(@types/express@5.0.6)(@types/ws@8.18.1)(fastify@5.12.8)(typescript@7.0.2))(typescript@7.0.2))(@trpc/server@11.24.0(@types/express@5.0.6)(@types/ws@8.18.1)(fastify@5.12.8)(typescript@7.0.2))(react@19.3.1)(typescript@7.0.2)
       '@trpc/server':
-        specifier: 11.22.1
-        version: 11.22.1(typescript@7.0.2)
+        specifier: 11.24.0
+        version: 11.24.0(@types/express@5.0.6)(@types/ws@8.18.1)(fastify@5.12.8)(typescript@7.0.2)
       cors:
         specifier: ^2.8.6
         version: 2.8.6
@@ -743,8 +743,8 @@ importers:
         specifier: workspace:^
         version: link:../../libs/act-otel
       '@trpc/server':
-        specifier: 11.22.1
-        version: 11.22.1(typescript@7.0.2)
+        specifier: 11.24.0
+        version: 11.24.0(@types/express@5.0.6)(@types/ws@8.18.1)(fastify@5.12.8)(typescript@7.0.2)
       hono:
         specifier: ^4.13.16
         version: 4.13.17
@@ -770,8 +770,8 @@ importers:
         specifier: workspace:^
         version: link:../../libs/act-pg
       '@trpc/server':
-        specifier: 11.22.1
-        version: 11.22.1(typescript@7.0.2)
+        specifier: 11.24.0
+        version: 11.24.0(@types/express@5.0.6)(@types/ws@8.18.1)(fastify@5.12.8)(typescript@7.0.2)
       drizzle-orm:
         specifier: ^0.45.4
         version: 0.45.4(@libsql/client@0.18.0)(@opentelemetry/api@1.9.1)(@types/pg@8.23.1)(pg@8.23.1)
@@ -4095,27 +4095,62 @@ packages:
       '@types/react':
         optional: true
 
-  '@trpc/client@11.22.1':
-    resolution: {integrity: sha512-flkAwF8bzzNCVJ5xcTMS+Az6Go/XK30ZIOGT94UJBYAmMq1w2tY7gk7+CIMiRUdvHzOYAVPitX2H+20qcIIomA==}
-    hasBin: true
+  '@trpc/client@11.24.0':
+    resolution: {integrity: sha512-D9zoHnF/LGL5SpVnDaSO3b9ymF0jgfnawxtU7HkDjVbcmXeWiAGnJT6fD2UTfEmP63+i57VE49RQqRO0Ig7WJg==}
     peerDependencies:
-      '@trpc/server': 11.22.1
+      '@trpc/server': 11.24.0
       typescript: '>=5.7.2'
 
-  '@trpc/react-query@11.22.1':
-    resolution: {integrity: sha512-PEd3EzQwiJDSi2qlOm1kkfnh5q4rsQcjVGBdKqcbW9iLl7f6/NH/5NOPDdWu/yiV8cY4QJ1pWHENLuD0A1j9uA==}
+  '@trpc/react-query@11.24.0':
+    resolution: {integrity: sha512-Fv0E18+X9t9dN8vs7LezSp+iRGdvHsTCQiUd2aj5XtitPfxuQGiWqb5ovM3fjFzItpIKfdYGZva8r2i1p2PTNA==}
     peerDependencies:
       '@tanstack/react-query': ^5.80.3
-      '@trpc/client': 11.22.1
-      '@trpc/server': 11.22.1
+      '@trpc/client': 11.24.0
+      '@trpc/server': 11.24.0
       react: '>=18.2.0'
       typescript: '>=5.7.2'
 
-  '@trpc/server@11.22.1':
-    resolution: {integrity: sha512-9SjWTS5iwENHOVPqpTjm0I1Os/CtuT6p8kDlovyEm00pXhpHX55tQM2vszJTEpcQhm/JfUz4ut/7Y9JZZQZo6A==}
-    hasBin: true
+  '@trpc/server@11.24.0':
+    resolution: {integrity: sha512-CxpaiIY58ItaLpGxwYTxHHYx5evRAJ4B2Eq94axvg28nwihDgjQIUiLG8T49DZ/t4R2tPHHdeLkF6t0kyjD5YQ==}
     peerDependencies:
+      '@types/aws-lambda': '*'
+      '@types/express': '*'
+      '@types/ws': '*'
+      fastify: '*'
+      next: '*'
       typescript: '>=5.7.2'
+    peerDependenciesMeta:
+      '@types/aws-lambda':
+        optional: true
+      '@types/express':
+        optional: true
+      '@types/ws':
+        optional: true
+      fastify:
+        optional: true
+      next:
+        optional: true
+
+  '@trpc/server@11.25.1':
+    resolution: {integrity: sha512-5KaW7oM4YZcHTqlF2ED3IkCYbbLc0JEZOLVlJmi0T5ZXeS2SzPiONr8Lt4FHAsyestTVp89R6Ok06xnDRW1YOA==}
+    peerDependencies:
+      '@types/aws-lambda': '*'
+      '@types/express': '*'
+      '@types/ws': '*'
+      fastify: '*'
+      next: '*'
+      typescript: '>=5.7.2'
+    peerDependenciesMeta:
+      '@types/aws-lambda':
+        optional: true
+      '@types/express':
+        optional: true
+      '@types/ws':
+        optional: true
+      fastify:
+        optional: true
+      next:
+        optional: true
 
   '@tybys/wasm-util@0.10.3':
     resolution: {integrity: sha512-F3fo1MYrRJYL3zER0OUOmkutjr1Vp23m7OsSgp7nq4SP6OqX6C/56XFIPAl5bt3zaBRjmW7SGz3u/6LwFpYcOg==}
@@ -13779,22 +13814,34 @@ snapshots:
     optionalDependencies:
       '@types/react': 19.3.0
 
-  '@trpc/client@11.22.1(@trpc/server@11.22.1(typescript@7.0.2))(typescript@7.0.2)':
+  '@trpc/client@11.24.0(@trpc/server@11.24.0(@types/express@5.0.6)(@types/ws@8.18.1)(fastify@5.12.8)(typescript@7.0.2))(typescript@7.0.2)':
     dependencies:
-      '@trpc/server': 11.22.1(typescript@7.0.2)
+      '@trpc/server': 11.24.0(@types/express@5.0.6)(@types/ws@8.18.1)(fastify@5.12.8)(typescript@7.0.2)
       typescript: 7.0.2
 
-  '@trpc/react-query@11.22.1(@tanstack/react-query@5.107.1(@types/react@19.3.0)(react@19.3.1))(@trpc/client@11.22.1(@trpc/server@11.22.1(typescript@7.0.2))(typescript@7.0.2))(@trpc/server@11.22.1(typescript@7.0.2))(react@19.3.1)(typescript@7.0.2)':
+  '@trpc/react-query@11.24.0(@tanstack/react-query@5.107.1(@types/react@19.3.0)(react@19.3.1))(@trpc/client@11.24.0(@trpc/server@11.24.0(@types/express@5.0.6)(@types/ws@8.18.1)(fastify@5.12.8)(typescript@7.0.2))(typescript@7.0.2))(@trpc/server@11.24.0(@types/express@5.0.6)(@types/ws@8.18.1)(fastify@5.12.8)(typescript@7.0.2))(react@19.3.1)(typescript@7.0.2)':
     dependencies:
       '@tanstack/react-query': 5.107.1(@types/react@19.3.0)(react@19.3.1)
-      '@trpc/client': 11.22.1(@trpc/server@11.22.1(typescript@7.0.2))(typescript@7.0.2)
-      '@trpc/server': 11.22.1(typescript@7.0.2)
+      '@trpc/client': 11.24.0(@trpc/server@11.24.0(@types/express@5.0.6)(@types/ws@8.18.1)(fastify@5.12.8)(typescript@7.0.2))(typescript@7.0.2)
+      '@trpc/server': 11.24.0(@types/express@5.0.6)(@types/ws@8.18.1)(fastify@5.12.8)(typescript@7.0.2)
       react: 19.3.1
       typescript: 7.0.2
 
-  '@trpc/server@11.22.1(typescript@7.0.2)':
+  '@trpc/server@11.24.0(@types/express@5.0.6)(@types/ws@8.18.1)(fastify@5.12.8)(typescript@7.0.2)':
     dependencies:
       typescript: 7.0.2
+    optionalDependencies:
+      '@types/express': 5.0.6
+      '@types/ws': 8.18.1
+      fastify: 5.12.8
+
+  '@trpc/server@11.25.1(@types/express@5.0.6)(@types/ws@8.18.1)(fastify@5.12.8)(typescript@7.0.2)':
+    dependencies:
+      typescript: 7.0.2
+    optionalDependencies:
+      '@types/express': 5.0.6
+      '@types/ws': 8.18.1
+      fastify: 5.12.8
 
   '@tybys/wasm-util@0.10.3':
     dependencies:
