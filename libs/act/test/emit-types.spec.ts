@@ -339,7 +339,21 @@ describe(".loads", () => {
     ).toThrow("doesn't emit it");
   });
 
+  it("marks an event already listed on another load", () => {
+    expect(() =>
+      moving_once()
+        .loads(AgentLoad, (d) => d.agent, ["Taken"], "one")
+        // @ts-expect-error an event already listed on another load
+        .loads(AgentLoad, (d) => d.agent, ["Taken"], "two")
+    ).toThrow();
+  });
+
   it("types its target and marks what it can't read", () => {
+    moving_once().loads(AgentLoad, (payload, own) => {
+      expectTypeOf(payload.agent).toEqualTypeOf<string>();
+      expectTypeOf(own.agent).toEqualTypeOf<string | undefined>();
+      return "a";
+    });
     // @ts-expect-error `Move` has no `nope`
     moving_once().loads(AgentLoad, (d) => d.nope);
     // @ts-expect-error a target returns a stream name

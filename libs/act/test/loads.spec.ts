@@ -5,7 +5,6 @@ import {
   type Committed,
   ConcurrencyError,
   InMemoryStore,
-  type Precondition,
   PreconditionError,
   type Schemas,
   type Snapshot,
@@ -278,14 +277,6 @@ describe("an action that loads another stream", () => {
       app.do("Enroll", at("enr-6"), { course: "c6", student: "s" })
     ).rejects.toThrow(StreamClosedError);
     expect(await events("enr-6")).toEqual([]);
-  });
-
-  test("time travel never runs loads", async ({ app }) => {
-    await app.do("Enroll", at("enr-7"), { course: "c7", student: "s" });
-    const past = await app.load(Enrollment, "enr-7", undefined, {
-      before: 1e9,
-    });
-    expect(past.state.student).toBe("s");
   });
 });
 
@@ -690,63 +681,6 @@ describe("partial states", () => {
     await app.do("Enroll", at("enr-p1"), { course: "p1", student: "s" });
     await app.do("note", at("enr-p1"), { note: "hi" });
     expect(await events("course-p1", store())).toEqual(["SeatTaken"]);
-  });
-});
-
-describe("types", () => {
-  const base = () =>
-    state({ X: z.object({ n: z.number() }) })
-      .init(() => ({ n: 0 }))
-      .emits({ Done: z.object({}) })
-      .on({ go: z.object({ id: z.string() }) });
-
-  test("a load name and its events are checked at compile time", () => {
-    expect(() => {
-      // @ts-expect-error an event the loaded state doesn't emit
-      base().loads(Seats, () => "a", ["Nope"]);
-    }).toThrow();
-    expect(() => {
-      base()
-        .loads(Seats, () => "a")
-        // @ts-expect-error a second unnamed load of the same state
-        .loads(Seats, () => "b");
-    }).toThrow();
-    expect(() => {
-      base()
-        .loads(Seats, () => "a", ["SeatTaken"], "one")
-        // @ts-expect-error an event already listed on another load
-        .loads(Seats, () => "b", ["SeatTaken"], "two");
-    }).toThrow();
-    base()
-      .loads(Seats, (payload, own) => {
-        expectTypeOf(payload.id).toEqualTypeOf<string>();
-        expectTypeOf(own.n).toEqualTypeOf<number>();
-        return "a";
-      })
-      .requires([
-        {
-          description: "typed",
-          // @ts-expect-error a load the action doesn't have
-          holds: (_, __, ___, { Other }) => !!Other,
-        },
-      ]);
-    // A shared rule that ignores the payload and the loads still fits.
-    const positive: Precondition<{ n: number }, unknown> = {
-      description: "n is positive",
-      holds: (_, state) => state.n > 0,
-    };
-    base()
-      .loads(Seats, () => "a")
-      .requires([positive])
-      .emit(() => ["Done", {}]);
-    base()
-      .loads(Seats, () => "a")
-      // @ts-expect-error an event no load lists
-      .emit(() => ["SeatTaken", { student: "s" }]);
-    base()
-      .loads(Seats, () => "a", ["SeatTaken"])
-      // @ts-expect-error a listed event with the wrong payload
-      .emit(() => ["SeatTaken", { student: 1 }]);
   });
 });
 

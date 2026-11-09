@@ -1,12 +1,15 @@
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createClient } from "@libsql/client";
 import { drizzle } from "drizzle-orm/libsql";
 
-const db_path = path.join(
-  path.dirname(fileURLToPath(import.meta.url)),
-  "../../local.db"
-);
+// Spec files run in parallel, one SQLite file per vitest worker: on a shared
+// file, a projection write that loses the lock waits out the reaction backoff.
+const worker = process.env.VITEST_POOL_ID;
+const db_path = worker
+  ? path.join(tmpdir(), `wolfdesk-test-${worker}.db`)
+  : path.join(path.dirname(fileURLToPath(import.meta.url)), "../../local.db");
 
 const client = createClient({ url: `file:${db_path}` });
 export const db = drizzle(client);
@@ -39,7 +42,6 @@ export async function init_tickets_db() {
       escalate_after INTEGER,
       close_after INTEGER
     );
-    TRUNCATE tickets;
   `);
 }
 

@@ -1,4 +1,4 @@
-import { InMemoryStore, type Store } from "@rotorsoft/act";
+import { InMemoryStore, type Lease, type Store } from "@rotorsoft/act";
 import { fixture } from "@rotorsoft/act/test";
 import { rules } from "./index.js";
 
@@ -19,6 +19,17 @@ export const events = async (stream: string) => {
   });
   return names;
 };
+
+/** Resolves once a drain acks `stream`; a deferred reaction's wait isn't an ack. */
+type OnAcked = {
+  on(event: "acked", listener: (leases: Lease[]) => void): unknown;
+};
+export const acked = (app: OnAcked, stream: string) =>
+  new Promise<void>((resolve) =>
+    app.on("acked", (leases: Lease[]) => {
+      if (leases.some((l) => l.stream === stream)) resolve();
+    })
+  );
 
 /** Every stored row, as the store holds it. */
 export const rows = async () => {

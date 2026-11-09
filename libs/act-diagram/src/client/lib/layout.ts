@@ -33,8 +33,8 @@ export const W = 100,
   SLICE_PAD = 24,
   SLICE_INNER = 16,
   SLICE_GAP = 20,
-  MARGIN = 30,
-  COMMIT_PAD = 3,
+  MARGIN = 30;
+const COMMIT_PAD = 3,
   COMMIT_GUTTER = 11;
 
 const COLORS = {
@@ -76,7 +76,7 @@ export type N = {
 };
 export type E = { from: Pos; to: Pos; color: string; dash?: boolean };
 /** The events of one commit across streams, drawn as one unit. */
-export type CommitBox = {
+type CommitBox = {
   label: string;
   x: number;
   y: number;

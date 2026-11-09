@@ -5,8 +5,8 @@
  * `sensitive(...)`, whether its value is a string, whether it holds a date to
  * revive. They must agree on which wrappers they see through, so they all ask
  * this module rather than each walking the schema its own way. The date
- * reviver makes two exceptions on purpose, named where it makes them: it keeps
- * a nullable's null, and it doesn't follow `z.lazy()`.
+ * reviver makes one exception on purpose, named where it makes it: it keeps
+ * a nullable's null.
  * `architecture.spec` keeps every other file away from `_zod`.
  */
 import type { z } from "zod";
