@@ -444,8 +444,8 @@ importers:
         version: link:../act-patch
     devDependencies:
       '@hono/node-server':
-        specifier: ^2.1.5
-        version: 2.1.5(hono@4.13.14)
+        specifier: ^2.1.6
+        version: 2.1.6(hono@4.13.14)
       '@hono/zod-validator':
         specifier: ^0.9.1
         version: 0.9.1(hono@4.13.14)(zod@4.6.7)
@@ -728,8 +728,8 @@ importers:
         specifier: workspace:^
         version: link:../calculator
       '@hono/node-server':
-        specifier: ^2.1.5
-        version: 2.1.5(hono@4.13.14)
+        specifier: ^2.1.6
+        version: 2.1.6(hono@4.13.14)
       '@rotorsoft/act':
         specifier: workspace:^
         version: link:../../libs/act
@@ -787,10 +787,10 @@ importers:
     dependencies:
       '@rotorsoft/act':
         specifier: ^1.35.2
-        version: link:../../libs/act
+        version: 1.37.8(vitest@5.0.5)(zod@4.6.7)
       '@rotorsoft/act-pg':
         specifier: ^1.22.3
-        version: link:../../libs/act-pg
+        version: 1.22.7(@rotorsoft/act@1.37.8(vitest@5.0.5)(zod@4.6.7))(zod@4.6.7)
       cli-table3:
         specifier: ^0.6.5
         version: 0.6.5
@@ -2734,8 +2734,8 @@ packages:
   '@hapi/topo@5.1.0':
     resolution: {integrity: sha512-foQZKJig7Ob0BMAYBfcJk8d77QtOe7Wo4ox7ff1lQYoNNAb6jwcY1ncdoy2e9wQZzvNy7ODZCYJkK8kzmcAnAg==}
 
-  '@hono/node-server@2.1.5':
-    resolution: {integrity: sha512-MgP/I06GdvsilDspMk/qmRzpk8LOUStP6jFAbSRi40W09DhoyUn+Mj7eyKICPqeYKybOjVFLVIAQzvu1bfIa7Q==}
+  '@hono/node-server@2.1.6':
+    resolution: {integrity: sha512-p/KH9MnfNcsm3sR6x4lNgm5j+QN4Et8srKredl9DZfXiyZ1UQ3aQ2YVpFLbqktYN5JI+DB+VZFKM2PqE5hLKjQ==}
     engines: {node: '>=20'}
     peerDependencies:
       hono: ^4 || ^5.0.0-0
@@ -3464,6 +3464,31 @@ packages:
     resolution: {integrity: sha512-tlynfm3LIQtOCjFdT7kjyMnGrl0PbhyldgCfj7b1VxafD6uYiJFjd2ATzmYb+YnzNIzNezpK7XzFzDtPu37IeA==}
     cpu: [x64]
     os: [win32]
+
+  '@rotorsoft/act-crypto@0.1.10':
+    resolution: {integrity: sha512-DFlfVCdAPFxBYthprcOPFvmmu0xiNMwtfjatrN83+J16zxXB3i3cLfxI5tKiQtFlpfZ1liWq8J+Kr/4TdkXP8w==}
+    engines: {node: '>=22.23.4'}
+
+  '@rotorsoft/act-patch@1.2.13':
+    resolution: {integrity: sha512-TBA9Nk9aD3Gj8a8DXGv1fFWDt0pkpokhlExN5Xb4leB5pEKPI5osbj2U367xnPuX2w1n8lnovOD4Ql0KXLvkxw==}
+    engines: {node: '>=22.23.4'}
+
+  '@rotorsoft/act-pg@1.22.7':
+    resolution: {integrity: sha512-lZKFyYyldBP4JvmugZAgdDwrGtXTePcJzFOaMFoAG+sJThQvqe3xXcoMx9g8KoIgRkBNc119G5mhHJxveNf9iQ==}
+    engines: {node: '>=22.23.4'}
+    peerDependencies:
+      '@rotorsoft/act': ^1.37.8
+      zod: ^4.6.7
+
+  '@rotorsoft/act@1.37.8':
+    resolution: {integrity: sha512-KOw/Otye4EoMKfANjshGyZ8v44DUaUDofelnyo7pMVvxUB1jEUCSFjg8di5wBNIMXnB10e84fX/9QDe2mPViwg==}
+    engines: {node: '>=22.23.4'}
+    peerDependencies:
+      vitest: ^5.0.5
+      zod: ^4.6.7
+    peerDependenciesMeta:
+      vitest:
+        optional: true
 
   '@rspack/binding-darwin-arm64@1.7.11':
     resolution: {integrity: sha512-oduECiZVqbO5zlVw+q7Vy65sJFth99fWPTyucwvLJJtJkPL5n17Uiql2cYP6Ijn0pkqtf1SXgK8WjiKLG5bIig==}
@@ -12466,7 +12491,7 @@ snapshots:
     dependencies:
       '@hapi/hoek': 9.3.0
 
-  '@hono/node-server@2.1.5(hono@4.13.14)':
+  '@hono/node-server@2.1.6(hono@4.13.14)':
     dependencies:
       hono: 4.13.14
 
@@ -13160,6 +13185,26 @@ snapshots:
 
   '@rollup/rollup-win32-x64-msvc@4.67.3':
     optional: true
+
+  '@rotorsoft/act-crypto@0.1.10': {}
+
+  '@rotorsoft/act-patch@1.2.13': {}
+
+  '@rotorsoft/act-pg@1.22.7(@rotorsoft/act@1.37.8(vitest@5.0.5)(zod@4.6.7))(zod@4.6.7)':
+    dependencies:
+      '@rotorsoft/act': 1.37.8(vitest@5.0.5)(zod@4.6.7)
+      '@rotorsoft/act-crypto': 0.1.10
+      pg: 8.23.1
+      zod: 4.6.7
+    transitivePeerDependencies:
+      - pg-native
+
+  '@rotorsoft/act@1.37.8(vitest@5.0.5)(zod@4.6.7)':
+    dependencies:
+      '@rotorsoft/act-patch': 1.2.13
+      zod: 4.6.7
+    optionalDependencies:
+      vitest: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@22.20.5)(@vitest/coverage-v8@5.0.5)(vite@8.3.5(@types/node@22.20.5)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.46.1)(tsx@4.23.15)(yaml@2.9.1))
 
   '@rspack/binding-darwin-arm64@1.7.11':
     optional: true
