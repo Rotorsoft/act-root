@@ -462,8 +462,8 @@ importers:
         specifier: ^5.3.0
         version: 5.3.0(supports-color@10.2.2)
       fastify:
-        specifier: ^5.12.7
-        version: 5.12.7
+        specifier: ^5.12.8
+        version: 5.12.8
       hono:
         specifier: ^4.13.14
         version: 4.13.14
@@ -787,10 +787,10 @@ importers:
     dependencies:
       '@rotorsoft/act':
         specifier: ^1.35.2
-        version: link:../../libs/act
+        version: 1.37.8(vitest@5.0.5)(zod@4.6.7)
       '@rotorsoft/act-pg':
         specifier: ^1.22.3
-        version: link:../../libs/act-pg
+        version: 1.22.7(@rotorsoft/act@1.37.8(vitest@5.0.5)(zod@4.6.7))(zod@4.6.7)
       cli-table3:
         specifier: ^0.6.5
         version: 0.6.5
@@ -3465,6 +3465,31 @@ packages:
     cpu: [x64]
     os: [win32]
 
+  '@rotorsoft/act-crypto@0.1.10':
+    resolution: {integrity: sha512-DFlfVCdAPFxBYthprcOPFvmmu0xiNMwtfjatrN83+J16zxXB3i3cLfxI5tKiQtFlpfZ1liWq8J+Kr/4TdkXP8w==}
+    engines: {node: '>=22.23.4'}
+
+  '@rotorsoft/act-patch@1.2.13':
+    resolution: {integrity: sha512-TBA9Nk9aD3Gj8a8DXGv1fFWDt0pkpokhlExN5Xb4leB5pEKPI5osbj2U367xnPuX2w1n8lnovOD4Ql0KXLvkxw==}
+    engines: {node: '>=22.23.4'}
+
+  '@rotorsoft/act-pg@1.22.7':
+    resolution: {integrity: sha512-lZKFyYyldBP4JvmugZAgdDwrGtXTePcJzFOaMFoAG+sJThQvqe3xXcoMx9g8KoIgRkBNc119G5mhHJxveNf9iQ==}
+    engines: {node: '>=22.23.4'}
+    peerDependencies:
+      '@rotorsoft/act': ^1.37.8
+      zod: ^4.6.7
+
+  '@rotorsoft/act@1.37.8':
+    resolution: {integrity: sha512-KOw/Otye4EoMKfANjshGyZ8v44DUaUDofelnyo7pMVvxUB1jEUCSFjg8di5wBNIMXnB10e84fX/9QDe2mPViwg==}
+    engines: {node: '>=22.23.4'}
+    peerDependencies:
+      vitest: ^5.0.5
+      zod: ^4.6.7
+    peerDependenciesMeta:
+      vitest:
+        optional: true
+
   '@rspack/binding-darwin-arm64@1.7.11':
     resolution: {integrity: sha512-oduECiZVqbO5zlVw+q7Vy65sJFth99fWPTyucwvLJJtJkPL5n17Uiql2cYP6Ijn0pkqtf1SXgK8WjiKLG5bIig==}
     cpu: [arm64]
@@ -6040,8 +6065,8 @@ packages:
   fast-wrap-ansi@0.2.0:
     resolution: {integrity: sha512-rLV8JHxTyhVmFYhBJuMujcrHqOT2cnO5Zxj37qROj23CP39GXubJRBUFF0z8KFK77Uc0SukZUf7JZhsVEQ6n8w==}
 
-  fastify@5.12.7:
-    resolution: {integrity: sha512-v4pEPsTRPuqlDIYiQFB+BHjVN4SdHX9u0ABk0ZDUKbbdY1vsNryUd1j4Z+jQEZajvYIVk047Kimva9/AJ79GYw==}
+  fastify@5.12.8:
+    resolution: {integrity: sha512-moP8exb2sCHLUbJkwp+I6C0padhy4D8lp0SdmzY7HhSdZuqm7O/u3o2aq7u8okaQ//33QDzj3G/u+FsSdB8Qzw==}
 
   fastq@1.20.1:
     resolution: {integrity: sha512-GGToxJ/w1x32s/D2EKND7kTil4n8OVk/9mycTc4VDza13lOvpUZTGX3mFSCtV9ksdGBVzvsyAVLM6mHFThxXxw==}
@@ -13161,6 +13186,26 @@ snapshots:
   '@rollup/rollup-win32-x64-msvc@4.67.3':
     optional: true
 
+  '@rotorsoft/act-crypto@0.1.10': {}
+
+  '@rotorsoft/act-patch@1.2.13': {}
+
+  '@rotorsoft/act-pg@1.22.7(@rotorsoft/act@1.37.8(vitest@5.0.5)(zod@4.6.7))(zod@4.6.7)':
+    dependencies:
+      '@rotorsoft/act': 1.37.8(vitest@5.0.5)(zod@4.6.7)
+      '@rotorsoft/act-crypto': 0.1.10
+      pg: 8.23.1
+      zod: 4.6.7
+    transitivePeerDependencies:
+      - pg-native
+
+  '@rotorsoft/act@1.37.8(vitest@5.0.5)(zod@4.6.7)':
+    dependencies:
+      '@rotorsoft/act-patch': 1.2.13
+      zod: 4.6.7
+    optionalDependencies:
+      vitest: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@22.20.5)(@vitest/coverage-v8@5.0.5)(vite@8.3.5(@types/node@22.20.5)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.46.1)(tsx@4.23.15)(yaml@2.9.1))
+
   '@rspack/binding-darwin-arm64@1.7.11':
     optional: true
 
@@ -15799,7 +15844,7 @@ snapshots:
     dependencies:
       fast-string-width: 3.0.2
 
-  fastify@5.12.7:
+  fastify@5.12.8:
     dependencies:
       '@fastify/ajv-compiler': 4.0.5
       '@fastify/error': 4.2.0
