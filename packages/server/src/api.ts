@@ -7,8 +7,8 @@ import { resolveDemoActor } from "./demo-actor.js";
 
 /**
  * The broadcast view of the calculator: the domain state plus the
- * `_v` version contract (`_v` is always `snap.event.version` — the
- * event store's stream version is the single source of truth).
+ * `_v` version contract (`_v` is always the stream's head version,
+ * `snap.version` — the event store is the single source of truth).
  */
 export type LiveState = z.infer<typeof Calculator.state> & { _v: number };
 
@@ -20,11 +20,14 @@ export const broadcast = new BroadcastChannel<LiveState>();
 calculatorApp.on("committed", Calculator, (snapshots) => {
   // Fired only with committed snapshots: the last one and its event exist.
   const last = snapshots.at(-1)!;
-  const event = last.event!;
+  const patches = snapshots.map((s) => s.patch ?? {});
+  // `.snap` took the next version: send it as an empty patch, or every
+  // live client reads the next commit as a gap and refetches.
+  if (last.version > last.event!.version) patches.push({});
   broadcast.publish(
-    event.stream,
-    { ...last.state, _v: event.version },
-    snapshots.map((s) => s.patch ?? {})
+    last.event!.stream,
+    { ...last.state, _v: last.version },
+    patches
   );
 });
 
