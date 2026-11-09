@@ -22,7 +22,7 @@ export const load_label = (load: LoadNode): string =>
   load.name === load.state ? load.state : `${load.state} as "${load.name}"`;
 
 /** The streams of the action's one commit, its own first; just its own without appending loads. */
-export const commit_streams = (action: ActionNode, owner: string): string[] => [
+const commit_streams = (action: ActionNode, owner: string): string[] => [
   owner,
   ...appending_loads(action).map(load_label),
 ];

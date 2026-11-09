@@ -3906,22 +3906,20 @@ export type StreamPosition = {
  *   \`source_exact: true\` for literal equality.
  * @property source_exact - Use exact match instead of pattern match for
  *   \`source\`.
- * @property source_matches - **Best-effort** reverse-match narrowing:
- *   prefer streams whose stored \`source\` **pattern matches at least one**
- *   of the given names (i.e. \`name ~ source\`, the inverse of \`source\`
- *   above which is \`source ~ pattern\`). A subscription with an absent or
- *   empty \`source\` (no source constraint — it consumes from every
- *   stream) ALWAYS qualifies, regardless of the names. For a caller that
- *   wants only the subscriptions that could consume from a set of streams;
- *   the framework itself doesn't use it. **Callers must treat it as a hint,
- *   not an exact filter:** a
+ * @property source_matches - **Best-effort** reverse-match narrowing: prefer
+ *   streams whose stored \`source\` **pattern matches at least one** of the
+ *   given names (i.e. \`name ~ source\`, the inverse of \`source\` above which
+ *   is \`source ~ pattern\`). A subscription with an absent or empty \`source\`
+ *   (no source constraint — it consumes from every stream) ALWAYS qualifies,
+ *   regardless of the names. For a caller that wants only the subscriptions
+ *   that could consume from a set of streams; the framework itself doesn't
+ *   use it. **Callers must treat it as a hint, not an exact filter:** a
  *   store that can't express reverse-regex (e.g. an anchor-aware \`LIKE\`
- *   approximation) MAY return a superset — typically by ignoring the
- *   filter entirely — so callers that need exactness re-verify in
- *   process. Stores that honor it server-side
- *   advertise \`source_matches\` in the TCK's \`StoreCapabilities\`, which
- *   gates the narrowing-behavior tests; correctness never depends on the
- *   flag, only the row count fetched.
+ *   approximation) MAY return a superset — typically by ignoring the filter
+ *   entirely — so callers that need exactness re-verify in process. Stores
+ *   that honor it server-side advertise \`source_matches\` in the TCK's
+ *   \`StoreCapabilities\`, which gates the narrowing-behavior tests;
+ *   correctness never depends on the flag, only the row count fetched.
  * @property blocked - Restrict to blocked (\`true\`) or unblocked (\`false\`)
  *   streams. Omit for all.
  * @property lane - Restrict to streams in this drain lane. Exact match.
@@ -4295,17 +4293,16 @@ export interface Store extends Disposable, EventSource {
      * streams atomically. InMemoryStore fuses its poll+lease logic equivalently.
      *
      * Claim reads only the subscription rows; it never matches a \`source\`
-     * against the event log. Correlate does that when it decides which
-     * targets to mark, and the drain uses the same rule when it fetches the
-     * claimed stream's events. A **literal** source (no anchor —
-     * the common case, and every autoclose/dynamic-resolver
-     * source) matches by string equality: the fast, index-friendly path, and
-     * exact so \`"s1"\` never matches \`"s12"\`. A **pattern** source (starting
-     * with \`^\` or ending with \`$\`, e.g. a static \`^(A|B)$\` reaction) is
-     * compiled as a regex and matched against candidate stream names.
-     * Adapters that cannot faithfully run an arbitrary regex (SQLite) reject
-     * a non-portable pattern at {@link subscribe} time rather than silently
-     * never fetching its events.
+     * against the event log. Correlate does that when it decides which targets
+     * to mark, and the drain uses the same rule when it fetches the claimed
+     * stream's events. A **literal** source (no anchor — the common case, and
+     * every autoclose/dynamic-resolver source) matches by string equality: the
+     * fast, index-friendly path, and exact so \`"s1"\` never matches \`"s12"\`. A
+     * **pattern** source (starting with \`^\` or ending with \`$\`, e.g. a static
+     * \`^(A|B)$\` reaction) is compiled as a regex and matched against candidate
+     * stream names. Adapters that cannot faithfully run an arbitrary regex
+     * (SQLite) reject a non-portable pattern at {@link subscribe} time rather
+     * than silently never fetching its events.
      *
      * Every granted lease **counts against the stream's retry budget**: claim
      * increments the stream's retry counter and only {@link ack} resets it, so
