@@ -20,7 +20,7 @@
     "startCommand": "LOG_LEVEL=trace tsx watch src/main.ts"
   },
   "dependencies": {
-    "@rotorsoft/act": ">=1.35.3",
+    "@rotorsoft/act": ">=1.37.6",
     "zod": "^4.6.7"
   },
   "devDependencies": {
