@@ -52,7 +52,12 @@ describe("a store shaped for 1.x", () => {
     ).toThrow(/before @rotorsoft\/act 2\.0/);
   });
 
-  it("lets a current store through, and a wrapper it can't read", () => {
+  it("lets a current store through", () => {
+    const current = new InMemoryStore();
+    expect(store(current)).toBe(current);
+  });
+
+  it("lets a wrapper it can't read through", () => {
     const real = new InMemoryStore();
     const wrapped = Object.assign(new InMemoryStore(), {
       commit: (...args: Parameters<Store["commit"]>) => real.commit(...args),

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { act, state } from "../src/index.js";
+import { act, dispose, sleep, state, store, ZodEmpty } from "../src/index.js";
 import { fixture, sandbox } from "../src/test/index.js";
 
 const actor = { id: "a", name: "a" };
@@ -81,7 +81,7 @@ describe("time-travel load", () => {
     expect(current.state.count).toBe(15);
   });
 
-  it("should not use snapshots for time-travel loads", async () => {
+  it("replays an unseeded stream up to the point, not from its latest snapshot", async () => {
     // One-off builder with snap rules — uses sandbox directly since
     // the shared `test` fixture is bound to the plain Counter builder.
     const SnapCounter = state({ SnapCounter: z.object({ count: z.number() }) })
@@ -251,5 +251,61 @@ describe("time-travel load", () => {
       expect(past.state.count).toBe(5);
       await dispose();
     });
+  });
+});
+
+// Time travel skips the resume floor, not the snapshots: after a windowed close
+// or a restart, a snapshot is all that holds the effect of the events it replaced.
+const base = () =>
+  state({ R: z.object({ n: z.number() }) })
+    .init(() => ({ n: 0 }))
+    .emits({ Hit: ZodEmpty })
+    .patch({ Hit: (_, s) => ({ n: s.n + 1 }) })
+    .on({ hit: ZodEmpty })
+    .emit(() => ["Hit", {}]);
+
+const later = () => ({ created_before: new Date(Date.now() + 3_600_000) });
+
+describe("time travel after history moved into a snapshot", () => {
+  afterEach(async () => {
+    await dispose()();
+  });
+
+  it("keeps the state a windowed close moved into a snapshot", async () => {
+    const R = base()
+      .snap((s) => s.patches >= 2)
+      .build();
+    const app = act().withState(R).build({ autoSettle: false });
+    for (let i = 0; i < 5; i++)
+      await app.do("hit", { stream: "pruned", actor }, {});
+    await sleep(5);
+    await app.close([{ stream: "pruned", before: new Date() }]);
+    const { state: past } = await app.load(R, "pruned", undefined, later());
+    expect(past.n).toBe(5);
+  });
+
+  it("pushes a limit down to the store, so it doesn't read the whole stream", async () => {
+    const R = base().build();
+    const app = act().withState(R).build({ autoSettle: false });
+    for (let i = 0; i < 4; i++)
+      await app.do("hit", { stream: "limited", actor }, {});
+    const query = vi.spyOn(store(), "query");
+    const { state: past } = await app.load(R, "limited", undefined, {
+      limit: 2,
+    });
+    expect(past.n).toBe(2);
+    expect(query.mock.calls.at(-1)?.[1]).toMatchObject({ limit: 2 });
+    query.mockRestore();
+  });
+
+  it("keeps the state a restart seeded", async () => {
+    const R = base().build();
+    const app = act().withState(R).build({ autoSettle: false });
+    for (let i = 0; i < 5; i++)
+      await app.do("hit", { stream: "restarted", actor }, {});
+    await app.close([{ stream: "restarted", restart: true }]);
+    await app.do("hit", { stream: "restarted", actor }, {});
+    const { state: past } = await app.load(R, "restarted", undefined, later());
+    expect(past.n).toBe(6);
   });
 });
