@@ -1,0 +1,1878 @@
+{
+  "title": "Konsult Flows",
+  "subtitle": "A small consulting bookkeeping app built on Act 2.0: clients, invoices, the year's Book and recurring expenses, where every invoice action books its money on the Book in the same commit.",
+  "source": "Konsult, a private app · src",
+  "lanes": [
+    {
+      "id": "actor",
+      "label": "Actors"
+    },
+    {
+      "id": "action",
+      "label": "Actions"
+    },
+    {
+      "id": "state",
+      "label": "State",
+      "sub": "load · check · patch"
+    },
+    {
+      "id": "event",
+      "label": "Events",
+      "sub": "per stream"
+    },
+    {
+      "id": "projection",
+      "label": "Projections"
+    },
+    {
+      "id": "external",
+      "label": "Outside world"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "action:AddExpense",
+      "lane": "action",
+      "label": "AddExpense",
+      "state": "Book",
+      "schema": "id: string\ndate: string\namount: number > 0\ncategory: \"Advertising\" | \"Equipment\" | \"HomeOffice\" | \"Insurance\" | \"Meals\" | \"OfficeSupplies\" | \"PhoneInternet\" | \"ProfessionalDev\" | \"ProfessionalServices\" | \"RentOther\" | \"TaxesLicenses\" | \"Travel\" | \"Retirement401k\" | \"Mileage\" | \"Other\"\ndescription: string\nvendor?: string\ntaxDeductiblePercent: number ≥ 0, ≤ 100",
+      "file": "states/book.state.ts",
+      "col": 13.0,
+      "description": "A hand-entered Schedule C expense, or a month booked from a recurring template. Meals lock to 50% deductible."
+    },
+    {
+      "id": "action:UpdateExpense",
+      "lane": "action",
+      "label": "UpdateExpense",
+      "state": "Book",
+      "schema": "expenseId: string\ndate?: string\namount?: number > 0\ncategory?: \"Advertising\" | \"Equipment\" | \"HomeOffice\" | \"Insurance\" | \"Meals\" | \"OfficeSupplies\" | \"PhoneInternet\" | \"ProfessionalDev\" | \"ProfessionalServices\" | \"RentOther\" | \"TaxesLicenses\" | \"Travel\" | \"Retirement401k\" | \"Mileage\" | \"Other\"\ndescription?: string\nvendor?: string\ntaxDeductiblePercent?: number ≥ 0, ≤ 100",
+      "file": "states/book.state.ts",
+      "col": 14.0
+    },
+    {
+      "id": "action:VoidExpense",
+      "lane": "action",
+      "label": "VoidExpense",
+      "state": "Book",
+      "schema": "expenseId: string\nreason: string",
+      "file": "states/book.state.ts",
+      "col": 15.0
+    },
+    {
+      "id": "action:AddMileage",
+      "lane": "action",
+      "label": "AddMileage",
+      "state": "Book",
+      "schema": "id: string\ndate: string\nclientId?: string\nmiles: number > 0\npurpose: string\nfromLocation?: string\ntoLocation?: string\nroundTrip: boolean",
+      "file": "states/book.state.ts",
+      "col": 16.0
+    },
+    {
+      "id": "action:VoidMileage",
+      "lane": "action",
+      "label": "VoidMileage",
+      "state": "Book",
+      "schema": "mileageId: string\nreason: string",
+      "file": "states/book.state.ts",
+      "col": 18.0
+    },
+    {
+      "id": "action:AdjustMileage",
+      "lane": "action",
+      "label": "AdjustMileage",
+      "state": "Book",
+      "schema": "mileageId: string\nnewMiles: number > 0\nreason: string ≥ 1 chars",
+      "file": "states/book.state.ts",
+      "col": 17.0,
+      "description": "One commit voids the original trip and books the corrected one (`-adj-n`), at the rate of the trip's own tax year."
+    },
+    {
+      "id": "action:AddContribution",
+      "lane": "action",
+      "label": "AddContribution",
+      "state": "Book",
+      "schema": "id: string\ndate: string\namount: number > 0\ntype: \"employee\" | \"employer\"\nnote?: string",
+      "file": "states/book.state.ts",
+      "col": 19.0,
+      "description": "Solo 401(k) contribution. Throws past the year's §415(c) limit, or past the business's net earnings once there is income."
+    },
+    {
+      "id": "action:AddQuarterlyPayment",
+      "lane": "action",
+      "label": "AddQuarterlyPayment",
+      "state": "Book",
+      "schema": "quarter: \"Q1\" | \"Q2\" | \"Q3\" | \"Q4\"\namount: number\npaidDate: string\nconfirmationNumber?: string",
+      "file": "states/book.state.ts",
+      "col": 20.0
+    },
+    {
+      "id": "evt:GrossIncomeUpdated",
+      "lane": "event",
+      "label": "GrossIncomeUpdated",
+      "state": "Book",
+      "schema": "amount: number\ninvoiceStream: string\npaidDate?: string",
+      "file": "states/book.state.ts",
+      "col": 12.0,
+      "description": "Last-wins per invoice: gross income is the sum of the per-invoice payment map, never an accumulator."
+    },
+    {
+      "id": "evt:ExpenseAdded",
+      "lane": "event",
+      "label": "ExpenseAdded",
+      "state": "Book",
+      "schema": "id: string\ndate: string\namount: number\ncategory: \"Advertising\" | \"Equipment\" | \"HomeOffice\" | \"Insurance\" | \"Meals\" | \"OfficeSupplies\" | \"PhoneInternet\" | \"ProfessionalDev\" | \"ProfessionalServices\" | \"RentOther\" | \"TaxesLicenses\" | \"Travel\" | \"Retirement401k\" | \"Mileage\" | \"Other\"\ndescription: string\nvendor?: string\ntaxDeductiblePercent: number ≥ 0, ≤ 100",
+      "file": "states/book.state.ts",
+      "col": 13.0
+    },
+    {
+      "id": "evt:ExpenseUpdated",
+      "lane": "event",
+      "label": "ExpenseUpdated",
+      "state": "Book",
+      "schema": "expenseId: string\ndate?: string\namount?: number\ncategory?: \"Advertising\" | \"Equipment\" | \"HomeOffice\" | \"Insurance\" | \"Meals\" | \"OfficeSupplies\" | \"PhoneInternet\" | \"ProfessionalDev\" | \"ProfessionalServices\" | \"RentOther\" | \"TaxesLicenses\" | \"Travel\" | \"Retirement401k\" | \"Mileage\" | \"Other\"\ndescription?: string\nvendor?: string\ntaxDeductiblePercent?: number ≥ 0, ≤ 100",
+      "file": "states/book.state.ts",
+      "col": 14.0
+    },
+    {
+      "id": "evt:ExpenseVoided",
+      "lane": "event",
+      "label": "ExpenseVoided",
+      "state": "Book",
+      "schema": "expenseId: string\nreason: string",
+      "file": "states/book.state.ts",
+      "col": 15.0
+    },
+    {
+      "id": "evt:MileageAdded",
+      "lane": "event",
+      "label": "MileageAdded",
+      "state": "Book",
+      "schema": "id: string\ndate: string\nclientId?: string\nmiles: number\npurpose: string\nfromLocation?: string\ntoLocation?: string\nroundTrip: boolean\nratePerMile: number",
+      "file": "states/book.state.ts",
+      "col": 16.0,
+      "description": "miles is the post-doubling total; ratePerMile is snapshotted from tax-config, so a revised rate never rewrites history."
+    },
+    {
+      "id": "evt:MileageVoided",
+      "lane": "event",
+      "label": "MileageVoided",
+      "state": "Book",
+      "schema": "mileageId: string\nreason: string",
+      "file": "states/book.state.ts",
+      "col": 18.0
+    },
+    {
+      "id": "evt:ContributionAdded",
+      "lane": "event",
+      "label": "ContributionAdded",
+      "state": "Book",
+      "schema": "id: string\ndate: string\namount: number\ntype: \"employee\" | \"employer\"\nnote?: string",
+      "file": "states/book.state.ts",
+      "col": 19.0
+    },
+    {
+      "id": "evt:QuarterlyPaymentAdded",
+      "lane": "event",
+      "label": "QuarterlyPaymentAdded",
+      "state": "Book",
+      "schema": "quarter: \"Q1\" | \"Q2\" | \"Q3\" | \"Q4\"\namount: number\npaidDate: string\nconfirmationNumber?: string",
+      "file": "states/book.state.ts",
+      "col": 20.0
+    },
+    {
+      "id": "action:RegisterClient",
+      "lane": "action",
+      "label": "RegisterClient",
+      "state": "Client",
+      "preconditions": ["A client with this slug is already registered"],
+      "schema": "name: string ≥ 1 chars\naddress: string ≥ 1 chars\nemail?: string\ncontactName?: string\nhourlyRate: number > 0\npaymentTermsDays: integer\ninvoiceSchedule: \"weekly\" | \"biweekly\" | \"semimonthly\" | \"monthly\"\ncommuteMiles?: number\npaymentInstructions?: string",
+      "file": "states/client.state.ts",
+      "col": 3.0
+    },
+    {
+      "id": "action:UpdateClient",
+      "lane": "action",
+      "label": "UpdateClient",
+      "state": "Client",
+      "schema": "name?: string ≥ 1 chars\naddress?: string ≥ 1 chars\nemail?: string\ncontactName?: string\nhourlyRate?: number > 0\npaymentTermsDays?: integer\ninvoiceSchedule?: \"weekly\" | \"biweekly\" | \"semimonthly\" | \"monthly\"\ncommuteMiles?: number\npaymentInstructions?: string",
+      "file": "states/client.state.ts",
+      "col": 4.0,
+      "description": "Edits the client profile; also how the Google Maps commute distance lands."
+    },
+    {
+      "id": "evt:ClientRegistered",
+      "lane": "event",
+      "label": "ClientRegistered",
+      "state": "Client",
+      "schema": "name: string ≥ 1 chars\naddress: string ≥ 1 chars\nemail?: string\ncontactName?: string\nhourlyRate: number > 0\npaymentTermsDays: integer\ninvoiceSchedule: \"weekly\" | \"biweekly\" | \"semimonthly\" | \"monthly\"\ncommuteMiles?: number\npaymentInstructions?: string",
+      "file": "states/client.state.ts",
+      "col": 3.0
+    },
+    {
+      "id": "evt:ClientUpdated",
+      "lane": "event",
+      "label": "ClientUpdated",
+      "state": "Client",
+      "schema": "name?: string ≥ 1 chars\naddress?: string ≥ 1 chars\nemail?: string\ncontactName?: string\nhourlyRate?: number > 0\npaymentTermsDays?: integer\ninvoiceSchedule?: \"weekly\" | \"biweekly\" | \"semimonthly\" | \"monthly\"\ncommuteMiles?: number\npaymentInstructions?: string",
+      "file": "states/client.state.ts",
+      "col": 4.0
+    },
+    {
+      "id": "action:RegisterTemplate",
+      "lane": "action",
+      "label": "RegisterTemplate",
+      "state": "RecurringExpenses",
+      "schema": "templateId: string ≥ 1 chars\nlabel: string ≥ 1 chars\ncategory: \"Advertising\" | \"Equipment\" | \"HomeOffice\" | \"Insurance\" | \"Meals\" | \"OfficeSupplies\" | \"PhoneInternet\" | \"ProfessionalDev\" | \"ProfessionalServices\" | \"RentOther\" | \"TaxesLicenses\" | \"Travel\" | \"Retirement401k\" | \"Mileage\" | \"Other\"\nmonthlyAmount: number > 0\ndeductiblePct: number ≥ 0, ≤ 100\nstartDate: string\nendDate?: string\nvendor?: string",
+      "file": "states/recurring-expenses.state.ts",
+      "col": 21.5
+    },
+    {
+      "id": "action:UpdateTemplate",
+      "lane": "action",
+      "label": "UpdateTemplate",
+      "state": "RecurringExpenses",
+      "schema": "templateId: string ≥ 1 chars\nlabel?: string ≥ 1 chars\ncategory?: \"Advertising\" | \"Equipment\" | \"HomeOffice\" | \"Insurance\" | \"Meals\" | \"OfficeSupplies\" | \"PhoneInternet\" | \"ProfessionalDev\" | \"ProfessionalServices\" | \"RentOther\" | \"TaxesLicenses\" | \"Travel\" | \"Retirement401k\" | \"Mileage\" | \"Other\"\nmonthlyAmount?: number > 0\ndeductiblePct?: number ≥ 0, ≤ 100\nstartDate?: string\nendDate?: string\nvendor?: string",
+      "file": "states/recurring-expenses.state.ts",
+      "col": 22.5
+    },
+    {
+      "id": "action:PauseTemplate",
+      "lane": "action",
+      "label": "PauseTemplate",
+      "state": "RecurringExpenses",
+      "schema": "templateId: string\nreason?: string",
+      "file": "states/recurring-expenses.state.ts",
+      "col": 23.5
+    },
+    {
+      "id": "action:ResumeTemplate",
+      "lane": "action",
+      "label": "ResumeTemplate",
+      "state": "RecurringExpenses",
+      "schema": "templateId: string",
+      "file": "states/recurring-expenses.state.ts",
+      "col": 24.5
+    },
+    {
+      "id": "action:SkipTemplateMonth",
+      "lane": "action",
+      "label": "SkipTemplateMonth",
+      "state": "RecurringExpenses",
+      "schema": "templateId: string\nmonth: string\nreason?: string",
+      "file": "states/recurring-expenses.state.ts",
+      "col": 25.5
+    },
+    {
+      "id": "action:EndTemplate",
+      "lane": "action",
+      "label": "EndTemplate",
+      "state": "RecurringExpenses",
+      "schema": "templateId: string\nendMonth: string",
+      "file": "states/recurring-expenses.state.ts",
+      "col": 26.5
+    },
+    {
+      "id": "action:DeleteTemplate",
+      "lane": "action",
+      "label": "DeleteTemplate",
+      "state": "RecurringExpenses",
+      "schema": "templateId: string\nreason?: string",
+      "file": "states/recurring-expenses.state.ts",
+      "col": 27.5
+    },
+    {
+      "id": "evt:TemplateAdded",
+      "lane": "event",
+      "label": "TemplateAdded",
+      "state": "RecurringExpenses",
+      "schema": "templateId: string ≥ 1 chars\nlabel: string ≥ 1 chars\ncategory: \"Advertising\" | \"Equipment\" | \"HomeOffice\" | \"Insurance\" | \"Meals\" | \"OfficeSupplies\" | \"PhoneInternet\" | \"ProfessionalDev\" | \"ProfessionalServices\" | \"RentOther\" | \"TaxesLicenses\" | \"Travel\" | \"Retirement401k\" | \"Mileage\" | \"Other\"\nmonthlyAmount: number > 0\ndeductiblePct: number ≥ 0, ≤ 100\nstartDate: string\nendDate?: string\nvendor?: string",
+      "file": "states/recurring-expenses.state.ts",
+      "col": 21.5
+    },
+    {
+      "id": "evt:TemplateUpdated",
+      "lane": "event",
+      "label": "TemplateUpdated",
+      "state": "RecurringExpenses",
+      "schema": "templateId: string ≥ 1 chars\nlabel?: string ≥ 1 chars\ncategory?: \"Advertising\" | \"Equipment\" | \"HomeOffice\" | \"Insurance\" | \"Meals\" | \"OfficeSupplies\" | \"PhoneInternet\" | \"ProfessionalDev\" | \"ProfessionalServices\" | \"RentOther\" | \"TaxesLicenses\" | \"Travel\" | \"Retirement401k\" | \"Mileage\" | \"Other\"\nmonthlyAmount?: number > 0\ndeductiblePct?: number ≥ 0, ≤ 100\nstartDate?: string\nendDate?: string\nvendor?: string",
+      "file": "states/recurring-expenses.state.ts",
+      "col": 22.5
+    },
+    {
+      "id": "evt:TemplatePaused",
+      "lane": "event",
+      "label": "TemplatePaused",
+      "state": "RecurringExpenses",
+      "schema": "templateId: string\nreason?: string",
+      "file": "states/recurring-expenses.state.ts",
+      "col": 23.5
+    },
+    {
+      "id": "evt:TemplateResumed",
+      "lane": "event",
+      "label": "TemplateResumed",
+      "state": "RecurringExpenses",
+      "schema": "templateId: string",
+      "file": "states/recurring-expenses.state.ts",
+      "col": 24.5
+    },
+    {
+      "id": "evt:TemplateMonthSkipped",
+      "lane": "event",
+      "label": "TemplateMonthSkipped",
+      "state": "RecurringExpenses",
+      "schema": "templateId: string\nmonth: string\nreason?: string",
+      "file": "states/recurring-expenses.state.ts",
+      "col": 25.5
+    },
+    {
+      "id": "evt:TemplateEnded",
+      "lane": "event",
+      "label": "TemplateEnded",
+      "state": "RecurringExpenses",
+      "schema": "templateId: string\nendMonth: string",
+      "file": "states/recurring-expenses.state.ts",
+      "col": 26.5
+    },
+    {
+      "id": "evt:TemplateDeleted",
+      "lane": "event",
+      "label": "TemplateDeleted",
+      "state": "RecurringExpenses",
+      "schema": "templateId: string\nreason?: string",
+      "file": "states/recurring-expenses.state.ts",
+      "col": 27.5
+    },
+    {
+      "id": "action:ConfigureBusiness",
+      "lane": "action",
+      "label": "ConfigureBusiness",
+      "state": "Settings",
+      "schema": "businessName: string ≥ 1 chars\nbusinessAddress: string ≥ 1 chars\nbusinessEmail: email",
+      "file": "states/settings.state.ts",
+      "col": 0
+    },
+    {
+      "id": "evt:BusinessConfigured",
+      "lane": "event",
+      "label": "BusinessConfigured",
+      "state": "Settings",
+      "schema": "businessName?: string ≥ 1 chars\nbusinessAddress?: string ≥ 1 chars\nbusinessEmail?: email",
+      "file": "states/settings.state.ts",
+      "col": 0
+    },
+    {
+      "id": "action:UpdateTaxYear",
+      "lane": "action",
+      "label": "UpdateTaxYear",
+      "state": "TaxYear",
+      "schema": "filingStatus?: \"mfj\" | \"single\" | \"mfs\" | \"hoh\"\nw2Wages?: number ≥ 0\nw2FederalWithholding?: number ≥ 0\nw2SocialSecurityWages?: number ≥ 0\nw2MedicareWages?: number ≥ 0\nw2Retirement401kContrib?: number ≥ 0\nw2MonthsCovered?: integer ≥ 0, ≤ 12\nspouseW2Wages?: number ≥ 0\nspouseW2FederalWithholding?: number ≥ 0\ntaxableInterest?: number ≥ 0\nordinaryDividends?: number ≥ 0\nqualifiedDividends?: number ≥ 0\ncapitalGains?: number\nseHealthInsurance?: number ≥ 0\nhsaContributions?: number ≥ 0\nstudentLoanInterest?: number ≥ 0\npriorYearTaxLiability?: number ≥ 0\npriorYearAGI?: number ≥ 0\nvehiclePlacedInService?: string\nvehicleTotalMiles?: number ≥ 0\nvehiclePersonalMiles?: number ≥ 0\nhomeOfficeSqft?: integer ≥ 0, ≤ 10000\nage50OrOver?: boolean\nisSSTB?: boolean",
+      "file": "states/taxyear.state.ts",
+      "col": 1.5
+    },
+    {
+      "id": "evt:TaxYearUpdated",
+      "lane": "event",
+      "label": "TaxYearUpdated",
+      "state": "TaxYear",
+      "schema": "filingStatus?: \"mfj\" | \"single\" | \"mfs\" | \"hoh\"\nw2Wages?: number ≥ 0\nw2FederalWithholding?: number ≥ 0\nw2SocialSecurityWages?: number ≥ 0\nw2MedicareWages?: number ≥ 0\nw2Retirement401kContrib?: number ≥ 0\nw2MonthsCovered?: integer ≥ 0, ≤ 12\nspouseW2Wages?: number ≥ 0\nspouseW2FederalWithholding?: number ≥ 0\ntaxableInterest?: number ≥ 0\nordinaryDividends?: number ≥ 0\nqualifiedDividends?: number ≥ 0\ncapitalGains?: number\nseHealthInsurance?: number ≥ 0\nhsaContributions?: number ≥ 0\nstudentLoanInterest?: number ≥ 0\npriorYearTaxLiability?: number ≥ 0\npriorYearAGI?: number ≥ 0\nvehiclePlacedInService?: string\nvehicleTotalMiles?: number ≥ 0\nvehiclePersonalMiles?: number ≥ 0\nhomeOfficeSqft?: integer ≥ 0, ≤ 10000\nage50OrOver?: boolean\nisSSTB?: boolean",
+      "file": "states/taxyear.state.ts",
+      "col": 1.5
+    },
+    {
+      "id": "action:CreateInvoice",
+      "lane": "action",
+      "label": "CreateInvoice",
+      "state": "Invoice",
+      "preconditions": [
+        "Period already has an active invoice — void it first to start a new draft"
+      ],
+      "schema": "clientId: string\nmonth: string\nrate: number\npaymentTermsDays?: number\nentries: Record<string, {\n  hours: number ≥ 0.25, ≤ 16\n  description: string ≥ 5 chars\n  drove?: boolean\n}>\nexpenses?: Record<string, {\n  category: \"Travel\" | \"Meals\" | \"Lodging\" | \"Other\"\n  description: string ≥ 3 chars\n  amount: number > 0\n  date: string\n  receiptId?: string\n}>\nclientName?: string\nclientAddress?: string\nclientEmail?: string\ncommuteMiles?: number\npaymentInstructions?: string",
+      "file": "states/period.state.ts",
+      "col": 5.5,
+      "description": "Starts a draft from the day entries and billed expenses, snapshotting the client's name, address, commute and terms so the invoice never drifts. Throws when there is nothing to bill, a billed expense has no receipt, or hours are billed with no rate."
+    },
+    {
+      "id": "action:AdjustInvoice",
+      "lane": "action",
+      "label": "AdjustInvoice",
+      "state": "Invoice",
+      "preconditions": ["Invoice must be in draft status"],
+      "schema": "rate?: number\nnotes?: string\nentries?: Record<string, {\n  hours: number ≥ 0.25, ≤ 16\n  description: string ≥ 5 chars\n  drove?: boolean\n} | null>\nexpenses?: Record<string, {\n  category: \"Travel\" | \"Meals\" | \"Lodging\" | \"Other\"\n  description: string ≥ 3 chars\n  amount: number > 0\n  date: string\n  receiptId?: string\n} | null>",
+      "file": "states/period.state.ts",
+      "col": 6.5,
+      "description": "The caller sends the full intended entries and expenses; the emit handler diffs them against the draft so the event carries only what changed. Refuses a change that changes nothing."
+    },
+    {
+      "id": "action:SendInvoice",
+      "lane": "action",
+      "label": "SendInvoice",
+      "state": "Invoice",
+      "preconditions": ["Invoice must be in draft status"],
+      "loads": [
+        {
+          "state": "state:Book",
+          "events": ["evt:MileageAdded", "evt:ExpenseAdded"]
+        },
+        {
+          "state": "state:Client",
+          "events": []
+        }
+      ],
+      "schema": "dueDate?: date",
+      "file": "states/period.state.ts",
+      "col": 7.5,
+      "description": "Issues the invoice (issue date today, due date from the terms) and, in the same commit, books its commute mileage and billed expenses on the period year's Book. Loads `book-{year}` and, for invoices created before the commute snapshot, reads the live Client. maxRetries 2."
+    },
+    {
+      "id": "action:DiscardDraft",
+      "lane": "action",
+      "label": "DiscardDraft",
+      "state": "Invoice",
+      "preconditions": ["Only an unsent draft can be discarded"],
+      "schema": "reason: string",
+      "file": "states/period.state.ts",
+      "col": 8.5,
+      "description": "Throws away a draft that was never issued. Nothing was booked, so it touches no Book."
+    },
+    {
+      "id": "action:VoidInvoice",
+      "lane": "action",
+      "label": "VoidInvoice",
+      "state": "Invoice",
+      "preconditions": [
+        "Only an issued invoice with no payments can be voided"
+      ],
+      "loads": [
+        {
+          "state": "state:Book",
+          "events": ["evt:ExpenseVoided"]
+        }
+      ],
+      "schema": "reason: string",
+      "file": "states/period.state.ts",
+      "col": 9.5,
+      "description": "Reverses an issued, unpaid invoice and un-books its reimbursements on the same Book in the same commit, carrying the void's reason. maxRetries 2."
+    },
+    {
+      "id": "action:RecordPayment",
+      "lane": "action",
+      "label": "RecordPayment",
+      "state": "Invoice",
+      "preconditions": ["Invoice must be sent"],
+      "loads": [
+        {
+          "state": "state:Book",
+          "events": ["evt:GrossIncomeUpdated"]
+        }
+      ],
+      "schema": "paidDate: string\npaidAmount: number\npaymentMethod?: string\nreference: string ≥ 1 chars",
+      "file": "states/period.state.ts",
+      "col": 10.5,
+      "description": "Settles the invoice in full and books the income on the Book of the paid date's year (cash basis), in the same commit. maxRetries 2."
+    },
+    {
+      "id": "evt:InvoiceCreated",
+      "lane": "event",
+      "label": "InvoiceCreated",
+      "state": "Invoice",
+      "schema": "month: string\nclientId: string\nentries: Record<string, {\n  hours: number ≥ 0.25, ≤ 16\n  description: string ≥ 5 chars\n  drove?: boolean\n}>\nexpenses?: Record<string, {\n  category: \"Travel\" | \"Meals\" | \"Lodging\" | \"Other\"\n  description: string ≥ 3 chars\n  amount: number > 0\n  date: string\n  receiptId?: string\n}>\nrate: number\nissueDate?: string\ndueDate?: string\nclientName?: string\nclientAddress?: string\nclientEmail?: string\ncommuteMiles?: number\npaymentTermsDays?: integer\npaymentInstructions?: string",
+      "file": "states/period.state.ts",
+      "col": 5.5
+    },
+    {
+      "id": "evt:InvoiceAdjusted",
+      "lane": "event",
+      "label": "InvoiceAdjusted",
+      "state": "Invoice",
+      "schema": "rate?: number\nnotes?: string\nentriesPatch?: Record<string, {\n  hours?: number ≥ 0.25, ≤ 16 | null\n  description?: string ≥ 5 chars\n  drove?: boolean | null\n} | null>\nexpensesPatch?: Record<string, {\n  category?: \"Travel\" | \"Meals\" | \"Lodging\" | \"Other\"\n  description?: string ≥ 3 chars\n  amount?: number > 0 | null\n  date?: string | null\n  receiptId?: string | null\n} | null>",
+      "file": "states/period.state.ts",
+      "col": 6.5
+    },
+    {
+      "id": "evt:InvoiceSent",
+      "lane": "event",
+      "label": "InvoiceSent",
+      "state": "Invoice",
+      "schema": "issueDate: date\ndueDate: date",
+      "file": "states/period.state.ts",
+      "col": 7.5
+    },
+    {
+      "id": "evt:DraftDiscarded",
+      "lane": "event",
+      "label": "DraftDiscarded",
+      "state": "Invoice",
+      "schema": "reason: string",
+      "file": "states/period.state.ts",
+      "col": 8.5
+    },
+    {
+      "id": "evt:InvoiceVoided",
+      "lane": "event",
+      "label": "InvoiceVoided",
+      "state": "Invoice",
+      "schema": "reason: string\nmonth?: string",
+      "file": "states/period.state.ts",
+      "col": 9.5
+    },
+    {
+      "id": "evt:PaymentReceived",
+      "lane": "event",
+      "label": "PaymentReceived",
+      "state": "Invoice",
+      "schema": "paidDate: string\npaidAmount: number\npaymentMethod?: string\nreference?: string",
+      "file": "states/period.state.ts",
+      "col": 10.5
+    },
+    {
+      "id": "proj:invoices_view",
+      "lane": "projection",
+      "label": "invoices_view",
+      "file": "projections/invoice.projection.ts"
+    },
+    {
+      "id": "proj:clients_view",
+      "lane": "projection",
+      "label": "clients_view",
+      "file": "projections/clients.projection.ts"
+    },
+    {
+      "id": "proj:recurring_expenses_view",
+      "lane": "projection",
+      "label": "recurring_expenses_view",
+      "file": "projections/recurring-expenses.projection.ts"
+    },
+    {
+      "id": "state:Book",
+      "lane": "state",
+      "label": "Book",
+      "note": "income · deductions · tax",
+      "schema": "year: integer\ngrossIncome: number\ninvoicePayments: Record<string, number>\ninvoicePaidDates: Record<string, string>\nexpenses: Record<string, {\n  id: string\n  date: string\n  amount: number\n  category: \"Advertising\" | \"Equipment\" | \"HomeOffice\" | \"Insurance\" | \"Meals\" | \"OfficeSupplies\" | \"PhoneInternet\" | \"ProfessionalDev\" | \"ProfessionalServices\" | \"RentOther\" | \"TaxesLicenses\" | \"Travel\" | \"Retirement401k\" | \"Mileage\" | \"Other\"\n  description: string\n  vendor?: string\n  taxDeductiblePercent: number ≥ 0, ≤ 100\n  deductibleAmount: number\n  voidedReason?: string\n}>\nmileage: Record<string, {\n  id: string\n  date: string\n  clientId?: string\n  miles: number\n  purpose: string\n  fromLocation?: string\n  toLocation?: string\n  roundTrip: boolean\n  deduction: number\n  ratePerMile: number\n  voidedReason?: string\n}>\ncontributions: ({\n  id: string\n  date: string\n  amount: number\n  type: \"employee\" | \"employer\"\n  note?: string\n})[]\nquarterlyPayments: Record<string, {\n  quarter: \"Q1\" | \"Q2\" | \"Q3\" | \"Q4\"\n  amount: number\n  paidDate: string\n  confirmationNumber?: string\n}>\ntotalExpenses: number\ntotalDeductions: number\nexpensesByCategory: Record<string, number>\ntotalMileage: number\nmileageDeduction: number\nretirementEmployee: number\nretirementEmployer: number\nquarterlyPaidTotal: number\ntaxEstimate: {\n  grossIncome: number\n  totalDeductions: number\n  selfEmploymentTax: number\n  estimatedIncomeTax: number\n  totalEstimatedTax: number\n  quarterlyAmount: number\n}",
+      "span": [11.75, 20.25],
+      "description": "One `book-{year}` stream per tax year: gross income, Schedule C expenses, mileage, retirement and quarterly payments, with the tax estimate recomputed on every fold. The Invoice actions load it to book what an invoice earns in the same commit.",
+      "invariants": []
+    },
+    {
+      "id": "state:Client",
+      "lane": "state",
+      "label": "Client",
+      "note": "profile · rate · commute",
+      "schema": "slug: string\nname: string\naddress: string\nemail?: string\ncontactName?: string\nhourlyRate: number\npaymentTermsDays: integer\ninvoiceSchedule: \"weekly\" | \"biweekly\" | \"semimonthly\" | \"monthly\"\nactive: boolean\ncommuteMiles?: number\npaymentInstructions?: string",
+      "span": [2.75, 4.25],
+      "description": "One `client-{slug}` stream per client."
+    },
+    {
+      "id": "state:RecurringExpenses",
+      "lane": "state",
+      "label": "RecurringExpenses",
+      "note": "templates",
+      "schema": "templates: Record<string, {\n  label: string\n  category: \"Advertising\" | \"Equipment\" | \"HomeOffice\" | \"Insurance\" | \"Meals\" | \"OfficeSupplies\" | \"PhoneInternet\" | \"ProfessionalDev\" | \"ProfessionalServices\" | \"RentOther\" | \"TaxesLicenses\" | \"Travel\" | \"Retirement401k\" | \"Mileage\" | \"Other\"\n  monthlyAmount: number\n  deductiblePct: number\n  startDate: string\n  endDate?: string\n  vendor?: string\n  paused: boolean\n  skips: Record<string, string>\n  deleted: boolean\n}>",
+      "span": [21.25, 27.75],
+      "description": "One `recurring-expenses` stream holds every monthly template."
+    },
+    {
+      "id": "state:Settings",
+      "lane": "state",
+      "label": "Settings",
+      "note": "business profile",
+      "schema": "businessName: string\nbusinessAddress: string\nbusinessEmail: string",
+      "span": [-0.25, 0.25],
+      "description": "One `settings` stream: the business name, address and email on every invoice."
+    },
+    {
+      "id": "state:TaxYear",
+      "lane": "state",
+      "label": "TaxYear",
+      "note": "tax inputs",
+      "schema": "filingStatus: \"mfj\" | \"single\" | \"mfs\" | \"hoh\"\nw2Wages: number\nw2FederalWithholding: number\nw2SocialSecurityWages: number\nw2MedicareWages: number\nw2Retirement401kContrib: number\nw2MonthsCovered: integer\nspouseW2Wages: number\nspouseW2FederalWithholding: number\ntaxableInterest: number\nordinaryDividends: number\nqualifiedDividends: number\ncapitalGains: number\nseHealthInsurance: number\nhsaContributions: number\nstudentLoanInterest: number\npriorYearTaxLiability: number\npriorYearAGI: number\nvehiclePlacedInService?: string\nvehicleTotalMiles: number\nvehiclePersonalMiles: number\nhomeOfficeSqft: integer\nage50OrOver: boolean\nisSSTB: boolean",
+      "span": [1.25, 1.75],
+      "description": "One `taxyear-{year}` stream: filing status, W-2 wages and withholding, the inputs the tax estimate needs."
+    },
+    {
+      "id": "state:Invoice",
+      "lane": "state",
+      "label": "Invoice",
+      "note": "draft → sent → paid · voided",
+      "schema": "month: string\nclientId: string\nentries: Record<string, {\n  hours: number ≥ 0.25, ≤ 16\n  description: string ≥ 5 chars\n  drove?: boolean\n}>\ntotalHours: number\nstatus: string\nrate: number\ntimeTotal: number\nexpenses: Record<string, {\n  category: \"Travel\" | \"Meals\" | \"Lodging\" | \"Other\"\n  description: string ≥ 3 chars\n  amount: number > 0\n  date: string\n  receiptId?: string\n}>\nexpensesTotal: number\nissueDate?: string\ndueDate?: string\npayments?: {\n  date: string\n  amount: number\n  method?: string\n  reference?: string\n}[]\npaidTotal?: number\nnotes?: string\nvoidedReason?: string\nvoidedHistory?: {\n  reason: string\n  voidedAt: string\n  timeTotal: number\n  hours: number\n  issueDate?: string\n  expensesTotal?: number\n}[]\nclientName?: string\nclientAddress?: string\nclientEmail?: string\ncommuteMiles?: number\npaymentTermsDays?: integer\npaymentInstructions?: string",
+      "span": [5.25, 10.75],
+      "description": "One `invoice-{client}-{period}` stream per billing period. The whole lifecycle lives on it, so \"one active invoice per period\" is a precondition on the stream, and a voided period can be re-drafted."
+    },
+    {
+      "id": "actor:setup",
+      "lane": "actor",
+      "actor": "person",
+      "label": "Consultant",
+      "col": 0.75
+    },
+    {
+      "id": "actor:clients",
+      "lane": "actor",
+      "actor": "person",
+      "label": "Consultant",
+      "col": 3.5
+    },
+    {
+      "id": "actor:billing",
+      "lane": "actor",
+      "actor": "person",
+      "label": "Consultant",
+      "col": 8.0
+    },
+    {
+      "id": "actor:books",
+      "lane": "actor",
+      "actor": "person",
+      "label": "Consultant",
+      "col": 16.5
+    },
+    {
+      "id": "actor:materializer",
+      "lane": "actor",
+      "actor": "automation",
+      "label": "Recurring materializer",
+      "col": 13.0,
+      "description": "utils/recurring.ts: when the consultant confirms pending months, books each one as an AddExpense with a deterministic `recurring-{template}-{month}` id, skipping months already on the Book."
+    },
+    {
+      "id": "actor:recurring",
+      "lane": "actor",
+      "actor": "person",
+      "label": "Consultant",
+      "col": 24.5
+    },
+    {
+      "id": "ext:maps",
+      "lane": "external",
+      "label": "Google Maps",
+      "col": 4.0,
+      "description": "calculateCommute asks for the driving distance from the business address to the client's, then saves it with UpdateClient."
+    },
+    {
+      "id": "ext:smtp",
+      "lane": "external",
+      "label": "SMTP",
+      "col": 7.5,
+      "description": "emailInvoice: after SendInvoice commits, builds the PDF with the committed dates and mails it with nodemailer."
+    }
+  ],
+  "edges": [
+    {
+      "from": "action:AddExpense",
+      "to": "evt:ExpenseAdded",
+      "label": "emits"
+    },
+    {
+      "from": "action:UpdateExpense",
+      "to": "evt:ExpenseUpdated",
+      "label": "emits"
+    },
+    {
+      "from": "action:VoidExpense",
+      "to": "evt:ExpenseVoided",
+      "label": "emits"
+    },
+    {
+      "from": "action:AddMileage",
+      "to": "evt:MileageAdded",
+      "label": "emits"
+    },
+    {
+      "from": "action:VoidMileage",
+      "to": "evt:MileageVoided",
+      "label": "emits"
+    },
+    {
+      "from": "action:AdjustMileage",
+      "to": "evt:MileageAdded",
+      "label": "emits"
+    },
+    {
+      "from": "action:AdjustMileage",
+      "to": "evt:MileageVoided",
+      "label": "emits"
+    },
+    {
+      "from": "action:AddContribution",
+      "to": "evt:ContributionAdded",
+      "label": "emits"
+    },
+    {
+      "from": "action:AddQuarterlyPayment",
+      "to": "evt:QuarterlyPaymentAdded",
+      "label": "emits"
+    },
+    {
+      "from": "action:RegisterClient",
+      "to": "evt:ClientRegistered",
+      "label": "emits"
+    },
+    {
+      "from": "action:UpdateClient",
+      "to": "evt:ClientUpdated",
+      "label": "emits"
+    },
+    {
+      "from": "action:RegisterTemplate",
+      "to": "evt:TemplateAdded",
+      "label": "emits"
+    },
+    {
+      "from": "action:UpdateTemplate",
+      "to": "evt:TemplateUpdated",
+      "label": "emits"
+    },
+    {
+      "from": "action:PauseTemplate",
+      "to": "evt:TemplatePaused",
+      "label": "emits"
+    },
+    {
+      "from": "action:ResumeTemplate",
+      "to": "evt:TemplateResumed",
+      "label": "emits"
+    },
+    {
+      "from": "action:SkipTemplateMonth",
+      "to": "evt:TemplateMonthSkipped",
+      "label": "emits"
+    },
+    {
+      "from": "action:EndTemplate",
+      "to": "evt:TemplateEnded",
+      "label": "emits"
+    },
+    {
+      "from": "action:DeleteTemplate",
+      "to": "evt:TemplateDeleted",
+      "label": "emits"
+    },
+    {
+      "from": "action:ConfigureBusiness",
+      "to": "evt:BusinessConfigured",
+      "label": "emits"
+    },
+    {
+      "from": "action:UpdateTaxYear",
+      "to": "evt:TaxYearUpdated",
+      "label": "emits"
+    },
+    {
+      "from": "action:CreateInvoice",
+      "to": "evt:InvoiceCreated",
+      "label": "emits"
+    },
+    {
+      "from": "action:AdjustInvoice",
+      "to": "evt:InvoiceAdjusted",
+      "label": "emits"
+    },
+    {
+      "from": "action:SendInvoice",
+      "to": "evt:InvoiceSent",
+      "label": "emits"
+    },
+    {
+      "from": "action:SendInvoice",
+      "to": "evt:MileageAdded",
+      "label": "emits"
+    },
+    {
+      "from": "action:SendInvoice",
+      "to": "evt:ExpenseAdded",
+      "label": "emits"
+    },
+    {
+      "from": "action:DiscardDraft",
+      "to": "evt:DraftDiscarded",
+      "label": "emits"
+    },
+    {
+      "from": "action:VoidInvoice",
+      "to": "evt:InvoiceVoided",
+      "label": "emits"
+    },
+    {
+      "from": "action:VoidInvoice",
+      "to": "evt:ExpenseVoided",
+      "label": "emits"
+    },
+    {
+      "from": "action:RecordPayment",
+      "to": "evt:PaymentReceived",
+      "label": "emits"
+    },
+    {
+      "from": "action:RecordPayment",
+      "to": "evt:GrossIncomeUpdated",
+      "label": "emits"
+    },
+    {
+      "from": "evt:InvoiceCreated",
+      "to": "proj:invoices_view",
+      "label": "projects"
+    },
+    {
+      "from": "evt:InvoiceAdjusted",
+      "to": "proj:invoices_view",
+      "label": "projects"
+    },
+    {
+      "from": "evt:InvoiceSent",
+      "to": "proj:invoices_view",
+      "label": "projects"
+    },
+    {
+      "from": "evt:DraftDiscarded",
+      "to": "proj:invoices_view",
+      "label": "projects"
+    },
+    {
+      "from": "evt:InvoiceVoided",
+      "to": "proj:invoices_view",
+      "label": "projects"
+    },
+    {
+      "from": "evt:PaymentReceived",
+      "to": "proj:invoices_view",
+      "label": "projects"
+    },
+    {
+      "from": "evt:ClientRegistered",
+      "to": "proj:clients_view",
+      "label": "projects"
+    },
+    {
+      "from": "evt:ClientUpdated",
+      "to": "proj:clients_view",
+      "label": "projects"
+    },
+    {
+      "from": "evt:TemplateAdded",
+      "to": "proj:recurring_expenses_view",
+      "label": "projects"
+    },
+    {
+      "from": "evt:TemplateUpdated",
+      "to": "proj:recurring_expenses_view",
+      "label": "projects"
+    },
+    {
+      "from": "evt:TemplatePaused",
+      "to": "proj:recurring_expenses_view",
+      "label": "projects"
+    },
+    {
+      "from": "evt:TemplateResumed",
+      "to": "proj:recurring_expenses_view",
+      "label": "projects"
+    },
+    {
+      "from": "evt:TemplateMonthSkipped",
+      "to": "proj:recurring_expenses_view",
+      "label": "projects"
+    },
+    {
+      "from": "evt:TemplateEnded",
+      "to": "proj:recurring_expenses_view",
+      "label": "projects"
+    },
+    {
+      "from": "evt:TemplateDeleted",
+      "to": "proj:recurring_expenses_view",
+      "label": "projects"
+    },
+    {
+      "from": "actor:setup",
+      "to": "action:ConfigureBusiness"
+    },
+    {
+      "from": "actor:setup",
+      "to": "action:UpdateTaxYear"
+    },
+    {
+      "from": "actor:clients",
+      "to": "action:RegisterClient"
+    },
+    {
+      "from": "actor:clients",
+      "to": "action:UpdateClient"
+    },
+    {
+      "from": "actor:clients",
+      "to": "ext:maps",
+      "label": "calculateCommute"
+    },
+    {
+      "from": "ext:maps",
+      "to": "action:UpdateClient",
+      "label": "commuteMiles"
+    },
+    {
+      "from": "actor:billing",
+      "to": "action:CreateInvoice"
+    },
+    {
+      "from": "actor:billing",
+      "to": "action:AdjustInvoice"
+    },
+    {
+      "from": "actor:billing",
+      "to": "action:SendInvoice"
+    },
+    {
+      "from": "actor:billing",
+      "to": "action:DiscardDraft"
+    },
+    {
+      "from": "actor:billing",
+      "to": "action:VoidInvoice"
+    },
+    {
+      "from": "actor:billing",
+      "to": "action:RecordPayment"
+    },
+    {
+      "from": "evt:InvoiceSent",
+      "to": "ext:smtp",
+      "label": "emailInvoice"
+    },
+    {
+      "from": "actor:books",
+      "to": "action:AddExpense"
+    },
+    {
+      "from": "actor:books",
+      "to": "action:UpdateExpense"
+    },
+    {
+      "from": "actor:books",
+      "to": "action:VoidExpense"
+    },
+    {
+      "from": "actor:books",
+      "to": "action:AddMileage"
+    },
+    {
+      "from": "actor:books",
+      "to": "action:AdjustMileage"
+    },
+    {
+      "from": "actor:books",
+      "to": "action:VoidMileage"
+    },
+    {
+      "from": "actor:books",
+      "to": "action:AddContribution"
+    },
+    {
+      "from": "actor:books",
+      "to": "action:AddQuarterlyPayment"
+    },
+    {
+      "from": "actor:materializer",
+      "to": "action:AddExpense"
+    },
+    {
+      "from": "actor:recurring",
+      "to": "action:RegisterTemplate"
+    },
+    {
+      "from": "actor:recurring",
+      "to": "action:UpdateTemplate"
+    },
+    {
+      "from": "actor:recurring",
+      "to": "action:PauseTemplate"
+    },
+    {
+      "from": "actor:recurring",
+      "to": "action:ResumeTemplate"
+    },
+    {
+      "from": "actor:recurring",
+      "to": "action:SkipTemplateMonth"
+    },
+    {
+      "from": "actor:recurring",
+      "to": "action:EndTemplate"
+    },
+    {
+      "from": "actor:recurring",
+      "to": "action:DeleteTemplate"
+    }
+  ],
+  "scenarios": [
+    {
+      "title": "Getting set up",
+      "stream": "settings",
+      "summary": "The consultant fills in the business profile and the tax year, registers a client, and lets Google Maps work out the commute.",
+      "steps": [
+        {
+          "from": "actor:setup",
+          "to": "action:ConfigureBusiness",
+          "say": "First the **business profile**: it prints on every invoice. Settings live in one `settings` stream."
+        },
+        {
+          "from": "action:ConfigureBusiness",
+          "to": "evt:BusinessConfigured",
+          "say": "No rules to check: the profile is just recorded.",
+          "data": {
+            "businessName": "Rivera Consulting",
+            "businessAddress": "12 Elm St, Austin TX"
+          }
+        },
+        {
+          "from": "actor:setup",
+          "to": "action:UpdateTaxYear",
+          "stream": "taxyear-2026",
+          "say": "Then the **2026 tax inputs**: filing status and W-2 withholding feed the quarterly estimate."
+        },
+        {
+          "from": "action:UpdateTaxYear",
+          "to": "evt:TaxYearUpdated",
+          "stream": "taxyear-2026",
+          "say": "Recorded on `taxyear-2026`.",
+          "data": {
+            "filingStatus": "mfj",
+            "w2Wages": 0,
+            "w2FederalWithholding": 0
+          }
+        },
+        {
+          "from": "actor:clients",
+          "to": "action:RegisterClient",
+          "say": "Now a client: **Acme**, at $150 an hour, net 30.",
+          "stream": "client-acme"
+        },
+        {
+          "from": "action:RegisterClient",
+          "to": "evt:ClientRegistered",
+          "say": "The stream is new, so the slug is free. **ClientRegistered** lands and **clients_view** picks it up.",
+          "data": {
+            "name": "Acme",
+            "hourlyRate": 150,
+            "paymentTermsDays": 30
+          },
+          "patch": {
+            "name": "Acme",
+            "hourlyRate": 150,
+            "paymentTermsDays": 30,
+            "active": true
+          },
+          "stream": "client-acme"
+        },
+        {
+          "from": "actor:clients",
+          "to": "action:RegisterClient",
+          "say": "A second **Register Acme**, from another tab.",
+          "stream": "client-acme"
+        },
+        {
+          "from": "action:RegisterClient",
+          "to": "evt:ClientRegistered",
+          "say": "Refused: the stream already holds Acme.",
+          "reject": "A client with this slug is already registered",
+          "stream": "client-acme"
+        },
+        {
+          "from": "actor:clients",
+          "to": "ext:maps",
+          "say": "**Calculate commute** asks Google Maps for the driving distance from the business to Acme.",
+          "stream": "client-acme"
+        },
+        {
+          "from": "ext:maps",
+          "to": "action:UpdateClient",
+          "say": "**12.4 miles**, one way. The router saves it with UpdateClient.",
+          "stream": "client-acme"
+        },
+        {
+          "from": "action:UpdateClient",
+          "to": "evt:ClientUpdated",
+          "say": "The event carries only what changed.",
+          "data": {
+            "commuteMiles": 12.4
+          },
+          "stream": "client-acme"
+        },
+        {
+          "from": "actor:clients",
+          "to": "action:UpdateClient",
+          "say": "Acme agrees to a new rate.",
+          "stream": "client-acme"
+        },
+        {
+          "from": "action:UpdateClient",
+          "to": "evt:ClientUpdated",
+          "say": "Again only the changed field lands.",
+          "data": {
+            "hourlyRate": 175
+          },
+          "stream": "client-acme"
+        }
+      ]
+    },
+    {
+      "title": "One commit, two streams",
+      "stream": "invoice-acme-2026-06",
+      "summary": "June's invoice is drafted, issued and paid. Sending it books its mileage and billed flight on book-2026 in the same commit; the payment books the income the same way.",
+      "initials": {
+        "book-2026": {
+          "state": "Book",
+          "data": {
+            "grossIncome": 61250,
+            "totalExpenses": 4210,
+            "totalMileage": 1840
+          },
+          "version": 41
+        }
+      },
+      "steps": [
+        {
+          "at": "state:Book",
+          "say": "The year's money lives on **book-2026**, a stream of its own. Before Act 2.0, reactions copied an invoice's money onto it after the fact. Now the invoice actions **load the Book** and append to it themselves."
+        },
+        {
+          "from": "actor:billing",
+          "to": "action:CreateInvoice",
+          "say": "The consultant drafts **June for Acme**: 12 days, 4 of them driven, and a $320 flight with its receipt."
+        },
+        {
+          "from": "action:CreateInvoice",
+          "to": "evt:InvoiceCreated",
+          "say": "The period had no active invoice, so the draft starts. It snapshots Acme's commute and terms.",
+          "data": {
+            "month": "2026-06",
+            "rate": 175,
+            "days": 12,
+            "commuteMiles": 12.4,
+            "expenses": {
+              "f1": "Flight $320"
+            }
+          },
+          "patch": {
+            "status": "draft",
+            "month": "2026-06",
+            "totalHours": 96,
+            "timeTotal": 16800,
+            "expensesTotal": 320
+          }
+        },
+        {
+          "from": "actor:billing",
+          "to": "action:AdjustInvoice",
+          "say": "One more day turns up. The consultant saves the whole timesheet again."
+        },
+        {
+          "from": "action:AdjustInvoice",
+          "to": "evt:InvoiceAdjusted",
+          "say": "The emit handler diffs it against the draft: only the **new day** goes on the event.",
+          "data": {
+            "entriesPatch": {
+              "2026-06-30": "8h"
+            }
+          },
+          "patch": {
+            "totalHours": 104,
+            "timeTotal": 18200
+          }
+        },
+        {
+          "from": "actor:billing",
+          "to": "action:SendInvoice",
+          "say": "**Send**. SendInvoice loads its own stream and **book-2026** at v41. The invoice already carries the commute, so the Client read is skipped.",
+          "loads": ["book-2026", null]
+        },
+        {
+          "from": "action:SendInvoice",
+          "to": "evt:InvoiceSent",
+          "commit": "send",
+          "say": "One commit, **two streams**: InvoiceSent on the invoice, and on the Book the drive days as mileage and the flight as a deductible expense. Both streams are checked at the versions loaded, then everything lands at once.",
+          "data": {
+            "issueDate": "2026-07-01",
+            "dueDate": "2026-07-31"
+          },
+          "patch": {
+            "status": "sent",
+            "issueDate": "2026-07-01",
+            "dueDate": "2026-07-31"
+          }
+        },
+        {
+          "from": "action:SendInvoice",
+          "to": "evt:MileageAdded",
+          "commit": "send",
+          "stream": "book-2026",
+          "data": {
+            "id": "mileage-invoice-acme-2026-06",
+            "miles": 124,
+            "ratePerMile": 0.7
+          },
+          "patch": {
+            "totalMileage": 1964
+          }
+        },
+        {
+          "from": "action:SendInvoice",
+          "to": "evt:ExpenseAdded",
+          "commit": "send",
+          "stream": "book-2026",
+          "data": {
+            "id": "reimb-invoice-acme-2026-06-f1",
+            "amount": 320,
+            "category": "Travel"
+          },
+          "patch": {
+            "totalExpenses": 4530
+          }
+        },
+        {
+          "from": "evt:InvoiceSent",
+          "to": "ext:smtp",
+          "say": "**emailInvoice** builds the PDF from the committed dates and mails it to Acme."
+        },
+        {
+          "from": "actor:billing",
+          "to": "action:RecordPayment",
+          "say": "Acme pays by ACH on **July 28**. RecordPayment loads the Book of the **paid date's** year: cash basis.",
+          "loads": ["book-2026"]
+        },
+        {
+          "from": "action:RecordPayment",
+          "to": "evt:PaymentReceived",
+          "commit": "pay",
+          "say": "The invoice is settled and the income is booked, in **one commit**. There is no moment where the invoice says paid and the Book doesn't know.",
+          "data": {
+            "paidDate": "2026-07-28",
+            "paidAmount": 18520,
+            "reference": "ACH-55120"
+          },
+          "patch": {
+            "status": "paid",
+            "paidTotal": 18520
+          }
+        },
+        {
+          "from": "action:RecordPayment",
+          "to": "evt:GrossIncomeUpdated",
+          "commit": "pay",
+          "stream": "book-2026",
+          "data": {
+            "invoiceStream": "invoice-acme-2026-06",
+            "amount": 18520
+          },
+          "patch": {
+            "grossIncome": 79770
+          }
+        }
+      ]
+    },
+    {
+      "title": "Void and start over",
+      "stream": "invoice-acme-2026-07",
+      "summary": "July went out at the wrong rate. Voiding it un-books its expenses in the same commit; the period is re-drafted, and an unneeded draft is discarded.",
+      "initial": {
+        "status": "sent",
+        "month": "2026-07",
+        "timeTotal": 16800,
+        "expensesTotal": 180,
+        "paidTotal": 0
+      },
+      "initials": {
+        "book-2026": {
+          "state": "Book",
+          "data": {
+            "grossIncome": 61250,
+            "totalExpenses": 4390,
+            "totalMileage": 1840
+          },
+          "version": 47
+        }
+      },
+      "steps": [
+        {
+          "from": "actor:billing",
+          "to": "action:VoidInvoice",
+          "say": "July was issued at the old rate. **Void** loads book-2026 at v47, where the invoice's $180 hotel is booked.",
+          "loads": ["book-2026"]
+        },
+        {
+          "from": "action:VoidInvoice",
+          "to": "evt:InvoiceVoided",
+          "commit": "void",
+          "say": "It's issued and unpaid, so it can be voided. The same commit **un-books** the hotel on the Book, carrying the void's reason.",
+          "data": {
+            "reason": "Wrong rate",
+            "month": "2026-07"
+          },
+          "patch": {
+            "status": "voided",
+            "voidedReason": "Wrong rate"
+          }
+        },
+        {
+          "from": "action:VoidInvoice",
+          "to": "evt:ExpenseVoided",
+          "commit": "void",
+          "stream": "book-2026",
+          "data": {
+            "expenseId": "reimb-invoice-acme-2026-07-h1",
+            "reason": "Wrong rate"
+          },
+          "patch": {
+            "totalExpenses": 4210
+          }
+        },
+        {
+          "from": "actor:billing",
+          "to": "action:CreateInvoice",
+          "say": "A voided period can start over. A fresh draft at the right rate."
+        },
+        {
+          "from": "action:CreateInvoice",
+          "to": "evt:InvoiceCreated",
+          "say": "Every per-cycle field resets; the voided cycle stays in the audit trail.",
+          "data": {
+            "month": "2026-07",
+            "rate": 175
+          },
+          "patch": {
+            "status": "draft",
+            "timeTotal": 16800,
+            "expensesTotal": 180,
+            "voidedReason": null
+          }
+        },
+        {
+          "from": "actor:billing",
+          "to": "action:RecordPayment",
+          "say": "A payment arrives early, against the draft.",
+          "loads": ["book-2026"]
+        },
+        {
+          "from": "action:RecordPayment",
+          "to": "evt:PaymentReceived",
+          "say": "Refused before anything is written: nothing lands on the invoice **or** the Book.",
+          "reject": "Invoice must be sent"
+        },
+        {
+          "from": "actor:billing",
+          "to": "action:VoidInvoice",
+          "say": "The consultant tries to void the draft instead of discarding it.",
+          "loads": ["book-2026"]
+        },
+        {
+          "from": "action:VoidInvoice",
+          "to": "evt:InvoiceVoided",
+          "say": "Void is for issued invoices.",
+          "reject": "Only an issued invoice with no payments can be voided"
+        },
+        {
+          "from": "actor:billing",
+          "to": "action:DiscardDraft",
+          "say": "The client will be billed in August instead. **Discard** the draft."
+        },
+        {
+          "from": "action:DiscardDraft",
+          "to": "evt:DraftDiscarded",
+          "say": "Nothing was issued, so nothing was booked and no Book is touched.",
+          "data": {
+            "reason": "Billing in August"
+          },
+          "patch": {
+            "status": "voided",
+            "voidedReason": "Billing in August"
+          }
+        }
+      ]
+    },
+    {
+      "title": "A lost race, retried",
+      "stream": "invoice-globex-2025-11",
+      "summary": "An old Globex invoice, created before invoices snapshot the commute, is sent while a recurring expense lands on the same Book. The commit loses the race, reloads and lands.",
+      "initial": {
+        "status": "draft",
+        "month": "2025-11",
+        "timeTotal": 6000,
+        "expensesTotal": 0
+      },
+      "initials": {
+        "book-2025": {
+          "state": "Book",
+          "data": {
+            "grossIncome": 98400,
+            "totalExpenses": 7020,
+            "totalMileage": 2210
+          },
+          "version": 88
+        },
+        "client-globex": {
+          "state": "Client",
+          "data": {
+            "name": "Globex",
+            "commuteMiles": 9
+          },
+          "version": 6
+        }
+      },
+      "steps": [
+        {
+          "from": "actor:billing",
+          "to": "action:SendInvoice",
+          "say": "This draft predates the commute snapshot, so SendInvoice also **reads** client-globex: 9 miles. It loads book-2025 at **v88**.",
+          "loads": ["book-2025", "client-globex"]
+        },
+        {
+          "from": "action:SendInvoice",
+          "to": "evt:InvoiceSent",
+          "commit": "send1",
+          "conflict": "book-2025",
+          "say": "Meanwhile a recurring expense landed on book-2025, which is now at v89. The Book's check fails, so **nothing lands** on either stream: ConcurrencyError.",
+          "data": {
+            "issueDate": "2026-01-05",
+            "dueDate": "2026-02-04"
+          }
+        },
+        {
+          "from": "action:SendInvoice",
+          "to": "evt:MileageAdded",
+          "commit": "send1",
+          "conflict": "book-2025",
+          "stream": "book-2025",
+          "data": {
+            "miles": 72
+          }
+        },
+        {
+          "at": "action:SendInvoice",
+          "say": "SendInvoice has **maxRetries 2**. It runs again with fresh loads: book-2025 at v89. The client is only read, so its version isn't checked.",
+          "loads": ["book-2025", "client-globex"]
+        },
+        {
+          "from": "action:SendInvoice",
+          "to": "evt:InvoiceSent",
+          "commit": "send2",
+          "say": "This time both checks pass. The invoice is sent and 4 drive days × 9 miles × 2 land on the Book.",
+          "data": {
+            "issueDate": "2026-01-05",
+            "dueDate": "2026-02-04"
+          },
+          "patch": {
+            "status": "sent",
+            "issueDate": "2026-01-05",
+            "dueDate": "2026-02-04"
+          }
+        },
+        {
+          "from": "action:SendInvoice",
+          "to": "evt:MileageAdded",
+          "commit": "send2",
+          "stream": "book-2025",
+          "data": {
+            "id": "mileage-invoice-globex-2025-11",
+            "miles": 72,
+            "ratePerMile": 0.7
+          },
+          "patch": {
+            "totalMileage": 2282
+          }
+        }
+      ]
+    },
+    {
+      "title": "Refusals",
+      "stream": "invoice-acme-2026-08",
+      "summary": "Every way the invoice turns a request down, each before anything is written.",
+      "initial": {
+        "status": "draft",
+        "month": "2026-08",
+        "timeTotal": 14000,
+        "expensesTotal": 0
+      },
+      "initials": {
+        "book-2026": {
+          "state": "Book",
+          "data": {
+            "grossIncome": 61250,
+            "totalExpenses": 4210,
+            "totalMileage": 1840
+          },
+          "version": 52
+        }
+      },
+      "steps": [
+        {
+          "from": "actor:billing",
+          "to": "action:CreateInvoice",
+          "say": "A second draft for August, from a stale tab."
+        },
+        {
+          "from": "action:CreateInvoice",
+          "to": "evt:InvoiceCreated",
+          "say": "August already has an active invoice.",
+          "reject": "Period already has an active invoice — void it first to start a new draft"
+        },
+        {
+          "from": "actor:billing",
+          "to": "action:AdjustInvoice",
+          "say": "The consultant hits Save without changing anything."
+        },
+        {
+          "from": "action:AdjustInvoice",
+          "to": "evt:InvoiceAdjusted",
+          "say": "An adjust that changes nothing isn't a fact.",
+          "reject": "No changes to save — the invoice already matches what you submitted."
+        },
+        {
+          "from": "actor:billing",
+          "to": "action:SendInvoice",
+          "say": "Send, with a due date typed in the past. The Book is loaded at v52.",
+          "loads": ["book-2026", null]
+        },
+        {
+          "from": "action:SendInvoice",
+          "to": "evt:InvoiceSent",
+          "say": "The emit handler refuses it, so neither the invoice nor the Book changes.",
+          "reject": "Due date cannot be before the issue date"
+        }
+      ]
+    },
+    {
+      "title": "Keeping the books",
+      "stream": "book-2026",
+      "summary": "The consultant records what no invoice books: expenses, trips and their corrections, a 401(k) contribution and a quarterly payment.",
+      "initials": {
+        "book-2026": {
+          "state": "Book",
+          "data": {
+            "grossIncome": 61250,
+            "totalExpenses": 4210,
+            "totalMileage": 1840
+          },
+          "version": 60
+        }
+      },
+      "initial": {
+        "grossIncome": 61250,
+        "totalExpenses": 4210,
+        "totalMileage": 1840
+      },
+      "steps": [
+        {
+          "from": "actor:books",
+          "to": "action:AddExpense",
+          "say": "A new **monitor**, $480, as equipment."
+        },
+        {
+          "from": "action:AddExpense",
+          "to": "evt:ExpenseAdded",
+          "say": "Recorded at 100% deductible; the tax estimate is recomputed on the fold.",
+          "data": {
+            "amount": 480,
+            "category": "Equipment",
+            "taxDeductiblePercent": 100
+          },
+          "patch": {
+            "totalExpenses": 4690
+          }
+        },
+        {
+          "from": "actor:books",
+          "to": "action:UpdateExpense",
+          "say": "The receipt says $450."
+        },
+        {
+          "from": "action:UpdateExpense",
+          "to": "evt:ExpenseUpdated",
+          "say": "Only the changed field goes on the event.",
+          "data": {
+            "amount": 450
+          },
+          "patch": {
+            "totalExpenses": 4660
+          }
+        },
+        {
+          "from": "actor:books",
+          "to": "action:VoidExpense",
+          "say": "A duplicate software charge gets voided."
+        },
+        {
+          "from": "action:VoidExpense",
+          "to": "evt:ExpenseVoided",
+          "say": "Voided rows stay on the Book, excluded from totals.",
+          "data": {
+            "reason": "Duplicate"
+          },
+          "patch": {
+            "totalExpenses": 4561
+          }
+        },
+        {
+          "from": "actor:books",
+          "to": "action:AddMileage",
+          "say": "A round trip to a client workshop, 38 miles each way."
+        },
+        {
+          "from": "action:AddMileage",
+          "to": "evt:MileageAdded",
+          "say": "The event stores the doubled total and snapshots this year's rate.",
+          "data": {
+            "miles": 76,
+            "roundTrip": true,
+            "ratePerMile": 0.7
+          },
+          "patch": {
+            "totalMileage": 1916
+          }
+        },
+        {
+          "from": "actor:books",
+          "to": "action:AdjustMileage",
+          "say": "The detour via I-35 made it 92 miles."
+        },
+        {
+          "from": "action:AdjustMileage",
+          "to": "evt:MileageVoided",
+          "commit": "adj",
+          "say": "One commit voids the original and books the correction, at the trip year's rate.",
+          "data": {
+            "reason": "via I-35"
+          },
+          "patch": {
+            "totalMileage": 1840
+          }
+        },
+        {
+          "from": "action:AdjustMileage",
+          "to": "evt:MileageAdded",
+          "commit": "adj",
+          "data": {
+            "id": "m-77-adj-1",
+            "miles": 92
+          },
+          "patch": {
+            "totalMileage": 1932
+          }
+        },
+        {
+          "from": "actor:books",
+          "to": "action:VoidMileage",
+          "say": "A trip logged twice."
+        },
+        {
+          "from": "action:VoidMileage",
+          "to": "evt:MileageVoided",
+          "say": "Voided, and dropped from the deduction.",
+          "data": {
+            "reason": "Logged twice"
+          },
+          "patch": {
+            "totalMileage": 1856
+          }
+        },
+        {
+          "from": "actor:books",
+          "to": "action:AddContribution",
+          "say": "A $90,000 solo 401(k) contribution."
+        },
+        {
+          "from": "action:AddContribution",
+          "to": "evt:ContributionAdded",
+          "say": "Over the year's cap, so the emit handler refuses it.",
+          "reject": "Combined 401(k) contributions $90,000 exceed the 2026 §415(c) limit of $70,000."
+        },
+        {
+          "from": "actor:books",
+          "to": "action:AddContribution",
+          "say": "$15,000 instead."
+        },
+        {
+          "from": "action:AddContribution",
+          "to": "evt:ContributionAdded",
+          "say": "Within the cap and below net earnings.",
+          "data": {
+            "amount": 15000,
+            "type": "employee"
+          },
+          "patch": {
+            "retirementEmployee": 15000
+          }
+        },
+        {
+          "from": "actor:books",
+          "to": "action:AddQuarterlyPayment",
+          "say": "The Q2 estimated payment goes out."
+        },
+        {
+          "from": "action:AddQuarterlyPayment",
+          "to": "evt:QuarterlyPaymentAdded",
+          "say": "Last write wins per quarter.",
+          "data": {
+            "quarter": "Q2",
+            "amount": 6200
+          },
+          "patch": {
+            "quarterlyPaidTotal": 6200
+          }
+        }
+      ]
+    },
+    {
+      "title": "Recurring expenses",
+      "stream": "recurring-expenses",
+      "summary": "A monthly software subscription as a template: changed, paused, resumed, skipped, ended and deleted, with its months booked on the Book when the consultant confirms them.",
+      "initials": {
+        "book-2026": {
+          "state": "Book",
+          "data": {
+            "grossIncome": 61250,
+            "totalExpenses": 4210,
+            "totalMileage": 1840
+          },
+          "version": 70
+        }
+      },
+      "steps": [
+        {
+          "from": "actor:recurring",
+          "to": "action:RegisterTemplate",
+          "say": "**Figma**, $45 a month from January."
+        },
+        {
+          "from": "action:RegisterTemplate",
+          "to": "evt:TemplateAdded",
+          "say": "All templates share one `recurring-expenses` stream.",
+          "data": {
+            "templateId": "figma",
+            "monthlyAmount": 45,
+            "startDate": "2026-01-01"
+          },
+          "patch": {
+            "figma": "$45/mo"
+          }
+        },
+        {
+          "from": "actor:materializer",
+          "to": "action:AddExpense",
+          "stream": "book-2026",
+          "say": "The consultant **confirms the pending months**. The materializer books each one on book-2026 with a deterministic id, skipping months already there."
+        },
+        {
+          "from": "action:AddExpense",
+          "to": "evt:ExpenseAdded",
+          "stream": "book-2026",
+          "say": "January lands as an ordinary expense.",
+          "data": {
+            "id": "recurring-figma-2026-01",
+            "amount": 45
+          },
+          "patch": {
+            "totalExpenses": 4255
+          }
+        },
+        {
+          "from": "actor:recurring",
+          "to": "action:UpdateTemplate",
+          "say": "The price goes up to $55."
+        },
+        {
+          "from": "action:UpdateTemplate",
+          "to": "evt:TemplateUpdated",
+          "say": "Only the changed field.",
+          "data": {
+            "monthlyAmount": 55
+          },
+          "patch": {
+            "figma": "$55/mo"
+          }
+        },
+        {
+          "from": "actor:recurring",
+          "to": "action:PauseTemplate",
+          "say": "Paused for a slow summer."
+        },
+        {
+          "from": "action:PauseTemplate",
+          "to": "evt:TemplatePaused",
+          "say": "Future months stop booking.",
+          "data": {
+            "templateId": "figma"
+          },
+          "patch": {
+            "paused": true
+          }
+        },
+        {
+          "from": "actor:recurring",
+          "to": "action:ResumeTemplate",
+          "say": "Back on in September."
+        },
+        {
+          "from": "action:ResumeTemplate",
+          "to": "evt:TemplateResumed",
+          "say": "Booking resumes.",
+          "data": {
+            "templateId": "figma"
+          },
+          "patch": {
+            "paused": false
+          }
+        },
+        {
+          "from": "actor:recurring",
+          "to": "action:SkipTemplateMonth",
+          "say": "October was comped."
+        },
+        {
+          "from": "action:SkipTemplateMonth",
+          "to": "evt:TemplateMonthSkipped",
+          "say": "The materializer will skip it.",
+          "data": {
+            "month": "2026-10",
+            "reason": "Comped"
+          },
+          "patch": {
+            "skips": {
+              "2026-10": "Comped"
+            }
+          }
+        },
+        {
+          "from": "actor:recurring",
+          "to": "action:EndTemplate",
+          "say": "Cancelled after November."
+        },
+        {
+          "from": "action:EndTemplate",
+          "to": "evt:TemplateEnded",
+          "say": "No months book after the end.",
+          "data": {
+            "endMonth": "2026-11"
+          },
+          "patch": {
+            "endDate": "2026-11-01"
+          }
+        },
+        {
+          "from": "actor:recurring",
+          "to": "action:DeleteTemplate",
+          "say": "Removed from the list. The months already booked stay on the Book."
+        },
+        {
+          "from": "action:DeleteTemplate",
+          "to": "evt:TemplateDeleted",
+          "say": "Marked deleted, never erased.",
+          "data": {
+            "templateId": "figma"
+          },
+          "patch": {
+            "deleted": true
+          }
+        }
+      ]
+    }
+  ]
+}
