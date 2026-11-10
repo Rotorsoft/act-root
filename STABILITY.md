@@ -65,7 +65,7 @@ Their names and payload shapes are stable. Adding new optional fields to a paylo
 
 Everything exported from `@rotorsoft/act` and `@rotorsoft/act/types`. If you can `import { Foo } from "@rotorsoft/act"` (or `/types`), the shape of `Foo` is covered.
 
-Two runtime exports are there for adapter and tooling authors, not for apps: `default_scope` (the ports bag an Act without `ActOptions.scoped` runs in) and `PackageSchema` (the package.json fields `config()` validates). They're covered like every other export.
+Some runtime exports are there for adapter and tooling authors, not for apps: `default_scope` (the ports bag an Act without `ActOptions.scoped` runs in), `PackageSchema` (the package.json fields `config()` validates), and the helpers a store calls so each framework rule lives once in core: `check_appends`, `throw_if_stale`, `concurrency_error`, `seed_event`, `fair_slots`, `notification_of`, `is_literal_source` and `DEFAULT_QUERY_STREAMS_LIMIT` (see [Writing a store](docs/docs/guides/writing-a-store.md)). They're covered like every other export.
 
 ## Not covered
 

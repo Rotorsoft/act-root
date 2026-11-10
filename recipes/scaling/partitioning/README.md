@@ -113,7 +113,7 @@ The two-tool composition that scales:
 - **Per-stream retirement** via `.autocloses({...})` so streams earn their tombstone in the partition where they go terminal. By the time that partition ages out of the retention window, the tombstones are safely in a future partition.
 - **Table-wide retention floor** via the drop runner, which checks the guard before touching DDL.
 
-For states that lack a natural terminal event, schedule explicit `app.snap()` calls in lock-step with the partition cadence — the snapshot writes to the always-current partition and survives the next drop. The recipe pages for `range-on-created` and `range-on-id` carry this guidance per-strategy; this section exists because the constraint cuts across every partitioning approach that can lose events.
+For states that lack a natural terminal event, schedule `app.close([{ stream, restart: true }])` in lock-step with the partition cadence, which keeps each stream live behind a snapshot seed — the snapshot writes to the always-current partition and survives the next drop. The recipe pages for `range-on-created` and `range-on-id` carry this guidance per-strategy; this section exists because the constraint cuts across every partitioning approach that can lose events.
 
 HASH-on-stream is the only strategy in this folder that's safe by construction — it never drops events, only relocates them across partitions.
 

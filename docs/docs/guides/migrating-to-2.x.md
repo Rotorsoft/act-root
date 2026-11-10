@@ -45,9 +45,13 @@ Two things that rewrite doesn't show:
 
 - **What changed:** `.given`, `Invariant`, `InvariantError`, `Errors.InvariantError`, act-http's `INVARIANT` code and the `validateFoldedState` option are gone.
 - **Why:** each of them guarded one action, so each was a precondition. The real invariants of a domain now live in the state's schema, checked before every commit.
-- **How to update:** see [Upgrading from `.given`](../concepts/state-management.md#upgrading-from-given-removed-in-20), which covers `GivenHandlers`, `State.given` and act-diagram's `ActionNode.invariants` (read `preconditions`) too.
+- **How to update:**
+  - Write `.given([rule])` as `.requires([rule])`, merging it with any `.requires` on the same action, with `valid: (state, actor) => ...` becoming `holds: (_, state, actor) => ...`, and type a shared rule `Precondition<S, unknown>` instead of `Invariant<S>`.
+  - Catch `PreconditionError` instead of `InvariantError`; `Errors.InvariantError` (`ERR_INVARIANT`) is gone, and act-http no longer has the `INVARIANT` code.
+  - A direct call to a rule's `holds` passes all four arguments, `holds(payload, state, actor, loaded)` (`{}` when the action loads nothing), and a direct call to an action handler in `state.on` passes `loaded` as its fourth argument. A rule written with fewer parameters still fits, so `.requires([...])` needs no change.
+  - Remove `validateFoldedState` from `act().build(...)`: invariants are the state's schema, checked before every commit, and the option has been ignored since 1.35.
+  - A state field cleared with `null` in a patch must be `.optional()` or `.nullish()`. `null` deletes the key, so a `.nullable()` field, which requires the key, refuses every action after the one that cleared it (since 1.35).
 - **What code sees:** a refusal that was `ERR_INVARIANT`, "failed invariant: ..." is now `ERR_PRECONDITION`, "failed precondition: ...", and act-http's code goes from `INVARIANT` to `PRECONDITION`, still 409. `PreconditionError` now extends `Error` directly.
-- **A rule called directly** takes four arguments: `holds(payload, state, actor, loaded)`, with `{}` when the action loads nothing.
 - **Coming from 1.34 or earlier:** the schema check on the state before every commit is new to you. A stream whose state already breaks its schema, say a `.nullable()` field cleared with `null`, refuses every action with `ValidationError` until you relax the schema or repair the field. Replay your important streams against the schema before upgrading.
 
 ```ts no-check

@@ -160,7 +160,7 @@ how to size the cycle knobs, what `query_stats` to monitor as you cut over.
 You're done when one of two things is true:
 
 1. The events table reaches steady state. Total row count plateaus over a few
-   close cycles. `app.query_stats({})` shows a stable distribution of live
+   close cycles. `store().query_stats(...)` shows a stable distribution of live
    streams instead of monotonic growth. Move on with your life.
 
 2. You can show, with numbers, that even aggressive close policies can't keep

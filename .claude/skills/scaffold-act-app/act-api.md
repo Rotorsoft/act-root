@@ -328,7 +328,7 @@ For fire-and-forget side effects (logging, metrics), use lifecycle events (`app.
 // → source=NULL; drain reads all events in id order; .on("PaymentReceived") filters by name
 ```
 
-Set `source` only when you want to genuinely scope drain to a *stable* stream pattern across every firing — e.g., a singleton aggregate's own stream, or a regex like `"invoice-.*"` that's the same on every correlate. For "many sources fan into one consumer," leave `source` unset.
+Set `source` only when you want to genuinely scope drain to a *stable* stream pattern across every firing — e.g., a singleton aggregate's own stream, or an anchored pattern like `"^invoice-"` (only a source that starts with `^` or ends with `$` is a pattern; anything else is one stream's exact name) that's the same on every correlate. For "many sources fan into one consumer," leave `source` unset.
 
 ## 7. Correlate Before Drain — settle() Pattern
 

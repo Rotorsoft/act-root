@@ -160,7 +160,7 @@ The drain, settle, and autoclose loops all hit the store. When it goes down, eve
 
 After **every** store failure, open or not, the breaker schedules one **retry** (a settle) `cooldownMs` later (plus the settle debounce, `settleDebounceMs`), so recovery is **automatic**: you don't need a new commit, a periodic poller, or a manual `drain()`. While open, the loops simply skip the store; the retry re-trials it and the breaker closes as soon as the store is healthy again. A failed drain pass also keeps its controller armed and retries on its own, never before the leases it took expire, since only then can another pass claim those streams.
 
-If the store stays down, the breaker keeps probing — **one attempt per `cooldownMs`, indefinitely** (always exactly one pending timer, `unref()`'d so it never blocks process exit). It never gives up, so it recovers whenever the store returns; the trade-off is that each failed probe re-emits the `error` event (an outage heartbeat — raise `cooldownMs` or dedupe in your handler if that's too chatty). The timer is cleared on the first successful probe and on `dispose()`. Tune it via [`ActOptions.circuitBreaker`](./configuration.md#circuit-breaker) (defaults: threshold 5, cooldown 30s).
+If the store stays down, the breaker keeps probing — **one attempt per `cooldownMs`, indefinitely** (always exactly one pending timer, `unref()`'d so it never blocks process exit). It never gives up, so it recovers whenever the store returns; the trade-off is that each failed probe re-emits the `error` event (an outage heartbeat — raise `cooldownMs` or dedupe in your handler if that's too chatty). The timer is cleared on the first successful probe and on `dispose()`. Tune it via [`ActOptions.circuitBreaker`](./configuration.md#act-options) (defaults: threshold 5, cooldown 30s).
 
 Subscribe to the **`error`** lifecycle event to alert on a degraded store — it fires on every failed store cycle with the error and the breaker state:
 
@@ -269,7 +269,7 @@ LOG_LEVEL=trace pnpm dev
 **Lifecycle event subscriptions.** Every Act instance emits a fixed set of lifecycle events; subscribe in dev to see what the framework is doing:
 
 ```ts no-check
-app.on("committed", (events) => console.log("committed", events.map(e => e.name)));
+app.on("committed", (snaps) => console.log("committed", snaps.map((s) => s.event?.name)));
 app.on("acked", (leases) => console.log("acked", leases));
 app.on("blocked", (blocked) => console.error("blocked", blocked));
 app.on("settled", (drain) => console.log("settled", drain));

@@ -132,9 +132,8 @@ Details and worked examples for each are in
 - [examples/ticket-cooldown.ts](examples/ticket-cooldown.ts) —
   imports the canonical wolfdesk `app` and asserts
   `app.registry.autoclose_policy("Ticket")` is registered, a
-  wiring check against the real model. The Ticket policy carries
-  both the 90-day cooldown AND-group and the 365-day
-  retention-floor `or` backstop.
+  wiring check against the real model. The Ticket policy closes a
+  resolved or closed ticket after a 90-day cooldown.
 
 It compiles against `@rotorsoft/act` as published and runs with
 `tsx` — no database needed to verify the declarator wires up.

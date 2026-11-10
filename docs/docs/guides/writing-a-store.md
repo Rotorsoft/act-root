@@ -22,7 +22,7 @@ The interface lives in [`libs/act/src/types/ports.ts`](https://github.com/Rotors
 - `defer(input, deferred_at)` — park streams until a future wall-clock time without advancing their watermark (the deferred-reaction outcome, [#1090](https://github.com/Rotorsoft/act-root/issues/1090)); covered below
 - `reset(streams)` / `prioritize(filter, n)` / `truncate(targets)` — operator-facing primitives; the `StreamFilter` shape carries an optional `lane` exact-match. `truncate` targets come in two shapes — full (delete everything, seed a snapshot or tombstone) and windowed (`before` boundary, prefix delete behind a snapshot) — covered below
 - `query_streams(callback, query?)` — read-only introspection (operational dashboards); positions carry their `lane`, an optional `deferred_at` (ms since epoch) when the stream is parked on an active future defer, and the optional `correlated_at` **work mark** so a reader can tell "behind the head" from "has work". The query gained an optional `source_matches` filter — covered below
-- `notify(handler)` — *optional* cross-process commit notifications
+- `notify(handler)` — *optional* cross-process commit notifications; read a payload your transport delivers with core's `notification_of(payload)`, which keeps only well-formed events
 - `query_stats(streams, options?)` — per-stream heads, counts and tails (see below)
 - `forget_pii(stream)` — *optional* erase a stream's sensitive payloads
 - `restore(driver)` — *optional* atomic wipe-and-rebuild from an event source (see below)

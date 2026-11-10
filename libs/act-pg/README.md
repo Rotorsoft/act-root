@@ -183,8 +183,8 @@ Both adapters pass the same conformance suite — your application code doesn't 
 
 - **Node**: >=22.23.4
 - **PostgreSQL**: >=14 (uses `FOR UPDATE SKIP LOCKED`, `LISTEN`/`NOTIFY`, JSONB)
-- **Peer**: `@rotorsoft/act` of the same major, `zod` ^4.6.7
-- **Bundled deps**: `pg` ^8.20.0
+- **Peer**: `@rotorsoft/act` of the same major, and `zod`
+- **Bundled deps**: `pg`; the ranges are in [`package.json`](./package.json)
 - **Module formats**: ESM + CJS
 
 ## Stability

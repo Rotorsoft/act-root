@@ -4,11 +4,11 @@
 [![NPM Downloads](https://img.shields.io/npm/dm/@rotorsoft/act-ops.svg)](https://www.npmjs.com/package/@rotorsoft/act-ops)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-_Operational primitives for [@rotorsoft/act](https://www.npmjs.com/package/@rotorsoft/act) apps and act-independent receivers — idempotency, retry budgets, poison-message classification._
+_Operational primitives for [@rotorsoft/act](https://www.npmjs.com/package/@rotorsoft/act) apps and act-independent receivers — receiver-side idempotency and the receiver port._
 
 ## Why this package
 
-Operational concerns that pair with Act — receiver-side idempotency, retry-budget sizing, poison-message classification — show up on both sides of the wire. The inline `webhook` reaction from `@rotorsoft/act-http` enforces dedup with an auto-derived `Idempotency-Key`; the cooperative receiver on the other end has to actually honor it. When the receiver is itself an Act app, it can reach for the same primitives the framework uses internally. When the receiver is something else — a Kafka consumer, an Express endpoint, a queue worker — it should be able to speak the same contract without dragging the orchestrator along.
+Operational concerns that pair with Act — receiver-side idempotency, and sizing its TTL from the sender's retries — show up on both sides of the wire. The inline `webhook` reaction from `@rotorsoft/act-http` enforces dedup with an auto-derived `Idempotency-Key`; the cooperative receiver on the other end has to actually honor it. When the receiver is itself an Act app, it can reach for the same primitives the framework uses internally. When the receiver is something else — a Kafka consumer, an Express endpoint, a queue worker — it should be able to speak the same contract without dragging the orchestrator along.
 
 `@rotorsoft/act-ops` is the home for those primitives. The package has **no dependency on `@rotorsoft/act`** and no peer dep. A service that processes forwarded events off a bus can install `@rotorsoft/act-ops` alone and get a port, an in-memory reference implementation, and the sizing helpers that pair with it. The cost of speaking the contract is one small library, not the full framework.
 
@@ -66,7 +66,10 @@ The `retryProfile` option captures the math that every receiver otherwise comput
 
 ## Subpath layout
 
-The package follows a subpath-export-per-domain shape, matching `@rotorsoft/act-http`. All idempotency primitives ship from `@rotorsoft/act-ops/idempotency`; future domains (poison-message classifiers, retry-budget helpers, …) will land on their own subpaths (`@rotorsoft/act-ops/poison`, `@rotorsoft/act-ops/retry`). Each subpath is its own ESM/CJS entry — pay for what you import.
+The package follows a subpath-export-per-domain shape, matching `@rotorsoft/act-http`:
+
+- `@rotorsoft/act-ops/idempotency` — the idempotency port, `withIdempotency`, `minSafeTtl`, `RetryProfile` and the in-memory store.
+- `@rotorsoft/act-ops/receiver` — the transport-agnostic `Receiver` port that act-http's receiver adapters implement.
 
 ## API — `@rotorsoft/act-ops/idempotency`
 

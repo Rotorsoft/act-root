@@ -9,14 +9,12 @@
  *   .autocloses({
  *     is: ["TicketClosed", "TicketResolved"],   // terminal events
  *     after: { days: 90 },                       // 90-day cooldown
- *     or: { after: { days: 365 } },              // retention-floor backstop
  *   })
  *
  * A resolved/closed ticket sits in primary storage for the 90-day
  * return / dispute / customer-success window, then retires itself when
- * the autoclose reaction's cooldown elapses. The `or` backstop catches tickets that
- * never reach a terminal event so abandoned streams can't linger past
- * a year. This file is a minimal harness that confirms the policy is
+ * the autoclose reaction's cooldown elapses. An open ticket ends through
+ * its own `closeAfter` timer instead. This file is a minimal harness that confirms the policy is
  * wired on the real model.
  *
  * Run:  cd recipes && pnpm tsx scaling/close-the-books/examples/ticket-cooldown.ts

@@ -246,9 +246,9 @@ missing.
 
 The framework gives you exactly two ways to keep state consistent in the presence of partition drops:
 
-1. **Retire the stream before the partition drops.** Run `app.close({ stream })` (or let `.autocloses({...})` retire it on its own cycle) before the events fall into a partition you'll later drop. A closed stream seeds a `__tombstone__` event as the sole surviving event — future `load()` of that stream returns the default state plus the tombstone, which is the correct "this is gone" semantic. The historical events can vanish without breaking anything, because nothing is supposed to load them anymore.
+1. **Retire the stream before the partition drops.** Run `app.close([{ stream }])` (or let `.autocloses({...})` retire it on its own cycle) before the events fall into a partition you'll later drop. A closed stream seeds a `__tombstone__` event as the sole surviving event — future `load()` of that stream returns the default state plus the tombstone, which is the correct "this is gone" semantic. The historical events can vanish without breaking anything, because nothing is supposed to load them anymore.
 
-2. **Snapshot the stream before the partition drops.** Run `app.snap(stream)` (or rely on the state's `.snap` predicate to insert one) before the cutoff. A snapshot writes a `__snapshot__` event with the current reduced state baked in; subsequent `load()` calls start from the snapshot and reduce forward, never reaching the dropped events. The snapshot itself lives in a recent partition that won't be dropped.
+2. **Snapshot the stream before the partition drops.** Run `app.close([{ stream, restart: true }])`, which keeps the stream live behind a snapshot seed (or rely on the state's `.snap` predicate to insert one) before the cutoff. A snapshot writes a `__snapshot__` event with the current reduced state baked in; subsequent `load()` calls start from the snapshot and reduce forward, never reaching the dropped events. The snapshot itself lives in a recent partition that won't be dropped.
 
 In practice, this means the partition-drop archival pipeline has a prerequisite check it must run **before** the `DROP`:
 
@@ -278,7 +278,7 @@ Real systems running range-on-created compose two policies:
 - **Per-stream retirement** — `.autocloses({...})` declares the policy by which streams become semantically dead and earn their tombstone. The autoclose cycle runs continuously and retires streams as they go terminal. By the time a partition ages out of the retention window, the streams that ended in that partition are already retired; their tombstones live in the partition for the month they retired.
 - **Table-wide retention floor** — `drop-partition.sql` runs on a cron and drops partitions older than the cutoff. Because retirement happens per-stream over time, by the time a partition is up for drop, every stream with events in it is either retired (tombstone in a future partition, OK to drop) or still alive (snapshot in a future partition, OK to drop).
 
-States that lack a natural terminal event — long-running ledgers, append-only audit trails on entities that never end — need explicit snapshots before drops, scheduled in lock-step with the partition rotation cadence. A cron that runs `app.snap()` on every alive state before each archival run is the typical shape.
+States that lack a natural terminal event — long-running ledgers, append-only audit trails on entities that never end — need explicit snapshots before drops, scheduled in lock-step with the partition rotation cadence. A cron that runs `app.close([{ stream, restart: true }])` on every alive stream before each archival run is the typical shape.
 
 States whose streams cross the retention boundary without retirement *or* snapshotting are the failure case. The pre-drop guard catches them; the operator's options are (a) retire them, (b) snapshot them, (c) extend the retention window. There is no fourth option that preserves correctness.
 
