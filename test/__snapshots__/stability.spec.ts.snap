@@ -5850,6 +5850,7 @@ export declare function state<TName extends string, TState extends Schema>(entry
 //# sourceMappingURL=state-builder.d.ts.map
 // === utils.d.ts ===
 import { type ZodType } from "zod";
+import { ConcurrencyError, type EventMeta, type Schema } from "./types/index.js";
 /**
  * @module utils
  * @category Utilities
@@ -5944,6 +5945,41 @@ export declare function check_appends(appends: readonly {
     readonly stream: string;
     readonly msgs: readonly unknown[];
 }[]): void;
+/**
+ * The error a stale append raises, given the head the store found. A writer
+ * that named no \`expectedVersion\` reads as \`-1\`: only a race between the
+ * version check and the insert gets one here.
+ *
+ * @internal
+ */
+export declare function concurrency_error(append: {
+    readonly stream: string;
+    readonly msgs: readonly unknown[];
+    readonly expectedVersion?: number;
+}, head: number): ConcurrencyError;
+/**
+ * What every store refuses as a stale writer: an append whose
+ * \`expectedVersion\` is not the stream's head. In core so each adapter calls
+ * the one rule before it appends anything.
+ *
+ * @internal
+ */
+export declare function throw_if_stale(append: {
+    readonly stream: string;
+    readonly msgs: readonly unknown[];
+    readonly expectedVersion?: number;
+}, head: number): void;
+/**
+ * The event a full \`truncate\` seeds a stream with at version 0: a snapshot
+ * of the given state, or a tombstone when there is none.
+ *
+ * @internal
+ */
+export declare function seed_event(snapshot?: Schema, meta?: EventMeta): {
+    name: string;
+    data: Schema;
+    meta: EventMeta;
+};
 /**
  * How many of \`lagging\` claim slots ignore priority, so sustained high-priority
  * load can't starve a low-priority stream forever. Each store's \`claim\` calls
