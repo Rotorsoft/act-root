@@ -28,6 +28,7 @@ import {
   DEFAULT_QUERY_STREAMS_LIMIT,
   fair_slots,
   log,
+  notification_of,
   SNAP_EVENT,
   StoreError,
   TOMBSTONE_EVENT,
@@ -1930,11 +1931,7 @@ export class PostgresStore implements Store {
       // connection is reused — guard rather than trust.
       if (msg.channel !== this._channel) return;
       if (!msg.payload) return;
-      let parsed: {
-        stream?: unknown;
-        events?: unknown;
-        by?: unknown;
-      };
+      let parsed: { by?: unknown };
       try {
         parsed = JSON.parse(msg.payload);
       } catch (err) {
@@ -1950,28 +1947,14 @@ export class PostgresStore implements Store {
       // store instance. This is what gives `notified` its cross-process
       // semantic — local commits already arm the drain via `do()`.
       if (parsed.by === this._by) return;
-      if (typeof parsed.stream !== "string" || !Array.isArray(parsed.events)) {
+      const notification = notification_of(parsed);
+      if (!notification) {
         logger.error(
           { payload: msg.payload },
-          "act_commit: payload missing required fields, skipping"
+          "act_commit: payload holds no notification, skipping"
         );
         return;
       }
-      const events: Array<{ id: number; name: string }> = [];
-      for (const raw of parsed.events) {
-        if (
-          raw &&
-          typeof raw === "object" &&
-          typeof (raw as { id?: unknown }).id === "number" &&
-          typeof (raw as { name?: unknown }).name === "string"
-        ) {
-          events.push({
-            id: (raw as { id: number }).id,
-            name: (raw as { name: string }).name,
-          });
-        }
-      }
-      if (events.length === 0) return;
       // Adapter-level robustness: a throwing handler must not tear
       // down the dedicated LISTEN client. The orchestrator wraps its
       // own `notified` emit + drain wakeup separately
@@ -1980,7 +1963,7 @@ export class PostgresStore implements Store {
       // `store.notify(handler)` (tests, custom integrations) inherit
       // the adapter wrap.
       try {
-        handler({ stream: parsed.stream, events });
+        handler(notification);
       } catch (err) {
         logger.error(err, "act_commit: handler threw, listener preserved");
       }

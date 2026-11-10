@@ -19,7 +19,7 @@ import type {
   Store,
   StoreNotification,
 } from "@rotorsoft/act";
-import { log } from "@rotorsoft/act";
+import { log, notification_of } from "@rotorsoft/act";
 
 /**
  * The wire shape brokers carry. `origin` implements the port's
@@ -46,29 +46,6 @@ export type Broker = {
     handler: (message: BrokerMessage) => void
   ): BrokerDisposer | Promise<BrokerDisposer>;
 };
-
-/**
- * The notification inside a broker message, checked the way the Postgres
- * listener checks its own payloads: `stream` must be a string, and only
- * `{ id: number, name: string }` events are kept. Anything else — a
- * foreign or version-skewed publisher on a shared channel — yields
- * `undefined` and is skipped.
- */
-function well_formed(raw: unknown): StoreNotification | undefined {
-  if (!raw || typeof raw !== "object") return undefined;
-  const { stream, events } = raw as { stream?: unknown; events?: unknown };
-  if (typeof stream !== "string" || !Array.isArray(events)) return undefined;
-  const kept = events.filter(
-    (e): e is { id: number; name: string } =>
-      !!e &&
-      typeof e === "object" &&
-      typeof (e as { id?: unknown }).id === "number" &&
-      typeof (e as { name?: unknown }).name === "string"
-  );
-  return kept.length
-    ? { stream, events: kept.map(({ id, name }) => ({ id, name })) }
-    : undefined;
-}
 
 /**
  * Wrap a durable store so commits publish wakeup hints to the broker and
@@ -145,7 +122,7 @@ export function withBroker<S extends Store>(
     const subscribed = broker.subscribe((message) => {
       // Self-filtering contract: only remote commits wake this process.
       if (!live || message?.origin === origin) return;
-      const notification = well_formed(message?.notification);
+      const notification = notification_of(message?.notification);
       if (!notification) {
         log().warn("Broker delivered a malformed notification, skipping");
         return;

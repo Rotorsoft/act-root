@@ -338,31 +338,25 @@ describe("withBroker", () => {
       warns.mockRestore();
     });
 
-    it("skips malformed notifications and keeps only well-formed events", async () => {
+    // What a well-formed notification is: core's `notification_of`, pinned
+    // in utils.spec.ts. This pins only that the broker skips the rest.
+    it("skips a malformed notification with a warning", async () => {
       const broker = new LoopbackBroker();
       const seen: StoreNotification[] = [];
       await withBroker(new InMemoryStore(), broker).notify((n) => seen.push(n));
       const warns = vi.spyOn(log(), "warn");
-      const send = (notification: unknown) =>
-        broker.publish({ origin: "other", notification } as never);
 
-      send({ stream: 42, events: valid.events });
-      send({ stream: "s9" });
-      send({ stream: "s9", events: [{ id: "1", name: "X" }, null] });
-      send(undefined);
       broker.publish(null as never);
-      send({
-        stream: "s9",
-        events: [
-          { id: 7, name: "Incremented", extra: true },
-          { name: "no-id" },
-        ],
-      });
+      broker.publish({
+        origin: "other",
+        notification: { stream: 42 },
+      } as never);
+      broker.publish({ origin: "other", notification: valid });
 
       expect(seen).toEqual([valid]);
       expect(
         warns.mock.calls.filter((c) => String(c[0]).includes("malformed"))
-      ).toHaveLength(5);
+      ).toHaveLength(2);
       warns.mockRestore();
     });
   });

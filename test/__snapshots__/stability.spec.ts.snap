@@ -5850,6 +5850,7 @@ export declare function state<TName extends string, TState extends Schema>(entry
 //# sourceMappingURL=state-builder.d.ts.map
 // === utils.d.ts ===
 import { type ZodType } from "zod";
+import { type StoreNotification } from "./types/index.js";
 /**
  * @module utils
  * @category Utilities
@@ -5952,6 +5953,16 @@ export declare function check_appends(appends: readonly {
  * @internal
  */
 export declare function fair_slots(lagging: number): number;
+/**
+ * The commit notification in a payload a store or broker received, or
+ * \`undefined\` when there is none: \`stream\` must be a string, and only
+ * \`{ id: number, name: string }\` events are kept, stripped of anything else.
+ * A payload with no such event is not a notification. In core so every
+ * listener reads a foreign or version-skewed payload the same way.
+ *
+ * @internal
+ */
+export declare function notification_of(raw: unknown): StoreNotification | undefined;
 /**
  * How many positions \`query_streams\` returns when the caller gives no limit.
  *
