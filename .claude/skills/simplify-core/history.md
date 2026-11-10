@@ -8,23 +8,23 @@ Least recently run goes next. A lens with no accepted proposal in its last three
 
 | lens | last run | runs | accepted | status |
 |---|---|---|---|---|
-| Public surface | 2026-11-03 | 9 | 2 | active (no surface growth; `Store.query`'s published doc still describes adapter-side date revival, #2284) |
-| Dead code (tool) | 2026-11-08 | 10 | 10 | active (an autoclose field written in two places and read nowhere since #2337; four act-diagram exports used only in their file; knip clean in core) |
+| Public surface | 2026-11-10 | 10 | 2 | active (58 exports; seven store helpers exported but hidden from the API reference by `@internal`, and STABILITY names two; the closed-surface proposal rejected, reshaped by the maintainer into #2411 for 3.0) |
+| Dead code (tool) | 2026-11-08 | 10 | 12 | active (an autoclose field written in two places and read nowhere since #2337; four act-diagram exports used only in their file; knip clean in core) |
 | Hotspots (tool) | 2026-10-20 | 5 | 1 | retired 2026-10-20: two runs with no proposal; every branch in the hot functions (correlate, action, drain) is a separate rule |
-| File budget | 2026-11-03 | 10 | 1 | active (9 over 300 code lines; act.ts 857 with #2228's overloads; no split subtracts) |
+| File budget | 2026-11-10 | 11 | 1 | active (10 over 300 code lines; no split subtracts) |
 | Comment noise | 2026-11-08 | 10 | 11 | active (28% / 14%, 0 ticket refs; one stale header in `zod.ts` my #2379 missed; two published doc paragraphs mis-wrapped by word swaps) |
-| Concepts and options | 2026-11-03 | 10 | 3 | active (RFC 2251 reviewed before it is built: five cuts, #2289–#2293) |
+| Concepts and options | 2026-11-10 | 11 | 3 | active (2.0 left nothing redundant in core; Act options documented in two places and missing three fields; a retry rule off by one in one page) |
 | Core or decorator? | 2026-10-15 | 3 | 0 | retired 2026-10-15: three runs, findings only (PII, audit, breaker, lanes stay; priority is a major-version question) |
-| DRY across adapters and builders | 2026-11-08 | 10 | 15 | active (the version check, truncate seed and notification parser still written per store; four adapter specs re-test core rules) |
-| Reading path | 2026-11-03 | 9 | 3 | active (13 files, ~33 names; #2263 adds `zod.ts` to the build path only) |
+| DRY across adapters and builders | 2026-11-08 | 10 | 18 | active (the version check, truncate seed and notification parser still written per store; four adapter specs re-test core rules) |
+| Reading path | 2026-11-10 | 10 | 3 | active (no change worth proposing since 2.0's `.loads`) |
 | Newcomer test (quarterly) | 2026-10-17 | 2 | 0 | active (21 concepts, 3 imports; a package.json without name/version crashes) |
-| Tests by concept | 2026-11-08 | 10 | 18 | active (Wolfdesk's 10 s stalls are one shared SQLite file; a duplicated test from a merge; two recipe timer tests that can't fail) |
+| Tests by concept | 2026-11-08 | 10 | 20 | active (Wolfdesk's 10 s stalls are one shared SQLite file; a duplicated test from a merge; two recipe timer tests that can't fail) |
 | Mutation evidence (monthly, CI) | never | 0 | 0 | retired: setup removed (#1805), see baselines below |
 | Packages earn their place | 2026-10-15 | 4 | 0 | retired 2026-10-15: four runs, no proposal (removal is ruled out; act-tck churn is the snapshot, now P2026-10-15p-1) |
-| Infra | 2026-11-03 | 10 | 2 | active (the act `./types` snapshot block repeats root, #2288; Renovate's dev-deps splitter and its three undo rules, backlog) |
-| One source of truth | 2026-11-03 | 10 | 8 | active (`Store.query` and `pii_schemas` docs contradict their owners, #2284) |
-| Examples | 2026-11-03 | 9 | 3 | active (5 of 5 runnable recipes green; the RFC 2251 preview loses its label when embedded, #2285) |
-| Process | 2026-11-03 | 9 | 9 | active (/pr asks for two body shapes and 36 PRs used ~20, backlog; the context hook's separator, #2286) |
+| Infra | 2026-11-10 | 11 | 2 | active (node-compat tests below the engines floor; lock-file maintenance can never pass its own age check (#914)) |
+| One source of truth | 2026-11-10 | 11 | 8 | active (2.0's source rule and `.snap` version didn't reach the scaffold skill and the testing guide; hand-copied versions stale) |
+| Examples | 2026-11-10 | 10 | 3 | active (5 of 5 recipes green; 396 snippets type-check; recipes call `app.snap()` and claim a removed backstop) |
+| Process | 2026-11-10 | 10 | 9 | active (the learnings step caught nothing in 64 PRs; `/pr`'s two shapes; the 2.0 window fixed every round twice) |
 | Feature interactions | 2026-11-08 | 10 | 20 | active (.loads meets everything through shared primitives; snapshots × SSE versions is the one accidental meeting) |
 
 ## Interaction register
@@ -116,8 +116,6 @@ The last trusted Stryker scores, recorded when the setup was removed (#1805) bec
 
 Sound proposals that missed a run's cut. The next run ranks these before looking for new ones.
 
-- Renovate: drop the "Dev dependencies" group rule, which splits a package's peer and dev entries into two PRs, and the three rules that undo it (the peer/dev list, the @trpc rule from #2283, react/react-dom), relying on `config:recommended`'s `group:monorepos` (~−1.8 KB of 5.5 KB, 4 of 11 rules). Unprobed: grouping shows only on the dashboard after merge; the peer/dev rule also isolates zod, vitest and hono minors, which is the user's call. (P2026-11-03p-2)
-- `/pr` asks for two body shapes (a section list and "four questions"); 36 PRs since 10-30 used ~20 heading sets. Keep the four questions plus `Closes #N` and the charter line (~−0.6 KB). (P2026-11-03p-3)
 
 - history.md has no budget (140 KB on 2026-10-30, was 119 KB; run entries before 2026-10-22 are 69 KB, read by every run and specialist): keep the tables, the backlog, the self-changes and the last three runs, and fold each older run into one line with its tickets and rejections (~−64 KB). A change to the skill's memory: the user's call. (P2026-10-27p-3)
 
@@ -136,8 +134,11 @@ Sound proposals that missed a run's cut. The next run ranks these before looking
 - Resolved by #1959 (P2026-10-17d-2 → #1949): a local `do()` arms lanes but schedules nothing, while a remote commit (`_wire_notify`) already schedules settle; 22 copies of `app.on("committed", () => app.settle())` in 17 files exist only to close that gap, and no framework in the field asks for it (Marten, Emmett, Axon, Propulsion run processors on their own). Changing it changes what apps observe.
 
 - Workflow and Renovate comments cut to their why: workflow comment lines 164 → 43, `renovate.json` 5.1 → 2.8 KB (ticket-history rule descriptions). Same kind as #2075, outside core. (P2026-10-23p-2)
+- The next major fixes once on its integration branch and merges into it without squashing: the 2.0 window fixed every audit round twice (#2337/#2336, #2357/#2359, #2379/#2380), merged master into `v2` four times (the duplicated test of #2386), and needed separate version PRs only because a squash flattens footers. Fewer words in CONTRIBUTING; 1.x waits for a backport. (P2026-11-10p-5)
 
 ## Self-changes
+
+- 2026-11-10: the Public surface lens checks every export tagged `@internal` against `docs/typedoc.json`'s `excludeInternal`: such an export is covered by the stability snapshot but has no reference page, and seven store helpers adapter authors are told to call were hidden that way. The Infra lens compares every version a test matrix pins with the packages' `engines` floor: Renovate raised the floor and node-compat kept testing below it.
 
 - 2026-11-08: the Tests by concept lens reads test durations against the framework's defaults (the 10 s backoff and lease, 30 s timers): a test that takes almost exactly one isn't slow, it's stalled. Wolfdesk's 10 s tests hid two real stalls for weeks (`EscalateTicket` with no action retries, fixed 2026-11-07; one shared SQLite file, #2383). The Dead code lens lists the rules recipe's `tour.ts` with knip's known false positives.
 
@@ -960,3 +961,41 @@ Findings, not proposed: `.loads` meets snapshots, sensitive fields, the schema c
 Lens metrics: knip 39 unused files, all known false positives plus the rules recipe's `tour.ts`; comments 28% / 14%; ticket refs 0; adapter suites repeating core rules 4 files; tests over 2 s that were stalls 4 (all Wolfdesk).
 
 Tickets: #2383–#2392.
+
+### 2026-11-10 — full run (four specialists: public surface + file budget + reading path, concepts and options + field, source of truth + examples, process + infra)
+
+| metric | 2026-11-08 | now | why |
+|---|---|---|---|
+| core lines (libs/act/src) | 18463 | 18535 | the store helpers of #2406 and #2408 |
+| runtime exports | 54 | 58 | `throw_if_stale`, `concurrency_error`, `seed_event` (#2406), `notification_of` (#2408), each called by the stores |
+| spec files / test lines | 250 / 66526 | 241 / 66008 | #2404's folds and the four deleted adapter specs |
+| everything else | | unchanged | 0 ticket refs in core, 41% (28% / 14%) comments, 10 files over 300 code lines, 5 workflows / 579 lines |
+
+Audit: 18 PRs since the last run, 10 from Renovate. vtrtorres shipped all ten 2026-11-08 tickets (#2404–#2409); the maintainer's #2394 (flow player) and #2410 (the Konsult animation). Between runs the maintainer settled two surface questions in conversation: the store helpers stay snake_case, named for what they do (#2406 renamed `check_version`, `stale_append`, `truncate_seed` to `throw_if_stale`, `concurrency_error`, `seed_event`), and `naming.md`'s "public is camelCase" doesn't match the code (port methods and record fields are snake_case by design; 64 public names break it). A proposal to close the root surface now (explicit exports, an adapter subpath, dropping 16 undocumented names) was rejected ("forget it"); the maintainer then asked for it as a 3.0 ticket behind one adapter interface (#2411).
+
+Decisions on P2026-11-08*: all shipped (D1–D4 → #2404, #2405, #2407; 1 → #2406; 2 → #2408; 3, 4 → #2404; 5 → #2409; 6 → #2404).
+
+Promises kept: P-1 net −3 → +27 source (as its ticket said, the guard was the gain); P-2 −12 → +28 with tests moved to core; P-3 + P-4 ≈ −620 → #2404 −639 (with the Wolfdesk and timer fixes); P-5 −16 → −16.
+
+Verified in the main loop before ranking: `STABILITY.md:68` against the eight `@internal` tags in `utils.ts` and `typedoc.json`'s `excludeInternal`; `concurrency-model.md:95` against `drain-cycle.ts:149`; act-ops' exports against its seven descriptions; `conformance.yml:141` against the engines floor in 12 libs; #914's pending `renovate/stability-days`; `act-api.md:331`'s unanchored source; `testing.md:253`'s `snap.event?.version`; `app.snap()` in the partitioning recipe; the backstop in `ticket-cooldown.ts` against `ticket-creation.ts:89-92`; `e.name` at `error-handling.md:272`; the pnpm floor.
+
+Proposals, ticketed when the report was done. Defects first:
+- D1. 2.0 examples that no longer work: the scaffold skill's unanchored source delivers nothing, the testing guide's concurrency test can't fail, a logger example logs undefined, the migration guide promises an uncovered section → #2412.
+- D2. A retry rule off by one in concurrency-model.md, act-ops' phantom poison/retry features, and seven store helpers hidden from the API reference while STABILITY names two → #2413.
+- D3. Operator recipes call `app.snap()` and `app.query_stats`, and claim a removed 365-day backstop → #2414.
+- D4. node-compat tests Node 22.23.3 below the 22.23.4 floor → #2415.
+Simplifications:
+- 1. Hand-copied versions read from package.json (~20 copies, 7 stale) → #2416.
+- 2. One list of Act options (≈ −26 lines) → #2417.
+- 3. "Upgrading from .given" into the migration guide (1.9 KB) → #2418.
+- 4. Three CLAUDE.md one-liners (−1.15 KB) → #2419.
+- 5. Lock-file maintenance dropped, or passed its own age check, the maintainer's call → #2420.
+- 6. The Renovate splitter, from the backlog with numbers → #2421.
+- 7. One `/pr` body shape and the per-PR learnings step, from the backlog, the maintainer's call → #2422.
+Backlog: the next major fixes once on the integration branch and merges into it without squashing (the 2.0 window fixed every audit round twice, merged master into `v2` four times, and needed two separate version PRs only because a squash flattens footers).
+
+Findings, not proposed: the SSE empty-patch rule is written by hand in 6 places, all agreeing (one owner needs new surface); no app or recipe sets `maxSubscribedStreams`, `settleDebounceMs`, `onlyLanes`, `listen`, `drain`, `circuitBreaker` or `autocloseWindow` (published, so they stay); 23 of 28 actions that write a loaded stream set `maxRetries` (Equinox re-decides 3 times by default, Emmett not at all: no single right default). CodeQL has never failed in 291 runs (kept, a question for the maintainer).
+
+Lens metrics: runtime exports 58 (8 adapter helpers, 16 undocumented); files over 300 code lines 10; snippets type-checked 396; runnable recipes 5 of 5; CI-CD reds since 10-30 14 of 316, 0 on #2404–#2409.
+
+Tickets: #2412–#2422, and #2411 (3.0) from the conversation.

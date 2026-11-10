@@ -4,7 +4,7 @@ Each lens is one way of looking for things to remove. The retrospective retires 
 
 ## Code
 
-**Public surface.** List every runtime export of each published package and every `Act` public method. For each: who uses it (`packages/`, docs, other libs)? Is it a second path to something else? Could it be internal, folded into another call, or an option instead of a method? Nothing public is deprecated or removed (ground rule 2); the useful findings are internal callers that should use internal code, public docs that over-explain, and new surface a PR is about to add.
+**Public surface.** List every runtime export of each published package and every `Act` public method. An export tagged `@internal` is still covered and callable but has no API reference page (`docs/typedoc.json` excludes it): flag one that docs tell anyone to call. For each: who uses it (`packages/`, docs, other libs)? Is it a second path to something else? Could it be internal, folded into another call, or an option instead of a method? Nothing public is deprecated or removed (ground rule 2); the useful findings are internal callers that should use internal code, public docs that over-explain, and new surface a PR is about to add.
 
 **Dead code (tool).** `npx knip` (or `npx ts-prune`) across the workspace: exports nothing imports, files nothing reaches, dependencies nothing uses. Objective, cheap, run first when this lens is due. Known false positives, skip them: bench scripts cited from `PERFORMANCE.md` or run by the weekly bench workflow, `libs/act/test/type-check.ts` (checked by tsc), `docs/` results (knip can't load the Docusaurus config), recipe examples run by `run.sh`, `libs/tsup.config.ts` (tsup finds it by searching up), the semantic-release and `fast-check` root devDependencies, `pino-pretty` (loaded by name), `performance/act-performance/evidence/*.ts` (run by `run.sh`), `performance/k6/*.js` (mounted by docker-compose), `packages/server/src/webhook-receiver.ts` (a demo the docs link), `libs/act-pg/test/stress/worker.ts` (spawned by its test), `libs/act-pg/scripts/drain-contention.ts` (a bench kept on purpose), `libs/act-tck/test/fixtures/stability/**` (read by path from `stability-tck.spec.ts`), `recipes/rules-across-streams/examples/tour.ts` (run by hand per its README), `.claude/skills/*/scripts/*`, and the docs and recipes dependencies (knip can't load either config).
 
@@ -44,7 +44,7 @@ Each lens is one way of looking for things to remove. The retrospective retires 
 
 ## Infra
 
-**Infra.** CI workflows and jobs (overlap, minutes per PR, jobs that never fail), scripts nothing calls, hooks that duplicate CI, the Renovate rule count, tsconfig/vite config sprawl, stale directories on disk. Propose removals, never new checks.
+**Infra.** CI workflows and jobs (overlap, minutes per PR, jobs that never fail, a version matrix that no longer matches the `engines` floor), scripts nothing calls, hooks that duplicate CI, the Renovate rule count, tsconfig/vite config sprawl, stale directories on disk. Propose removals, never new checks.
 
 ## Docs
 
