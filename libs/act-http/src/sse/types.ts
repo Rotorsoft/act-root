@@ -5,7 +5,7 @@ import type { DeepPartial } from "@rotorsoft/act-patch";
  * Apps extend this with their own domain state shape.
  */
 export type BroadcastState = Record<string, unknown> & {
-  /** Event store stream version — set by the broadcast layer from snap.event.version */
+  /** Event store stream version — set by the broadcast layer from snap.version */
   _v: number;
 };
 
