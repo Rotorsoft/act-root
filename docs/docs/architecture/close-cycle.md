@@ -256,7 +256,7 @@ A stream closes shortly after it qualifies, not on a fixed sweep boundary: the r
 - `libs/act/src/act.ts` — autoclose-reaction synthesis (`__autoclose__:` synthetic stream, off-hours gate, defer-to-cooldown, `CloseSignal`) and the `DrainController.on_close` → `run_close_cycle` wiring
 - `libs/act/src/types/errors.ts` (`DeferSignal`) / `internal/reaction-dispatch.ts` (`CloseSignal`) — the control-flow signals a reaction throws to defer or close
 - `libs/act/src/internal/defer-timer.ts` — the per-worker wake optimization over `stream → due-time` (clamped to `setTimeout`'s ceiling)
-- `libs/act/src/internal/autoclose-policy.ts` — `AutoclosePolicy` schema, `compile_autoclose_policy`, `policy_min_after_days`, `policy_keep_days`
+- `libs/act/src/internal/autoclose-policy.ts` — `AutoclosePolicy` schema, `compile_autoclose_policy`, `policy_after_windows`, `policy_keep_days`
 - `libs/act/src/internal/config.ts` — the `autocloseWindow` schema + resolver (the single home for builder-facing config bags); `libs/act/src/internal/autoclose-window.ts` — `in_autoclose_window` / `next_window_open`
 - `libs/act/src/builders/state-builder.ts` — `.autocloses` / `.archives` declarators
 - `libs/act/test/autoclose-reaction.spec.ts` — synthesized-reaction behavior (immediate close, live-head reopen, cooldown park, threshold, off-hours defer, rolling-window prune/defer)
