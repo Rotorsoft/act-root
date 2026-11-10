@@ -10,19 +10,23 @@
  * @internal
  */
 import { ZodObject, type ZodType } from "zod";
+import { def_of, inner_of } from "../internal/zod.js";
 import type { Projection } from "../types/builders.js";
 import type { Schema, State } from "../types/index.js";
 
 /**
- * Unwraps wrapper types (ZodOptional, ZodNullable, ZodDefault, ZodReadonly)
- * to find the base type name, e.g. `z.string().optional()` -> `"ZodString"`.
+ * The kind of value a field holds under its wrappers (optional, nullable,
+ * default, ...), e.g. `z.string().optional()` -> `"string"`. A list names its
+ * element, `"array of string"`, so it differs from a value and from a list of
+ * something else. Zod's `.unwrap()` returns the element and loses the list.
  */
-function base_type_name(zodType: ZodType): string {
-  let t: any = zodType;
-  while (typeof t.unwrap === "function") {
-    t = t.unwrap();
-  }
-  return t.constructor.name;
+function base_type_name(schema: ZodType): string {
+  let def = def_of(schema)!;
+  for (let inner = inner_of(def); inner; inner = inner_of(def))
+    def = def_of(inner)!;
+  return def.type === "array"
+    ? `array of ${base_type_name(def.element)}`
+    : def.type;
 }
 
 /**
