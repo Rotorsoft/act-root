@@ -9,7 +9,7 @@ sidebar_position: 3.6
 
 An Act app already knows its own flows. Every action, the state that checks it, the events it commits, the projections that fold them and the reactions that pick them up are declared in the builders. A flow animation draws all of that as one map and plays it: a token leaves a person or an automation, passes through the state where the preconditions are checked, lands as an event, feeds the projections, wakes a reaction, and goes on to the next action or out to another system.
 
-**See one:** [WolfDesk ticket flows](pathname:///flows/wolfdesk.html) · [Rules across streams](pathname:///flows/rules-across-streams.html) · [Calculator flows](pathname:///flows/calculator.html) · [Risk game flows](pathname:///flows/risk.html), from the [Risk board game](https://github.com/Rotorsoft/risk) built on Act · [all animations](pathname:///flows/index.html)
+**See one:** [WolfDesk ticket flows](pathname:///flows/wolfdesk.html) · [Rules across streams](pathname:///flows/rules-across-streams.html) · [Calculator flows](pathname:///flows/calculator.html) · [Risk game flows](pathname:///flows/risk.html), from the [Risk board game](https://github.com/Rotorsoft/risk) built on Act · [Konsult flows](pathname:///flows/konsult.html), from a small consulting bookkeeping app built on Act · [all animations](pathname:///flows/index.html)
 
 ## What you get
 
