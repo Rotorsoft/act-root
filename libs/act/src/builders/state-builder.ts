@@ -9,7 +9,6 @@ import {
   compile_autoclose_policy,
   policy_after_windows,
   policy_keep_days,
-  policy_min_after_days,
 } from "../internal/autoclose-policy.js";
 import { resolveActionConfig } from "../internal/config.js";
 import type {
@@ -300,8 +299,11 @@ function action_builder<
       internal.autoclose = compile_autoclose_policy(
         policy
       ) as AutoclosePredicate<TEvents>;
-      internal.autoclose_after_days = policy_min_after_days(policy);
-      internal.autoclose_after_windows = policy_after_windows(policy);
+      const windows = policy_after_windows(policy);
+      internal.autoclose_after_windows = windows;
+      internal.autoclose_after_days = windows.length
+        ? Math.min(...windows)
+        : undefined;
       internal.autoclose_keep_days = policy_keep_days(policy);
       return builder;
     },
