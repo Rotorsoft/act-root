@@ -7,6 +7,7 @@ import {
   type Schema,
   type Schemas,
   SNAP_EVENT,
+  type StoreNotification,
   TOMBSTONE_EVENT,
   ValidationError,
 } from "./types/index.js";
@@ -233,6 +234,31 @@ export function seed_event(
  */
 export function fair_slots(lagging: number): number {
   return lagging >= 2 ? Math.max(1, Math.floor(lagging / 4)) : 0;
+}
+
+/**
+ * The commit notification in a payload a store or broker received, or
+ * `undefined` when there is none: `stream` must be a string, and only
+ * `{ id: number, name: string }` events are kept, stripped of anything else.
+ * A payload with no such event is not a notification. In core so every
+ * listener reads a foreign or version-skewed payload the same way.
+ *
+ * @internal
+ */
+export function notification_of(raw: unknown): StoreNotification | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const { stream, events } = raw as { stream?: unknown; events?: unknown };
+  if (typeof stream !== "string" || !Array.isArray(events)) return undefined;
+  const kept = events.filter(
+    (e): e is { id: number; name: string } =>
+      !!e &&
+      typeof e === "object" &&
+      typeof (e as { id?: unknown }).id === "number" &&
+      typeof (e as { name?: unknown }).name === "string"
+  );
+  return kept.length
+    ? { stream, events: kept.map(({ id, name }) => ({ id, name })) }
+    : undefined;
 }
 
 /**
