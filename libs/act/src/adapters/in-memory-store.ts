@@ -27,11 +27,11 @@ import type {
 import { DEFAULT_LANE, SNAP_EVENT } from "../types/index.js";
 import {
   check_appends,
-  check_version,
   DEFAULT_QUERY_STREAMS_LIMIT,
   fair_slots,
+  seed_event,
   sleep,
-  truncate_seed,
+  throw_if_stale,
 } from "../utils.js";
 
 /**
@@ -414,7 +414,7 @@ export class InMemoryStore implements Store {
     // Every version is checked before anything is appended, so a stale
     // append leaves every stream as it was.
     for (const append of appends)
-      check_version(append, this._stream_versions.get(append.stream) ?? -1);
+      throw_if_stale(append, this._stream_versions.get(append.stream) ?? -1);
     const created = new Date();
     return appends.flatMap(({ stream, msgs }) => {
       let version = this._stream_versions.get(stream) ?? -1;
@@ -839,7 +839,7 @@ export class InMemoryStore implements Store {
         stream,
         version: 0,
         created: new Date(),
-        ...truncate_seed(snapshot, meta),
+        ...seed_event(snapshot, meta),
       };
       this._events.push(event);
       this._stream_versions.set(stream, 0);

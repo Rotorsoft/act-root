@@ -169,7 +169,7 @@ export function check_appends(
  *
  * @internal
  */
-export function stale_append(
+export function concurrency_error(
   append: {
     readonly stream: string;
     readonly msgs: readonly unknown[];
@@ -192,7 +192,7 @@ export function stale_append(
  *
  * @internal
  */
-export function check_version(
+export function throw_if_stale(
   append: {
     readonly stream: string;
     readonly msgs: readonly unknown[];
@@ -204,7 +204,7 @@ export function check_version(
     typeof append.expectedVersion === "number" &&
     head !== append.expectedVersion
   )
-    throw stale_append(append, head);
+    throw concurrency_error(append, head);
 }
 
 /**
@@ -213,7 +213,7 @@ export function check_version(
  *
  * @internal
  */
-export function truncate_seed(
+export function seed_event(
   snapshot?: Schema,
   meta?: EventMeta
 ): { name: string; data: Schema; meta: EventMeta } {

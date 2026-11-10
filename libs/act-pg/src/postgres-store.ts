@@ -24,14 +24,14 @@ import type {
 import {
   ConcurrencyError,
   check_appends,
-  check_version,
+  concurrency_error,
   DEFAULT_QUERY_STREAMS_LIMIT,
   fair_slots,
   log,
   SNAP_EVENT,
   StoreError,
-  stale_append,
-  truncate_seed,
+  seed_event,
+  throw_if_stale,
   ValidationError,
 } from "@rotorsoft/act";
 import {
@@ -956,7 +956,7 @@ export class PostgresStore implements Store {
         heads.rows.map((r) => [r.stream, r.version ?? -1])
       );
       for (const append of appends)
-        check_version(append, head_of.get(append.stream)!);
+        throw_if_stale(append, head_of.get(append.stream)!);
 
       // Data/pii travel as text[] and cast to jsonb in SQL — the pg driver
       // can't serialize object elements inside a jsonb[] parameter.
@@ -1058,7 +1058,7 @@ export class PostgresStore implements Store {
           const detail = (error as { detail?: string }).detail ?? "";
           const key = /=\((.*), \d+\)/s.exec(detail)?.[1];
           const hit = appends.find((a) => a.stream === key) ?? appends[0];
-          throw stale_append(hit, head_of.get(hit.stream)!);
+          throw concurrency_error(hit, head_of.get(hit.stream)!);
         }
         throw error;
       }
@@ -2147,7 +2147,7 @@ export class PostgresStore implements Store {
           `DELETE FROM ${this._fqt} WHERE stream = $1`,
           [stream]
         );
-        const seed = truncate_seed(snapshot, meta);
+        const seed = seed_event(snapshot, meta);
         const { rows } = await client.query(
           `INSERT INTO ${this._fqt}(name, data, stream, version, created, meta)
            VALUES($1, $2, $3, 0, now(), $4) RETURNING *`,

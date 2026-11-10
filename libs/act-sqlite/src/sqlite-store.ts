@@ -25,13 +25,13 @@ import type {
 import {
   ConcurrencyError,
   check_appends,
-  check_version,
+  concurrency_error,
   DEFAULT_QUERY_STREAMS_LIMIT,
   fair_slots,
   is_literal_source,
   StoreError,
-  stale_append,
-  truncate_seed,
+  seed_event,
+  throw_if_stale,
   ValidationError,
 } from "@rotorsoft/act";
 import {
@@ -620,7 +620,7 @@ export class SqliteStore implements Store {
             args: [append.stream],
           });
           const current = Number(row.rows[0].v);
-          check_version(append, current);
+          throw_if_stale(append, current);
           heads.set(append.stream, current);
         }
 
@@ -670,7 +670,7 @@ export class SqliteStore implements Store {
         // beat this one to the row. Every other driver error is wrapped in
         // StoreError('commit') for parity with the adapter's other methods.
         if (e instanceof ConcurrencyError) throw e;
-        if (is_unique_violation(e)) throw stale_append(appending, head);
+        if (is_unique_violation(e)) throw concurrency_error(appending, head);
         throw new StoreError("commit", { cause: e });
       }
     });
@@ -1630,7 +1630,7 @@ export class SqliteStore implements Store {
         // stream's subscription is inert, and reaping it is maintenance that
         // `seed()` performs.
 
-        const seed = truncate_seed(snapshot, meta);
+        const seed = seed_event(snapshot, meta);
         const now = new Date().toISOString();
         const ins = await tx.execute({
           sql: "INSERT INTO events (stream, version, name, data, meta, created) VALUES (?, 0, ?, ?, ?, ?)",

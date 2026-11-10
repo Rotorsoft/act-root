@@ -5952,7 +5952,7 @@ export declare function check_appends(appends: readonly {
  *
  * @internal
  */
-export declare function stale_append(append: {
+export declare function concurrency_error(append: {
     readonly stream: string;
     readonly msgs: readonly unknown[];
     readonly expectedVersion?: number;
@@ -5964,7 +5964,7 @@ export declare function stale_append(append: {
  *
  * @internal
  */
-export declare function check_version(append: {
+export declare function throw_if_stale(append: {
     readonly stream: string;
     readonly msgs: readonly unknown[];
     readonly expectedVersion?: number;
@@ -5975,7 +5975,7 @@ export declare function check_version(append: {
  *
  * @internal
  */
-export declare function truncate_seed(snapshot?: Schema, meta?: EventMeta): {
+export declare function seed_event(snapshot?: Schema, meta?: EventMeta): {
     name: string;
     data: Schema;
     meta: EventMeta;

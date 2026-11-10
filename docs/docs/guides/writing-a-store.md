@@ -42,7 +42,7 @@ await store.commit([{ stream, msgs, expectedVersion }], meta);
 
 A commit across streams notifies once per stream, with that stream's events. Call `check_appends(appends)` from `@rotorsoft/act` first: it's the framework's rule for what a commit may hold, and the TCK's `commit across streams` block matches its messages exactly.
 
-An adapter checks every append's version before inserting anything, with core's `check_version(append, head)` and the stream's head (`-1` when it has no events). It inserts every append inside the transaction it already opens, and lets the unique `(stream, version)` constraint catch a race on any stream appended to; on that violation it throws `stale_append(append, head)`, the same `ConcurrencyError` the check raises. The TCK's "commit across streams" block is the checklist: stale first, middle and last appends, a stream named twice, an append with no events, an unguarded append beside guarded ones, and two commits racing on a shared stream.
+An adapter checks every append's version before inserting anything, with core's `throw_if_stale(append, head)` and the stream's head (`-1` when it has no events). It inserts every append inside the transaction it already opens, and lets the unique `(stream, version)` constraint catch a race on any stream appended to; on that violation it throws `concurrency_error(append, head)`, the same `ConcurrencyError` the check raises. The TCK's "commit across streams" block is the checklist: stale first, middle and last appends, a stream named twice, an append with no events, an unguarded append beside guarded ones, and two commits racing on a shared stream.
 
 ## The store schema is the framework's job
 
@@ -260,7 +260,7 @@ The subtle part is that the **sort comparator and the cursor comparator must be 
 
 `truncate` is the delete verb behind close-the-books, and it carries two contracts in one method, switched per target by the presence of `before`.
 
-A **full** target (`{ stream, snapshot?, meta? }`) is the classic close: in a single transaction, delete every event for the stream and insert exactly one seed event — a `__snapshot__` when `snapshot` is provided (the restart case), a `__tombstone__` otherwise. Take its name, data and meta from core's `truncate_seed(snapshot, meta)`, which also supplies the default meta. After the transaction the stream holds exactly one event.
+A **full** target (`{ stream, snapshot?, meta? }`) is the classic close: in a single transaction, delete every event for the stream and insert exactly one seed event — a `__snapshot__` when `snapshot` is provided (the restart case), a `__tombstone__` otherwise. Take its name, data and meta from core's `seed_event(snapshot, meta)`, which also supplies the default meta. After the transaction the stream holds exactly one event.
 
 **Do not touch the subscriptions table**, for retired and restarted targets alike ([#1527](https://github.com/Rotorsoft/act-root/issues/1527)). `truncate` is event-log work, and keeping it that way is what lets a store hold its event log and its subscriptions on different systems — every method then belongs cleanly to one half, and a hybrid routes instead of reimplementing. Removing the subscription row was the one exception, and it forced such a store into a distributed transaction it had no way to get.
 
