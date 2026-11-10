@@ -75,7 +75,9 @@ What building Act has taught, as rules to check a design or a fix against. Read 
 - A safety-net timer must restart every stage that can go idle, not only the first: the `start_correlations` tick re-armed correlation, but lanes disarmed on an empty claim never claimed a dead worker's expired lease. (2026-10-18 probe)
 - Several loops that feed one failure counter need the same recovery: #1928 made a failed drain pass retry and left a failed settle pass waiting for the breaker to open. Fix the class, then probe each loop.
 
-- A change to a value's meaning must reach every reader, docs included: #2354 made a snapshot's `version` the head, its code readers followed, and the SSE wiring kept pinning `event.version`, so every live client resyncs at each snapshot (#2384). Grep the docs and examples for the old meaning in the same change.
+- A change to a value's meaning must reach every reader, docs and the scaffold skill included (2.0's anchored-source rule left the skill recommending `"invoice-.*"`, which now delivers nothing, #2412): #2354 made a snapshot's `version` the head, its code readers followed, and the SSE wiring kept pinning `event.version`, so every live client resyncs at each snapshot (#2384). Grep the docs and examples for the old meaning in the same change.
+- A bot that raises a floor doesn't move what tests the floor: Renovate raised `engines.node` to 22.23.4 and node-compat kept testing 22.23.3 for two weeks (#2415). And a bot's PR that can never pass its own gate sits forever: lock-file maintenance has no release date for `minimumReleaseAge` to age (#914, #2420).
+
 ## Contracts and tests
 
 - A port is its interface plus its TCK; behavior the TCK doesn't pin is undefined. Optional methods are gated by capabilities. (#302)
