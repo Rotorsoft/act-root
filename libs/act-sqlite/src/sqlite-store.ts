@@ -10,7 +10,6 @@ import type {
   Committed,
   EventMeta,
   Lease,
-  Message,
   Query,
   QueryStatsOptions,
   QueryStreams,
@@ -26,10 +25,13 @@ import type {
 import {
   ConcurrencyError,
   check_appends,
+  concurrency_error,
   DEFAULT_QUERY_STREAMS_LIMIT,
   fair_slots,
   is_literal_source,
   StoreError,
+  seed_event,
+  throw_if_stale,
   ValidationError,
 } from "@rotorsoft/act";
 import {
@@ -612,23 +614,14 @@ export class SqliteStore implements Store {
       try {
         // Every head is read and checked before anything is inserted.
         const heads = new Map<string, number>();
-        for (const { stream, msgs, expectedVersion } of appends) {
+        for (const append of appends) {
           const row = await tx.execute({
             sql: "SELECT COALESCE(MAX(version), -1) as v FROM events WHERE stream = ?",
-            args: [stream],
+            args: [append.stream],
           });
           const current = Number(row.rows[0].v);
-          if (
-            typeof expectedVersion === "number" &&
-            current !== expectedVersion
-          )
-            throw new ConcurrencyError(
-              stream,
-              current,
-              msgs as unknown as Message<Schemas, keyof Schemas>[],
-              expectedVersion
-            );
-          heads.set(stream, current);
+          throw_if_stale(append, current);
+          heads.set(append.stream, current);
         }
 
         const now = new Date().toISOString();
@@ -677,13 +670,7 @@ export class SqliteStore implements Store {
         // beat this one to the row. Every other driver error is wrapped in
         // StoreError('commit') for parity with the adapter's other methods.
         if (e instanceof ConcurrencyError) throw e;
-        if (is_unique_violation(e))
-          throw new ConcurrencyError(
-            appending.stream,
-            head,
-            appending.msgs as unknown as Message<Schemas, keyof Schemas>[],
-            appending.expectedVersion ?? -1
-          );
+        if (is_unique_violation(e)) throw concurrency_error(appending, head);
         throw new StoreError("commit", { cause: e });
       }
     });
@@ -1643,17 +1630,15 @@ export class SqliteStore implements Store {
         // stream's subscription is inert, and reaping it is maintenance that
         // `seed()` performs.
 
-        const event_name =
-          snapshot !== undefined ? "__snapshot__" : "__tombstone__";
-        const event_meta = meta ?? { correlation: "", causation: {} };
+        const seed = seed_event(snapshot, meta);
         const now = new Date().toISOString();
         const ins = await tx.execute({
           sql: "INSERT INTO events (stream, version, name, data, meta, created) VALUES (?, 0, ?, ?, ?, ?)",
           args: [
             stream,
-            event_name,
-            JSON.stringify(snapshot ?? {}),
-            JSON.stringify(event_meta),
+            seed.name,
+            JSON.stringify(seed.data),
+            JSON.stringify(seed.meta),
             now,
           ],
         });
@@ -1665,9 +1650,7 @@ export class SqliteStore implements Store {
             stream,
             version: 0,
             created: new Date(now),
-            name: event_name,
-            data: snapshot ?? {},
-            meta: event_meta,
+            ...seed,
           },
         });
       }

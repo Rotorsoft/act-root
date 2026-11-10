@@ -6,7 +6,6 @@ import type {
   EventMeta,
   Lease,
   Logger,
-  Message,
   NotifyDisposer,
   Query,
   QueryStatsOptions,
@@ -25,13 +24,15 @@ import type {
 import {
   ConcurrencyError,
   check_appends,
+  concurrency_error,
   DEFAULT_QUERY_STREAMS_LIMIT,
   fair_slots,
   log,
   notification_of,
   SNAP_EVENT,
   StoreError,
-  TOMBSTONE_EVENT,
+  seed_event,
+  throw_if_stale,
   ValidationError,
 } from "@rotorsoft/act";
 import {
@@ -955,16 +956,8 @@ export class PostgresStore implements Store {
       const head_of = new Map(
         heads.rows.map((r) => [r.stream, r.version ?? -1])
       );
-      for (const { stream, msgs, expectedVersion } of appends) {
-        const head = head_of.get(stream)!;
-        if (typeof expectedVersion === "number" && head !== expectedVersion)
-          throw new ConcurrencyError(
-            stream,
-            head,
-            msgs as unknown as Message<Schemas, string>[],
-            expectedVersion
-          );
-      }
+      for (const append of appends)
+        throw_if_stale(append, head_of.get(append.stream)!);
 
       // Data/pii travel as text[] and cast to jsonb in SQL — the pg driver
       // can't serialize object elements inside a jsonb[] parameter.
@@ -1066,12 +1059,7 @@ export class PostgresStore implements Store {
           const detail = (error as { detail?: string }).detail ?? "";
           const key = /=\((.*), \d+\)/s.exec(detail)?.[1];
           const hit = appends.find((a) => a.stream === key) ?? appends[0];
-          throw new ConcurrencyError(
-            hit.stream,
-            head_of.get(hit.stream)!,
-            hit.msgs as unknown as Message<Schemas, string>[],
-            hit.expectedVersion ?? -1
-          );
+          throw concurrency_error(hit, head_of.get(hit.stream)!);
         }
         throw error;
       }
@@ -2142,16 +2130,11 @@ export class PostgresStore implements Store {
           `DELETE FROM ${this._fqt} WHERE stream = $1`,
           [stream]
         );
-        const name = snapshot !== undefined ? SNAP_EVENT : TOMBSTONE_EVENT;
+        const seed = seed_event(snapshot, meta);
         const { rows } = await client.query(
           `INSERT INTO ${this._fqt}(name, data, stream, version, created, meta)
            VALUES($1, $2, $3, 0, now(), $4) RETURNING *`,
-          [
-            name,
-            snapshot ?? {},
-            stream,
-            meta ?? { correlation: "", causation: {} },
-          ]
+          [seed.name, seed.data, stream, seed.meta]
         );
         result.set(stream, {
           deleted: rowCount ?? 0,

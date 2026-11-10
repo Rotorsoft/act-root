@@ -141,9 +141,11 @@ const tag_overlay_keys = <S extends object>(
  *
  * ## Version Contract
  *
- * The `_v` field on state MUST be set from `snap.event.version` (the event
- * store's monotonic stream version) BEFORE calling `publish()`. This is the
- * single source of truth for ordering — no separate version counters.
+ * The `_v` field on state MUST be set from `snap.version` (the event store's
+ * monotonic stream version at the head) BEFORE calling `publish()`. This is
+ * the single source of truth for ordering — no separate version counters.
+ * When `.snap` fired, the snapshot holds that version: pass an empty patch for
+ * it, so the patches stay contiguous with the next commit.
  */
 export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
   private channels = new Map<string, Set<Subscriber<S>>>();
@@ -221,7 +223,7 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
    * patches[i] corresponds to version baseV + i + 1.
    *
    * @param streamId - The event store stream ID
-   * @param state - Full state with `_v` set from `snap.event.version`
+   * @param state - Full state with `_v` set from `snap.version`
    * @param patches - Array of domain patches, one per emitted event, as the
    *   snapshots carry them (`null` deletes a key)
    */

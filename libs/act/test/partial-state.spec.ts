@@ -349,6 +349,54 @@ describe("partial-state", () => {
     );
   });
 
+  it("should throw when one partial declares a value and another a list", () => {
+    const PartialA = state({ Tags: z.object({ tags: z.string() }) })
+      .init(() => ({ tags: "" }))
+      .emits({ X: ZodEmpty })
+      .patch({ X: () => ({}) })
+      .on({ doX: ZodEmpty })
+      .emit(() => ["X", {}])
+      .build();
+
+    const PartialB = state({
+      Tags: z.object({ tags: z.array(z.string()).optional() }),
+    })
+      .init(() => ({ tags: [] }))
+      .emits({ Y: ZodEmpty })
+      .patch({ Y: () => ({}) })
+      .on({ doY: ZodEmpty })
+      .emit(() => ["Y", {}])
+      .build();
+
+    expect(() => act().withState(PartialA).withState(PartialB)).toThrow(
+      'Schema conflict in "Tags": key "tags" has type "string" but incoming partial declares "array of string"'
+    );
+  });
+
+  it("should throw when two partials list different elements", () => {
+    const PartialA = state({ Lists: z.object({ xs: z.array(z.string()) }) })
+      .init(() => ({ xs: [] }))
+      .emits({ X: ZodEmpty })
+      .patch({ X: () => ({}) })
+      .on({ doX: ZodEmpty })
+      .emit(() => ["X", {}])
+      .build();
+
+    const PartialB = state({
+      Lists: z.object({ xs: z.array(z.number()).default([]) }),
+    })
+      .init(() => ({ xs: [] }))
+      .emits({ Y: ZodEmpty })
+      .patch({ Y: () => ({}) })
+      .on({ doY: ZodEmpty })
+      .emit(() => ["Y", {}])
+      .build();
+
+    expect(() => act().withState(PartialA).withState(PartialB)).toThrow(
+      'key "xs" has type "array of string" but incoming partial declares "array of number"'
+    );
+  });
+
   describe("partials whose state schema is not a plain z.object", () => {
     const plain = state({ Wrapped: z.object({ a: z.number() }) })
       .init(() => ({ a: 0 }))

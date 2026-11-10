@@ -246,6 +246,11 @@ describe("framework rules stay in the framework", () => {
     ["the query_streams default limit", /query\?\.limit\s*\?\?\s*\d/],
     ["what a commit may hold", /is named twice|has no events/],
     [
+      "what makes a writer stale",
+      /typeof\s+\w*\.?expectedVersion\s*===\s*"number"|expectedVersion\s*\?\?\s*-1/,
+    ],
+    ["what a full truncate seeds", /correlation:\s*""/],
+    [
       "what makes a source a pattern",
       /METACHARACTERS|source\.startsWith\("\^"\)/,
     ],

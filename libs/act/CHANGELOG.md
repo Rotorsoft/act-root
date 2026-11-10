@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v2.0.1](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v2.0.0...@rotorsoft/act-v2.0.1) (2026-11-10)
+
+
+### Bug Fixes
+
+* **act:** refuse a merge where one partial declares a value and another a list ([#2407](https://github.com/Rotorsoft/act-root/issues/2407)) ([f85b33c](https://github.com/Rotorsoft/act-root/commit/f85b33c33d5c0d6a98b8d962a0be40deae23ffe3)), closes [#2385](https://github.com/Rotorsoft/act-root/issues/2385)
+
 # [@rotorsoft/act-v2.0.0](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.37.8...@rotorsoft/act-v2.0.0) (2026-11-07)
 
 

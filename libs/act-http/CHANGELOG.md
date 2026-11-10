@@ -1,3 +1,10 @@
+# [@rotorsoft/act-http-v2.0.4](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-http-v2.0.3...@rotorsoft/act-http-v2.0.4) (2026-11-10)
+
+
+### Bug Fixes
+
+* **act-http:** publish a snapshot's version so live SSE clients don't resync ([#2405](https://github.com/Rotorsoft/act-root/issues/2405)) ([13af2f8](https://github.com/Rotorsoft/act-root/commit/13af2f8f8ba6f2ff730947e2642fed77a1c3247c)), closes [#2384](https://github.com/Rotorsoft/act-root/issues/2384)
+
 # [@rotorsoft/act-http-v2.0.3](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-http-v2.0.2...@rotorsoft/act-http-v2.0.3) (2026-11-09)
 
 

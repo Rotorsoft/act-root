@@ -15,7 +15,7 @@
  *       │
  *       ▼
  *   deriveState(snap)          ← app-specific (overlay presence, deadlines, etc.)
- *   state._v = snap.event.version
+ *   state._v = snap.version    (+ an empty patch if .snap took a version)
  *       │
  *       ▼
  *   broadcast.publish(streamId, state, patches)
@@ -33,8 +33,11 @@
  *
  * ## Version Contract
  *
- * `_v` is always the event store stream version (`snap.event.version`).
+ * `_v` is always the event store stream version at the head (`snap.version`).
  * No separate version counters. The event store is the single source of truth.
+ * A `.snap` takes a version of its own, so `snap.version` is then one past
+ * `snap.event.version`: publish it as an empty patch, or the next commit
+ * reads as a gap and every live client resyncs.
  */
 
 export { patch } from "@rotorsoft/act-patch";

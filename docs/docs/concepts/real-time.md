@@ -48,7 +48,9 @@ Run `pnpm dev:http` from the repo root and press keys at [http://localhost:3000]
 
 ## The version contract
 
-`_v` on every state object is always `snap.event.version` — the event store's monotonic stream version. There is no separate counter, no clock-based ordering. The event store is the single source of truth for ordering; the broadcast layer is just a fan-out.
+`_v` on every state object is always `snap.version` — the event store's monotonic stream version at the head of the stream. There is no separate counter, no clock-based ordering. The event store is the single source of truth for ordering; the broadcast layer is just a fan-out.
+
+A state with [`.snap`](state-management.md#snapshots) takes one more version than its events when a snapshot fires: the snapshot event is the stream's head, so `snap.version` is one past `snap.event.version`. Publish that version as an empty patch, so every version reaches the client. Otherwise the next commit starts one past where the client is, and every live client reads it as **behind** and refetches.
 
 ## Server-side
 
@@ -111,13 +113,13 @@ const last = snaps.at(-1)!;
 // 1. Derive the broadcast view (typically snap.state plus overlays)
 const state: AppState = {
   ...last.state,
-  _v: last.event!.version, // MUST come from event.version
+  _v: last.version, // MUST be the stream's head version
 };
 
 // 2. Collect each emitted snapshot's patch, in commit order
-const patches = snaps
-  .map((s) => s.patch)
-  .filter(Boolean) as Partial<AppState>[];
+const patches: Partial<AppState>[] = snaps.map((s) => s.patch ?? {});
+// A `.snap` took the next version: send it as an empty patch
+if (last.version > last.event!.version) patches.push({});
 
 // 3. Publish — sends a version-keyed PatchMessage to all subscribers
 broadcast.publish(streamId, state, patches);
@@ -262,7 +264,7 @@ onData: (env) => {
 
 ## Key rules
 
-1. **`_v` is `snap.event.version`** — the event store's stream version is the single source of truth. Never invent a version.
+1. **`_v` is `snap.version`** — the event store's stream version is the single source of truth. Never invent a version, and publish a snapshot's version as an empty patch.
 2. **One broadcast function** — every code path that calls `app.do()` should funnel through the same publish helper. Multiple publish sites with different state shapes is how double-apply bugs start.
 3. **Broadcast from snapshots, not projections** — projections are eventually consistent and may lag. Broadcast from the snapshots returned by `app.do()`.
 4. **Presence is an overlay, not an event** — use `overlay()` so connect/disconnect doesn't pollute the event log.

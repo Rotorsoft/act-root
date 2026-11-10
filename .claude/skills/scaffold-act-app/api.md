@@ -176,10 +176,12 @@ app.on("committed", Item, (snaps) => {
   const streamId = event.stream;
   const fullState: AppState = {
     ...last.state,
-    _v: event.version, // MUST come from the event store version
+    _v: last.version, // MUST be the stream's head version
   };
   // One domain patch per emitted event, in commit order
   const patches = snaps.map((s) => s.patch ?? {});
+  // A `.snap` took the next version: send it as an empty patch
+  if (last.version > event.version) patches.push({});
   // Overlay presence on human players/users
   broadcast.publish(streamId, applyPresence(fullState, streamId), patches);
 });

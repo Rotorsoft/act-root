@@ -397,14 +397,14 @@ async function doAction(action: string, target: any, payload: any) {
 
 Instead of sending the full aggregate state to every client after each action, `@rotorsoft/act-http/sse` forwards the *domain patches* that event handlers already compute (deep-merge partials), keyed by event version — so subscribers apply only what changed and resync with a full refetch when they miss versions.
 
-**Version contract:** `_v` is always set from `snap.event.version` — the event store's monotonic stream version. No separate version counters.
+**Version contract:** `_v` is always set from `snap.version` — the event store's monotonic stream version at the head. No separate version counters. A `.snap` takes a version of its own (`snap.version` is then one past `snap.event.version`), so publish it as an empty patch; otherwise every live client reads the next commit as a gap and refetches.
 
 ```
   app.do() → snapshots (each carries its domain patch)
       │
       ▼
   deriveState(snap)              ← app-specific (overlay presence, deadlines, etc.)
-  state._v = snap.event.version  ← event store version is the single source of truth
+  state._v = snap.version        ← event store version is the single source of truth
       │
       ▼
   broadcast.publish(streamId, state, patches)
@@ -445,8 +445,9 @@ app.on("committed", MyState, (snaps) => {
   const event = last.event!;                     // so the last one and its event exist
   const streamId = event.stream;
   const state = deriveFullState(last);           // app-specific state derivation
-  state._v = event.version;                      // MUST set from event store version
+  state._v = last.version;                       // MUST be the stream's head version
   const patches = snaps.map((s) => s.patch ?? {}); // one per emitted event
+  if (last.version > event.version) patches.push({}); // a .snap took the next version
   const withPresence = applyPresence(state, streamId); // app-specific overlay
   broadcast.publish(streamId, withPresence, patches);
 });

@@ -5850,7 +5850,7 @@ export declare function state<TName extends string, TState extends Schema>(entry
 //# sourceMappingURL=state-builder.d.ts.map
 // === utils.d.ts ===
 import { type ZodType } from "zod";
-import { type StoreNotification } from "./types/index.js";
+import { ConcurrencyError, type EventMeta, type Schema, type StoreNotification } from "./types/index.js";
 /**
  * @module utils
  * @category Utilities
@@ -5945,6 +5945,41 @@ export declare function check_appends(appends: readonly {
     readonly stream: string;
     readonly msgs: readonly unknown[];
 }[]): void;
+/**
+ * The error a stale append raises, given the head the store found. A writer
+ * that named no \`expectedVersion\` reads as \`-1\`: only a race between the
+ * version check and the insert gets one here.
+ *
+ * @internal
+ */
+export declare function concurrency_error(append: {
+    readonly stream: string;
+    readonly msgs: readonly unknown[];
+    readonly expectedVersion?: number;
+}, head: number): ConcurrencyError;
+/**
+ * What every store refuses as a stale writer: an append whose
+ * \`expectedVersion\` is not the stream's head. In core so each adapter calls
+ * the one rule before it appends anything.
+ *
+ * @internal
+ */
+export declare function throw_if_stale(append: {
+    readonly stream: string;
+    readonly msgs: readonly unknown[];
+    readonly expectedVersion?: number;
+}, head: number): void;
+/**
+ * The event a full \`truncate\` seeds a stream with at version 0: a snapshot
+ * of the given state, or a tombstone when there is none.
+ *
+ * @internal
+ */
+export declare function seed_event(snapshot?: Schema, meta?: EventMeta): {
+    name: string;
+    data: Schema;
+    meta: EventMeta;
+};
 /**
  * How many of \`lagging\` claim slots ignore priority, so sustained high-priority
  * load can't starve a low-priority stream forever. Each store's \`claim\` calls
@@ -7522,9 +7557,11 @@ import { type BroadcastState, type PatchMessage, type Subscriber } from "./types
  *
  * ## Version Contract
  *
- * The \`_v\` field on state MUST be set from \`snap.event.version\` (the event
- * store's monotonic stream version) BEFORE calling \`publish()\`. This is the
- * single source of truth for ordering — no separate version counters.
+ * The \`_v\` field on state MUST be set from \`snap.version\` (the event store's
+ * monotonic stream version at the head) BEFORE calling \`publish()\`. This is
+ * the single source of truth for ordering — no separate version counters.
+ * When \`.snap\` fired, the snapshot holds that version: pass an empty patch for
+ * it, so the patches stay contiguous with the next commit.
  */
 export declare class BroadcastChannel<S extends BroadcastState = BroadcastState> {
     private channels;
@@ -7566,7 +7603,7 @@ export declare class BroadcastChannel<S extends BroadcastState = BroadcastState>
      * patches[i] corresponds to version baseV + i + 1.
      *
      * @param streamId - The event store stream ID
-     * @param state - Full state with \`_v\` set from \`snap.event.version\`
+     * @param state - Full state with \`_v\` set from \`snap.version\`
      * @param patches - Array of domain patches, one per emitted event, as the
      *   snapshots carry them (\`null\` deletes a key)
      */
@@ -7614,7 +7651,7 @@ export declare class BroadcastChannel<S extends BroadcastState = BroadcastState>
  *       │
  *       ▼
  *   deriveState(snap)          ← app-specific (overlay presence, deadlines, etc.)
- *   state._v = snap.event.version
+ *   state._v = snap.version    (+ an empty patch if .snap took a version)
  *       │
  *       ▼
  *   broadcast.publish(streamId, state, patches)
@@ -7632,8 +7669,11 @@ export declare class BroadcastChannel<S extends BroadcastState = BroadcastState>
  *
  * ## Version Contract
  *
- * \`_v\` is always the event store stream version (\`snap.event.version\`).
+ * \`_v\` is always the event store stream version at the head (\`snap.version\`).
  * No separate version counters. The event store is the single source of truth.
+ * A \`.snap\` takes a version of its own, so \`snap.version\` is then one past
+ * \`snap.event.version\`: publish it as an empty patch, or the next commit
+ * reads as a gap and every live client resyncs.
  */
 export { patch } from "@rotorsoft/act-patch";
 export type { ApplyResult } from "./apply-patch.js";
@@ -7722,7 +7762,7 @@ import type { DeepPartial } from "@rotorsoft/act-patch";
  * Apps extend this with their own domain state shape.
  */
 export type BroadcastState = Record<string, unknown> & {
-    /** Event store stream version — set by the broadcast layer from snap.event.version */
+    /** Event store stream version — set by the broadcast layer from snap.version */
     _v: number;
 };
 /**

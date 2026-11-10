@@ -163,24 +163,6 @@ function compile_reaches(
 }
 
 /**
- * The smallest `after` window (in days) anywhere in a policy — across
- * the top-level `after` and the `or.after` block — or `undefined` when
- * the policy has no time component.
- *
- * The soonest a time gate could open. The reaction parks on every window,
- * through {@link policy_after_windows}.
- */
-export function policy_min_after_days(
-  options: AutoclosePolicy
-): number | undefined {
-  const parsed = AutoclosePolicySchema.parse(options);
-  const windows: number[] = [];
-  if (parsed.after) windows.push(parsed.after.days);
-  if (parsed.or?.after) windows.push(parsed.or.after.days);
-  return windows.length ? Math.min(...windows) : undefined;
-}
-
-/**
  * Every `after` window (in days) in a policy. The reaction parks on the
  * earliest one still ahead, so a branch with a later window keeps its turn once
  * an earlier one has passed.
