@@ -6,14 +6,12 @@
  * @category Adapters
  */
 
-import { ConcurrencyError } from "../types/errors.js";
 import type {
   Append,
   BlockedLease,
   Committed,
   EventMeta,
   Lease,
-  Message,
   Query,
   QueryStatsOptions,
   QueryStreams,
@@ -26,12 +24,14 @@ import type {
   StreamStats,
   SubscribeInput,
 } from "../types/index.js";
-import { DEFAULT_LANE, SNAP_EVENT, TOMBSTONE_EVENT } from "../types/index.js";
+import { DEFAULT_LANE, SNAP_EVENT } from "../types/index.js";
 import {
   check_appends,
+  check_version,
   DEFAULT_QUERY_STREAMS_LIMIT,
   fair_slots,
   sleep,
+  truncate_seed,
 } from "../utils.js";
 
 /**
@@ -413,16 +413,8 @@ export class InMemoryStore implements Store {
     check_appends(appends);
     // Every version is checked before anything is appended, so a stale
     // append leaves every stream as it was.
-    for (const { stream, msgs, expectedVersion } of appends) {
-      const current = this._stream_versions.get(stream) ?? -1;
-      if (typeof expectedVersion === "number" && current !== expectedVersion)
-        throw new ConcurrencyError(
-          stream,
-          current,
-          msgs as unknown as Message<Schemas, keyof Schemas>[],
-          expectedVersion
-        );
-    }
+    for (const append of appends)
+      check_version(append, this._stream_versions.get(append.stream) ?? -1);
     const created = new Date();
     return appends.flatMap(({ stream, msgs }) => {
       let version = this._stream_versions.get(stream) ?? -1;
@@ -847,9 +839,7 @@ export class InMemoryStore implements Store {
         stream,
         version: 0,
         created: new Date(),
-        name: snapshot !== undefined ? SNAP_EVENT : TOMBSTONE_EVENT,
-        data: snapshot ?? {},
-        meta: meta ?? { correlation: "", causation: {} },
+        ...truncate_seed(snapshot, meta),
       };
       this._events.push(event);
       this._stream_versions.set(stream, 0);

@@ -1,6 +1,15 @@
 import { prettifyError, ZodError, type ZodType } from "zod";
 import { config } from "./config.js";
-import { ValidationError } from "./types/index.js";
+import {
+  ConcurrencyError,
+  type EventMeta,
+  type Message,
+  type Schema,
+  type Schemas,
+  SNAP_EVENT,
+  TOMBSTONE_EVENT,
+  ValidationError,
+} from "./types/index.js";
 
 /**
  * @module utils
@@ -151,6 +160,68 @@ export function check_appends(
       throw new Error(`commit: stream "${stream}" is named twice`);
     seen.add(stream);
   }
+}
+
+/**
+ * The error a stale append raises, given the head the store found. A writer
+ * that named no `expectedVersion` reads as `-1`: only a race between the
+ * version check and the insert gets one here.
+ *
+ * @internal
+ */
+export function stale_append(
+  append: {
+    readonly stream: string;
+    readonly msgs: readonly unknown[];
+    readonly expectedVersion?: number;
+  },
+  head: number
+): ConcurrencyError {
+  return new ConcurrencyError(
+    append.stream,
+    head,
+    append.msgs as Message<Schemas, keyof Schemas>[],
+    append.expectedVersion ?? -1
+  );
+}
+
+/**
+ * What every store refuses as a stale writer: an append whose
+ * `expectedVersion` is not the stream's head. In core so each adapter calls
+ * the one rule before it appends anything.
+ *
+ * @internal
+ */
+export function check_version(
+  append: {
+    readonly stream: string;
+    readonly msgs: readonly unknown[];
+    readonly expectedVersion?: number;
+  },
+  head: number
+): void {
+  if (
+    typeof append.expectedVersion === "number" &&
+    head !== append.expectedVersion
+  )
+    throw stale_append(append, head);
+}
+
+/**
+ * The event a full `truncate` seeds a stream with at version 0: a snapshot
+ * of the given state, or a tombstone when there is none.
+ *
+ * @internal
+ */
+export function truncate_seed(
+  snapshot?: Schema,
+  meta?: EventMeta
+): { name: string; data: Schema; meta: EventMeta } {
+  return {
+    name: snapshot !== undefined ? SNAP_EVENT : TOMBSTONE_EVENT,
+    data: snapshot ?? {},
+    meta: meta ?? { correlation: "", causation: {} },
+  };
 }
 
 /**
