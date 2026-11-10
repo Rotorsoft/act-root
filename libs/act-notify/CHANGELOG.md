@@ -1,3 +1,5 @@
+# [@rotorsoft/act-notify-v1.0.1](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-notify-v1.0.0...@rotorsoft/act-notify-v1.0.1) (2026-11-10)
+
 # [@rotorsoft/act-notify-v1.0.0](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-notify-v0.3.2...@rotorsoft/act-notify-v1.0.0) (2026-11-07)
 
 
