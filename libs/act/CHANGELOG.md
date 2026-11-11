@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v2.0.4](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v2.0.3...@rotorsoft/act-v2.0.4) (2026-11-11)
+
+
+### Bug Fixes
+
+* **recipes:** guard the recurring timer with state rules, not a version pin ([c7d95d6](https://github.com/Rotorsoft/act-root/commit/c7d95d63b6db5bcdea511d8a1d9c144e7515d2a6))
+
 # [@rotorsoft/act-v2.0.3](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v2.0.2...@rotorsoft/act-v2.0.3) (2026-11-10)
 
 # [@rotorsoft/act-v2.0.2](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v2.0.1...@rotorsoft/act-v2.0.2) (2026-11-10)
