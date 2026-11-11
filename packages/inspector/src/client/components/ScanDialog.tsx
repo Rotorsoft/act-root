@@ -2,10 +2,9 @@ import { useState } from "react";
 import { trpc } from "../trpc.js";
 
 // Mirrors the server's `DiscoveredPgStore` shape (see
-// `server/discovery/types.ts`). ACT-1122 widened the `discover`
-// response to a discriminated union; this dialog still only surfaces
-// PG results, so we narrow the union at the boundary. #782 will add
-// the SQLite tab + its own variant.
+// `server/discovery/types.ts`). `discover` returns a discriminated
+// union; this dialog surfaces PG results only (SQLite has
+// `SqliteScanDialog`), so we narrow the union at the boundary.
 type DiscoveredStore = {
   kind: "pg";
   host: string;

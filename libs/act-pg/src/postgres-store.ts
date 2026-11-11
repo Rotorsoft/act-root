@@ -2085,13 +2085,8 @@ export class PostgresStore implements Store {
           before?: Date;
         }
       >();
-      // Windowed targets run BEFORE full ones, matching InMemory and SQLite.
-      // A stream listed as both used to land its windowed entry in the result
-      // on this adapter and its full entry on the other two — same on-disk
-      // state, different returned map. The framework never produces
-      // that input (`close-cycle` dedups by stream first), but `Store` is a
-      // public port that third-party adapters validate against the TCK, so
-      // the three must agree.
+      // Windowed targets run BEFORE full ones, so a stream listed as both
+      // returns its full entry, as in every adapter (the TCK pins it).
       for (const { stream, before, max_id } of windowed) {
         // Closest safe boundary: latest snapshot older than the cutoff and
         // at/below the consumer watermark cap. No qualifying snapshot →

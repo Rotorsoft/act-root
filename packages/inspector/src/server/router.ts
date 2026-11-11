@@ -31,7 +31,7 @@ import {
 import { mutationOriginAllowed } from "./security.js";
 
 /**
- * Request context (#1195). HTTP requests carry the `Origin` header and
+ * Request context. HTTP requests carry the `Origin` header and
  * the CORS allowlist so the mutation guard can refuse cross-site,
  * origin-less writes. In-process callers (`createCaller({})` in tests,
  * trusted server-side code) leave `viaHttp` false and skip the guard.
@@ -45,7 +45,7 @@ export type InspectorContext = {
 const t = initTRPC.context<InspectorContext>().create();
 
 /**
- * Mutation procedure with the CORS origin guard (#1195). Every
+ * Mutation procedure with the CORS origin guard. Every
  * mutating tRPC procedure builds on this so an origin-less cross-site
  * request can't reach a write. In-process callers (no `viaHttp`) pass
  * straight through — the guard only applies to real HTTP requests.
@@ -59,12 +59,9 @@ const mutationProcedure = t.procedure.use(async ({ ctx, next }) => {
 });
 
 /**
- * Write-mutation gate (#698). Mutating procedures that change adapter
- * state — currently just `prioritize` — refuse to run unless this is
- * explicitly opted into via `ACT_INSPECTOR_WRITE=1`. The legacy
- * `backup` / `restore` mutations predate the gate and aren't covered;
- * they're guarded by their UI flow (explicit click + confirm) rather
- * than by env.
+ * Write-mutation gate. Procedures that change a store (`prioritize`, and a
+ * `transfer` into a persistent target) refuse to run unless the operator
+ * opts in with `ACT_INSPECTOR_WRITE=1`.
  *
  * Default off keeps the inspector safe to point at production from a
  * laptop. A misclick in the dashboard can no longer reorder live
@@ -73,7 +70,7 @@ const mutationProcedure = t.procedure.use(async ({ ctx, next }) => {
 const writeEnabled = process.env.ACT_INSPECTOR_WRITE === "1";
 
 /**
- * Cwd-relative path guard (#1194). Every client-supplied file path —
+ * Cwd-relative path guard. Every client-supplied file path —
  * transfer csv/sqlite source and target slots, the `event_migrations`
  * module path — resolves through here. Absolute paths and `..`
  * traversal are rejected so a client can't coerce the server into
@@ -94,7 +91,7 @@ export function resolveUnderCwd(input: string, label: string): string {
 }
 
 /**
- * PG SSL config mapping (#1195). `ssl:true` means *verified* TLS —
+ * PG SSL config mapping. `ssl:true` means *verified* TLS —
  * `rejectUnauthorized:true`, the secure default. An operator who
  * knowingly points at a server with a self-signed / mismatched cert
  * opts out explicitly via `sslInsecure:true`, which disables cert
@@ -117,7 +114,7 @@ export function resolveSslConfig(
 }
 
 /**
- * In-memory audit log (#698). Records each successful mutation so an
+ * In-memory audit log. Records each successful mutation so an
  * operator can answer "who set priority=10 on which streams ten minutes
  * ago?" without persistent storage. Bounded to keep memory usage flat;
  * older entries fall off as new ones land. Cleared on process restart.
@@ -148,7 +145,7 @@ const recordAudit = (entry: AuditEntry): void => {
 type AnyEvent = Committed<Schemas, string>;
 
 /**
- * Event-version classifier (ACT-403 mirror) — #708.
+ * Event-version classifier.
  *
  * The framework's `internal/event-versions.ts` owns the canonical
  * `_v<digits>` rule. The inspector can't reach into internal, so this
@@ -159,8 +156,8 @@ type AnyEvent = Committed<Schemas, string>;
  *   group, the highest version is "current", lower versions are
  *   "deprecated", standalone bases (no siblings) are "active".
  *
- * Kept inline so the inspector stays standalone — it queries a PG
- * store directly and never needs to import the running app's
+ * Kept inline so the inspector stays standalone — it queries the
+ * connected store directly and never needs to import the running app's
  * registry. The convention is documented in
  * `docs/docs/architecture/event-schema-evolution.md`, so duplicating
  * the rule here doesn't widen any unstable surface.
@@ -221,11 +218,9 @@ const toDate = (iso: string | undefined): Date | undefined =>
  *
  * Three members:
  * - `pg` — production path, constructs a `PostgresStore`.
- * - `sqlite` — reserved for #782 (SQLite `connect` branch); not yet
- *   reachable. Kept here so #781/#782 land additively rather than
- *   churning this declaration.
- * - `inmemory` — ephemeral, single-process. Used by ACT-1131's test
- *   suite and by future "demo / playground" affordances in the UI.
+ * - `sqlite` — constructs a `SqliteStore` against a file.
+ * - `inmemory` — ephemeral, single-process. Used by the test suite and
+ *   for demo / playground flows.
  *   No persistent config — every connect builds a fresh empty store.
  *
  * Read-only-after-connect: mutated exclusively by `connect` /
@@ -241,7 +236,7 @@ type PgConfig = {
   schema: string;
   table: string;
   /**
-   * TLS settings the store connected with (#1554). Held here because
+   * TLS settings the store connected with. Held here because
    * everything else that talks to the same server — the correlators
    * reader, which opens its own client against the framework's
    * `*_correlated` table — has to connect the same way. Dropping them
@@ -269,7 +264,7 @@ type InMemoryConfig = {
 type AdapterConfig = PgConfig | SqliteConfig | InMemoryConfig;
 
 /**
- * One side of a transfer (ACT-1128 / #788). The inspector's single
+ * One side of a transfer. The inspector's single
  * `transfer` mutation subsumes the prior backup / restore /
  * cross-adapter endpoints — both ends speak this discriminated
  * union. Some kinds are source-only (`upload`) and some are
@@ -304,7 +299,7 @@ let currentConfig: AdapterConfig | null = null;
 
 /**
  * Construct a per-call Store-shaped adapter for one side of a
- * transfer (ACT-1128 / #788). Maps the typed transfer endpoint to
+ * transfer. Maps the typed transfer endpoint to
  * a live adapter the pipeline can read from (`EventSource`) or
  * write into (`EventSink`).
  *
@@ -328,7 +323,7 @@ function buildPersistentAdapter(
       // commit/claim/subscribe — it's transfer-only). The cast is
       // safe because the transfer pipeline only calls `query` and
       // `restore` on the value; the other Store methods are never
-      // touched. Path is guarded (#1194) so a client can't read or
+      // touched. Path is guarded so a client can't read or
       // clobber files outside the inspector cwd.
       return new CsvFile({
         path: resolveUnderCwd(endpoint.file, "csv file"),
@@ -383,7 +378,7 @@ function sameEndpoint(a: TransferSource, b: TransferTarget): boolean {
 }
 
 /**
- * Restore progress pub-sub (ACT-1128).
+ * Restore progress pub-sub.
  *
  * The `restore` mutation pushes a `{ processed, total? }` event each
  * time `Act.restore`'s `on_progress` fires; the `restoreProgress`
@@ -490,9 +485,9 @@ function has_pending_work(p: StreamPosition): boolean {
 
 /**
  * Stream names whose subscription row is a leftover record of a retired
- * stream (#1535).
+ * stream.
  *
- * Since #1527 a full close leaves the subscription row in place. The row
+ * A full close leaves the subscription row in place. The row
  * is inert — a tombstoned stream refuses new commits, so nothing can
  * raise its work mark and no worker can claim it — but it still shows up
  * in `query_streams`, where it reads as a live subscription that happens
@@ -516,29 +511,10 @@ async function loadRetiredStreams(): Promise<Set<string>> {
   return retired;
 }
 
-// --- Discovery ---
-//
-// The inline PG-only block that lived here pre-ACT-1122 has moved to
-// `src/server/discovery/`. The router now dispatches to `runDiscovery`
-// with a discriminated-union input that picks PG (port scan) or SQLite
-// (directory glob) at the call site.
-
-// CSV parsing AND emission both live in the framework's `CsvFile`
-// utility (libs/act/src/csv.ts) as of ACT-1128. The inspector no
-// longer hand-rolls CSV anywhere — the unified `transfer` mutation
-// constructs `CsvFile` for upload-source, download-target, and
-// server-side file endpoints alike.
+// Discovery lives in `src/server/discovery/`; CSV parsing and emission
+// in the framework's `CsvFile` (libs/act/src/csv.ts).
 
 export const inspectorRouter = t.router({
-  /**
-   * Scan for Act event stores.
-   *
-   * Discriminated input — `{ kind: "pg" }` scans a TCP port range and
-   * walks credentials; `{ kind: "sqlite" }` globs a directory for SQLite
-   * files and probes each one's schema. The PG variant defaults its
-   * `kind` so existing frontend payloads (`{ host, portFrom, portTo }`)
-   * keep working unchanged.
-   */
   /**
    * List a directory's subdirectories, for picking a SQLite scan target.
    *
@@ -553,7 +529,7 @@ export const inspectorRouter = t.router({
     .query(({ input }) => browseDirectory(input?.path)),
 
   /**
-   * Who is looking for work, and how far they have got (#1539).
+   * Who is looking for work, and how far they have got.
    *
    * Pairs each correlator's reading position with the newest event id, so the
    * gap between them is the honest measure of "work exists but nobody has
@@ -561,7 +537,7 @@ export const inspectorRouter = t.router({
    * are all about work already noticed.
    *
    * Empty for an in-memory store, which keeps this in memory with no table
-   * behind it, and for stores predating #1532.
+   * behind it, and for stores without a keyed correlation checkpoint.
    */
   browse_correlators: t.procedure.query(async () => {
     const config = currentConfig;
@@ -580,6 +556,15 @@ export const inspectorRouter = t.router({
     return { correlators, maxEventId };
   }),
 
+  /**
+   * Scan for Act event stores.
+   *
+   * Discriminated input — `{ kind: "pg" }` scans a TCP port range and
+   * walks credentials; `{ kind: "sqlite" }` globs a directory for SQLite
+   * files and probes each one's schema. The PG variant defaults its
+   * `kind` so existing frontend payloads (`{ host, portFrom, portTo }`)
+   * keep working unchanged.
+   */
   discover: mutationProcedure
     .input(
       z.union([
@@ -622,7 +607,7 @@ export const inspectorRouter = t.router({
    *   silently initialized.
    * - `inmemory` constructs an `InMemoryStore` — ephemeral, single
    *   process, no persistent config. Useful for demo / playground
-   *   flows and for ACT-1131's test suite (real adapter, no mocking).
+   *   flows and for the test suite (real adapter, no mocking).
    */
   connect: mutationProcedure
     .input(
@@ -637,8 +622,8 @@ export const inspectorRouter = t.router({
           schema: z.string().default("public"),
           table: z.string().default("events"),
           ssl: z.boolean().default(false),
-          // Explicit, separate opt-out from TLS cert verification
-          // (#1195). `ssl:true` alone means *verified* TLS; an operator
+          // Explicit, separate opt-out from TLS cert verification.
+          // `ssl:true` alone means *verified* TLS; an operator
           // knowingly pointing at a self-signed / mismatched cert sets
           // this to true and eats a logged warning. Keeps `ssl:true`
           // honest — it no longer silently disables verification.
@@ -701,7 +686,7 @@ export const inspectorRouter = t.router({
         // Test the connection
         await newStore.query<Schemas>(() => {}, { limit: 1 });
         currentStore = newStore;
-        // TLS rides along (#1554) — the correlators reader opens its own
+        // TLS rides along — the correlators reader opens its own
         // client from this config and has to reach the same server.
         currentConfig = { adapter: "pg", ...pgConfig, ssl, sslInsecure };
         return {
@@ -735,7 +720,7 @@ export const inspectorRouter = t.router({
    * connected). `target` is the connected store's discriminator — the
    * database name for PG, the file path for SQLite, `"memory"` for
    * the ephemeral InMemory adapter — used by the restore UI as the
-   * typed-name gate on destructive operations (ACT-1128).
+   * typed-name gate on destructive operations.
    */
   status: t.procedure.query(() => {
     const target = ((): string | null => {
@@ -841,7 +826,7 @@ export const inspectorRouter = t.router({
 
   /** Get distinct stream names with per-stream metadata for the streams view.
    *
-   * Backed by `Store.query_stats` (ACT-639): one round trip per adapter,
+   * Backed by `Store.query_stats`: one round trip per adapter,
    * returns per-stream aggregates instead of streaming every event row over
    * the wire. For a store with 1M events / 10K streams this is ~100×
    * less data transferred than the previous full-event-scan path.
@@ -851,7 +836,7 @@ export const inspectorRouter = t.router({
    * (schema-evolution view, drill-through to legacy-event filters).
    * Sorting + limit stay client-side (the DB returns all matched streams).
    *
-   * Returns `{ streams, total }` rather than a bare array (#1546). The
+   * Returns `{ streams, total }` rather than a bare array. The
    * page is ordered by event count descending, so the rows the cap
    * discards are the *least* active streams — the population an
    * operator hunting a quiet or stalled stream is looking for. `total`
@@ -890,7 +875,7 @@ export const inspectorRouter = t.router({
           return {
             stream,
             eventCount: count ?? 0,
-            // ISO-8601, not `String(date)` (#1546). The Streams view
+            // ISO-8601, not `String(date)`. The Streams view
             // sorts its Age / Last columns on these strings, and
             // `Date.prototype.toString()` leads with the weekday
             // abbreviation — a lexical sort over it orders Fri, Mon,
@@ -898,25 +883,25 @@ export const inspectorRouter = t.router({
             // chronological order, parses everywhere, and keeps the
             // wire format free of the server's locale and timezone.
             lastEvent: head.created.toISOString(),
-            // Earliest event id + created (ACT-639 tail opt-in). Lets the
+            // Earliest event id + created. Lets the
             // Streams view render an "age" column and filter for stale
             // streams that haven't committed in N days. `tail` is always
             // present in this response because the query requested it.
             firstEvent: tail ? tail.created.toISOString() : null,
             currentVersion: head.version,
             isClosed,
-            // Retired for good (#1535): the tombstone is the only event
+            // Retired for good: the tombstone is the only event
             // left. Free here — the head and tail this query already
             // fetches are everything the test needs, so no extra round
             // trip and no per-row probe.
             isRetired: isRetiredStream(head, tail),
-            // Stream lifecycle affordances (#1174), derived from the head
+            // Stream lifecycle affordances, derived from the head
             // and tail the query already fetched:
             // - restarted: a full close reseeded it — the earliest event
             //   is a version-0 `__snapshot__`.
             // - pruned: a windowed close truncated history behind a real
             //   snapshot — the earliest event is a `__snapshot__` at a
-            //   version above 0 (#1011).
+            //   version above 0.
             isRestarted: tailIsSnapshot && tail!.version === 0,
             isPruned: tailIsSnapshot && tail!.version > 0,
             closeScheduled: autocloseTargets.has(stream) && !isClosed,
@@ -931,7 +916,7 @@ export const inspectorRouter = t.router({
     }),
 
   /**
-   * Full per-stream stats for the detail panel (#698). Fetched on
+   * Full per-stream stats for the detail panel. Fetched on
    * demand when the operator opens a stream in the Streams view —
    * cheaper than including head + tail Committed bodies in the
    * page-wide `streams` query, which would 100× the payload for the
@@ -946,7 +931,7 @@ export const inspectorRouter = t.router({
       z.object({
         stream: z.string().min(1),
         // Time-travel: include only events with `id < before` in the
-        // aggregation (#708 slice 5). Lets the detail panel answer
+        // aggregation. Lets the detail panel answer
         // "what did this stream look like before event N?". Default
         // (omitted) returns live stats — the full stream.
         before: z.number().int().positive().optional(),
@@ -986,12 +971,12 @@ export const inspectorRouter = t.router({
     }),
 
   /**
-   * Workspace event-name rollup with deprecation status (#708).
+   * Workspace event-name rollup with deprecation status.
    *
    * Aggregates per-stream event-name counts from
    * `query_stats({}, {names: true})` into a single workspace-wide
    * histogram, then applies the framework's `_v<digits>` deprecation
-   * rule (ACT-403) to label each name as `current` / `deprecated` /
+   * rule to label each name as `current` / `deprecated` /
    * `active`. Returns one row per distinct event name, sorted with
    * deprecated rows first (operator's main concern) then by count
    * descending.
@@ -1049,8 +1034,8 @@ export const inspectorRouter = t.router({
   }),
 
   /**
-   * Drill-through query: streams that still hold a given event name
-   * (#708). Used by the Schema Evolution view's modal — operator
+   * Drill-through query: streams that still hold a given event name.
+   * Used by the Schema Evolution view's modal — operator
    * clicks a deprecated event row, sees every stream where
    * `nameCounts[name] > 0`, sorted by per-stream count descending.
    *
@@ -1064,7 +1049,7 @@ export const inspectorRouter = t.router({
    * the lane + priority operators care about when deciding what to
    * close.
    *
-   * Both halves of the join are load-bearing (#1566). A failed positions
+   * Both halves of the join are load-bearing. A failed positions
    * read used to degrade to an empty list, and every row then reported
    * the *defaults* — `priority: 0`, `lane: null` — which read exactly
    * like a stream genuinely on the default lane. The lane and priority
@@ -1117,7 +1102,7 @@ export const inspectorRouter = t.router({
   /**
    * Get stream processing metadata from the streams table.
    *
-   * Reads fail loudly (#1552). An empty list is what a store with no
+   * Reads fail loudly. An empty list is what a store with no
    * subscriptions returns, so a swallowed fault — or simply not being
    * connected — was indistinguishable from "nothing is subscribed here".
    */
@@ -1131,7 +1116,7 @@ export const inspectorRouter = t.router({
       blocked: p.blocked,
       error: p.error || null,
       priority: p.priority,
-      // ACT-1103: drain lane the stream is bound to. `undefined`
+      // The drain lane the stream is bound to. `undefined`
       // (the implicit "default" lane) surfaces as null for the UI;
       // the Streams view dims it so non-default lanes pop.
       lane: p.lane ?? null,
@@ -1144,7 +1129,7 @@ export const inspectorRouter = t.router({
    * Get drain status: aggregate health + blocked streams + leases +
    * watermark histogram.
    *
-   * **Retired streams are counted apart from everything else** (#1535).
+   * **Retired streams are counted apart from everything else**.
    * Their subscription rows survive a full close and can never be
    * claimed again, so folding them into `healthy` / `lagging` — or into
    * the gap histogram, the priority and lane tallies, the blocked list —
@@ -1155,7 +1140,7 @@ export const inspectorRouter = t.router({
    * make. `total` therefore counts live subscriptions only, and the four
    * health buckets still sum to it.
    *
-   * **A row is retired only if it is also finished** (#1553). The retired
+   * **A row is retired only if it is also finished**. The retired
    * set is built from *event-stream* names and tested against
    * *subscription-target* names — two namespaces sharing one string
    * domain, and the documented per-aggregate shape
@@ -1166,7 +1151,7 @@ export const inspectorRouter = t.router({
    * can no longer disappear behind an unrelated retired stream that
    * happens to share its name.
    *
-   * **Faults are not answers** (#1552). The whole read fails rather than
+   * **Faults are not answers**. The whole read fails rather than
    * returning a zeroed snapshot — an all-clear on the framework's primary
    * "what is stuck right now?" surface is exactly the wrong thing to show
    * during the kind of incident that causes store faults.
@@ -1206,7 +1191,7 @@ export const inspectorRouter = t.router({
     // Streams per priority lane — operators want a quick read of
     // "how many things are at priority > 0 right now."
     const priorityCounts = new Map<number, number>();
-    // Streams per drain lane (ACT-1103). `undefined`/`"default"`
+    // Streams per drain lane. `undefined`/`"default"`
     // normalize to `"default"` so the histogram bucket renders one
     // consistent label.
     const laneCounts = new Map<string, number>();
@@ -1232,7 +1217,7 @@ export const inspectorRouter = t.router({
         });
         continue;
       }
-      // Pending work, not distance to the head (#1521). A subscription's
+      // Pending work, not distance to the head. A subscription's
       // watermark advances only over events that resolve to it, so a
       // reaction handling a subset of a state's events sits permanently
       // below the head with nothing to do — and showed here as a large gap,
@@ -1332,7 +1317,7 @@ export const inspectorRouter = t.router({
   }),
 
   /**
-   * Inspector write-mode status (#698). Tells the UI whether mutation
+   * Inspector write-mode status. Tells the UI whether mutation
    * controls should render. Read-only by default; flipped on via the
    * `ACT_INSPECTOR_WRITE=1` env var at server start. The flag is
    * server-static — the UI doesn't get to toggle it, so refresh of a
@@ -1347,8 +1332,8 @@ export const inspectorRouter = t.router({
   })),
 
   /**
-   * Bulk-update the scheduling priority of streams matching a filter
-   * (#698 / ACT-102). Wraps `Store.prioritize`. Filter shape mirrors
+   * Bulk-update the scheduling priority of streams matching a filter.
+   * Wraps `Store.prioritize`. Filter shape mirrors
    * `query_streams` so the UI can preview affected counts via the
    * existing query before committing the mutation.
    *
@@ -1389,14 +1374,14 @@ export const inspectorRouter = t.router({
       return { ok: true as const, affected };
     }),
 
-  /** Last 100 mutations performed via the inspector (#698). */
+  /** Last 100 mutations performed via the inspector. */
   audit: t.procedure.query(() => ({
     entries: [...auditLog].reverse(),
     capacity: AUDIT_CAPACITY,
   })),
 
   /**
-   * Server-sent stream of restore progress events (ACT-1128).
+   * Server-sent stream of restore progress events.
    *
    * Each `Act.restore` `on_progress` tick on the server pushes one
    * `{ processed, total? }` event to every active subscriber. The
@@ -1419,7 +1404,7 @@ export const inspectorRouter = t.router({
   }),
 
   /**
-   * One unified event-transfer mutation (ACT-1128 / #788). Subsumes
+   * One unified event-transfer mutation. Subsumes
    * the prior `backup`, `restore`, and cross-adapter `transfer`
    * endpoints. Source and target are independent endpoints —
    * either side can be the connected store, an uploaded CSV blob
@@ -1511,19 +1496,19 @@ export const inspectorRouter = t.router({
           .optional(),
         dry_run: z.boolean().optional(),
         drop_snapshots: z.boolean().optional(),
-        // Compaction (ACT-1126). Pre-pass collects tombstoned streams
+        // Compaction. Pre-pass collects tombstoned streams
         // and the main scan drops every event from those streams,
         // including the tombstones themselves and any pre-close
         // events. Useful when an operator wants the new (migrated)
         // store to contain only currently-live streams.
         drop_closed_streams: z.boolean().optional(),
-        // Per-batch row count for the scan pagination loop (ACT-1133).
+        // Per-batch row count for the scan pagination loop.
         // Lower trades round trips for memory; higher approaches the
         // cost of an unbounded query. Bounded to a sensible operator
         // range — too small thrashes round trips; too large defeats
         // the bounded-memory point.
         batch_size: z.number().int().min(50).max(10_000).optional(),
-        // Stream rename (ACT-1126). An ordered list of regex pairs —
+        // Stream rename. An ordered list of regex pairs —
         // server compiles them into a per-event renaming function that
         // runs `acc.replace(pattern_i, replacement_i)` in sequence, so
         // each rule sees the previous rule's output. Covers two
@@ -1544,7 +1529,7 @@ export const inspectorRouter = t.router({
           )
           .optional(),
         // Path (relative to the inspector server's cwd) to an
-        // operator-authored migrations module — ACT-1126. The module's
+        // operator-authored migrations module. The module's
         // default export is `Record<string, EventMigration>`. Zod
         // schemas + transform functions can't be JSON-encoded for a
         // tRPC input, so the file-on-disk indirection is the honest
@@ -1554,7 +1539,7 @@ export const inspectorRouter = t.router({
       })
     )
     .mutation(async ({ input }) => {
-      // Write-mode gate (#1194). A transfer that materially writes to a
+      // Write-mode gate. A transfer that materially writes to a
       // persistent target — the connected store, a server-side CSV /
       // SQLite / PG destination — is destructive and refuses to run in
       // read-only mode, exactly like `prioritize`. Dry-runs (in-memory
@@ -1622,9 +1607,7 @@ export const inspectorRouter = t.router({
         if (!currentStore)
           throw new Error("Not connected — `current` target unavailable");
         if (!currentStore.restore)
-          throw new Error(
-            "Connected adapter has no restore capability — see ACT-1124"
-          );
+          throw new Error("Connected adapter has no restore capability");
         target = currentStore;
       } else if (input.target.adapter === "download") {
         downloadPath = join(
@@ -1685,7 +1668,7 @@ export const inspectorRouter = t.router({
       // are passed explicitly so `Act.restore` never falls back to
       // the singleton store.
       const app = act().build();
-      // Migration overlay (ACT-1126) — compile the regex pair into a
+      // Migration overlay — compile the regex pair into a
       // function, dynamic-import the operator-authored migrations
       // module. Both optional; both rejected if invalid before any
       // restore call so the operator gets a clear error instead of a
@@ -1719,7 +1702,7 @@ export const inspectorRouter = t.router({
         // filesystem. The inspector is intentionally a thin tool; if
         // the migrations live elsewhere the operator can stage them
         // under cwd first. Shares the guard with the csv/sqlite file
-        // paths (#1194).
+        // paths.
         const abs = resolveUnderCwd(
           input.event_migrations_path,
           "event_migrations_path"

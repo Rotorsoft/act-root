@@ -13,7 +13,7 @@ type EventRow = {
 type SortKey = "name" | "status" | "count";
 
 /**
- * Schema Evolution view (#708).
+ * Schema Evolution view.
  *
  * Renders the workspace event-name rollup with deprecation status —
  * derived from the framework's `_v<digits>` convention. Operators
@@ -281,7 +281,7 @@ function EventNameRow({
 
 /**
  * Modal listing every stream that holds at least one event of the
- * named type (#708 slice 4). Built from the `streamsForEvent` tRPC
+ * named type. Built from the `streamsForEvent` tRPC
  * query — pure read, no destructive actions from the inspector.
  *
  * Operators select rows + copy stream names (or a ready-to-paste
@@ -413,7 +413,7 @@ function StreamsForEventModal({
           </div>
           {query.isError ? (
             // The lane + priority columns come from a second read, and a
-            // failed one used to fill them with defaults (#1566). "No
+            // failed one used to fill them with defaults. "No
             // streams hold this event" would be the same lie in list form.
             <ReadFailed
               title="Couldn't read the streams holding this event"

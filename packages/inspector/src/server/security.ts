@@ -1,5 +1,5 @@
 /**
- * HTTP-boot security policy (#1195).
+ * HTTP-boot security policy.
  *
  * The pure decision functions live here — separate from `server.ts`,
  * which is the un-unit-tested boot wiring — so the bind-host default,
@@ -82,7 +82,7 @@ export function isOriginAllowed(
 }
 
 /**
- * Mutating-procedure origin guard (#1195). A cross-site request can
+ * Mutating-procedure origin guard. A cross-site request can
  * omit the `Origin` header, so we don't let an origin-less request
  * reach a *mutating* tRPC procedure unless an explicit allowlist is
  * configured (which pins the caller). Reads are unaffected — they

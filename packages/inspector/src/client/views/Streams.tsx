@@ -9,7 +9,7 @@ type StreamRow = {
   firstEvent: string | null;
   currentVersion: number;
   isClosed?: boolean;
-  // Stream lifecycle affordances (#1174), derived server-side from the
+  // Stream lifecycle affordances, derived server-side from the
   // head/tail the streams query already fetches plus the subscriptions
   // table: restarted = reseeded by a full close (earliest event is a
   // version-0 snapshot); pruned = windowed close truncated history
@@ -18,11 +18,11 @@ type StreamRow = {
   isRestarted?: boolean;
   isPruned?: boolean;
   closeScheduled?: boolean;
-  // Retired for good (#1535): the tombstone is the only event left.
+  // Retired for good: the tombstone is the only event left.
   // Stronger than `isClosed`, which a failed close also satisfies while
   // the stream's real events are still there.
   isRetired?: boolean;
-  // Joined from streamMeta (#698 slice 2). Null when the stream has no
+  // Joined from streamMeta. Null when the stream has no
   // subscription row yet — i.e., no reaction targets it, so it has no
   // priority or lane assignment. Default zero / "default" inferred.
   priority: number;
@@ -38,7 +38,7 @@ type StreamRow = {
 type RetiredMode = "hide" | "show" | "only";
 
 /**
- * What a retired stream's surviving subscription row records (#1535):
+ * What a retired stream's surviving subscription row records:
  * the last event its consumer reached, which can never advance now. `-1`
  * is the never-consumed watermark; `null` means no subscription row
  * survived to record anything.
@@ -52,7 +52,7 @@ function retirementRecord(at: number | null): string {
 }
 
 /**
- * Lifecycle chip next to the stream name (#1174). Same visual shape as
+ * Lifecycle chip next to the stream name. Same visual shape as
  * the original `closed` badge; color communicates severity — closed is
  * terminal (red), restarted/pruned are informational history markers,
  * close-scheduled is a pending-policy hint.
@@ -88,8 +88,7 @@ type SortKey =
 const STALE_DAY_OPTIONS = [7, 14, 30, 90];
 
 /**
- * Inline-editable scheduling priority cell on the Streams view (#698
- * slice 5). Click the value to switch into a numeric input;
+ * Inline-editable scheduling priority cell on the Streams view. Click the value to switch into a numeric input;
  * Enter / blur commits via `Store.prioritize({stream_exact:true})`.
  * Esc reverts. When write mode is off the cell stays display-only and
  * surfaces the reason in the tooltip.
@@ -183,7 +182,7 @@ function PriorityCell({
  * `streams` query serves, or 0 when the stream has none. Sorting and
  * the staleness filter both read timestamps as instants — never as
  * strings, which is how the "Last" column once ended up ordered by
- * weekday name (#1546).
+ * weekday name.
  */
 function timestamp(iso: string | null): number {
   if (!iso) return 0;
@@ -230,7 +229,7 @@ export function Streams({
   // long-lived streams that have gone quiet; this turns that into one
   // click.
   const [staleDays, setStaleDays] = useState(0);
-  // Retired streams (#1535) are finished work: closed for good, nothing
+  // Retired streams are finished work: closed for good, nothing
   // left but a tombstone, and a subscription row that survives as a
   // record. Hidden by default so they stay out of the way of anyone
   // debugging delivery; "only" is the audit view of what was closed.
@@ -247,7 +246,7 @@ export function Streams({
   const metaQuery = trpc.streamMeta.useQuery(undefined, {
     staleTime: 3_000,
   });
-  // Write-mode probe (#698 slice 4). Drives whether the inline
+  // Write-mode probe. Drives whether the inline
   // priority editor is interactive or display-only. Cached for the
   // session — flipping the env var requires a server restart anyway.
   const writeModeQuery = trpc.writeMode.useQuery(undefined, {
@@ -383,7 +382,7 @@ export function Streams({
             showing {streams.length} of {totalStreams}
           </span>
         )}
-        {/* The subscription join failed (#1552). Pri / Lane / At are read
+        {/* The subscription join failed. Pri / Lane / At are read
             from it, and their defaults — p=0, default lane, no watermark —
             are legitimate values, so the columns must be called out as
             unread rather than left to read as facts. */}
@@ -469,7 +468,7 @@ export function Streams({
             <button
               onClick={() => handleSort("lane")}
               className="w-20 shrink-0 text-left hover:text-zinc-300"
-              title="Drain lane (ACT-1103)"
+              title="Drain lane"
             >
               Lane{sortArrow("lane")}
             </button>
@@ -626,7 +625,7 @@ export function Streams({
 
 /**
  * Head / tail indicators rendered above the event list when a stream
- * is selected (#698 follow-up). Two compact cards sharing the same
+ * is selected. Two compact cards sharing the same
  * font + spacing, one per end of the stream:
  *
  *   ┌──────────────────────────┬──────────────────────────┐
@@ -658,14 +657,14 @@ function StreamStatsHeader({
 }) {
   if (!stats) return null;
   const sameEvent = stats.tail && stats.tail.id === stats.head.id;
-  // Lifecycle line (#1174): the same tail-shape derivations the row
+  // Lifecycle line: the same tail-shape derivations the row
   // badges use, but with the boundary's date — the operator's cue that
   // a short-looking log is intentionally windowed, not young.
   const pruned = stats.tail?.name === "__snapshot__" && stats.tail.version > 0;
   const restarted =
     stats.tail?.name === "__snapshot__" && stats.tail.version === 0;
   const closed = stats.head.name === "__tombstone__";
-  // Retired (#1535): the tombstone is the only event left, which is what
+  // Retired: the tombstone is the only event left, which is what
   // a full close leaves behind. A close that failed after committing its
   // guard tombstone is `closed` but not retired — its real events are
   // still here.
@@ -770,7 +769,7 @@ function StreamDetail({
   /**
    * The stream's subscription watermark, or null when it has no
    * subscription row. Only read on a retired stream, where it is the
-   * record of where consumption stopped (#1535).
+   * record of where consumption stopped.
    */
   watermark: number | null;
   onTrace?: (id: string) => void;
@@ -781,7 +780,7 @@ function StreamDetail({
     { stream, limit: 100, backward: true },
     { staleTime: 3_000 }
   );
-  // Head + tail stats — fetched on demand, one stream at a time (#698).
+  // Head + tail stats — fetched on demand, one stream at a time.
   //
   // Efficiency contract (don't tighten without revisiting):
   // - Mount-driven: this hook lives in `StreamDetail`, which is only

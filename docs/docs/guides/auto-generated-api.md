@@ -373,6 +373,8 @@ Both `trpc(app, { sse })` and `hono(app, { sse })` accept an optional SSE wiring
 
 A state whose events declare `sensitive(...)` fields can't be served over SSE: generating either transport with `sse` for an app that has one throws at build. The channel caches one state per stream, folded over whichever actor committed last, and sends it to every subscriber, so it would hand one actor's plaintext to everyone and overwrite the owner's view with `[REDACTED]`. Generate without `sse`, or keep the sensitive fields in a state you don't broadcast.
 
+The host builds the state and patches it publishes as [Broadcasting a commit](../concepts/real-time.md#broadcasting-a-commit) shows, including the empty patch a `.snap` needs.
+
 ```ts no-check
 import { BroadcastChannel } from "@rotorsoft/act-http/sse";
 import { trpc } from "@rotorsoft/act-http/trpc";
@@ -380,13 +382,9 @@ import { hono } from "@rotorsoft/act-http/hono";
 
 const broadcast = new BroadcastChannel<MyState>();
 
-// Server-side: after every app.do(...), publish the derived state.
-const snaps = await app.do(action, target, payload);
-broadcast.publish(
-  target.stream,
-  deriveState(snaps),
-  snaps.map((s) => s.patch).filter(Boolean)
-);
+// Server-side: after every app.do(...), publish the state and its
+// patches, built as "Broadcasting a commit" in the real-time guide shows.
+broadcast.publish(target.stream, state, patches);
 
 // tRPC — emits one subscription per registered state under
 // `router.subscribe.<stateName>`.

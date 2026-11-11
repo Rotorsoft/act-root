@@ -19,8 +19,13 @@ export const Reminders = state({
     RemindersEnded: () => ({ ended: true }),
   })
   .on({ remind: z.object({ nth: z.number() }) })
+    .requires([{
+      description: "the next tick of a running series",
+      holds: ({ nth }, { sent, ended }) => !ended && nth === sent + 1,
+    }])
     .emit((a) => ["Reminded", a])
   .on({ endReminders: ZodEmpty })
+    .requires([{ description: "a running series", holds: (_, { ended }) => !ended }])
     .emit(() => ["RemindersEnded", {}])
   .autocloses({ is: "RemindersEnded" })
   .build();
@@ -34,8 +39,8 @@ act()
   .on("Reminded")
     .defer(opts.schedule)
     .do(async function nudge(event, stream, app) {
-      // Only advance from the tick at head (see Failure modes).
-      const target = { stream, actor: SYS, expectedVersion: event.version };
+      // The rules refuse a tick that already advanced (see Failure modes).
+      const target = { stream, actor: SYS };
       try {
         if (event.data.nth >= opts.max) {
           await app.do("endReminders", target, {});
@@ -44,7 +49,8 @@ act()
         await opts.onRemind?.(event.data.nth);
         await app.do("remind", target, { nth: event.data.nth + 1 });
       } catch (error) {
-        if (!(error instanceof ConcurrencyError)) throw error;
+        if (!(error instanceof PreconditionError) && !(error instanceof ConcurrencyError))
+          throw error;
       }
     })
   .build();
@@ -145,7 +151,7 @@ Every tick's next due-time must derive from that tick's own `created` (or from i
 What happens when the machinery under the loop hiccups:
 
 - **The finalize write fails, or a worker crashes mid-finalize.** Nothing lands and the tick redelivers, as [close-cycle § Defer, not poll](../../../docs/docs/architecture/close-cycle.md#defer-not-poll) explains. Your handler re-throws its `DeferSignal`, and because the due-time derives from the tick (the durability rule above), it resolves to the same instant on whichever worker picks it up. The failure mode is an early redelivery of one tick, never a stalled loop.
-- **The tick is redelivered after its handler already ran.** The handler sent the nudge and committed the next tick, and then the ack failed or the lease was lost. Delivery is at-least-once, so the same tick runs again. Without a guard, that second run commits a second next tick, each copy schedules its own follow-up, and every tick from then on fires twice, forever ([#1744](https://github.com/Rotorsoft/act-root/issues/1744)). The handler prevents this by committing with `expectedVersion: event.version`: the follow-up lands only if nothing has been committed after the tick being handled. A redelivered tick gets a `ConcurrencyError`, which the handler takes as "already advanced". The nudge itself can still repeat once, so the side effect has to tolerate a duplicate, like any at-least-once handler.
+- **The tick is redelivered after its handler already ran.** The handler sent the nudge and committed the next tick, and then the ack failed or the lease was lost. Delivery is at-least-once, so the same tick runs again. Without a guard, that second run commits a second next tick, each copy schedules its own follow-up, and every tick from then on fires twice, forever ([#1744](https://github.com/Rotorsoft/act-root/issues/1744)). The rules on the two actions prevent this: `remind` takes only the tick after the last one sent, and `endReminders` only a running series, so a redelivered tick is refused with a `PreconditionError`, which the handler takes as "already advanced" (a `ConcurrencyError` means another worker got there first). The rules read the state, not the stream version: a pin like `expectedVersion: event.version` would be one behind after every `.snap`, refuse every tick and end the loop. The nudge itself can still repeat once, so the side effect has to tolerate a duplicate, like any at-least-once handler.
 
 A failed finalize needs nothing else to drive the retry. After a crash, the restarted worker drains on startup.
 

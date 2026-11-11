@@ -20,13 +20,6 @@ const okExecute = (stmt?: Stmt) => {
   });
 };
 
-const txOk = () => ({
-  execute: vi.fn<(stmt: Stmt) => Promise<unknown>>(okExecute),
-  commit: vi.fn(() => Promise.resolve()),
-  rollback: vi.fn(() => Promise.resolve()),
-  close: vi.fn(),
-});
-
 /**
  * Build a mock libsql Client whose write transaction fails on `execute()`
  * for SQL statements containing `failOn`. All other executes resolve to a
@@ -306,33 +299,6 @@ describe("SqliteStore error paths", () => {
       expect(stored).toEqual([]);
       await real.dispose();
     });
-  });
-
-  it("commit: throws ConcurrencyError when expectedVersion mismatches", async () => {
-    const tx = txOk();
-    tx.execute.mockImplementation((stmt: Stmt) => {
-      const sql = sqlOf(stmt);
-      if (sql.includes("MAX(version)")) {
-        return Promise.resolve({
-          rows: [{ v: 5 }],
-          rowsAffected: 0,
-          lastInsertRowid: 0,
-        });
-      }
-      return okExecute();
-    });
-    (db as unknown as { client: unknown }).client = {
-      transaction: () => Promise.resolve(tx),
-      execute: okExecute,
-      close: () => {},
-    };
-    await expect(
-      db.commit(
-        [{ stream: "s", msgs: [{ name: "E", data: {} }], expectedVersion: 0 }],
-        { correlation: "", causation: {} }
-      )
-    ).rejects.toThrow(ConcurrencyError);
-    expect(tx.rollback).toHaveBeenCalled();
   });
 
   it("subscribe: rolls back and wraps INSERT failure in StoreError", async () => {

@@ -1,5 +1,5 @@
 /**
- * SQLite discovery probe (ACT-1122).
+ * SQLite discovery probe.
  *
  * Scans a directory for files matching a glob (default
  * `\.(db|sqlite|sqlite3)$`) and verifies each one is an Act SQLite
