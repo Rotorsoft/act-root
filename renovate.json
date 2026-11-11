@@ -77,6 +77,24 @@
       "groupName": "react"
     },
     {
+      "description": "Minor and patch updates of the packages above join the weekly non-major PR, so their peer and dev entries still move together, without a PR and a release for each package. Majors keep their own PRs. The dev-dependencies group stays: it keeps dev-only bumps as chore(deps), which release nothing.",
+      "matchPackageNames": [
+        "zod",
+        "vitest",
+        "@fast-check/vitest",
+        "hono",
+        "@hono/node-server",
+        "express",
+        "fastify",
+        "prom-client",
+        "@trpc/**",
+        "react",
+        "react-dom"
+      ],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "Non-major dependencies"
+    },
+    {
       "description": "The Node engines floor (22) is the oldest runtime the published libraries support, tested weekly by node-compat in conformance.yml. Raising it breaks every install on an older Node, so it changes only by hand, in a major release, together with @types/node (the rule above). Renovate otherwise bumps `engines.node` like any dependency (#2282 proposed >=26 across every library).",
       "matchDepTypes": ["engines"],
       "matchPackageNames": ["node"],
