@@ -4,7 +4,6 @@
   "extends": [
     "config:recommended",
     ":automergePatch",
-    ":maintainLockFilesWeekly",
     ":enableVulnerabilityAlerts",
     "helpers:pinGitHubActionDigests"
   ],
@@ -84,9 +83,5 @@
       "enabled": false
     }
   ],
-  "lockFileMaintenance": {
-    "enabled": true,
-    "schedule": ["before 3am on monday"]
-  },
   "rangeStrategy": "bump"
 }
