@@ -1,7 +1,7 @@
 import { TRANSFER_DEFAULTS, type TransferEndpoint } from "./types.js";
 
 /**
- * One side of a transfer (ACT-1128 / #788). Picks the endpoint
+ * One side of a transfer. Picks the endpoint
  * adapter kind then renders the matching field set. The two-tier
  * mental model is enforced visually: "Connected store" is a
  * one-line summary; "Upload" / "Download" have no fields;

@@ -3,7 +3,7 @@ import { DroppedBreakdown } from "./DroppedBreakdown.js";
 import type { ScanResult } from "./types.js";
 
 /**
- * Post-transfer summary panel (ACT-1128).
+ * Post-transfer summary panel.
  *
  * Renders the final `ScanResult` plus the post-transfer operator
  * reminder when the target was the connected store: rebuildable

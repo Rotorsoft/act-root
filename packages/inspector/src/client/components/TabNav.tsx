@@ -34,8 +34,8 @@ type TabNavProps = {
   active: Tab;
   onChange: (tab: Tab) => void;
   /**
-   * Blocked streams right now. `null` means unknown — the read failed
-   * (#1552) — and renders as a muted "?" instead of no badge at all,
+   * Blocked streams right now. `null` means unknown — the read failed,
+   * and renders as a muted "?" instead of no badge at all,
    * which would read as "nothing is blocked".
    */
   blockedCount?: number | null;

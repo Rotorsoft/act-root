@@ -1,5 +1,5 @@
 /**
- * Compaction toggles section of the restore dialog (ACT-1128, ACT-1126).
+ * Compaction toggles section of the restore dialog.
  *
  * `drop_snapshots` drops `__snapshot__` events so the next snap policy
  * regenerates them with current state. `drop_closed_streams` walks the

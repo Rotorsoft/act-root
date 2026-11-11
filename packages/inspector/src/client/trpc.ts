@@ -18,7 +18,7 @@ export const queryClient = new QueryClient({
 // `splitLink` routes subscriptions over SSE (`httpSubscriptionLink`)
 // and everything else over the existing `httpLink`. This keeps the
 // server on a plain HTTP adapter (no WS) while still pushing
-// reactive `restoreProgress` events to the client (ACT-1128).
+// reactive `restoreProgress` events to the client.
 const url = (import.meta.env.VITE_API_URL as string) || "/trpc";
 export const trpcClient = trpc.createClient({
   links: [

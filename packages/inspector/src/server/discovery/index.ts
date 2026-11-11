@@ -1,5 +1,5 @@
 /**
- * Adapter-pluggable discovery dispatcher (ACT-1122).
+ * Adapter-pluggable discovery dispatcher.
  *
  * The router's `discover` tRPC procedure forwards to `runDiscovery`,
  * which branches on the input's `kind` discriminator. Adding a new

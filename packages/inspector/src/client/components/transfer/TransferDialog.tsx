@@ -13,7 +13,7 @@ import {
 } from "./types.js";
 
 /**
- * The one transfer dialog (ACT-1128 / #788), now structured as a
+ * The one transfer dialog, now structured as a
  * four-step wizard: Source → Target → Options → Summary. The single
  * crowded panel was hard to scan; splitting it lets each step focus
  * on one decision and validates in order.
@@ -41,7 +41,7 @@ export function TransferDialog({ onClose }: { onClose: () => void }) {
   const [dropSnapshots, setDropSnapshots] = useState(false);
   const [dropClosedStreams, setDropClosedStreams] = useState(false);
   const [batchSize, setBatchSize] = useState(500);
-  // Migration overlay (ACT-1126). Stream rename is an ordered list —
+  // Migration overlay. Stream rename is an ordered list —
   // each rule fires in turn against the running output, so independent
   // renames and chained refinements both work. Empty list = no
   // renames; we ship `undefined` so scan skips the overlay entirely.

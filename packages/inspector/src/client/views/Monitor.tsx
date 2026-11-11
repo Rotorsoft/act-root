@@ -7,7 +7,7 @@ type MonitorProps = {
   onStream?: (stream: string) => void;
   /**
    * Blocked-stream count for the tab badge. `null` means the count could
-   * not be read (#1552) — the badge says so rather than reporting zero,
+   * not be read — the badge says so rather than reporting zero,
    * which is what a healthy system looks like.
    */
   onBlockedCount?: (count: number | null) => void;
@@ -17,7 +17,7 @@ export function Monitor({ onStream, onBlockedCount }: MonitorProps) {
   const statusQuery = trpc.drainStatus.useQuery(undefined, {
     staleTime: 2_000,
   });
-  // Write-mode + audit log (#698 slice 5). Both refresh on a mutation
+  // Write-mode + audit log. Both refresh on a mutation
   // commit through `useUtils().audit.invalidate()` from the
   // PriorityCell on the Streams view.
   const writeModeQuery = trpc.writeMode.useQuery(undefined, {
@@ -27,7 +27,7 @@ export function Monitor({ onStream, onBlockedCount }: MonitorProps) {
     staleTime: 2_000,
     refetchInterval: 5_000,
   });
-  // Who is looking for new work, and how far behind that has fallen (#1539).
+  // Who is looking for new work, and how far behind that has fallen.
   // Polled on the same cadence as the audit log — this is a small read of a
   // tiny table, not a per-stream probe.
   const correlatorsQuery = trpc.browse_correlators.useQuery(undefined, {
@@ -47,7 +47,7 @@ export function Monitor({ onStream, onBlockedCount }: MonitorProps) {
   const data = statusQuery.data;
 
   // Report blocked count for tab badge. A failed read reports "unknown"
-  // rather than zero (#1552); while it is merely loading, the badge keeps
+  // rather than zero; while it is merely loading, the badge keeps
   // whatever it last knew.
   useEffect(() => {
     if (statusQuery.isError) onBlockedCount?.(null);
@@ -67,7 +67,7 @@ export function Monitor({ onStream, onBlockedCount }: MonitorProps) {
     [data?.activeLeases, priorityFilter, laneFilter]
   );
 
-  // A failed read is not an idle system (#1552). Say what happened, and
+  // A failed read is not an idle system. Say what happened, and
   // offer the retry — never a page of zeros with a fresh timestamp on it.
   if (statusQuery.isError) {
     return (
@@ -227,7 +227,7 @@ export function Monitor({ onStream, onBlockedCount }: MonitorProps) {
             ))
           )}
 
-          {/* Retired subscriptions (#1535). Last panel on purpose —
+          {/* Retired subscriptions. Last panel on purpose —
               nothing here is a problem to chase. It answers two
               questions: what was closed for good, and how far each
               consumer got before it was. */}
@@ -291,14 +291,12 @@ export function Monitor({ onStream, onBlockedCount }: MonitorProps) {
 }
 
 /**
- * Right-side panel surfacing inspector-driven mutations (#698 slice
- * 5). Shows the read-only-mode reason when writes are gated; otherwise
+ * Right-side panel surfacing inspector-driven mutations. Shows the read-only-mode reason when writes are gated; otherwise
  * lists the last 10 audit entries with timestamp + action + affected
  * count. Cleared on server restart — this is operational breadcrumbs,
  * not a compliance log.
  */
-// ACT-1127 widened the audit log to a discriminated union — restore
-// entries carry the full ScanResult instead of priority/affected.
+// The audit log is a discriminated union: restore entries carry the full ScanResult instead of priority/affected.
 type AuditEntry =
   | {
       timestamp: string;
@@ -683,7 +681,7 @@ function LeaseRow({
 }
 
 /**
- * One leftover subscription of a stream closed for good (#1535).
+ * One leftover subscription of a stream closed for good.
  *
  * The watermark reads as a record — "reached #N" — rather than the
  * `at:` / `gap:` pair the live rows use, because it is the last thing
@@ -773,7 +771,7 @@ function Histogram({
 }
 
 /**
- * Who is looking for new work, and how far behind they are (#1539).
+ * Who is looking for new work, and how far behind they are.
  *
  * Before a reaction can run, something has to read new events and note which
  * reactions care. One worker does that on behalf of the rest, holding a short
@@ -797,7 +795,7 @@ function CorrelatorsPanel({
   }>;
   maxEventId: number;
   /**
-   * Why the read failed, when it did (#1554). The empty state below names
+   * Why the read failed, when it did. The empty state below names
    * a specific, benign cause — it may only be shown when the read
    * succeeded and there was genuinely nothing there.
    */

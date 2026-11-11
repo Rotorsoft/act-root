@@ -8,7 +8,7 @@ import {
 } from "./SqliteScanDialog.js";
 
 /**
- * Connection persistence (ACT-1123).
+ * Connection persistence.
  *
  * Saved connections widen to a discriminated union so SQLite entries
  * can live alongside PG ones in the same localStorage list. Pre-1.1
@@ -67,8 +67,8 @@ function loadSaved(): Connection[] {
     const raw = localStorage.getItem("inspector:connections");
     if (!raw) return [];
     const parsed: unknown[] = JSON.parse(raw);
-    // Migrate legacy entries (no `kind` field) and pre-ACT-1123
-    // payloads that may have carried `password: ""` — strip explicitly.
+    // Migrate legacy entries (no `kind` field) and older payloads
+    // that may have carried `password: ""` — strip explicitly.
     return parsed.map((c) => {
       const obj = c as Record<string, unknown>;
       const isPg = !("kind" in obj) || obj.kind === "pg";

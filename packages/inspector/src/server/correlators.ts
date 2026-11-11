@@ -1,9 +1,9 @@
 /**
- * Reading who is looking for work, and how far they have got (#1539).
+ * Reading who is looking for work, and how far they have got.
  *
  * The inspector can show how far each reaction has progressed, but nothing
  * about the step *before* that: something has to read new events and note
- * which reactions care. Since [#1532] one worker does that on behalf of the
+ * which reactions care. Since one worker does that on behalf of the
  * rest, holding a short claim on the job — so if it dies, nothing is noticed
  * until the claim lapses. That is bounded and self-healing, and until now
  * completely invisible.
@@ -43,7 +43,7 @@ export type CorrelatorsConfig =
       readonly schema: string;
       readonly table: string;
       /**
-       * TLS, on the same terms the store connects with (#1554). Without
+       * TLS, on the same terms the store connects with. Without
        * these the reader could never reach a Postgres that requires TLS —
        * RDS, Neon, Supabase — while the store connected fine, leaving the
        * panel permanently dark on exactly the deployments where its
@@ -58,10 +58,10 @@ export type CorrelatorsConfig =
  * Is this failure the benign one — no such table, or the older shape?
  *
  * An in-memory store keeps this in memory with no table behind it, and a
- * store that predates [#1532] has the older single-row shape. Those two are
+ * store that predates has the older single-row shape. Those two are
  * worth nothing more than an empty panel. A refused connection, a
  * permission error or a wrong schema are not, and used to arrive at the
- * operator wearing the same clothes (#1554).
+ * operator wearing the same clothes.
  *
  * Postgres says so by error code — undefined table, undefined column, or a
  * schema that isn't there; SQLite says so in the message.

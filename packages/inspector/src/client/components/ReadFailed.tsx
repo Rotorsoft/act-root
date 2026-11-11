@@ -1,7 +1,7 @@
 import { AlertTriangle } from "lucide-react";
 
 /**
- * A read that failed, said out loud (#1552 / #1554 / #1566).
+ * A read that failed, said out loud.
  *
  * The panels this replaces used to render a failed read as data — a zeroed
  * dashboard, an empty list, a plausible default — which is the one thing an

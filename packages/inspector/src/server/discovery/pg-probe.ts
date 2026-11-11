@@ -1,5 +1,5 @@
 /**
- * Postgres discovery probe (ACT-1122).
+ * Postgres discovery probe.
  *
  * Lifted verbatim from the original inline `router.ts` discover block —
  * port range scan in parallel, credential walk per open port, schema

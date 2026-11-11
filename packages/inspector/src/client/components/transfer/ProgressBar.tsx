@@ -2,7 +2,7 @@
  * In-flight restore progress display.
  *
  * When the source is indexed (PostgresStore / SqliteStore), `scan`
- * probes the max id up front (ACT-1133) and the progress events
+ * probes the max id up front and the progress events
  * carry `{ processed, id, max_id }` — we render a determinate
  * `id / max_id` bar. Sources that can't expose `max_id` (`CsvFile`)
  * fall back to the running `processed` counter against an

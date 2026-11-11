@@ -1,5 +1,5 @@
 /**
- * Shared types for the discovery module (ACT-1122).
+ * Shared types for the discovery module.
  *
  * `DiscoveredStore` is the response shape the inspector hands back to
  * the UI — a discriminated union over `kind` so the connection panel
