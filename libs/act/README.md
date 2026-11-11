@@ -143,7 +143,7 @@ await app.unblock({ stream: "^webhooks-out-" }); // bulk
 ## Compatibility
 
 - **Node**: >=22.23.4
-- **Peer**: `zod` ^4.6.7
+- **Peer**: `zod`; the ranges are in [`package.json`](./package.json)
 - **Bundled deps**: `@rotorsoft/act-patch` (state reducer)
 - **Module formats**: ESM + CJS
 - **TypeScript**: strict mode recommended for full inference

@@ -116,7 +116,7 @@ Version 2 needs `@rotorsoft/act` 2. Stay on version 1 for `@rotorsoft/act` 1.
 
 - **Node**: >=22.23.4
 - **Peer**: `@rotorsoft/act` of the same major
-- **Bundled deps**: `pino` ^10.3.1, `pino-pretty` ^13.1.3
+- **Bundled deps**: `pino` and `pino-pretty`; the ranges are in [`package.json`](./package.json)
 - **Module formats**: ESM (`import`) and CJS (`require`). No side effects.
 
 ## Stability

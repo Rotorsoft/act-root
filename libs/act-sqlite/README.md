@@ -142,8 +142,8 @@ Both adapters pass the same `runStoreTck` suite. Application code doesn't change
 ## Compatibility
 
 - **Node**: >=22.23.4
-- **Peer**: `@rotorsoft/act` of the same major, `zod` ^4.6.7
-- **Bundled deps**: `@libsql/client` ^0.17.3 (no native bindings)
+- **Peer**: `@rotorsoft/act` of the same major, and `zod`
+- **Bundled deps**: `@libsql/client`, with no native bindings; the ranges are in [`package.json`](./package.json)
 - **Module formats**: ESM + CJS
 - **Runtimes**: Node, Bun, Deno (libSQL pure-TS implementation); also runs in Turso-compatible edge environments
 

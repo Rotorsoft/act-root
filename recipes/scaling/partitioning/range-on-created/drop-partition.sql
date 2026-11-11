@@ -16,7 +16,7 @@
 -- `load()` returns silently wrong state. The first SQL block in
 -- this script is the pre-flight check that catches this case;
 -- if it raises, abort the run and retire / snapshot the named
--- streams via `app.close()` or `app.snap()` first. Do not skip
+-- streams via `app.close()` (with `restart: true` to keep them live) first. Do not skip
 -- the check. See README.md → "Consistency: retire or snapshot
 -- before drop" for the full explanation.
 --
@@ -72,7 +72,7 @@ BEGIN;
 --
 -- The expected output of this query is ZERO rows. Any rows mean
 -- you must retire those streams via app.close() or snapshot them
--- via app.snap() BEFORE re-running this script. The transaction
+-- via app.close([{ stream, restart: true }]) BEFORE re-running this script. The transaction
 -- is rolled back if the check fails — no partition is touched.
 DO $$
 DECLARE
@@ -95,7 +95,7 @@ BEGIN
             'partition-drop aborted: % stream(s) have events before % '
             'with no tombstone or snapshot at or after that date. '
             'Dropping now would silently corrupt aggregate state on '
-            'next load(). Run app.close() or app.snap() on those '
+            'next load(). Run app.close() (restart: true keeps them live) on those '
             'streams first, then re-run this script.',
             unsafe_count,
             :'cutoff';

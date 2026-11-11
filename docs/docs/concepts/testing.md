@@ -9,7 +9,7 @@ Act is designed for testability. The in-memory defaults (InMemoryStore, InMemory
 
 ## The canonical pattern — `fixture` and `sandbox`
 
-Reach for the helpers from `@rotorsoft/act/test` first. (They run on your project's own vitest — the package declares `vitest` as an optional peer dependency, so the only requirement is having vitest ^4 installed, which a test suite already does.) They build on `ActOptions.scoped` (ACT-501) so every test gets its own `{ store, cache }` bag — no singleton contention, parallel-safe with `it.concurrent`.
+Reach for the helpers from `@rotorsoft/act/test` first. (They run on your project's own vitest — the package declares `vitest` as an optional peer dependency, so the only requirement is having vitest installed, which a test suite already does.) They build on `ActOptions.scoped` (ACT-501) so every test gets its own `{ store, cache }` bag — no singleton contention, parallel-safe with `it.concurrent`.
 
 ```typescript no-check
 import { act, type Target } from "@rotorsoft/act";
@@ -250,7 +250,7 @@ it("should detect concurrent modifications", async () => {
 
   // Attempt to commit with stale version
   await expect(
-    app.do("increment", { ...t, expectedVersion: snap.event?.version }, { by: 1 })
+    app.do("increment", { ...t, expectedVersion: snap.version }, { by: 1 })
   ).rejects.toThrow();
 });
 ```

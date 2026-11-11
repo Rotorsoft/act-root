@@ -106,7 +106,7 @@ Coming from Axon, Marten, MassTransit, or Temporal? Some patterns those framewor
 ## Requirements
 
 - Node.js >= 22.23.4
-- pnpm >= 12.15.0
+- pnpm >= 12.18.0
 
 ## Stability and support
 

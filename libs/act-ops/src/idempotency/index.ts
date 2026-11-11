@@ -16,10 +16,8 @@
  * - {@link RetryProfile} — the sender's retry shape, used as input
  *   to `minSafeTtl` and as the `retryProfile` option on the store.
  *
- * Sibling subpaths (e.g. `@rotorsoft/act-ops/poison`,
- * `@rotorsoft/act-ops/retry`) will host future operational primitives
- * as they land. Each subpath is its own ESM/CJS entry — pay for what
- * you import.
+ * The sibling subpath `@rotorsoft/act-ops/receiver` holds the receiver
+ * port. Each subpath is its own ESM/CJS entry — pay for what you import.
  *
  * The package has no runtime or peer dependency on `@rotorsoft/act`,
  * so non-Act receivers (forwarded-bus consumers, framework-agnostic

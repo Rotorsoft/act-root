@@ -5938,8 +5938,6 @@ export declare const dateReviver: (_key: string, value: unknown) => unknown;
 /**
  * What every store refuses in a \`commit\`: an append with no events, and a
  * stream named twice. In core so each adapter calls the one rule.
- *
- * @internal
  */
 export declare function check_appends(appends: readonly {
     readonly stream: string;
@@ -5949,8 +5947,6 @@ export declare function check_appends(appends: readonly {
  * The error a stale append raises, given the head the store found. A writer
  * that named no \`expectedVersion\` reads as \`-1\`: only a race between the
  * version check and the insert gets one here.
- *
- * @internal
  */
 export declare function concurrency_error(append: {
     readonly stream: string;
@@ -5961,8 +5957,6 @@ export declare function concurrency_error(append: {
  * What every store refuses as a stale writer: an append whose
  * \`expectedVersion\` is not the stream's head. In core so each adapter calls
  * the one rule before it appends anything.
- *
- * @internal
  */
 export declare function throw_if_stale(append: {
     readonly stream: string;
@@ -5972,8 +5966,6 @@ export declare function throw_if_stale(append: {
 /**
  * The event a full \`truncate\` seeds a stream with at version 0: a snapshot
  * of the given state, or a tombstone when there is none.
- *
- * @internal
  */
 export declare function seed_event(snapshot?: Schema, meta?: EventMeta): {
     name: string;
@@ -5984,8 +5976,6 @@ export declare function seed_event(snapshot?: Schema, meta?: EventMeta): {
  * How many of \`lagging\` claim slots ignore priority, so sustained high-priority
  * load can't starve a low-priority stream forever. Each store's \`claim\` calls
  * it, and the rule stays out of the \`claim\` signature.
- *
- * @internal
  */
 export declare function fair_slots(lagging: number): number;
 /**
@@ -5994,14 +5984,10 @@ export declare function fair_slots(lagging: number): number;
  * \`{ id: number, name: string }\` events are kept, stripped of anything else.
  * A payload with no such event is not a notification. In core so every
  * listener reads a foreign or version-skewed payload the same way.
- *
- * @internal
  */
 export declare function notification_of(raw: unknown): StoreNotification | undefined;
 /**
  * How many positions \`query_streams\` returns when the caller gives no limit.
- *
- * @internal
  */
 export declare const DEFAULT_QUERY_STREAMS_LIMIT = 100;
 //# sourceMappingURL=utils.d.ts.map"
@@ -8533,10 +8519,8 @@ export declare class InMemoryIdempotencyStore implements IdempotencyStore {
  * - {@link RetryProfile} — the sender's retry shape, used as input
  *   to \`minSafeTtl\` and as the \`retryProfile\` option on the store.
  *
- * Sibling subpaths (e.g. \`@rotorsoft/act-ops/poison\`,
- * \`@rotorsoft/act-ops/retry\`) will host future operational primitives
- * as they land. Each subpath is its own ESM/CJS entry — pay for what
- * you import.
+ * The sibling subpath \`@rotorsoft/act-ops/receiver\` holds the receiver
+ * port. Each subpath is its own ESM/CJS entry — pay for what you import.
  *
  * The package has no runtime or peer dependency on \`@rotorsoft/act\`,
  * so non-Act receivers (forwarded-bus consumers, framework-agnostic

@@ -141,36 +141,10 @@ const app = act()
 - **`onlyLanes`** (default: every declared lane) — restrict this process to a subset of declared drain lanes (ACT-1103). See [Lanes](#lanes) below.
 - **`listen`** (default `true`) — subscribe to `Store.notify` on this instance. Set `false` on writer-only instances: commits still notify, but the instance doesn't subscribe to the channel. The subscriber-connection budget is the practical scaling ceiling for the notify/listen pattern; writer-only fleets shouldn't spend it.
 - **`drain`** (default `true`) — run the local reaction pipeline. Set `false` to make `correlate()`, `drain()`, and `settle()` no-ops and skip auto-cycle workers. The `notified` lifecycle event still fires when `listen` is on, so observability sidecars (`listen: true, drain: false`) work.
-- **`circuitBreaker`** (defaults: `failureThreshold` 5, `cooldownMs` 30_000) — see [Circuit breaker](#circuit-breaker) below. Out-of-range values throw a `ZodError` at `build()`.
-
-### Circuit breaker
-
-Every `Act` owns one circuit breaker, shared by the drain, settle and autoclose loops: it opens after `failureThreshold` consecutive store failures and retries on its own every `cooldownMs`. How it recovers and what it reports: [Store failures and the circuit breaker](./error-handling.md#store-failures-and-the-circuit-breaker).
-
-```typescript
-import { act, state } from "@rotorsoft/act";
-import { z } from "zod";
-
-const Counter = state({ Counter: z.object({ count: z.number() }) })
-  .init(() => ({ count: 0 }))
-  .emits({ Incremented: z.object({ amount: z.number() }) })
-  .on({ increment: z.object({ by: z.number() }) })
-    .emit((action) => ["Incremented", { amount: action.by }])
-  .build();
-
-const app = act()
-  .withState(Counter)
-  .build({ circuitBreaker: { failureThreshold: 3, cooldownMs: 10_000 } });
-```
-
-- **`failureThreshold`** (default `5`) — consecutive store failures that trip the breaker open.
-- **`cooldownMs`** (default `30_000`) — how long it stays open before a half-open trial.
-
-A single-node deployment rarely needs to tune this; raise the threshold for flaky networks, lower the cooldown for faster recovery probing.
-
-### Invariants
-
-There is nothing to configure: every action checks the state it leaves against the state's Zod schema before it commits. What the check covers and what it ignores is in [state-management § Invariants](./state-management.md#invariants).
+- **`circuitBreaker`** (defaults: `failureThreshold` 5 consecutive store failures, `cooldownMs` 30_000) — see [Store failures and the circuit breaker](./error-handling.md#store-failures-and-the-circuit-breaker). Out-of-range values throw a `ZodError` at `build()`.
+- **`scoped`** — give this Act its own store and cache, both together ([Scoped ports](../architecture/extension-points.md#scoped-ports-per-act)).
+- **`correlator`** — how an originating commit gets its correlation id ([Correlation IDs](./event-sourcing.md#correlation-ids)).
+- **`autocloseWindow`** — the hours of the day `.autocloses` may close streams ([Off-hours window](../guides/close-policies.md#off-hours-window)).
 
 ### Deployment shapes via `listen` / `drain`
 

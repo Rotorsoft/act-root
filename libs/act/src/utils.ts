@@ -123,8 +123,6 @@ export function is_literal_source(source: string, target?: string): boolean {
 /**
  * Matches an ISO-8601 timestamp, the shape `JSON.stringify` produces for a
  * `Date`.
- *
- * @internal
  */
 const ISO_8601 =
   /^(\d{4})-(0[1-9]|1[0-2])-(0[1-9]|[1-2][0-9]|3[0-1])T([01][0-9]|2[0-3]):([0-5][0-9]):([0-5][0-9])(\.\d+)?(Z|[+-][0-2][0-9]:[0-5][0-9])?$/;
@@ -144,8 +142,6 @@ export const dateReviver = (_key: string, value: unknown): unknown =>
 /**
  * What every store refuses in a `commit`: an append with no events, and a
  * stream named twice. In core so each adapter calls the one rule.
- *
- * @internal
  */
 export function check_appends(
   appends: readonly {
@@ -167,8 +163,6 @@ export function check_appends(
  * The error a stale append raises, given the head the store found. A writer
  * that named no `expectedVersion` reads as `-1`: only a race between the
  * version check and the insert gets one here.
- *
- * @internal
  */
 export function concurrency_error(
   append: {
@@ -190,8 +184,6 @@ export function concurrency_error(
  * What every store refuses as a stale writer: an append whose
  * `expectedVersion` is not the stream's head. In core so each adapter calls
  * the one rule before it appends anything.
- *
- * @internal
  */
 export function throw_if_stale(
   append: {
@@ -211,8 +203,6 @@ export function throw_if_stale(
 /**
  * The event a full `truncate` seeds a stream with at version 0: a snapshot
  * of the given state, or a tombstone when there is none.
- *
- * @internal
  */
 export function seed_event(
   snapshot?: Schema,
@@ -229,8 +219,6 @@ export function seed_event(
  * How many of `lagging` claim slots ignore priority, so sustained high-priority
  * load can't starve a low-priority stream forever. Each store's `claim` calls
  * it, and the rule stays out of the `claim` signature.
- *
- * @internal
  */
 export function fair_slots(lagging: number): number {
   return lagging >= 2 ? Math.max(1, Math.floor(lagging / 4)) : 0;
@@ -242,8 +230,6 @@ export function fair_slots(lagging: number): number {
  * `{ id: number, name: string }` events are kept, stripped of anything else.
  * A payload with no such event is not a notification. In core so every
  * listener reads a foreign or version-skewed payload the same way.
- *
- * @internal
  */
 export function notification_of(raw: unknown): StoreNotification | undefined {
   if (!raw || typeof raw !== "object") return undefined;
@@ -263,7 +249,5 @@ export function notification_of(raw: unknown): StoreNotification | undefined {
 
 /**
  * How many positions `query_streams` returns when the caller gives no limit.
- *
- * @internal
  */
 export const DEFAULT_QUERY_STREAMS_LIMIT = 100;
