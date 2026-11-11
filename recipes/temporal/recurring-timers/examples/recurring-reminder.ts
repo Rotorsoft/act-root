@@ -21,6 +21,7 @@ import {
   type Committed,
   ConcurrencyError,
   type DeferWhen,
+  PreconditionError,
   state,
   ZodEmpty,
 } from "@rotorsoft/act";
@@ -52,8 +53,17 @@ export const Reminders = state({
     RemindersEnded: () => ({ ended: true }),
   })
   .on({ remind: z.object({ nth: z.number() }) })
+  .requires([
+    {
+      description: "the next tick of a running series",
+      holds: ({ nth }, { sent, ended }) => !ended && nth === sent + 1,
+    },
+  ])
   .emit((a) => ["Reminded", a])
   .on({ endReminders: ZodEmpty })
+  .requires([
+    { description: "a running series", holds: (_, { ended }) => !ended },
+  ])
   .emit(() => ["RemindersEnded", {}])
   // Reap the timer stream once the loop ends: `.autocloses` closes it the
   // moment the head is the terminal event, so a resolved reminder loop is
@@ -84,10 +94,11 @@ export function buildReminderTimer(opts: {
     .defer(opts.schedule)
     .do(async function nudge(event, stream, app) {
       // A tick can be redelivered after its handler already ran (the ack
-      // failed, or the lease was lost). Commit the follow-up only if nothing
-      // has landed after this tick, so a redelivery can't start a second
-      // chain; a ConcurrencyError here means this tick already advanced.
-      const target = { stream, actor: SYS, expectedVersion: event.version };
+      // failed, or the lease was lost). The rules on `remind` and
+      // `endReminders` refuse a tick that already advanced, so a redelivery
+      // can't start a second chain. The rules read the state, not the
+      // stream version, which a snapshot also moves.
+      const target = { stream, actor: SYS };
       try {
         if (event.data.nth >= opts.max) {
           await app.do("endReminders", target, {});
@@ -96,7 +107,11 @@ export function buildReminderTimer(opts: {
         await opts.onRemind?.(event.data.nth);
         await app.do("remind", target, { nth: event.data.nth + 1 });
       } catch (error) {
-        if (!(error instanceof ConcurrencyError)) throw error;
+        if (
+          !(error instanceof PreconditionError) &&
+          !(error instanceof ConcurrencyError)
+        )
+          throw error;
       }
     })
     .build();
