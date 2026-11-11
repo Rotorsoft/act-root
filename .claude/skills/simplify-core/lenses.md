@@ -16,7 +16,7 @@ Each lens is one way of looking for things to remove. The retrospective retires 
 
 **Concepts and options.** List the named mechanisms (lanes, priority, fairness reserve, correlation lease, work mark, defer, backoff, breaker, close lock, …) and every option bag (`ActOptions`, reaction, lane, drain/settle, autoclose). For each: the problem it solves, how many apps need it, options nobody sets or with one sensible value, mechanisms that overlap. Propose folds and removals.
 
-**DRY across adapters and builders.** Logic implemented three times (InMemory/Postgres/SQLite) or twice (act-builder/slice-builder). Propose the single home: the orchestrator, the TCK, or `internal/config.ts`.
+**DRY across adapters and builders.** Logic implemented three times (InMemory/Postgres/SQLite) or twice (act-builder/slice-builder). Propose the single home: the orchestrator, the TCK, or `internal/config.ts`. For every rule `architecture.spec.ts` guards, plant a restated copy in a clone, spelled differently from the old one, in each adapter it should cover: a rule that matches only the old spelling, or a moved rule with no guard row, guards nothing.
 
 **Reading path.** Read the README quickstart, then follow `app.do` → `action` → `commit` and `app.settle` → correlate → drain as a newcomer would. Every file jump and every extra name to hold in your head is a finding.
 
@@ -48,7 +48,7 @@ Each lens is one way of looking for things to remove. The retrospective retires 
 
 ## Docs
 
-**One source of truth.** Find behaviors described in several places (docs pages, package READMEs, recipes, `CLAUDE.md`, code comments) with differing wording. One page owns each; the rest link to it. `CLAUDE.md` should be the short index it says it is.
+**One source of truth.** Find behaviors described in several places (docs pages, package READMEs, recipes, `CLAUDE.md`, code comments) with differing wording. Count the copies of a code example by grepping its code shape (`.filter(Boolean)`), not its wording. One page owns each; the rest link to it. `CLAUDE.md` should be the short index it says it is.
 
 **Examples.** Do the examples in `packages/` and the docs show the simple path first, compile against today's API, and use the fewest concepts they can? An example that needs a paragraph of caveats means the API is too complicated. Include the code the `scaffold-act-app` skill writes into new apps, the `@example` blocks in public doc comments, doc snippets marked `no-check` (type-check the ones that call the API: the rebuild flow called `app.once`, which doesn't exist), the runnable `recipes/**/examples/*.ts` (run them with `npx tsx` and compare with their README), a downstream app moved to the latest packages (its build and tests; the Risk upgrade found a browser build failure and an act-sse patch release that dropped four methods), and the diagram sources: the animated scenes in `docs/src/scenes/*.ts`, the Mermaid blocks and the flow specs in `docs/flows/*.flow.json` (compare each step, timing and `reject` reason with the code path it draws). No check compiles or runs any of these, so they drift unseen.
 

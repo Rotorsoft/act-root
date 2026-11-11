@@ -9,23 +9,23 @@ Least recently run goes next. A lens with no accepted proposal in its last three
 | lens | last run | runs | accepted | status |
 |---|---|---|---|---|
 | Public surface | 2026-11-10 | 10 | 2 | active (58 exports; seven store helpers exported but hidden from the API reference by `@internal`, and STABILITY names two; the closed-surface proposal rejected, reshaped by the maintainer into #2411 for 3.0) |
-| Dead code (tool) | 2026-11-08 | 10 | 12 | active (an autoclose field written in two places and read nowhere since #2337; four act-diagram exports used only in their file; knip clean in core) |
+| Dead code (tool) | 2026-11-11 | 11 | 12 | active (knip clean in core; one act-pg bench script nothing cites) |
 | Hotspots (tool) | 2026-10-20 | 5 | 1 | retired 2026-10-20: two runs with no proposal; every branch in the hot functions (correlate, action, drain) is a separate rule |
 | File budget | 2026-11-10 | 11 | 1 | active (10 over 300 code lines; no split subtracts) |
-| Comment noise | 2026-11-08 | 10 | 11 | active (28% / 14%, 0 ticket refs; one stale header in `zod.ts` my #2379 missed; two published doc paragraphs mis-wrapped by word swaps) |
+| Comment noise | 2026-11-11 | 11 | 11 | active (core clean; the inspector holds 102 of the repo's 105 ticket refs and a write-gate comment that contradicts the code) |
 | Concepts and options | 2026-11-10 | 11 | 3 | active (2.0 left nothing redundant in core; Act options documented in two places and missing three fields; a retry rule off by one in one page) |
 | Core or decorator? | 2026-10-15 | 3 | 0 | retired 2026-10-15: three runs, findings only (PII, audit, breaker, lanes stay; priority is a major-version question) |
-| DRY across adapters and builders | 2026-11-08 | 10 | 18 | active (the version check, truncate seed and notification parser still written per store; four adapter specs re-test core rules) |
+| DRY across adapters and builders | 2026-11-11 | 11 | 18 | active (every moved rule lives once in core; the guard that keeps them there missed one and matched two only by their old spelling) |
 | Reading path | 2026-11-10 | 10 | 3 | active (no change worth proposing since 2.0's `.loads`) |
 | Newcomer test (quarterly) | 2026-10-17 | 2 | 0 | active (21 concepts, 3 imports; a package.json without name/version crashes) |
-| Tests by concept | 2026-11-08 | 10 | 20 | active (Wolfdesk's 10 s stalls are one shared SQLite file; a duplicated test from a merge; two recipe timer tests that can't fail) |
+| Tests by concept | 2026-11-11 | 11 | 20 | active (4 of 4 full runs green, 0 time-budget tests under an injected stall; four specs repeat core or the TCK) |
 | Mutation evidence (monthly, CI) | never | 0 | 0 | retired: setup removed (#1805), see baselines below |
 | Packages earn their place | 2026-10-15 | 4 | 0 | retired 2026-10-15: four runs, no proposal (removal is ruled out; act-tck churn is the snapshot, now P2026-10-15p-1) |
 | Infra | 2026-11-10 | 11 | 2 | active (node-compat tests below the engines floor; lock-file maintenance can never pass its own age check (#914)) |
 | One source of truth | 2026-11-10 | 11 | 8 | active (2.0's source rule and `.snap` version didn't reach the scaffold skill and the testing guide; hand-copied versions stale) |
 | Examples | 2026-11-10 | 10 | 3 | active (5 of 5 recipes green; 396 snippets type-check; recipes call `app.snap()` and claim a removed backstop) |
 | Process | 2026-11-10 | 10 | 9 | active (the learnings step caught nothing in 64 PRs; `/pr`'s two shapes; the 2.0 window fixed every round twice) |
-| Feature interactions | 2026-11-08 | 10 | 20 | active (.loads meets everything through shared primitives; snapshots × SSE versions is the one accidental meeting) |
+| Feature interactions | 2026-11-11 | 11 | 20 | active (a snapshot takes a stream version, so every reader that pins a version must know `.snap`: the timer recipe and three SSE copies don't) |
 
 ## Interaction register
 
@@ -62,22 +62,22 @@ Where two features meet, and why. The Feature interactions lens reads this first
 | restore, drain in flight | the in-flight `ack` writes nothing into the restored store | harmless | InMemory probe 3 of 3; Postgres not probed |
 | correlate outcome, lane arming / settle progress | Act arms on `marked > 0` and settle counts `read` | resolved | #2084 (P2026-10-22f-2); `subscribed` stays only in `app.correlate()`'s public return |
 | explicit correlate filter, shared checkpoint | the scan reads only `limit` | resolved | #2106 (P2026-10-23-1) |
-| `app.correlate` default, a query without `limit` | the default `{ limit: 10 }` sits on the parameter, so `{}` or a leftover `{ stream }` reads the whole log while the JSDoc says 10 | accidental | P2026-10-25-2 |
-| `.given`/`.requires`/`on`, partial-state merge | `merge.ts` skips the duplicate-action check on schema identity, so two partials sharing one action schema merge silently: one partial's rules with the other's handler, by order | accidental, and a bug | P2026-10-25-1 (probed in the main loop); goes when the check keys on the handler |
+| `app.correlate` default, a query without `limit` | the default `{ limit: 10 }` sits on the parameter, so `{}` or a leftover `{ stream }` reads the whole log while the JSDoc says 10 | resolved (checked in the code 2026-11-11) | P2026-10-25-2 |
+| `.given`/`.requires`/`on`, partial-state merge | `merge.ts` skips the duplicate-action check on schema identity, so two partials sharing one action schema merge silently: one partial's rules with the other's handler, by order | resolved (checked in the code 2026-11-11) | P2026-10-25-1 (probed in the main loop); goes when the check keys on the handler |
 | `.requires`, per-action retry | the `ConcurrencyError` retry re-runs `load` and every rule | shared primitive | probed; no test pins it yet (P2026-10-25-5) |
 | `.requires`, sensitive fields | one actor-gated snapshot feeds `given`, `requires` and `.emit` | shared primitive | probed: both see `[REDACTED]` for another actor |
 | `.requires`, act-http errors | the class map gives 409 `INVARIANT`; only the message names the layer | shared primitive | `rule` is a constructor argument, not a field |
 | empty block/ack skipped (#2117), breaker / lifecycle | a pass that only blocks makes no ack call and emits no `acked`; `breaker.passed()` still runs | harmless | probed |
 | `start_correlations` limit, `Query.limit` | the poll stores `query.limit \|\| undefined`, so `0` ("no limit" everywhere else) becomes settle's default 100 | justified, documented | #2173: the user kept the code and documented that a poll's 0 uses the background default |
 | `validateFoldedState`, commit | #2180 folds once before the commit and checks the state schema there; the option is ignored | resolved | #2180 (P2026-10-27-1) |
-| state schema check, sensitive fields / forget | `action()` checks the actor's view, so `[REDACTED]` or `[SHREDDED]` fails a typed field (`z.email()`): another actor's action is refused, and after `forget` every action is | accidental, a regression from #2180 | P2026-10-29-1 (probed in the main loop; passes on 10fa801c9) |
-| reactions, optimistic concurrency | `reactingTo ? expectedVersion : expected` lets a reaction commit on a stale load; the docs say leases serialize these writes, but a lease is per reaction target, not per stream written (wolfdesk's three timers write one ticket under three targets), and never against user actions | accidental; the documented reason no longer holds | P2026-10-29-2 (probed: a stored state breaks `max(2)`, then every action fails) |
-| first commit, optimistic concurrency | `snapshot.version >= 0 ? … : undefined` leaves a new stream unguarded, so two racing creators both pass `.requires` | accidental | P2026-10-29-3 (probed) |
-| state check, payload check | `check_invariants` re-implements `validate` with `safeParse` and drops its wrap of non-Zod throws | accidental | P2026-10-29-4 (probed: raw `Error`, HTTP 500, vs `ValidationError`, 422) |
+| state schema check, sensitive fields / forget | `action()` checks the actor's view, so `[REDACTED]` or `[SHREDDED]` fails a typed field (`z.email()`): another actor's action is refused, and after `forget` every action is | resolved (checked in the code 2026-11-11) | P2026-10-29-1 (probed in the main loop; passes on 10fa801c9) |
+| reactions, optimistic concurrency | `reactingTo ? expectedVersion : expected` lets a reaction commit on a stale load; the docs say leases serialize these writes, but a lease is per reaction target, not per stream written (wolfdesk's three timers write one ticket under three targets), and never against user actions | resolved (checked in the code 2026-11-11) | P2026-10-29-2 (probed: a stored state breaks `max(2)`, then every action fails) |
+| first commit, optimistic concurrency | `snapshot.version >= 0 ? … : undefined` leaves a new stream unguarded, so two racing creators both pass `.requires` | resolved (checked in the code 2026-11-11) | P2026-10-29-3 (probed) |
+| state check, payload check | `check_invariants` re-implements `validate` with `safeParse` and drops its wrap of non-Zod throws | resolved (checked in the code 2026-11-11) | P2026-10-29-4 (probed: raw `Error`, HTTP 500, vs `ValidationError`, 422) |
 | projection folds, `Act` constructor `patch_fn` | the constructor's patch step reaches `load`/`action`; projection folds always get `bare_patch` from the builder | harmless (one value in the repo since #2180) | P2026-10-29s-1 |
 | action retry, reaction retry | a reaction's `do()` that loses a race retries in `action()` (its `maxRetries`), then fails the handler into the reaction's retry and backoff | justified | the two decide different things: the action re-decides on fresh state at once, the reaction treats the whole handler as failed (10 s fixed backoff by default); they multiply, (N+1)(M+1) attempts, only on a conflict that never clears (probed 2026-10-30) |
 | `reactingTo`, version guard | resolved by #2201: `reactingTo` only builds correlation and causation | resolved | #2201; the ambient box clearing in `scoped.ts` stays for causation (simulated: one test fails without it) |
-| empty action, `committed` / wake | `Act.do` read `s.event` on every snapshot, including the loaded one an action that emits nothing returns | accidental, a bug | P2026-10-30 r-1 → #2210 / #2213 (probed in the main loop) |
+| empty action, `committed` / wake | `Act.do` read `s.event` on every snapshot, including the loaded one an action that emits nothing returns | resolved (checked in the code 2026-11-11) | P2026-10-30 r-1 → #2210 / #2213 (probed in the main loop) |
 | `.loads`, optimistic concurrency | every written stream gets its version at load in one `commit`; a read-only load isn't guarded; a conflict drops only that stream's cache entry; a version the caller pins is never retried on its own stream, but is retried on a loaded one | shared primitive | the version guard (#2289); `loads.spec` pins every case |
 | `.loads`, snapshots | each written stream runs its own state's `.snap` in the same per-append loop; the result's `version` is the snapshot head | shared primitive | probed: with snaps, the version the listener hears on the loaded stream, pinned on the owner's next action, commits; `taken` = 5 both ways (`probe-loads-snap.spec.ts`) |
 | `.loads`, sensitive fields | a loaded stream loads with the caller's actor; `check_invariants` gets the loaded state's `pii_aware`; a sensitive state isn't cached and can't `.snap`, both through the same rules | shared primitive | `loads.spec` "loads with the caller's actor" |
@@ -89,9 +89,10 @@ Where two features meet, and why. The Feature interactions lens reads this first
 | `.loads`, act-otel | `act_events_committed_total` counts per event across the per-stream `committed` calls | shared primitive | correct with per-stream calls |
 | source rule, a target reading itself | `is_literal_source(source, target)`: `source === target` is literal | justified, nearly unused since 03b4404ef | #2379 added `target` when every metacharacter made a pattern; 03b4404ef made only `^…`/`…$` patterns, so `target` now matters only for a stream name that starts with `^` or ends with `$`. It is published (`utils.ts`), so it stays (rule 2) |
 | source rule, autoclose | the resolver skips a stream whose name would read as a pattern | justified, same reach | since 03b4404ef it skips only `^…`/`…$` names; `app.close` still closes them |
-| snapshots, SSE versions | a `__snapshot__` takes a stream version the wiring never sends | accidental, a bug | i-D1 |
-| per-call correlator, app correlator | `{ correlator, ...options }` let an explicit `undefined` win | accidental, a bug | r-2 → #2211 / #2213 (probed in the main loop) |
-| SSE broadcast, sensitive states | the cached state is the committer's view, served to every subscriber; another actor's commit overwrites it with markers | accidental, a bug | P2026-10-31 i-1 → #2232 (probed in the main loop) |
+| snapshots, SSE versions | a `__snapshot__` takes a stream version the wiring never sends | resolved in code by #2405; three doc copies still teach the old wiring | #2428 |
+| snapshots, version pins | a handler that pins `expectedVersion: event.version` is one behind after a snapshot; the timer recipe swallows the conflict and stops | accidental, a bug | #2427; root cause in the backlog (snapshots as stream events) |
+| per-call correlator, app correlator | `{ correlator, ...options }` let an explicit `undefined` win | resolved (checked in the code 2026-11-11) | r-2 → #2211 / #2213 (probed in the main loop) |
+| SSE broadcast, sensitive states | the cached state is the committer's view, served to every subscriber; another actor's commit overwrites it with markers | resolved (checked in the code 2026-11-11) | P2026-10-31 i-1 → #2232 (probed in the main loop) |
 | marker-capable state fields: state check, sensitive-type warning, OpenAPI | the check filters by value; the warning and `<State>Snapshots` match by name and miss renamed copies | accidental (three owners) | i-2, i-3 → #2233 |
 | state-scoped `committed`, generic `committed` | one call site in `Act.do`, after #2213's patch check | shared primitive | the empty-action check covers both (probed) |
 | state-scoped `committed`, remote commits | neither fires for another process's commit; hosts use `notified` | justified | same as the generic listener |
@@ -116,6 +117,8 @@ The last trusted Stryker scores, recorded when the setup was removed (#1805) bec
 
 Sound proposals that missed a run's cut. The next run ranks these before looking for new ones.
 
+- Design finding for a future major: a snapshot is an event in the stream, so it takes a version, and every reader of a version has to know about `.snap` (#2384 SSE, #2427 the timer recipe, the 2.0 "pin `version`, not `event.version`" note). Marten keeps snapshots as documents and counts only events; Axon keys them by the last event's sequence in a separate store; Kurrent recommends a separate stream; only Equinox's rolling snapshots on EventStore write into the stream as Act does. Moving them touches load, close seeds, the cache and every adapter. (2026-11-11, interactions)
+
 
 - history.md has no budget (140 KB on 2026-10-30, was 119 KB; run entries before 2026-10-22 are 69 KB, read by every run and specialist): keep the tables, the backlog, the self-changes and the last three runs, and fold each older run into one line with its tickets and rejections (~−64 KB). A change to the skill's memory: the user's call. (P2026-10-27p-3)
 
@@ -137,6 +140,8 @@ Sound proposals that missed a run's cut. The next run ranks these before looking
 - The next major fixes once on its integration branch and merges into it without squashing: the 2.0 window fixed every audit round twice (#2337/#2336, #2357/#2359, #2379/#2380), merged master into `v2` four times (the duplicated test of #2386), and needed separate version PRs only because a squash flattens footers. Fewer words in CONTRIBUTING; 1.x waits for a backport. (P2026-11-10p-5)
 
 ## Self-changes
+
+- 2026-11-11: the DRY lens plants a restated copy of each moved rule, spelled differently, against `architecture.spec.ts`: #2408 moved the notification parser with no guard rule, and two rules matched only the exact old spelling, so their copies passed (#2429). The One source of truth lens counts copies of a behavior by grepping its code shape, not its wording: the 2026-11-10 run reported the SSE wiring as 6 agreeing copies; there were 9, and 3 disagreed (#2428).
 
 - 2026-11-10: the Public surface lens checks every export tagged `@internal` against `docs/typedoc.json`'s `excludeInternal`: such an export is covered by the stability snapshot but has no reference page, and seven store helpers adapter authors are told to call were hidden that way. The Infra lens compares every version a test matrix pins with the packages' `engines` floor: Renovate raised the floor and node-compat kept testing below it.
 
@@ -999,3 +1004,35 @@ Findings, not proposed: the SSE empty-patch rule is written by hand in 6 places,
 Lens metrics: runtime exports 58 (8 adapter helpers, 16 undocumented); files over 300 code lines 10; snippets type-checked 396; runnable recipes 5 of 5; CI-CD reds since 10-30 14 of 316, 0 on #2404–#2409.
 
 Tickets: #2412–#2422, and #2411 (3.0) from the conversation.
+
+### 2026-11-11 — full run (four specialists: dead code + comment noise, DRY across adapters and builders, tests by concept, feature interactions + field)
+
+| metric | 2026-11-10 | now | why |
+|---|---|---|---|
+| core lines (libs/act/src) | 18535 | 18519 | #2424 dropped the store helpers' eight `@internal` tags |
+| everything else | | unchanged | 58 runtime exports, 0 ticket refs in core, 41% (28% / 14%) comments, 10 files over 300 code lines, 241 spec files, 5 workflows / 579 lines, CLAUDE.md 28 KB |
+
+Audit: four PRs since the last run, none in product code: #2423 (the run record), #2424 (#2412–#2419), #2425 (#2420), #2426 (#2421, #2422). Core last changed in #2404–#2409, which this run's code lenses audited.
+
+Decisions on P2026-11-10*: all shipped. D1–D4 and 1–4 → #2424; 5 → #2425 (lock-file maintenance dropped, #914 closed); 7 → #2426. 6 was reshaped by its own evidence: merged Renovate PRs since October were 26 `fix(deps)` (they release) and 23 dev-only `chore(deps)` (they don't), and the dev group is what keeps the 23 as chores, so dropping it would release every library weekly; #2426 instead adds one rule that puts the peer packages' minor and patch updates in the weekly non-major group (a local dry run: 8 branches → 6).
+
+Promises kept: #2417 ≈ −26 → −26 lines; #2418 1.9 KB moved → −958 B net; #2419 −1.15 KB → −804 B; #2420 −5 → −5; #2421 −4 rules → +1 rule (above); #2416, 7 stale ranges → 0.
+
+Verified in the main loop before ranking: the timer probe (pin + `.snap`: ticks `[1, 2]`; pin without `.snap`, the state-rule fix with and without, and both redelivery cases green); the three SSE copies against real-time.md; the guard's rules in `architecture.spec.ts:244-257` (no notification row, no `with-broker.ts`, `METACHARACTERS`, no `code_of`); the inspector gate comment against `router.ts:1567` and the stacked doc at `:533`; act-pg's fixed `retry_compat` / `retry_overflow` schemas; no row citing `close-outcome.spec.ts`.
+
+Proposals, ticketed when the report was done. Defects first:
+- D1. The recurring-timer recipe stops for good at the first snapshot → #2427.
+- D2. Three SSE wiring copies (act-http README, `BroadcastChannel` doc, auto-generated-api.md) resync on every snapshot; delete them for links → #2428.
+- D3. The framework-rules guard misses the notification parser and matches two rules only by their old spelling → #2429.
+Simplifications:
+- 1 (t-1–t-4). Four specs that repeat other specs or core (≈ −279) → #2430.
+- 2 (t-5). The adapters' one-off seed tests into seed-upgrade.spec, on suffixed schemas (≈ −90) → #2431.
+- 3 (dc-1, dc-D1, dc-D2). The inspector's comments: a write-gate comment that contradicts the code, a stacked doc, 102 ticket refs → #2432.
+- 4 (dc-2). "Used to" comments in the TCK and SQL adapters (≈ −15–20) → #2433.
+- 5 (dc-3). An act-pg bench script nothing cites, the maintainer's call → #2434.
+
+Findings, not proposed: a snapshot takes a stream version, the root of #2384 and #2427; Marten, Axon and Kurrent keep snapshots out of the event sequence (backlog, a major-version question). The PG differential's `skip: { queryEdgeInputs: true }` hides 15 assertions where only one diverges (published TCK surface). A timed-out property in the store TCK keeps writing into the next property's store, so one timeout reds two tests. Nine register rows marked accidental are fixed in the code; marked resolved.
+
+Lens metrics: knip 39 unused files (one uncited: #2434), 19 unused exports; stacked docs 1 (inspector); ticket refs core 0, inspector 102; 4 of 4 full runs green at 13.6 s, 0 tests near a framework default, 0 time-budget tests under an injected stall; guard rules that fail a differently spelled copy 4 of 6.
+
+Tickets: #2427–#2434.
