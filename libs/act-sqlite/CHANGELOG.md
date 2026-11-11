@@ -1,3 +1,10 @@
+# [@rotorsoft/act-sqlite-v2.0.2](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-sqlite-v2.0.1...@rotorsoft/act-sqlite-v2.0.2) (2026-11-11)
+
+
+### Bug Fixes
+
+* **recipes:** guard the recurring timer with state rules, not a version pin ([c7d95d6](https://github.com/Rotorsoft/act-root/commit/c7d95d63b6db5bcdea511d8a1d9c144e7515d2a6))
+
 # [@rotorsoft/act-sqlite-v2.0.1](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-sqlite-v2.0.0...@rotorsoft/act-sqlite-v2.0.1) (2026-11-10)
 
 # [@rotorsoft/act-sqlite-v2.0.0](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-sqlite-v1.22.8...@rotorsoft/act-sqlite-v2.0.0) (2026-11-07)
