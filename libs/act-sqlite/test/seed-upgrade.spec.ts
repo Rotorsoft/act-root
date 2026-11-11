@@ -7,6 +7,7 @@
  * single-writer by design.)
  */
 
+import { createClient } from "@libsql/client";
 import { dispose, store } from "@rotorsoft/act";
 import { SqliteStore } from "../src/sqlite-store.js";
 import { rm_tmp_dbs, tmp_db_url } from "./tmp-db.js";
@@ -64,8 +65,6 @@ describe("SqliteStore seed-sync contract", () => {
     await dispose()("EXIT").catch(() => {});
   });
 
-  afterAll(rm_tmp_dbs);
-
   it("upgrades the oldest supported shape losslessly and idempotently", async () => {
     await build_oldest_shape();
 
@@ -99,3 +98,97 @@ describe("SqliteStore seed-sync contract", () => {
     expect(Number(again.rows[0].n)).toBe(2);
   });
 });
+
+/**
+ * The retry-seed fix must take effect on databases created before
+ * the change without an operator migration. SQLite cannot `ALTER COLUMN ...
+ * SET DEFAULT`, so `subscribe` seeds `retry = -1` explicitly rather than
+ * relying on the column default. This proves a table from an older install
+ * (retry default 0) still gives new subscriptions retry = -1, so their first claim
+ * returns retry = 0.
+ */
+const RETRY_DB_URL = tmp_db_url();
+
+describe("sqlite retry seed is migration-free", () => {
+  it("subscribe seeds retry=-1 even when the column default is 0", async () => {
+    const s = new SqliteStore({ url: RETRY_DB_URL });
+    const raw = createClient({ url: RETRY_DB_URL });
+    try {
+      await s.drop();
+      await s.seed();
+      // Simulate a table from an older install (retry default 0).
+      await raw.execute("DROP TABLE streams");
+      await raw.execute(`
+        CREATE TABLE streams (
+          stream TEXT PRIMARY KEY,
+          source TEXT,
+          at INTEGER NOT NULL DEFAULT -1,
+          retry INTEGER NOT NULL DEFAULT 0,
+          blocked INTEGER NOT NULL DEFAULT 0,
+          error TEXT NOT NULL DEFAULT '',
+          leased_by TEXT,
+          leased_until TEXT,
+          priority INTEGER NOT NULL DEFAULT 0,
+          lane TEXT NOT NULL DEFAULT 'default'
+        )
+      `);
+      await s.subscribe([{ stream: "compat-1" }]);
+      const res = await raw.execute(
+        "SELECT retry FROM streams WHERE stream = 'compat-1'"
+      );
+      expect(Number(res.rows[0].retry)).toBe(-1);
+    } finally {
+      raw.close();
+      await s.dispose();
+    }
+  });
+});
+
+const CORRELATED_DB_URL = tmp_db_url();
+
+/**
+ * Migrating the correlate checkpoint to its keyed shape.
+ *
+ * SQLite cannot drop a primary key, so the old single-row table is rebuilt
+ * rather than altered. The checkpoint has to survive that: losing it would
+ * silently re-read the whole log on the next boot, or — worse, if it came back
+ * as -1 against a large store — flood every subscription with re-marks.
+ */
+describe("correlated table migration", () => {
+  it("rebuilds the older single-row table and keeps its checkpoint", async () => {
+    const store = new SqliteStore({ url: CORRELATED_DB_URL });
+    await store.drop();
+    await store.seed();
+
+    // Put the old shape back, exactly as an install predating the keyed checkpoint has it.
+    const client = (store as unknown as { client: SqliteStore["client"] })
+      .client;
+    await client.execute("DROP TABLE correlated");
+    await client.execute(
+      "CREATE TABLE correlated (id INTEGER PRIMARY KEY CHECK (id = 0), at INTEGER NOT NULL DEFAULT -1)"
+    );
+    await client.execute("INSERT INTO correlated (id, at) VALUES (0, 4242)");
+
+    // Seeding is the migration — seed-sync is this project's schema story.
+    await store.seed();
+
+    const columns = await client.execute("PRAGMA table_info(correlated)");
+    const names = columns.rows.map((r) => r.name);
+    expect(names).toContain("key");
+    expect(names).toContain("leased_by");
+    expect(names).not.toContain("id");
+
+    // The old checkpoint lands on the shared row, which is the floor every
+    // new correlator key inherits — so no worker re-reads history.
+    const { correlated_at } = await store.subscribe([]);
+    expect(correlated_at).toBe(4242);
+
+    // And it is idempotent: seeding again against the new shape is a no-op.
+    await store.seed();
+    expect((await store.subscribe([])).correlated_at).toBe(4242);
+
+    await store.dispose();
+  });
+});
+
+afterAll(rm_tmp_dbs);

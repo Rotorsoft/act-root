@@ -94,117 +94,43 @@ describe("PostgresStore.notify", () => {
     await secondDispose();
   });
 
-  it("survives malformed payloads on the channel without tearing down", async () => {
+  it("skips malformed payloads and keeps delivering", async () => {
     const received: any[] = [];
     const dispose = await listener.notify!((n) => received.push(n));
 
-    // Inject a raw NOTIFY with a non-JSON payload via the writer's pool.
-    // Use the same namespaced channel the writer/listener pair uses.
+    // Raw NOTIFYs on the writer/listener channel: no payload, not JSON, and
+    // JSON that isn't a notification. Postgres delivers one channel in order,
+    // so if the commit sent after them is the first thing received, every
+    // bad payload was skipped and the listener is still connected.
     const channel = (writer as any)._channel as string;
-    const rawClient = await (writer as any)._pool.connect();
+    const raw = await (writer as any)._pool.connect();
     try {
-      await rawClient.query(`SELECT pg_notify($1, 'not-json')`, [channel]);
-    } finally {
-      rawClient.release();
-    }
-    // Then send a valid commit and ensure the listener is still alive.
-    await sleep(50);
-    await writer.commit(
-      [{ stream: "stream-after-bad", msgs: [{ name: "AfterBad", data: {} }] }],
-      {
-        correlation: "c",
-        causation: {},
-      }
-    );
-    await vi.waitFor(() => expect(received).not.toHaveLength(0), {
-      timeout: 1_500,
-    });
-    expect(received).toHaveLength(1);
-    expect(received[0].stream).toBe("stream-after-bad");
-
-    await dispose();
-  });
-
-  it("ignores NOTIFYs with no payload", async () => {
-    const received: any[] = [];
-    const dispose = await listener.notify!((n) => received.push(n));
-
-    const channel = (writer as any)._channel as string;
-    const rawClient = await (writer as any)._pool.connect();
-    try {
-      // `NOTIFY chan` (no payload) — pg delivers msg.payload as ''.
-      await rawClient.query(`NOTIFY ${channel}`);
-    } finally {
-      rawClient.release();
-    }
-    await sleep(100);
-    expect(received).toHaveLength(0);
-
-    // Listener still alive — a real commit is delivered.
-    await writer.commit(
-      [
+      await raw.query(`NOTIFY ${channel}`);
+      await raw.query(`SELECT pg_notify($1, 'not-json')`, [channel]);
+      for (const bad of [
+        { stream: 42, events: [], by: "other" },
+        { stream: "ok", events: "nope", by: "other" },
         {
-          stream: "stream-after-empty",
-          msgs: [{ name: "AfterEmpty", data: {} }],
-        },
-      ],
-      { correlation: "c", causation: {} }
-    );
-    await vi.waitFor(() => expect(received).not.toHaveLength(0), {
-      timeout: 1_500,
-    });
-    expect(received[0].stream).toBe("stream-after-empty");
-
-    await dispose();
-  });
-
-  it("skips JSON payloads missing required fields", async () => {
-    const received: any[] = [];
-    const dispose = await listener.notify!((n) => received.push(n));
-
-    const channel = (writer as any)._channel as string;
-    const rawClient = await (writer as any)._pool.connect();
-    try {
-      // Valid JSON but missing `stream` (number instead of string).
-      await rawClient.query(`SELECT pg_notify($1, $2)`, [
-        channel,
-        JSON.stringify({ stream: 42, events: [], by: "other" }),
-      ]);
-      // Valid JSON but `events` not an array.
-      await rawClient.query(`SELECT pg_notify($1, $2)`, [
-        channel,
-        JSON.stringify({ stream: "ok", events: "nope", by: "other" }),
-      ]);
-      // Valid envelope but events array contains malformed entries
-      // (drop those, deliver no event when nothing valid remains).
-      await rawClient.query(`SELECT pg_notify($1, $2)`, [
-        channel,
-        JSON.stringify({
           stream: "ok",
           events: [{ id: "not-a-number", name: "X" }],
           by: "other",
-        }),
-      ]);
-    } finally {
-      rawClient.release();
-    }
-    await sleep(100);
-    expect(received).toHaveLength(0);
-
-    // Listener still alive — a real commit is delivered.
-    await writer.commit(
-      [
-        {
-          stream: "stream-after-bad-fields",
-          msgs: [{ name: "AfterBadFields", data: {} }],
         },
-      ],
+      ])
+        await raw.query(`SELECT pg_notify($1, $2)`, [
+          channel,
+          JSON.stringify(bad),
+        ]);
+    } finally {
+      raw.release();
+    }
+    await writer.commit(
+      [{ stream: "stream-after-bad", msgs: [{ name: "AfterBad", data: {} }] }],
       { correlation: "c", causation: {} }
     );
     await vi.waitFor(() => expect(received).not.toHaveLength(0), {
       timeout: 1_500,
     });
-    expect(received[0].stream).toBe("stream-after-bad-fields");
+    expect(received[0].stream).toBe("stream-after-bad");
 
     await dispose();
   });

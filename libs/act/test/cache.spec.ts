@@ -133,7 +133,7 @@ describe("cache integration", () => {
     expect((await c.get("c1"))?.state).toEqual({ count: 5 });
   });
 
-  it("cache.set rejection warns but does not fail the action", async () => {
+  it("cache.set rejection warns but fails neither the action nor a load", async () => {
     // Reset singletons so we can inject a failing cache for this test only
     await dispose()();
     store(new InMemoryStore());
@@ -152,9 +152,12 @@ describe("cache integration", () => {
     const warnSpy = vi.spyOn(log(), "warn").mockImplementation(() => {});
     const errorSpy = vi.spyOn(log(), "error").mockImplementation(() => {});
 
-    // Action should succeed despite cache.set rejecting
+    // Action and load both succeed despite cache.set rejecting
     const snaps = await action(Counter, "increment", target, { count: 5 });
     expect(snaps[0].state.count).toBe(5);
+    expect((await load(Counter, { stream: target.stream })).state.count).toBe(
+      5
+    );
 
     // Flush the fire-and-forget .catch microtask
     await new Promise((r) => setImmediate(r));
