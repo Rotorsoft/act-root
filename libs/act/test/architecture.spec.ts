@@ -237,6 +237,7 @@ describe("framework rules stay in the framework", () => {
     "src/adapters/in-memory-store.ts",
     "../act-pg/src/postgres-store.ts",
     "../act-sqlite/src/sqlite-store.ts",
+    "../act-notify/src/with-broker.ts",
   ].map((path) => ({
     path,
     text: readFileSync(new URL(`../${path}`, import.meta.url), "utf8"),
@@ -245,19 +246,17 @@ describe("framework rules stay in the framework", () => {
     ["the fair share of claim slots", /lagging\s*>=\s*2|Math\.floor\(lagging/],
     ["the query_streams default limit", /query\?\.limit\s*\?\?\s*\d/],
     ["what a commit may hold", /is named twice|has no events/],
-    [
-      "what makes a writer stale",
-      /typeof\s+\w*\.?expectedVersion\s*===\s*"number"|expectedVersion\s*\?\?\s*-1/,
-    ],
-    ["what a full truncate seeds", /correlation:\s*""/],
+    ["what makes a writer stale", /\bexpectedVersion\b|new ConcurrencyError\(/],
+    ["what a full truncate seeds", /correlation:\s*""|TOMBSTONE_EVENT/],
     [
       "what makes a source a pattern",
-      /METACHARACTERS|source\.startsWith\("\^"\)/,
+      /METACHARACTER|source\.startsWith\("\^"\)/,
     ],
+    ["what a notification holds", /\bid\?:\s*unknown\b/],
   ];
 
   it.each(restated)("no adapter restates %s", (_, rule) => {
-    expect(adapters.filter(({ text }) => rule.test(text))).toEqual([]);
+    expect(adapters.filter(({ text }) => rule.test(code_of(text)))).toEqual([]);
   });
 
   it("the TCK uses core's source rule too", () => {
