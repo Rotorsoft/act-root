@@ -11,14 +11,11 @@ Open a pull request for the current branch following the Act project conventions
 1. Verify the branch is clean and pushed (`git status`, `git log origin/$(git rev-parse --abbrev-ref HEAD)..HEAD`). If unpushed commits exist, push them with `-u`.
 2. If `$ARGUMENTS` includes a ticket number, plan to use `Closes #<num>` in the PR body. Otherwise omit (don't fabricate).
 3. Run `git log master..HEAD --oneline` and `git diff master...HEAD --stat` to identify the full scope of the branch.
-4. Compose the PR body with these sections, in order:
-   - **Title** — under 70 chars, conventional-commits format matching the dominant commit type on the branch.
-   - **Summary** — `Closes #N.` if applicable, then a one-paragraph "what shipped + why" in plain prose.
-   - **Sections per concern** — each major change gets its own `##` section with the rationale, not just the diff.
-   - **Test plan** — what was checked beyond CI (CI runs typecheck, lint, tests with 100% coverage, build and the stability snapshot): manual runs, probes, a docs build. Don't restate CI's checks.
-   - **Stability charter impact** — call out additive vs. breaking with files touched. Skip the section only if no charter-covered files changed.
-
-     If the PR adds public surface (new export, builder method, port method, lifecycle event, new field on an exported type), link its `rfcs/NNNN-*.md` here.
+4. Compose the PR body in the one shape below.
+   - **Title**: under 70 chars, conventional-commits format matching the dominant commit type on the branch.
+   - **Body**: `Closes #N.` if applicable, one plain sentence saying what happened, then the four questions in "Write it in plain language", each as a `##` section when it has more than a sentence.
+   - **Test plan**: only what was checked beyond CI (CI runs typecheck, lint, tests with 100% coverage, build and the stability snapshot): manual runs, probes, a docs build.
+   - **Stability charter**: one line, additive or breaking, with the charter-covered files touched; skip it when none changed. If the PR adds public surface (new export, builder method, port method, lifecycle event, new field on an exported type), link its `rfcs/NNNN-*.md` there.
 5. Open with `gh pr create --title ... --body "$(cat <<'EOF' ... EOF)"` and HEREDOC the body so Markdown formatting survives.
 6. Print the resulting URL.
 

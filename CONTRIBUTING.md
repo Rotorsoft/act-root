@@ -8,9 +8,8 @@ Branch work isn't done until `/release-check` passes cleanly and every CI check 
 
 Sequence at the end of a feature branch:
 
-1. `/release-check` — regenerates and classifies the stability snapshot, runs the doc audit (step 3) and lint, then pushes and reads every CI check (typecheck, lint, tests with 100% coverage, build, stability and the repo checks). A coverage gap fails CI; write the fault-injection test or remove the branch (patterns in `libs/act-pg/test/store.error.spec.ts` / `libs/act-sqlite/test/store.error.spec.ts`). See [.claude/commands/release-check.md](.claude/commands/release-check.md).
-2. **Learnings.** If the change taught something that `.claude/skills/simplify-core/learnings.md` doesn't already say, add one entry there: the rule in one line, then the ticket as evidence. Most PRs add nothing.
-3. **Doc audit — any PR that changes a public surface, renames a method, migrates a callsite to a new primitive, or alters described semantics must update the relevant docs in the same PR.** This is the one copy of the audit; `/release-check` runs it from here. Find what was renamed or removed, then grep every place docs live for the old name or the old description:
+1. `/release-check` — regenerates and classifies the stability snapshot, runs the doc audit (step 2) and lint, then pushes and reads every CI check (typecheck, lint, tests with 100% coverage, build, stability and the repo checks). A coverage gap fails CI; write the fault-injection test or remove the branch (patterns in `libs/act-pg/test/store.error.spec.ts` / `libs/act-sqlite/test/store.error.spec.ts`). See [.claude/commands/release-check.md](.claude/commands/release-check.md).
+2. **Doc audit — any PR that changes a public surface, renames a method, migrates a callsite to a new primitive, or alters described semantics must update the relevant docs in the same PR.** This is the one copy of the audit; `/release-check` runs it from here. Find what was renamed or removed, then grep every place docs live for the old name or the old description:
    ```bash
    git diff master --diff-filter=D --name-only -- libs/act/src/ libs/act-*/src/
    grep -rln "<old-name-or-shape>" docs/docs docs/src/scenes docs/flows CLAUDE.md STABILITY.md \
@@ -25,7 +24,7 @@ Sequence at the end of a feature branch:
    The pattern that catches this: the PR's commit message says "we changed X" — every place that *describes* X in the docs needs the same update. Treat the docs as part of the public surface.
 
    **A doc claim about runtime behavior ships with its test.** Any sentence in `docs/docs/**` or a public port/`Act` doc-comment that asserts a concrete runtime guarantee ("`with_snaps` resumes from the latest snapshot", "the cache is invalidated only on `ConcurrencyError`") must have a TCK or unit test that fails if the claim stops holding, and a row in the [behavior-contract checklist](docs/docs/architecture/behavior-contracts.md): a one-line claim, a link to the doc section that explains it, and the exact test names. No rationale or ticket numbers in the row. `pnpm check:contracts` (run in CI) fails when a cited test doesn't exist, so a test rename updates its row in the same PR.
-4. Only then: announce "ready for review", show the diff summary, offer to open a PR via `/pr`.
+3. Only then: announce "ready for review", show the diff summary, offer to open a PR via `/pr`.
 
 A branch stacked on another PR's branch conflicts once that PR squash-merges. Merge master into it, and check that its diff against master is only its own change.
 
