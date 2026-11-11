@@ -1851,9 +1851,8 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         });
 
         it("never claims an unmarked stream, however much work the log holds", async () => {
-          // NULL is not "no work" and no longer "unknown, go and look" — it
-          // is "correlate has not spoken for this row", and `claim` has
-          // nothing else to consult. The events below are real
+          // NULL means "correlate has not spoken for this row", and `claim`
+          // has nothing else to consult. The events below are real
           // work for this subscription; only the mark makes them claimable.
           const s = `ws-unmarked-${uid()}`;
           const src = `ws-unmarked-src-${uid()}`;
@@ -2142,11 +2141,10 @@ export const runStoreTck = (options: StoreTckOptions): void => {
       });
     });
 
-    // The TCK previously asserted only the *shape* of claim()
-    // results, letting adapters diverge on `Lease.retry` and `Lease.lagging`
-    // — the two signals the drain controller reads to time `blockOnError`
-    // and to balance frontiers. These cases pin the *semantics* so every
-    // adapter is interchangeable, not merely structurally conformant.
+    // `Lease.retry` and `Lease.lagging` are the two signals the drain
+    // controller reads to time `blockOnError` and to balance frontiers.
+    // These cases pin their semantics, not only their shape, so every
+    // adapter is interchangeable.
     describe("lease semantics", () => {
       // Frontier budgets (`lagging`/`leading`) apply across every claimable
       // stream in the store, so these cases run against a fresh, isolated
@@ -2286,18 +2284,12 @@ export const runStoreTck = (options: StoreTckOptions): void => {
     });
 
     // A subscription's `source` is the window its FETCH reads — a literal
-    // stream name matched by equality, or a portable pattern. It is no
-    // longer anything to `claim`, which answers eligibility
-    // from the row's mark alone and never reads the event log.
-    //
-    // The matching itself did not disappear, it moved up a layer: correlate
-    // applies it when deciding which events may raise a target's mark
-    // (`_in_fetch_window`), and the cases that used to live here —
-    // exact names never overmatching a sibling prefix, pattern
-    // sources claiming only on a real match — are now in
-    // `libs/act/test/correlate.spec.ts`. What remains here is
-    // what the store still owns: the fetch window, source portability, and
-    // lease exclusivity.
+    // stream name matched by equality, or a portable pattern. `claim`
+    // answers eligibility from the row's mark alone and never reads the
+    // event log; correlate matches sources when it decides which events
+    // may raise a target's mark, and its cases are in
+    // `libs/act/test/correlate.spec.ts`. What the store owns is here: the
+    // fetch window, source portability, and lease exclusivity.
     describe("source windows and lease exclusivity", () => {
       it("receives exactly its source stream's events", async () => {
         const fresh = await options.factory();
@@ -2364,13 +2356,6 @@ export const runStoreTck = (options: StoreTckOptions): void => {
       });
     });
 
-    // The pattern-source claim cases are gone with the probe.
-    // A pattern source (one with an anchor, like the
-    // calculator's `^(A|B)$`) is still matched as a full RegExp — but by
-    // correlate, when it decides which events may raise a target's mark,
-    // not by `claim`, which no longer reads the event log. The cases now
-    // live in `libs/act/test/correlate.spec.ts`.
-
     // Adapters that cannot faithfully run an arbitrary regex in
     // claim reject a non-portable claim source loudly at subscribe() —
     // failing at registration, not silently never claiming the stream.
@@ -2394,10 +2379,8 @@ export const runStoreTck = (options: StoreTckOptions): void => {
       }
     );
 
-    // Competing-consumer correctness was previously proven only by
-    // the PG-specific multi-process stress harness. This makes it a portable
-    // contract for adapters that support concurrent claimers (gated by
-    // `concurrent_claim`): two distinct workers claiming the same candidate
+    // Competing consumers, for adapters that support concurrent claimers
+    // (gated by `concurrent_claim`): two distinct workers claiming the same candidate
     // set concurrently must never both lease the same stream within the
     // lease window. Single-writer stores (SQLite) opt out — see the
     // capability docs.
@@ -3837,9 +3820,9 @@ export const runStoreTck = (options: StoreTckOptions): void => {
 
       it("applies windowed targets before full ones", async () => {
         // A stream listed as both is not something the framework produces —
-        // `close-cycle` dedups by stream first — but `Store` is a public port
-        // and the three adapters used to disagree on which entry survived in
-        // the returned map. Windowed first, so the full entry wins.
+        // `close-cycle` dedups by stream first — but `Store` is a public port,
+        // so every adapter must return the same map. Windowed first, so the
+        // full entry wins.
         const s = `trunc-mix-${uid()}`;
         await store.commit<CounterEvents>(
           [{ stream: s, msgs: [inc(1)] }],
