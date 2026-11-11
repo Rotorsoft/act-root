@@ -189,10 +189,9 @@ Both are typed from the app: a tRPC client and Hono's `hc<typeof api>` see each 
 ```ts
 import { BroadcastChannel, applyPatchMessage } from "@rotorsoft/act-http/sse";
 
-// Server: after every app.do()
-const snaps = await app.do(action, target, payload);
-const patches = snaps.map((s) => s.patch).filter(Boolean);
-const state = deriveState(snaps.at(-1)!);
+// Server: after every app.do(), publish the state and its patches.
+// Building both, including the empty patch a `.snap` needs, is in the
+// real-time guide's "Broadcasting a commit".
 broadcast.publish(streamId, state, patches);
 
 // Client: in your SSE onData handler
@@ -203,6 +202,8 @@ onData: (msg) => {
   else if (result.reason === "behind") utils.getState.invalidate({ streamId });
 };
 ```
+
+How to build `state` and `patches` from `app.do()`'s snapshots: [Broadcasting a commit](https://rotorsoft.github.io/act-root/docs/concepts/real-time#broadcasting-a-commit).
 
 ## API
 

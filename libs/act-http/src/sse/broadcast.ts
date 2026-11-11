@@ -123,10 +123,9 @@ const tag_overlay_keys = <S extends object>(
  * ```typescript
  * const broadcast = new BroadcastChannel<MyState>();
  *
- * // After every app.do():
- * const snaps = await app.do(...);
- * const patches = snaps.map(s => s.patch).filter(Boolean);
- * const state = deriveState(snaps.at(-1));
+ * // After every app.do(), publish the state and its patches (how to
+ * // build both, a `.snap`'s empty patch included:
+ * // https://rotorsoft.github.io/act-root/docs/concepts/real-time#broadcasting-a-commit):
  * broadcast.publish(streamId, state, patches);
  *
  * // In SSE subscription:
