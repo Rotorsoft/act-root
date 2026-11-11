@@ -8,7 +8,7 @@ Verify the current branch is mergeable. CI (`ci-cd.yml` → `ci` job) runs typec
 ## Local steps
 
 1. **Charter-covered diff.** Run `pnpm build`, then regenerate the stability snapshot (`pnpm check:stability -u`; it reads `dist/`, so the build comes first and biome must already have formatted the source), then `git diff master --stat -- test/__snapshots__/stability.spec.ts.snap`. The snapshot records the published declarations of every entry point and what they re-export (a subpath the root re-exports whole only once, in the root's block), so an implementation-only change leaves it alone. If it changed, classify it (see below). Commit the regenerated snapshot: CI fails on a stale one.
-2. **Doc-staleness audit.** Run the audit in [CONTRIBUTING.md § Pre-handoff workflow](../../CONTRIBUTING.md#pre-handoff-workflow), step 3: its grep covers every place docs live. Report hits; they're fixed in this PR, not a follow-up.
+2. **Doc-staleness audit.** Run the audit in [CONTRIBUTING.md § Pre-handoff workflow](../../CONTRIBUTING.md#pre-handoff-workflow), step 2: its grep covers every place docs live. Report hits; they're fixed in this PR, not a follow-up.
 3. **Lint** (`pnpm lint`) — it takes a second, and fixing a lint error before the push saves a CI round trip. CI runs it too.
 
 ## Then push and read CI

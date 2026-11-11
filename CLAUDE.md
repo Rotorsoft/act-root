@@ -202,7 +202,7 @@ Source-of-truth for what lives where:
 
 ### Pre-handoff workflow (mandatory before "ready for review" / PR)
 
-Run `/release-check` before calling a branch ready: it runs the snapshot, doc-audit and lint steps CI can't decide, then waits until every CI check on the PR has passed or was rightly skipped. A local test run doesn't substitute for reading CI. In the same PR, fix every doc that describes what changed (grep for the old name or shape; never a follow-up PR), give every new runtime claim in the docs a test and a [behavior-contract](docs/docs/architecture/behavior-contracts.md) row, and add a `learnings.md` entry only when the change taught something new. Steps and the doc-audit checklist: [CONTRIBUTING.md § Pre-handoff workflow](CONTRIBUTING.md#pre-handoff-workflow).
+Run `/release-check` before calling a branch ready: it runs the snapshot, doc-audit and lint steps CI can't decide, then waits until every CI check on the PR has passed or was rightly skipped. A local test run doesn't substitute for reading CI. In the same PR, fix every doc that describes what changed (grep for the old name or shape; never a follow-up PR), and give every new runtime claim in the docs a test and a [behavior-contract](docs/docs/architecture/behavior-contracts.md) row. Steps and the doc-audit checklist: [CONTRIBUTING.md § Pre-handoff workflow](CONTRIBUTING.md#pre-handoff-workflow).
 
 ### Documentation discipline
 

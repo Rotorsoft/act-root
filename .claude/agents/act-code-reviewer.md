@@ -49,7 +49,6 @@ Apply `.claude/rules/naming.md`: anything reachable from a package's `index.ts` 
 - Touching `libs/act/src/types/ports.ts` → check whether `docs/docs/architecture/extension-points.md` needs an update.
 - Touching reaction/drain semantics → check `docs/docs/concepts/error-handling.md`.
 - A doc sentence that promises runtime behavior needs a test and a row in `docs/docs/architecture/behavior-contracts.md` (`CONTRIBUTING.md` § Pre-handoff workflow).
-- A change that taught something → check for one entry in `.claude/skills/simplify-core/learnings.md`.
 - Verify cross-references from CLAUDE.md "Where to find what" cover any new doc pages.
 
 ## 6. Business rules
