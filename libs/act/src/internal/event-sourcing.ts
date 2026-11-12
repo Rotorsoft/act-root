@@ -300,26 +300,34 @@ export async function scan(
           kept++;
           return;
         }
+        // Spread `migrated`, not `event`, or the migration is undone.
         let remapped = migrated;
-        const caused_by = migrated.meta.causation.event?.id;
-        if (caused_by !== undefined) {
-          const new_caused_by = id_map.get(caused_by);
-          if (new_caused_by !== undefined && new_caused_by !== caused_by) {
-            // Spread `migrated`, not `event`, or the migration is undone.
-            remapped = {
-              ...migrated,
-              meta: {
-                ...migrated.meta,
-                causation: {
-                  ...migrated.meta.causation,
+        const { action, event: cause } = migrated.meta.causation;
+        if (cause || (stream_rename && action)) {
+          remapped = {
+            ...migrated,
+            meta: {
+              ...migrated.meta,
+              causation: {
+                ...migrated.meta.causation,
+                ...(action &&
+                  stream_rename && {
+                    action: { ...action, stream: stream_rename(action.stream) },
+                  }),
+                ...(cause && {
                   event: {
-                    ...migrated.meta.causation.event!,
-                    id: new_caused_by,
+                    ...cause,
+                    // A cause missing from the source has no id in the new
+                    // log; its old id would name another event there.
+                    id: id_map.get(cause.id) ?? -1,
+                    stream: stream_rename
+                      ? stream_rename(cause.stream)
+                      : cause.stream,
                   },
-                },
+                }),
               },
-            };
-          }
+            },
+          };
         }
         const new_id = await callback(remapped);
         id_map.set(event.id, new_id);

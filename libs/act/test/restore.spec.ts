@@ -524,24 +524,79 @@ describe("scan (with committer)", () => {
     });
   });
 
-  it("passes causation refs through unchanged when target not in source", async () => {
-    const causationIds: Array<number | undefined> = [];
+  it("gives a cause missing from the source id -1, keeping its name, stream and the action", async () => {
+    // The cause (id 1) was pruned at the source; the sink renumbers from 1,
+    // so keeping the old id would make the event name the first restored one.
+    const seen: E["meta"]["causation"][] = [];
+    let next_id = 1;
+    const action = {
+      stream: "s",
+      actor: { id: "a", name: "a" },
+      name: "Tick",
+    };
     await scan(
       fromArray([
+        baseEvent({ id: 5 }),
         baseEvent({
+          id: 6,
           meta: {
             correlation: "c",
-            causation: { event: { id: 999, name: "Phantom", stream: "g" } },
+            causation: {
+              action,
+              event: { id: 1, name: "Pruned", stream: "g" },
+            },
           },
         }),
       ]),
       {},
       async (e) => {
-        causationIds.push(e.meta.causation.event?.id);
-        return 1;
+        seen.push(e.meta.causation);
+        return next_id++;
       }
     );
-    expect(causationIds).toEqual([999]);
+    expect(seen[1]).toEqual({
+      action,
+      event: { id: -1, name: "Pruned", stream: "g" },
+    });
+  });
+
+  it("stream_rename renames the streams in causation too", async () => {
+    const seen: E["meta"]["causation"][] = [];
+    let next_id = 1;
+    const actor = { id: "a", name: "a" };
+    await scan(
+      fromArray([
+        baseEvent({ id: 5, stream: "old-o1" }),
+        baseEvent({
+          id: 6,
+          stream: "inv-old-o1",
+          meta: {
+            correlation: "c",
+            causation: {
+              event: { id: 5, name: "Tick", stream: "old-o1" },
+            },
+          },
+        }),
+        baseEvent({
+          id: 7,
+          stream: "old-o1",
+          meta: {
+            correlation: "c",
+            causation: { action: { stream: "old-o1", actor, name: "Tick" } },
+          },
+        }),
+      ]),
+      { stream_rename: (s) => s.replace("old-", "new-") },
+      async (e) => {
+        seen.push(e.meta.causation);
+        return next_id++;
+      }
+    );
+    expect(seen).toEqual([
+      {},
+      { event: { id: 1, name: "Tick", stream: "new-o1" } },
+      { action: { stream: "new-o1", actor, name: "Tick" } },
+    ]);
   });
 
   it("validates before committing — throws and commit never sees bad event", async () => {
