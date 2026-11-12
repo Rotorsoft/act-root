@@ -286,8 +286,8 @@ The drain pipeline retries on `WebhookError` per `maxRetries` and paces with `ba
 
 | Shape | Config |
 |---|---|
-| **Be patient with the receiver** (the 80% default) | `{ maxRetries: 5, backoff: { strategy: "exponential", baseMs: 200, maxMs: 30_000, jitter: true } }` |
-| **Never give up** | `{ maxRetries: Infinity, blockOnError: false, backoff: {…} }` — for sinks that *must* eventually succeed. 4xx falls back to the same loop. |
+| **Be patient with the receiver** (recommended) | `{ maxRetries: 5, backoff: { strategy: "exponential", baseMs: 200, maxMs: 30_000, jitter: true } }` |
+| **Never give up** | `{ blockOnError: false, backoff: {…} }` — for sinks that *must* eventually succeed: the stream never blocks, so `maxRetries` stops nothing. 4xx falls back to the same loop. |
 | **Strict — block on any failure** | `{ maxRetries: 0 }` — useful for endpoints with strong idempotency where any failed POST warrants operator review. |
 
 In catch blocks, distinguish retryable from non-retryable via the two classes (or the shared `status` field):
@@ -327,7 +327,7 @@ Multi-event commits produce multiple entries in one message. Version gaps trigge
 
 `webhook` is built for **fire-and-forget delivery to a cooperative receiver**: timeouts shorter than the drain lease, retries paced by `backoff`, idempotent endpoints.
 
-**Keep `timeoutMs` below `leaseMillis`.** The drain lease stops competing workers from re-dispatching while your handler is in flight. The default lease is a few seconds; the default `timeoutMs` is `5000`. If `timeoutMs` approaches or exceeds the lease, a slow receiver can hold the lease through expiry, another worker claims the stream, and the same event POSTs twice. The downstream `Idempotency-Key` then becomes load-bearing — if your receiver doesn't dedup, you'll deliver twice. Rule: `timeoutMs ≤ leaseMillis - safety_margin`.
+**Keep `timeoutMs` below `leaseMillis`.** The drain lease stops competing workers from re-dispatching while your handler is in flight. The default lease is 10 seconds; the default `timeoutMs` is `5000`. If `timeoutMs` approaches or exceeds the lease, a slow receiver can hold the lease through expiry, another worker claims the stream, and the same event POSTs twice. The downstream `Idempotency-Key` then becomes load-bearing — if your receiver doesn't dedup, you'll deliver twice. Rule: `timeoutMs ≤ leaseMillis - safety_margin`.
 
 **For heavy or long-running delivery, don't use `webhook` directly.** Drain leases aren't free, and holding one for tens of seconds while a slow API churns is the wrong shape. The Act-native pattern is **outbox-style fan-out**: emit a "needs delivery" event from your reaction (a cheap, local operation), and let a separate consumer — a downstream worker, a Kafka/SQS pipeline, an external scheduler — do the long work at its own pace.
 
