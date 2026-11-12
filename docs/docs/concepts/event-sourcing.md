@@ -288,12 +288,7 @@ await app.do("CreateItem", target, input);
 
 ### Lifecycle Events
 
-- `app.on("committed", ...)` — observe all state changes (snapshots typed loosely, since one listener hears every state)
-- `app.on("committed", Counter, ...)` — observe one state's changes, by `State` or name, with its snapshots typed from that state; `app.off` takes the same shape
-- `app.on("acked", ...)` — observe acknowledged reactions
-- `app.on("blocked", ...)` — catch reaction processing failures
-- `app.on("settled", ...)` — react when `settle()` completes
-- `app.on("closed", ...)` — observe results of `close()` operations (`{ truncated, skipped }`)
+An app emits eight lifecycle events: `committed`, `acked`, `blocked`, `settled`, `closed`, `notified`, `forgotten` and `error`. [Observability § The lifecycle events](../guides/observability.md#the-lifecycle-events) lists each one's payload and what to watch it for. `app.on("committed", Counter, ...)` hears one state's changes, by `State` or name, with its snapshots typed from that state; `app.off` takes the same shape.
 
 ## Projection Rebuild
 
