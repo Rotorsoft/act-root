@@ -13,17 +13,17 @@ Least recently run goes next. A lens with no accepted proposal in its last three
 | Hotspots (tool) | 2026-10-20 | 5 | 1 | retired 2026-10-20: two runs with no proposal; every branch in the hot functions (correlate, action, drain) is a separate rule |
 | File budget | 2026-11-10 | 11 | 1 | active (10 over 300 code lines; no split subtracts) |
 | Comment noise | 2026-11-11 | 11 | 11 | active (core clean; the inspector holds 102 of the repo's 105 ticket refs and a write-gate comment that contradicts the code) |
-| Concepts and options | 2026-11-10 | 11 | 3 | active (2.0 left nothing redundant in core; Act options documented in two places and missing three fields; a retry rule off by one in one page) |
+| Concepts and options | 2026-11-12 | 12 | 3 | active (core's bags unchanged; act-http's two bags unvalidated, a NaN `maxAgeSeconds` turns off replay protection) |
 | Core or decorator? | 2026-10-15 | 3 | 0 | retired 2026-10-15: three runs, findings only (PII, audit, breaker, lanes stay; priority is a major-version question) |
 | DRY across adapters and builders | 2026-11-11 | 11 | 18 | active (every moved rule lives once in core; the guard that keeps them there missed one and matched two only by their old spelling) |
-| Reading path | 2026-11-10 | 10 | 3 | active (no change worth proposing since 2.0's `.loads`) |
+| Reading path | 2026-11-12 | 11 | 3 | active (path unchanged: 13 files, 2 quickstart imports; seven doc pages name things the code doesn't have) |
 | Newcomer test (quarterly) | 2026-10-17 | 2 | 0 | active (21 concepts, 3 imports; a package.json without name/version crashes) |
 | Tests by concept | 2026-11-11 | 11 | 20 | active (4 of 4 full runs green, 0 time-budget tests under an injected stall; four specs repeat core or the TCK) |
 | Mutation evidence (monthly, CI) | never | 0 | 0 | retired: setup removed (#1805), see baselines below |
 | Packages earn their place | 2026-10-15 | 4 | 0 | retired 2026-10-15: four runs, no proposal (removal is ruled out; act-tck churn is the snapshot, now P2026-10-15p-1) |
 | Infra | 2026-11-10 | 11 | 2 | active (node-compat tests below the engines floor; lock-file maintenance can never pass its own age check (#914)) |
-| One source of truth | 2026-11-10 | 11 | 8 | active (2.0's source rule and `.snap` version didn't reach the scaffold skill and the testing guide; hand-copied versions stale) |
-| Examples | 2026-11-10 | 10 | 3 | active (5 of 5 recipes green; 396 snippets type-check; recipes call `app.snap()` and claim a removed backstop) |
+| One source of truth | 2026-11-12 | 12 | 8 | active (docs and the scaffold skill bind SIGTERM the framework already binds; a stale Store contract copy; port topics written up to 5 times) |
+| Examples | 2026-11-12 | 11 | 3 | active (recipes green, 55 tests; the correlate → drain loop tip races the background settle; 44 of 259 snippets type-checked) |
 | Process | 2026-11-10 | 10 | 9 | active (the learnings step caught nothing in 64 PRs; `/pr`'s two shapes; the 2.0 window fixed every round twice) |
 | Feature interactions | 2026-11-11 | 11 | 20 | active (a snapshot takes a stream version, so every reader that pins a version must know `.snap`: the timer recipe and three SSE copies don't) |
 
@@ -140,6 +140,7 @@ Sound proposals that missed a run's cut. The next run ranks these before looking
 - The next major fixes once on its integration branch and merges into it without squashing: the 2.0 window fixed every audit round twice (#2337/#2336, #2357/#2359, #2379/#2380), merged master into `v2` four times (the duplicated test of #2386), and needed separate version PRs only because a squash flattens footers. Fewer words in CONTRIBUTING; 1.x waits for a backport. (P2026-11-10p-5)
 
 ## Self-changes
+- 2026-11-12: the Concepts and options lens now covers the satellites' public option bags and feeds each numeric option NaN. Core's bags hadn't changed since the last run, and the specialist found act-http's two bags unvalidated, one turning off replay protection (#2440).
 
 - 2026-11-11: the DRY lens plants a restated copy of each moved rule, spelled differently, against `architecture.spec.ts`: #2408 moved the notification parser with no guard rule, and two rules matched only the exact old spelling, so their copies passed (#2429). The One source of truth lens counts copies of a behavior by grepping its code shape, not its wording: the 2026-11-10 run reported the SSE wiring as 6 agreeing copies; there were 9, and 3 disagreed (#2428).
 
@@ -1036,3 +1037,35 @@ Findings, not proposed: a snapshot takes a stream version, the root of #2384 and
 Lens metrics: knip 39 unused files (one uncited: #2434), 19 unused exports; stacked docs 1 (inspector); ticket refs core 0, inspector 102; 4 of 4 full runs green at 13.6 s, 0 tests near a framework default, 0 time-budget tests under an injected stall; guard rules that fail a differently spelled copy 4 of 6.
 
 Tickets: #2427–#2434.
+
+### 2026-11-12 — full run (four specialists: reading path, one source of truth, examples, concepts and options)
+
+| metric | 2026-11-11 | now | why |
+|---|---|---|---|
+| spec files | 241 | 235 | #2436 folded six specs (#2430, #2431) |
+| everything else | | unchanged | core 18,519 lines, 58 runtime exports, 0 ticket refs in core, 41% (28% / 14%) comments, 10 files over 300 code lines, 5 workflows / 579 lines, docs 10,011 lines, CLAUDE.md 28 KB |
+
+Audit: #2436 (#2427–#2433) and #2437 (#2434, the bench script deleted) since the last run; core unchanged. Public surface was skipped: RFC 2411 (#2438) owns it, and its implementation plan is #2439.
+
+Decisions on P2026-11-11*: all shipped. D1–D3 and 1–4 → #2436; 5 → #2437 (deleted).
+
+Promises kept: #2430 ≈ −279 and #2431 ≈ −90 → 6 spec files and 4 tests gone; #2433 ≈ −15–20 → −24 lines; #2432 102 refs → 0 (117 counted at fix time).
+
+Verified in the main loop before ranking: the NaN `maxAgeSeconds` replay (a 10-day-old delivery accepted; default and 600 s refuse) and the NaN `timeoutMs`; `maxRetries: Infinity` throwing at build (control 1,000,000 builds); the SIGTERM double shutdown (disposers once without the app's handler, 4 times with it, through the framework's own rejection handlers); the correlate → drain tip (reaction skipped after a 20 or 40 ms pause, control `autoSettle: false`); every stale doc name by `git grep -w` outside the docs.
+
+Proposals, ticketed when the reports were in. Defects first:
+- c-D1, c-D2. act-http's `verifyWebhook` and `webhook` options unvalidated; a NaN bound turns off replay protection → #2440.
+- c-D3. The act-http README's "never give up" setting throws at build; lease "a few seconds" is 10 → #2441.
+- s-D1. The docs and the scaffold skill bind SIGTERM again, so every shutdown runs twice; making shutdown run once is the maintainer's call → #2442.
+- r-D1, s-D2, s-D3. Doc names and pointers the code doesn't have, a lease diagram edge, and configuration.md's stale Store contract copy → #2443.
+- e-D1. The correlate → drain loop tip races the background settle → #2444.
+Simplifications:
+- 1 (r-1). `Act.do` finds each stream's state through the registry (−4 lines) → #2445.
+- 2 (s-1). One list of lifecycle events, owned by observability.md (≈ −130 B) → #2446.
+- 3 (s-2). One home for each port topic across the concept pages (−1,550 B, −60 lines) → #2447.
+
+Findings, not proposed: the snippet check compiles 44 of 259 blocks, and compiling all 259 found 0 calls to a removed API; the last run's "396 type-checked" counted something the checker doesn't. `SettleOptions.correlate` is typed as a `Query` but only `limit` is read (documented; narrowing is breaking).
+
+Lens metrics: reading path 13 runtime files, ~33 names, quickstart 2 imports; recipes 12 files / 55 tests green; snippets type-checked 44 of 259; option bags outside core validated 0 of 2 in act-http.
+
+Tickets: #2440–#2447, and #2439 (RFC 2411's plan) from the conversation.
