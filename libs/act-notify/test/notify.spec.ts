@@ -338,7 +338,7 @@ describe("withBroker", () => {
       warns.mockRestore();
     });
 
-    // What a well-formed notification is: core's `notification_of`, pinned
+    // What a well-formed notification is: core's `parseNotification`, pinned
     // in utils.spec.ts. This pins only that the broker skips the rest.
     it("skips a malformed notification with a warning", async () => {
       const broker = new LoopbackBroker();

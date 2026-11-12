@@ -19,7 +19,8 @@ import type {
   Store,
   StoreNotification,
 } from "@rotorsoft/act";
-import { log, notification_of } from "@rotorsoft/act";
+import { log } from "@rotorsoft/act";
+import { parseNotification } from "@rotorsoft/act/adapter";
 
 /**
  * The wire shape brokers carry. `origin` implements the port's
@@ -122,7 +123,7 @@ export function withBroker<S extends Store>(
     const subscribed = broker.subscribe((message) => {
       // Self-filtering contract: only remote commits wake this process.
       if (!live || message?.origin === origin) return;
-      const notification = notification_of(message?.notification);
+      const notification = parseNotification(message?.notification);
       if (!notification) {
         log().warn("Broker delivered a malformed notification, skipping");
         return;
