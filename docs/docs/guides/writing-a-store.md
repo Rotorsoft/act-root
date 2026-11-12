@@ -221,7 +221,7 @@ Two pieces implement it. First, a `deferred_at` column on the streams/subscripti
 -- defer(input, deferred_at): one bulk UPDATE, returns the affected count
 UPDATE streams
    SET deferred_at = $deferred_at,
-       retry_count = -1            -- a defer is not a failure; clear the retry counter
+       retry = -1                  -- a defer is not a failure; clear the retry counter
  WHERE stream = ANY($streams)      -- or the StreamFilter's compiled predicate
 ```
 
@@ -240,7 +240,7 @@ The second write path for `deferred_at` is `ack` itself: the framework's drain f
 
 That guard is the whole correctness story. Because the skip lives in the shared store and not in worker memory, every competing consumer honors the same deferral — this is durable shared state, not the in-process pacing that reaction backoff does. When the due-time passes, the next `claim` from any worker picks the stream up again at the persisted watermark, so the pending tail is re-delivered and the handler gets another chance to decide.
 
-`deferred_at` is transient: it must clear the moment the stream makes progress or is recovered. `ack` (the watermark advanced), `block` (the stream is quarantined), `reset` (rewind to replay), and `unblock` (operator recovery) all set it back to `NULL`. Re-deferring simply overwrites it. Keep these clears in lockstep with how you already clear `retry_count` and `error` on those verbs — the same rows, the same statements.
+`deferred_at` is transient: it must clear the moment the stream makes progress or is recovered. `ack` (the watermark advanced), `block` (the stream is quarantined), `reset` (rewind to replay), and `unblock` (operator recovery) all set it back to `NULL`. Re-deferring simply overwrites it. Keep these clears in lockstep with how you already clear `retry` and `error` on those verbs — the same rows, the same statements.
 
 There is one more read path to wire: **`query_streams` must surface a stream's active future `deferred_at`** on the position it emits (ms since epoch; `StreamPosition.deferred_at`, [#1221](https://github.com/Rotorsoft/act-root/issues/1221)). The defer timer lives in worker memory, so a process restart forgets every scheduled re-visit — an idle terminal aggregate that deferred its own autoclose would then never re-arm, because nothing re-seeds the timer and no commit lands to wake the stream. On cold start the orchestrator closes that gap by walking `query_streams`, finding streams whose `deferred_at` is still in the future, and re-seeding the owning lane's timer so the drain re-arms at the due-time. Your only job is to return the column when it's set and in the future; leave it absent otherwise.
 

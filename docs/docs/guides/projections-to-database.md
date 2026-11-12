@@ -110,7 +110,7 @@ The default handler runs each event in its own connection. For projections that 
   })
 ```
 
-If the transaction throws, the framework's drain pipeline retries the handler (subject to `maxRetries`), and `block()`s the stream after the retry budget is exhausted. The `__streams__` row records `blocked: true` and an error message — your monitoring should listen for the `"blocked"` lifecycle event:
+If the transaction throws, the framework's drain pipeline retries the handler (subject to `maxRetries`), and `block()`s the stream after the retry budget is exhausted. The stream's subscription row (`events_streams` in Postgres by default, `streams` in SQLite) records `blocked: true` and an error message — your monitoring should listen for the `"blocked"` lifecycle event:
 
 ```typescript no-check
 app.on("blocked", (blocked) => {

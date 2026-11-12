@@ -75,7 +75,7 @@ stateDiagram-v2
   leased --> idle: ack()<br/>the watermark advances, retry back to -1
   leased --> scheduled: ack() with a due time<br/>a defer (retry -1) or a backoff (retry kept)
   scheduled --> leased: claim() once<br/>the due time has passed
-  leased --> idle: the lease expires<br/>a failure with no backoff, or the worker died
+  leased --> idle: the lease expires<br/>the worker died
   leased --> blocked: block()<br/>retries used up, with blockOnError
   blocked --> idle: app.unblock() or app.reset()
   class idle store
@@ -157,5 +157,5 @@ A "use the action's correlation id as a dedup key" hook was evaluated and reject
 
 - `libs/act/src/internal/event-sourcing.ts` — `action()` and the `expectedVersion` check
 - `libs/act-pg/src/postgres-store.ts` — `commit()` (with the `PG_UNIQUE_VIOLATION` translation), `claim()` (with `FOR UPDATE SKIP LOCKED`)
-- `libs/act/src/internal/drain-cycle.ts` — `runDrainCycle` orchestration and `DrainController` lifecycle
+- `libs/act/src/internal/drain-cycle.ts` — `run_drain_cycle` orchestration and `DrainController` lifecycle
 - `libs/act-pg/test/stress/` — multi-process exercise of both primitives under contention
