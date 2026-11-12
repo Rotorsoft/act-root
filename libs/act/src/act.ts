@@ -742,7 +742,6 @@ export class Act<
       // no `patch`: nothing committed, so nothing to wake or announce.
       // Snapshots of the streams its loads appended to follow its own.
       if (!snapshots[0].patch) return snapshots;
-      const me = this.registry.actions[action];
       // A local commit runs its reactions the way a remote one does.
       this._wake(snapshots.map((s) => s.event!.name as string));
       // `committed` fires once per stream appended to, its own first, so a
@@ -753,13 +752,10 @@ export class Act<
         if (of_stream) of_stream.push(s);
         else by_stream.set(s.event!.stream, [s]);
       }
-      for (const [stream, of_stream] of by_stream) {
-        const owner =
-          stream === target.stream
-            ? me
-            : me.loads![action]!.find((l) =>
-                l.events.includes(of_stream[0].event!.name as string)
-              )!.state;
+      for (const of_stream of by_stream.values()) {
+        const owner = this._event_to_state.get(
+          of_stream[0].event!.name as string
+        )!;
         this.emit("committed", of_stream);
         this._notify(`committed:${owner.name}`, of_stream);
       }

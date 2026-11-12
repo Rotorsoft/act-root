@@ -158,7 +158,7 @@ Mixing them works, with one catch: each lane's controller runs one drain at a ti
 ## Pointers
 
 - `libs/act/src/internal/correlate-cycle.ts` — `CorrelateCycle` class, init, scan, polling
-- `libs/act/src/internal/drain-cycle.ts` — `runDrainCycle` (pure cycle), `DrainController` (stateful driver)
+- `libs/act/src/internal/drain-cycle.ts` — `run_drain_cycle` (pure cycle), `DrainController` (stateful driver)
 - `libs/act/src/internal/drain-ratio.ts` — adaptive lag/lead ratio
 - `libs/act/src/internal/settle.ts` — `SettleLoop` debounce + progress loop
 - `libs/act/src/internal/classify.ts` — registry classification at construction

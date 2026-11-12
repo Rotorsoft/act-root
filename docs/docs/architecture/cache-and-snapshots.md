@@ -178,5 +178,5 @@ For a destructive reducer change (renamed field that you can't add as a new opti
 
 - `libs/act/src/internal/event-sourcing.ts` — `load()`, `action()`, `snap()` — the only callers of `cache()` in the framework
 - `libs/act/src/adapters/in-memory-cache.ts` — default `Cache` implementation (LRU)
-- `libs/act/src/types/index.ts` — `Cache` interface, `CacheEntry` shape
+- `libs/act/src/types/ports.ts` — `Cache` interface, `CacheEntry` shape
 - `libs/act/test/property/cache-coherence.property.spec.ts` — invariants the implementation must hold

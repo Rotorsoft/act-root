@@ -1,4 +1,5 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
+import { z } from "zod";
 
 /**
  * Outcome of {@link verifyWebhook}. Either the request signature
@@ -35,6 +36,13 @@ export type VerifyOptions = {
   now?: number;
 };
 
+// A NaN or infinite bound makes both window checks false, so a replay of
+// any age would pass: refuse it at the call instead.
+const VerifyOptionsSchema = z.object({
+  maxAgeSeconds: z.number().min(0).default(300),
+  now: z.number(),
+});
+
 /**
  * Verify an inbound webhook's signature and timestamp against the
  * shared secret. Pair with the sender side: configure
@@ -53,6 +61,10 @@ export type VerifyOptions = {
  *   wasn't 64 hex chars, or the recomputed HMAC didn't match
  *   (constant-time compare).
  *
+ * A `maxAgeSeconds` or `now` that isn't a finite number, or a negative
+ * `maxAgeSeconds`, throws instead: a `NaN` window would accept a replay
+ * of any age.
+ *
  * The signed payload is `${timestamp}.${body}`, so `body` must be
  * the **raw request body bytes**. Any pre-parse normalization
  * (whitespace trimming, JSON re-stringification) would change the
@@ -68,8 +80,10 @@ export function verifyWebhook(
   secret: string,
   options?: VerifyOptions
 ): VerifyResult {
-  const maxAgeSeconds = options?.maxAgeSeconds ?? 300;
-  const now = options?.now ?? Math.floor(Date.now() / 1000);
+  const { maxAgeSeconds, now } = VerifyOptionsSchema.parse({
+    maxAgeSeconds: options?.maxAgeSeconds,
+    now: options?.now ?? Math.floor(Date.now() / 1000),
+  });
 
   const signature = pick_header(headers, "x-webhook-signature");
   if (!signature) return { ok: false, reason: "missing-signature" };

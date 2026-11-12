@@ -27,36 +27,11 @@ The event store uses a port/adapter pattern:
 - **PostgresStore** (`@rotorsoft/act-pg`) — production-ready with ACID guarantees and connection pooling
 - **SqliteStore** (`@rotorsoft/act-sqlite`) — libSQL-backed adapter for embedded or single-node deployments
 
-```typescript
-import { store } from "@rotorsoft/act";
-import { PostgresStore } from "@rotorsoft/act-pg";
-
-store(new PostgresStore({
-  host: "localhost",
-  database: "myapp",
-  user: "postgres",
-  password: "secret",
-}));
-```
-
-```typescript
-import { store } from "@rotorsoft/act";
-import { SqliteStore } from "@rotorsoft/act-sqlite";
-
-store(new SqliteStore({ url: "file:myapp.db" }));
-```
+Inject one with `store(adapter)` before building the app; [Configuration § Store](./configuration.md#store) shows each.
 
 ### Cache
 
-Cache is always-on with `InMemoryCache` (LRU, maxSize 1000) as the default. It eliminates full event replay on every `load()` by storing the latest state checkpoint in memory. Actions update the cache after each commit; concurrency errors invalidate stale entries.
-
-For distributed deployments, implement the `Cache` interface backed by Redis or another external store:
-
-```typescript no-check
-import { cache } from "@rotorsoft/act";
-
-cache(new RedisCache({ url: "redis://localhost:6379" }));
-```
+Every `load()` starts from a cached checkpoint (`InMemoryCache` by default) and replays only what came after it; [Cache and snapshots](../architecture/cache-and-snapshots.md) explains when it is updated, invalidated and bypassed.
 
 ### Time-travel queries
 
@@ -98,28 +73,15 @@ await app.load(
 
 ### Logger
 
-Logging follows the same port/adapter pattern. The default `ConsoleLogger` emits JSON lines in production and colorized output in development. For pino, inject `PinoLogger` from `@rotorsoft/act-pino`:
-
-```typescript
-import { log } from "@rotorsoft/act";
-import { PinoLogger } from "@rotorsoft/act-pino";
-
-log(new PinoLogger({ level: "debug" }));
-```
+Logging is a port too: `ConsoleLogger` by default, `PinoLogger` from `@rotorsoft/act-pino` for pino ([Configuration § Logger](./configuration.md#logger)).
 
 ### Resource Disposal
 
-All adapters (logger, store, cache, custom disposers) are cleaned up via `dispose()()`:
+All adapters (logger, store, cache, custom disposers) are cleaned up via `dispose()()`. Importing the framework already runs it on SIGINT and SIGTERM, so an app doesn't bind those signals itself ([Production checklist § Graceful shutdown](../guides/production-checklist.md#6-graceful-shutdown)). Tests call it after each file:
 
 ```typescript
 import { dispose } from "@rotorsoft/act";
 
-// Graceful shutdown
-process.on("SIGTERM", async () => {
-  await dispose()();
-});
-
-// In tests
 afterAll(async () => {
   await dispose()();
 });
@@ -294,12 +256,7 @@ await app.do("CreateItem", target, input);
 
 ### Lifecycle Events
 
-- `app.on("committed", ...)` — observe all state changes (snapshots typed loosely, since one listener hears every state)
-- `app.on("committed", Counter, ...)` — observe one state's changes, by `State` or name, with its snapshots typed from that state; `app.off` takes the same shape
-- `app.on("acked", ...)` — observe acknowledged reactions
-- `app.on("blocked", ...)` — catch reaction processing failures
-- `app.on("settled", ...)` — react when `settle()` completes
-- `app.on("closed", ...)` — observe results of `close()` operations (`{ truncated, skipped }`)
+An app emits eight lifecycle events: `committed`, `acked`, `blocked`, `settled`, `closed`, `notified`, `forgotten` and `error`. [Observability § The lifecycle events](../guides/observability.md#the-lifecycle-events) lists each one's payload and what to watch it for. `app.on("committed", Counter, ...)` hears one state's changes, by `State` or name, with its snapshots typed from that state; `app.off` takes the same shape.
 
 ## Projection Rebuild
 

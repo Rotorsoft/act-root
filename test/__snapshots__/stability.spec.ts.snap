@@ -7195,6 +7195,10 @@ export type VerifyOptions = {
  *   wasn't 64 hex chars, or the recomputed HMAC didn't match
  *   (constant-time compare).
  *
+ * A \`maxAgeSeconds\` or \`now\` that isn't a finite number, or a negative
+ * \`maxAgeSeconds\`, throws instead: a \`NaN\` window would accept a replay
+ * of any age.
+ *
  * The signed payload is \`\${timestamp}.\${body}\`, so \`body\` must be
  * the **raw request body bytes**. Any pre-parse normalization
  * (whitespace trimming, JSON re-stringification) would change the
@@ -8183,7 +8187,8 @@ export type WebhookConfig<TEvents extends Schemas = Schemas> = {
      */
     readonly body?: WebhookBody | ((event: Committed<TEvents, keyof TEvents>) => WebhookBody);
     /**
-     * Per-request timeout in milliseconds. Defaults to 5000.
+     * Per-request timeout in milliseconds. Defaults to 5000. A value that
+     * isn't a positive number (\`NaN\` included) throws when \`webhook()\` is called.
      * The handler throws after the timeout via \`AbortController\`.
      *
      * The budget covers the **whole** exchange, not just the connection:

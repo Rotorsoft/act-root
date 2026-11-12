@@ -274,7 +274,7 @@ app.on("acked", (leases) => console.log("acked", leases));
 app.on("blocked", (blocked) => console.error("blocked", blocked));
 app.on("settled", (drain) => console.log("settled", drain));
 app.on("closed", (result) => console.log("closed", result));
-app.on("notified", (n) => console.log("cross-process commit", n));  // PostgresStore notify only
+app.on("notified", (n) => console.log("cross-process commit", n));  // a store with notify (PostgresStore, or act-notify's withBroker)
 app.on("error", ({ error, circuit }) => console.error("store failure", error, circuit));
 ```
 
@@ -307,8 +307,8 @@ Each reaction handler accepts options that control retry and blocking behaviour:
   .to(resolver)
 ```
 
-- **`maxRetries`** (default `3`) — how many times the framework re-claims a stream after a handler throws. Each failed cycle increments `retry_count`; the next `claim()` picks the stream up again with the same events.
-- **`blockOnError`** (default `true`) — once a failure happens with `retry_count` at `maxRetries` (the `maxRetries + 1`th attempt), the framework calls `block()` to set `blocked = true` on the stream. Set `false` if your handler is idempotent and you'd rather keep retrying forever.
+- **`maxRetries`** (default `3`) — how many times the framework re-claims a stream after a handler throws. Each failed cycle increments the stream's `retry`; the next `claim()` picks the stream up again with the same events.
+- **`blockOnError`** (default `true`) — once a failure happens with `retry` at `maxRetries` (the `maxRetries + 1`th attempt), the framework calls `block()` to set `blocked = true` on the stream. Set `false` if your handler is idempotent and you'd rather keep retrying forever.
 - **`backoff`** (default: a fixed 10 seconds) — paces inter-attempt timing so flaky receivers aren't hammered. See [Backoff](#backoff).
 
 Set `maxRetries: 0` for handlers that should never retry — typically those that already implement their own dead-letter strategy.

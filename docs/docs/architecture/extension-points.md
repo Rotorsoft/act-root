@@ -261,7 +261,7 @@ interface Logger extends Disposable {
 
 - **No-throw**: log calls must never throw. A misbehaving logger crashing the framework is the classic operability footgun.
 - **Level gating**: levels above `level` should be no-ops. The `tracing` module checks `logger.level === "trace"` to decide whether to instrument event-sourcing and drain ops with breadcrumb logs. Lying about the level disables tracing silently.
-- **`child(bindings)` returns a logger that forwards to the same sink with merged bindings**. Used by `Act.create_correlations` and similar to add a per-instance binding (e.g., `correlationId`).
+- **`child(bindings)` returns a logger that forwards to the same sink with merged bindings**. The framework never calls it; apps use it to add their own bindings (e.g., `correlationId`).
 
 ### Concrete adapters
 

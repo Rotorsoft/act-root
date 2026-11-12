@@ -381,7 +381,7 @@ Before pushing to production, walk this list mentally:
 - [ ] `app.on("blocked", …)` wired to monitoring
 - [ ] Snap policies set on long-lived states
 - [ ] Idempotency middleware on mutation endpoints
-- [ ] `dispose()` wired to SIGINT/SIGTERM
+- [ ] App cleanup registered with `dispose(...)` (signals are handled for you)
 - [ ] `LOG_LEVEL` and `NODE_ENV` set appropriately
 - [ ] Lifecycle metrics exported (blocked, settled, concurrency)
 - [ ] Lanes sized per latency class (or all reactions sharing one timing budget is genuinely fine)

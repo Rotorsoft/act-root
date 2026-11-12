@@ -153,17 +153,11 @@ Without snapshots, a cold-start `load()` replays the entire event stream. With s
 When other processes commit to the same store and it has no `notify` (SQLite, or Postgres with `listen: false`), poll for their commits:
 
 ```typescript
-import { dispose } from "@rotorsoft/act";
-
 // Periodic settle — picks up commits from other processes every 3s
 app.start_correlations({ limit: 10 }, 3000);
-
-// Graceful shutdown — dispose() shuts the app down (stopping the poll) and
-// cleans up all adapters (store, cache, etc.)
-process.on("SIGTERM", async () => {
-  await dispose()();
-});
 ```
+
+On SIGINT or SIGTERM the framework's own handler runs `dispose()`, which stops the poll and cleans up every adapter. Don't bind those signals in the app: a second handler runs the whole shutdown twice.
 
 ## Automated Jobs
 
@@ -805,5 +799,4 @@ const state = await readProjection(streamId); // stale
 
 See dev-server.ts above for the complete seed pattern. Key points:
 - Use `systemActor` for seed actions
-- Call `correlate()` + `drain()` in a loop after seeding to process all reactions and projections
 - Seed an admin user with `hashPassword()` for development access
