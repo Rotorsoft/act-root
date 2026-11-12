@@ -21,7 +21,7 @@ When `streamLimit` is binding (more candidate streams than the worker can claim 
 
 ## The shape
 
-A reaction's resolver gets an optional `priority` field, a 32-bit integer (Postgres stores it as `int`). A static `.to({ priority })` that isn't one throws at build, and `app.prioritize` throws before it reaches the store. A dynamic resolver's priority is only known at correlate, so a bad one skips that event for that reaction and logs an error once; every other reaction keeps running:
+A reaction's resolver gets an optional `priority` field, a 32-bit integer (Postgres stores it as `int`). A static `.to({ priority })` that isn't one throws at build, and `app.prioritize` throws before it reaches the store. A dynamic resolver's priority is only known at correlate, so a bad one runs at priority 0 and logs an error once per reaction, the way an undeclared lane runs on `default`:
 
 ```ts no-check
 .on("OrderConfirmed")
