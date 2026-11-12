@@ -86,6 +86,16 @@ export function resolveReactionConfig(
   return ReactionOptionsSchema.parse(options);
 }
 
+// Target — `.to({ target, priority })`. Postgres stores `priority` as a
+// 32-bit `int`, so a fraction or a larger value would fail every subscribe.
+
+const TargetOptionsSchema = z.object({ priority: z.int32().optional() });
+
+/** Validate a static reaction target's options. Throws `ZodError`. */
+export function resolveTargetConfig(options: { priority?: number }): void {
+  TargetOptionsSchema.parse(options);
+}
+
 // Action — `.on(entry, options)`. `maxRetries` gates the command retry loop's
 // exit (`attempt >= maxRetries`), so a `NaN` here can spin the loop forever on
 // a contended stream. All fields optional (the argument itself is optional).

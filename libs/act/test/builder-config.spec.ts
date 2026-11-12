@@ -225,6 +225,23 @@ describe("config is validated at the declaration/runtime site", () => {
     ).toThrow();
   });
 
+  it("a static target's priority must be a 32-bit integer, checked at declaration", () => {
+    async function react() {}
+    const route = (priority: number) =>
+      act()
+        .withState(counter)
+        .on("ticked")
+        .do(react)
+        .to({ target: "out", priority });
+    expect(() => route(1.5)).toThrow();
+    expect(() => route(3_000_000_000)).toThrow();
+    expect(() => route(Number.NaN)).toThrow();
+    expect(() => route(-10).build()).not.toThrow();
+    expect(() =>
+      act().withState(counter).on("ticked").do(react).to("out").build()
+    ).not.toThrow();
+  });
+
   it("action with a NaN maxRetries throws at build", () => {
     expect(() =>
       state({ S: z.object({ n: z.number() }) })
