@@ -49,7 +49,7 @@ import {
 import { SettleLoop } from "./internal/settle.js";
 import { build_drain, build_es } from "./internal/tracing.js";
 import { walk_streams } from "./internal/walk-streams.js";
-import { cache, default_scope, log, store } from "./ports.js";
+import { cache, log, store, unscoped_ports } from "./ports.js";
 import {
   current_reacting,
   make_reaction_scope,
@@ -351,7 +351,7 @@ export class Act<
     // Every Act runs in its own ports frame (the singletons when unscoped),
     // so a shared Act never inherits its caller's frame.
     if (options.scoped) check_store(options.scoped.store);
-    this._ports = options.scoped ?? default_scope();
+    this._ports = options.scoped ?? unscoped_ports();
     const ports = this._ports;
     this._scoped = make_run_scoped({
       // Getters, not a spread: the singletons resolve lazily, so a later

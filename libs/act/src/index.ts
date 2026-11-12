@@ -3,13 +3,9 @@ import "./signals.js";
 /**
  * @packageDocumentation
  * @module act
- * Main entry point for the Act framework: the builders, the ports an app
- * wires, the in-memory adapters, the errors it catches and every public type.
- * A store implementation takes its rules from `@rotorsoft/act/adapter`.
- *
- * Every runtime name is listed here on purpose, so a new public value is a
- * line in review rather than an accident of a re-export.
+ * Main entry point for apps. Store rules are on `@rotorsoft/act/adapter`.
  */
+// Each runtime name is listed, so a new public value is a line in review.
 export { Act } from "./act.js";
 export {
   ConsoleLogger,

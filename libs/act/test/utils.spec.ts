@@ -1,7 +1,6 @@
 import { patch } from "@rotorsoft/act-patch";
 import { z } from "zod";
 import { config, sleep, ValidationError, validate } from "../src/index.js";
-import { extend } from "../src/utils.js";
 
 describe("utils", () => {
   describe("config", () => {
@@ -225,42 +224,6 @@ describe("utils", () => {
       expect(caught).toBeInstanceOf(ValidationError);
       // details should preserve the impostor; it must not be prettified as zod
       expect(caught?.details).toBeInstanceOf(ImpostorError);
-    });
-  });
-
-  describe("extend", () => {
-    it("should extend target with validated source", () => {
-      const source = { key: "value" };
-      const target = { otherKey: 123 };
-      const extended = extend(source, schema, target);
-      expect(extended).toEqual({ otherKey: 123, key: "value" });
-    });
-
-    it("should throw ValidationError on invalid source", () => {
-      const source = { key: 123 };
-      const target = { otherKey: 123 };
-      // @ts-expect-error invalid source
-      expect(() => extend(source, schema, target)).toThrow(ValidationError);
-    });
-
-    it("should extend with no target", () => {
-      const schema = z.object({ key: z.string() });
-      const source = { key: "value" };
-      const extended = extend(source, schema);
-      expect(extended).toEqual({ key: "value" });
-    });
-
-    it("should not mutate the target object across calls", () => {
-      const defaults = { otherKey: 123 };
-      const snapshot = { ...defaults };
-
-      extend({ key: "first" }, schema, defaults);
-      extend({ key: "second" }, schema, defaults);
-
-      // defaults must remain pristine — extend returns a new object,
-      // not a mutated target. Otherwise shared defaults leak across calls.
-      expect(defaults).toEqual(snapshot);
-      expect(defaults).not.toHaveProperty("key");
     });
   });
 

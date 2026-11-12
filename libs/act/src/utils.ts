@@ -9,7 +9,6 @@ import { ValidationError } from "./types/index.js";
  * Small utilities used across the framework:
  * - {@link validate} — parse a payload against a Zod schema, throwing
  *   {@link ValidationError} on failure.
- * - {@link extend} — validate a source object and merge into defaults.
  * - {@link sleep} — async delay (default duration from `config().sleepMs`).
  */
 
@@ -40,33 +39,6 @@ export const validate = <S>(
     }
     throw new ValidationError(target, payload, error);
   }
-};
-
-/**
- * Validate `source` against `schema` and return a new object that merges
- * `source` over the optional `target` defaults. Used by {@link config} for
- * env-var-overrides-defaults patterns; safe to call elsewhere — it never
- * mutates `target`.
- *
- * @example
- * ```typescript
- * const schema = z.object({ host: z.string(), port: z.number() });
- * const cfg = extend({ port: 8080 }, schema, { host: "localhost", port: 80 });
- * // → { host: "localhost", port: 8080 }
- * ```
- *
- * @throws {@link ValidationError} if `source` fails the schema.
- */
-export const extend = <
-  S extends Record<string, unknown>,
-  T extends Record<string, unknown>,
->(
-  source: Readonly<S>,
-  schema: ZodType<S>,
-  target?: Readonly<T>
-): Readonly<S & T> => {
-  const value = validate("config", source, schema);
-  return { ...target, ...value } as Readonly<S & T>;
 };
 
 /**
