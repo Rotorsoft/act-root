@@ -1,3 +1,10 @@
+# [@rotorsoft/act-pino-v2.0.1](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-pino-v2.0.0...@rotorsoft/act-pino-v2.0.1) (2026-11-12)
+
+
+### Bug Fixes
+
+* wave 30 bugs (restore causation, TCK globals, pino single line, priority and CJS docs) ([#2459](https://github.com/Rotorsoft/act-root/issues/2459)) ([3c095ef](https://github.com/Rotorsoft/act-root/commit/3c095ef0f3824b36316f822c2a2dac2290ab56cf)), closes [#2451](https://github.com/Rotorsoft/act-root/issues/2451) [#2452](https://github.com/Rotorsoft/act-root/issues/2452)
+
 # [@rotorsoft/act-pino-v2.0.0](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-pino-v1.0.9...@rotorsoft/act-pino-v2.0.0) (2026-11-07)
 
 
