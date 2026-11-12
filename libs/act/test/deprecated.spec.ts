@@ -10,6 +10,8 @@ import { extend } from "../src/utils.js";
 // Each name the root keeps for 2.x callers is the very function or value it
 // points at, so a caller on the old name sees no difference until 3.0.
 describe("deprecated root names (removed in 3.0)", () => {
+  const exported = new Map(Object.entries(root));
+
   it.each([
     ["check_appends", adapter.checkAppends],
     ["throw_if_stale", adapter.checkVersion],
@@ -36,7 +38,7 @@ describe("deprecated root names (removed in 3.0)", () => {
     ["default_scope", default_scope],
     ["extend", extend],
   ])("%s is its replacement", (name, replacement) => {
-    expect(root[name as keyof typeof root]).toBe(replacement);
+    expect(exported.get(name)).toBe(replacement);
   });
 
   it("pii_fields stays on /types too, beside sensitiveFields", () => {
