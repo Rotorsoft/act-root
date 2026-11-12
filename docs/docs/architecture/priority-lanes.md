@@ -21,7 +21,7 @@ When `streamLimit` is binding (more candidate streams than the worker can claim 
 
 ## The shape
 
-A reaction's resolver gets an optional `priority` field:
+A reaction's resolver gets an optional `priority` field, a 32-bit integer (Postgres stores it as `int`, so a fraction or a larger value fails the subscribe):
 
 ```ts no-check
 .on("OrderConfirmed")

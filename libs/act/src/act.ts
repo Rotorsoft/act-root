@@ -1402,7 +1402,7 @@ export class Act<
    * registered stream.**
    *
    * @param filter - Selection criteria (regex by default, like {@link query}).
-   * @param priority - New priority value. Set as-is — no clamp.
+   * @param priority - New priority value, a 32-bit integer. Set as-is — no clamp.
    * @returns Count of streams whose priority changed.
    *
    * @example Boost a specific projection mid-replay
