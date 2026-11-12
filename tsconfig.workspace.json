@@ -11,6 +11,7 @@
     "paths": {
       "@act/*": ["./packages/*/src/index.ts"],
       "@rotorsoft/act": ["./libs/act/src/index.ts"],
+      "@rotorsoft/act/adapter": ["./libs/act/src/adapter.ts"],
       "@rotorsoft/act/test": ["./libs/act/src/test/index.ts"],
       "@rotorsoft/act/types": ["./libs/act/src/types/index.ts"],
       "@rotorsoft/act-crypto": ["./libs/act-crypto/src/index.ts"],

@@ -2,7 +2,7 @@
  * The sensitive-data marker: the symbol `sensitive(zodType)` stamps on a
  * schema's definition, and the lookups that read it. The public
  * `sensitive()` and the two sentinels live in `types/schemas.ts`, which
- * re-exports `pii_fields` from here. The transforms that apply the marker at
+ * re-exports `sensitiveFields` from here. The transforms that apply the marker at
  * commit, load and dispatch live in `internal/pii.ts`.
  */
 import type { z } from "zod";
@@ -85,6 +85,11 @@ export function pii_schemas(schema: z.ZodType): Record<string, z.ZodType> {
  * act-http OpenAPI emitter marks these fields `writeOnly`). Returns `[]`
  * for a schema with no sensitive fields.
  */
-export function pii_fields(schema: z.ZodType): readonly string[] {
+export function sensitiveFields(schema: z.ZodType): readonly string[] {
   return Object.keys(pii_schemas(schema));
 }
+
+/**
+ * @deprecated Use {@link sensitiveFields}. Removed in 3.0.
+ */
+export const pii_fields = sensitiveFields;

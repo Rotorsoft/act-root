@@ -2888,7 +2888,7 @@ export {};
 //# sourceMappingURL=builders.d.ts.map
 // === config.d.ts ===
 import { z } from "zod";
-import { type ActOptions, type AutocloseConfig, type Config } from "./types/index.js";
+import { type Config } from "./types/index.js";
 /**
  * Zod schema for the package.json fields {@link config} validates. Published
  * for tooling that reads the same file, not for apps.
@@ -2936,11 +2936,6 @@ export declare const PackageSchema: z.ZodObject<{
  * @see {@link Config} for configuration type
  */
 export declare const config: () => Config;
-/**
- * Validates and defaults the autoclose knobs of \`ActOptions\`, the way
- * \`act().build()\` does. Throws \`ZodError\` on an out-of-range value.
- */
-export declare function resolveAutocloseConfig(options: ActOptions | undefined): AutocloseConfig;
 //# sourceMappingURL=config.d.ts.map
 // === console-logger.d.ts ===
 /**
@@ -3012,6 +3007,170 @@ export declare class CsvFile implements EventSource, EventSink {
     dispose(): Promise<void>;
 }
 //# sourceMappingURL=csv.d.ts.map
+// === deprecated.d.ts ===
+/**
+ * Names the root still exports for 2.x callers, each pointing at its
+ * replacement ([RFC 2411](https://github.com/Rotorsoft/act-root/blob/master/rfcs/2411-adapter-subpath.md)).
+ * All of them are removed in 3.0, together with this file and their lines in
+ * \`index.ts\`; \`pii_fields\` is the one alias kept next to its replacement, in
+ * \`sensitive.ts\`, because \`/types\` publishes it too.
+ */
+import { checkAppends, checkVersion, concurrencyError, fairSlots, isStreamName, parseNotification, seedEvent } from "./adapter.js";
+import { default_scope as unscoped_ports } from "./ports.js";
+import { type ActOptions, type AutocloseConfig } from "./types/index.js";
+import { extend as extend_config } from "./utils.js";
+/** @deprecated Use \`checkAppends\` from \`@rotorsoft/act/adapter\`. */
+export declare const check_appends: typeof checkAppends;
+/** @deprecated Use \`checkVersion\` from \`@rotorsoft/act/adapter\`. */
+export declare const throw_if_stale: typeof checkVersion;
+/** @deprecated Use \`concurrencyError\` from \`@rotorsoft/act/adapter\`. */
+export declare const concurrency_error: typeof concurrencyError;
+/** @deprecated Use \`seedEvent\` from \`@rotorsoft/act/adapter\`. */
+export declare const seed_event: typeof seedEvent;
+/** @deprecated Use \`fairSlots\` from \`@rotorsoft/act/adapter\`. */
+export declare const fair_slots: typeof fairSlots;
+/** @deprecated Use \`isStreamName\` from \`@rotorsoft/act/adapter\`. */
+export declare const is_literal_source: typeof isStreamName;
+/** @deprecated Use \`parseNotification\` from \`@rotorsoft/act/adapter\`. */
+export declare const notification_of: typeof parseNotification;
+/** @deprecated Import it from \`@rotorsoft/act/types\`. */
+export declare const DEFAULT_QUERY_STREAMS_LIMIT = 100;
+/** @deprecated Import it from \`@rotorsoft/act/types\`. */
+export declare const ActorSchema: import("zod").ZodReadonly<import("zod").ZodObject<{
+    id: import("zod").ZodString;
+    name: import("zod").ZodString;
+}, import("zod/v4/core").$loose>>;
+/** @deprecated Import it from \`@rotorsoft/act/types\`. */
+export declare const TargetSchema: import("zod").ZodReadonly<import("zod").ZodObject<{
+    stream: import("zod").ZodString;
+    actor: import("zod").ZodReadonly<import("zod").ZodObject<{
+        id: import("zod").ZodString;
+        name: import("zod").ZodString;
+    }, import("zod/v4/core").$loose>>;
+    expectedVersion: import("zod").ZodOptional<import("zod").ZodNumber>;
+}, import("zod/v4/core").$loose>>;
+/** @deprecated Import it from \`@rotorsoft/act/types\`. */
+export declare const EventMetaSchema: import("zod").ZodReadonly<import("zod").ZodObject<{
+    correlation: import("zod").ZodString;
+    causation: import("zod").ZodObject<{
+        action: import("zod").ZodOptional<import("zod").ZodIntersection<import("zod").ZodReadonly<import("zod").ZodObject<{
+            stream: import("zod").ZodString;
+            actor: import("zod").ZodReadonly<import("zod").ZodObject<{
+                id: import("zod").ZodString;
+                name: import("zod").ZodString;
+            }, import("zod/v4/core").$loose>>;
+            expectedVersion: import("zod").ZodOptional<import("zod").ZodNumber>;
+        }, import("zod/v4/core").$loose>>, import("zod").ZodObject<{
+            name: import("zod").ZodString;
+        }, import("zod/v4/core").$strip>>>;
+        event: import("zod").ZodOptional<import("zod").ZodObject<{
+            id: import("zod").ZodNumber;
+            name: import("zod").ZodString;
+            stream: import("zod").ZodString;
+        }, import("zod/v4/core").$strip>>;
+    }, import("zod/v4/core").$strip>;
+}, import("zod/v4/core").$strip>>;
+/** @deprecated Import it from \`@rotorsoft/act/types\`. */
+export declare const CausationEventSchema: import("zod").ZodObject<{
+    id: import("zod").ZodNumber;
+    name: import("zod").ZodString;
+    stream: import("zod").ZodString;
+}, import("zod/v4/core").$strip>;
+/** @deprecated Import it from \`@rotorsoft/act/types\`. */
+export declare const CommittedMetaSchema: import("zod").ZodReadonly<import("zod").ZodObject<{
+    id: import("zod").ZodNumber;
+    stream: import("zod").ZodString;
+    version: import("zod").ZodNumber;
+    created: import("zod").ZodDate;
+    meta: import("zod").ZodReadonly<import("zod").ZodObject<{
+        correlation: import("zod").ZodString;
+        causation: import("zod").ZodObject<{
+            action: import("zod").ZodOptional<import("zod").ZodIntersection<import("zod").ZodReadonly<import("zod").ZodObject<{
+                stream: import("zod").ZodString;
+                actor: import("zod").ZodReadonly<import("zod").ZodObject<{
+                    id: import("zod").ZodString;
+                    name: import("zod").ZodString;
+                }, import("zod/v4/core").$loose>>;
+                expectedVersion: import("zod").ZodOptional<import("zod").ZodNumber>;
+            }, import("zod/v4/core").$loose>>, import("zod").ZodObject<{
+                name: import("zod").ZodString;
+            }, import("zod/v4/core").$strip>>>;
+            event: import("zod").ZodOptional<import("zod").ZodObject<{
+                id: import("zod").ZodNumber;
+                name: import("zod").ZodString;
+                stream: import("zod").ZodString;
+            }, import("zod/v4/core").$strip>>;
+        }, import("zod/v4/core").$strip>;
+    }, import("zod/v4/core").$strip>>;
+}, import("zod/v4/core").$strip>>;
+/** @deprecated Import it from \`@rotorsoft/act/types\`. */
+export declare const QuerySchema: import("zod").ZodReadonly<import("zod").ZodObject<{
+    stream: import("zod").ZodOptional<import("zod").ZodString>;
+    names: import("zod").ZodOptional<import("zod").ZodArray<import("zod").ZodString>>;
+    before: import("zod").ZodOptional<import("zod").ZodNumber>;
+    after: import("zod").ZodOptional<import("zod").ZodNumber>;
+    limit: import("zod").ZodOptional<import("zod").ZodNumber>;
+    created_before: import("zod").ZodOptional<import("zod").ZodDate>;
+    created_after: import("zod").ZodOptional<import("zod").ZodDate>;
+    backward: import("zod").ZodOptional<import("zod").ZodBoolean>;
+    correlation: import("zod").ZodOptional<import("zod").ZodString>;
+    with_snaps: import("zod").ZodOptional<import("zod").ZodBoolean>;
+    with_pii: import("zod").ZodOptional<import("zod").ZodBoolean>;
+    stream_exact: import("zod").ZodOptional<import("zod").ZodBoolean>;
+}, import("zod/v4/core").$strip>>;
+/** @deprecated Import it from \`@rotorsoft/act/types\`. */
+export declare const Environments: readonly ["development", "test", "staging", "production"];
+/** @deprecated Import it from \`@rotorsoft/act/types\`. */
+export declare const LogLevels: readonly ["fatal", "error", "warn", "info", "debug", "trace"];
+/** @deprecated Import it from \`@rotorsoft/act/types\`. */
+export declare const ExitCodes: readonly ["ERROR", "EXIT"];
+/** @deprecated Import it from \`@rotorsoft/act/types\`. */
+export declare const DEFAULT_LANE = "default";
+/** @deprecated Import it from \`@rotorsoft/act/types\`. */
+export declare const DEFAULT_MAX_SUBSCRIBED_STREAMS = 1000;
+/** @deprecated Import it from \`@rotorsoft/act/types\`. */
+export declare const DEFAULT_SETTLE_DEBOUNCE_MS = 10;
+/**
+ * @deprecated Removed in 3.0 with no replacement: \`config()\` validates
+ * package.json itself.
+ */
+export declare const PackageSchema: import("zod").ZodObject<{
+    name: import("zod").ZodString;
+    version: import("zod").ZodString;
+    description: import("zod").ZodOptional<import("zod").ZodString>;
+    author: import("zod").ZodOptional<import("zod").ZodUnion<[import("zod").ZodOptional<import("zod").ZodObject<{
+        name: import("zod").ZodString;
+        email: import("zod").ZodOptional<import("zod").ZodString>;
+    }, import("zod/v4/core").$strip>>, import("zod").ZodString]>>;
+    license: import("zod").ZodOptional<import("zod").ZodString>;
+    dependencies: import("zod").ZodOptional<import("zod").ZodRecord<import("zod").ZodString, import("zod").ZodString>>;
+}, import("zod/v4/core").$strip>;
+/**
+ * @deprecated Removed in 3.0 with no replacement: \`store()\`, \`cache()\` and
+ * \`log()\` called outside a scoped handler give the same adapters.
+ */
+export declare const default_scope: typeof unscoped_ports;
+/**
+ * @deprecated Removed in 3.0 with no replacement: \`act().build()\` validates
+ * the autoclose options.
+ */
+export declare function resolveAutocloseConfig(options: ActOptions | undefined): AutocloseConfig;
+/**
+ * @deprecated Removed in 3.0 with no replacement: parse into a Zod schema and
+ * spread over the defaults.
+ */
+export declare const extend: typeof extend_config;
+/**
+ * Revive ISO-8601-shaped strings into \`Date\`s during \`JSON.parse\`. It turns
+ * every timestamp-shaped string into a \`Date\`, including fields declared as
+ * \`z.string()\`.
+ *
+ * @deprecated Removed in 3.0 with no replacement: the framework converts only
+ * the fields an event's schema declares as \`z.date()\`, and a host can write
+ * the same reviver in a few lines.
+ */
+export declare const dateReviver: (_key: string, value: unknown) => unknown;
+//# sourceMappingURL=deprecated.d.ts.map
 // === errors.d.ts ===
 import type { Actor, DeferWhen, Message, Schema, Schemas, Snapshot, Target } from "./action.js";
 /**
@@ -3438,16 +3597,24 @@ import "./signals.js";
 /**
  * @packageDocumentation
  * @module act
- * Main entry point for the Act framework. Re-exports all core APIs.
+ * Main entry point for the Act framework: the builders, the ports an app
+ * wires, the in-memory adapters, the errors it catches and every public type.
+ * A store implementation takes its rules from \`@rotorsoft/act/adapter\`.
+ *
+ * Every runtime name is listed here on purpose, so a new public value is a
+ * line in review rather than an accident of a re-export.
  */
-export * from "./act.js";
-export * from "./adapters/index.js";
-export * from "./builders/index.js";
-export * from "./config.js";
-export * from "./csv.js";
-export * from "./ports.js";
-export * from "./types/index.js";
-export * from "./utils.js";
+export { Act } from "./act.js";
+export { ConsoleLogger, InMemoryCache, InMemoryStore, } from "./adapters/index.js";
+export { act, projection, slice, state } from "./builders/index.js";
+export { config } from "./config.js";
+export { CsvFile } from "./csv.js";
+export { ActorSchema, CausationEventSchema, CommittedMetaSchema, check_appends, concurrency_error, DEFAULT_LANE, DEFAULT_MAX_SUBSCRIBED_STREAMS, DEFAULT_QUERY_STREAMS_LIMIT, DEFAULT_SETTLE_DEBOUNCE_MS, dateReviver, default_scope, Environments, EventMetaSchema, ExitCodes, extend, fair_slots, is_literal_source, LogLevels, notification_of, PackageSchema, QuerySchema, resolveAutocloseConfig, seed_event, TargetSchema, throw_if_stale, } from "./deprecated.js";
+export { cache, dispose, disposeAndExit, log, port, store, } from "./ports.js";
+export { pii_fields } from "./sensitive.js";
+export type * from "./types/index.js";
+export { ConcurrencyError, DeferSignal, Errors, NonRetryableError, PreconditionError, REDACTED, SHREDDED, SNAP_EVENT, StoreError, StreamClosedError, sensitive, sensitiveFields, TOMBSTONE_EVENT, ValidationError, ZodEmpty, } from "./types/index.js";
+export { sleep, validate } from "./utils.js";
 //# sourceMappingURL=index.d.ts.map
 // === index.d.ts ===
 export { ConsoleLogger } from "./console-logger.js";
@@ -3486,7 +3653,7 @@ export type * from "./audit.js";
 export type { ActBuilder, ActionBuilder, Projection, ProjectionBuilder, Slice, SliceBuilder, StateBuilder, } from "./builders.js";
 export * from "./errors.js";
 export type * from "./ports.js";
-export { SNAP_EVENT, TOMBSTONE_EVENT } from "./ports.js";
+export { DEFAULT_QUERY_STREAMS_LIMIT, SNAP_EVENT, TOMBSTONE_EVENT, } from "./ports.js";
 export type * from "./reaction.js";
 export { DEFAULT_LANE } from "./reaction.js";
 export type * from "./registry.js";
@@ -4996,6 +5163,10 @@ export declare const SNAP_EVENT = "__snapshot__";
  * @see {@link Act.close} for the close-the-books API
  */
 export declare const TOMBSTONE_EVENT = "__tombstone__";
+/**
+ * How many positions \`query_streams\` returns when the caller gives no limit.
+ */
+export declare const DEFAULT_QUERY_STREAMS_LIMIT = 100;
 //# sourceMappingURL=ports.d.ts.map
 // === projection-builder.d.ts ===
 import type { ProjectionBuilder } from "../types/builders.js";
@@ -5571,7 +5742,7 @@ import { type ZodObject, type ZodRawShape, z } from "zod";
  * An empty Zod schema (no properties).
  */
 export declare const ZodEmpty: z.ZodRecord<z.ZodString, z.ZodNever>;
-export { pii_fields } from "../sensitive.js";
+export { pii_fields, sensitiveFields } from "../sensitive.js";
 /**
  * Sentinel placed in \`event.data[field]\` when the caller isn't authorized to
  * see the sensitive field — either \`.discloses(predicate)\` returned \`false\`,
@@ -5725,7 +5896,7 @@ export declare const QuerySchema: z.ZodReadonly<ZodObject<{
  * The sensitive-data marker: the symbol \`sensitive(zodType)\` stamps on a
  * schema's definition, and the lookups that read it. The public
  * \`sensitive()\` and the two sentinels live in \`types/schemas.ts\`, which
- * re-exports \`pii_fields\` from here. The transforms that apply the marker at
+ * re-exports \`sensitiveFields\` from here. The transforms that apply the marker at
  * commit, load and dispatch live in \`internal/pii.ts\`.
  */
 import type { z } from "zod";
@@ -5763,7 +5934,11 @@ export declare function pii_schemas(schema: z.ZodType): Record<string, z.ZodType
  * act-http OpenAPI emitter marks these fields \`writeOnly\`). Returns \`[]\`
  * for a schema with no sensitive fields.
  */
-export declare function pii_fields(schema: z.ZodType): readonly string[];
+export declare function sensitiveFields(schema: z.ZodType): readonly string[];
+/**
+ * @deprecated Use {@link sensitiveFields}. Removed in 3.0.
+ */
+export declare const pii_fields: typeof sensitiveFields;
 //# sourceMappingURL=sensitive.d.ts.map
 // === slice-builder.d.ts ===
 /**
@@ -5850,7 +6025,6 @@ export declare function state<TName extends string, TState extends Schema>(entry
 //# sourceMappingURL=state-builder.d.ts.map
 // === utils.d.ts ===
 import { type ZodType } from "zod";
-import { ConcurrencyError, type EventMeta, type Schema, type StoreNotification } from "./types/index.js";
 /**
  * @module utils
  * @category Utilities
@@ -5903,6 +6077,22 @@ export declare const extend: <S extends Record<string, unknown>, T extends Recor
  * \`\`\`
  */
 export declare function sleep(ms?: number): Promise<unknown>;
+//# sourceMappingURL=utils.d.ts.map"
+`;
+
+exports[`@rotorsoft/act — public API stability > stable public surface for ./adapter 1`] = `
+"// === adapter.d.ts ===
+/**
+ * @packageDocumentation
+ * @module act/adapter
+ *
+ * The rules a \`Store\` implementation calls, so each one lives once in core and
+ * a third-party store can't drift from it. Each is a pure function of its
+ * arguments. Import them by name, or as
+ * \`import * as adapter from "@rotorsoft/act/adapter"\`. Writing a store:
+ * https://rotorsoft.github.io/act-root/docs/guides/writing-a-store
+ */
+import { ConcurrencyError, type EventMeta, type Schema, type StoreNotification } from "./types/index.js";
 /**
  * True when \`source\` is a stream's **name**, matched exactly. Only an anchored
  * source, one that starts with \`^\` or ends with \`$\`, is a **pattern** and gets
@@ -5919,27 +6109,17 @@ export declare function sleep(ms?: number): Promise<unknown>;
  *
  * @example
  * \`\`\`typescript
- * is_literal_source("Board");    // → true  (exact lookup)
- * is_literal_source("a+b");      // → true  (exact lookup)
- * is_literal_source("^(A|B)$");  // → false (compile as RegExp)
+ * isStreamName("Board");    // → true  (exact lookup)
+ * isStreamName("a+b");      // → true  (exact lookup)
+ * isStreamName("^(A|B)$");  // → false (compile as RegExp)
  * \`\`\`
  */
-export declare function is_literal_source(source: string, target?: string): boolean;
-/**
- * Revive ISO-8601-shaped strings into \`Date\`s during \`JSON.parse\`.
- *
- * For host applications that parse Act JSON themselves (an export file, a
- * message forwarded by a webhook) and have no event schema at hand. It turns
- * every timestamp-shaped string into a \`Date\`, including fields declared as
- * \`z.string()\`. The framework doesn't use it: it converts only the fields an
- * event's schema declares as \`z.date()\`.
- */
-export declare const dateReviver: (_key: string, value: unknown) => unknown;
+export declare function isStreamName(source: string, target?: string): boolean;
 /**
  * What every store refuses in a \`commit\`: an append with no events, and a
  * stream named twice. In core so each adapter calls the one rule.
  */
-export declare function check_appends(appends: readonly {
+export declare function checkAppends(appends: readonly {
     readonly stream: string;
     readonly msgs: readonly unknown[];
 }[]): void;
@@ -5948,7 +6128,7 @@ export declare function check_appends(appends: readonly {
  * that named no \`expectedVersion\` reads as \`-1\`: only a race between the
  * version check and the insert gets one here.
  */
-export declare function concurrency_error(append: {
+export declare function concurrencyError(append: {
     readonly stream: string;
     readonly msgs: readonly unknown[];
     readonly expectedVersion?: number;
@@ -5958,7 +6138,7 @@ export declare function concurrency_error(append: {
  * \`expectedVersion\` is not the stream's head. In core so each adapter calls
  * the one rule before it appends anything.
  */
-export declare function throw_if_stale(append: {
+export declare function checkVersion(append: {
     readonly stream: string;
     readonly msgs: readonly unknown[];
     readonly expectedVersion?: number;
@@ -5967,7 +6147,7 @@ export declare function throw_if_stale(append: {
  * The event a full \`truncate\` seeds a stream with at version 0: a snapshot
  * of the given state, or a tombstone when there is none.
  */
-export declare function seed_event(snapshot?: Schema, meta?: EventMeta): {
+export declare function seedEvent(snapshot?: Schema, meta?: EventMeta): {
     name: string;
     data: Schema;
     meta: EventMeta;
@@ -5977,7 +6157,7 @@ export declare function seed_event(snapshot?: Schema, meta?: EventMeta): {
  * load can't starve a low-priority stream forever. Each store's \`claim\` calls
  * it, and the rule stays out of the \`claim\` signature.
  */
-export declare function fair_slots(lagging: number): number;
+export declare function fairSlots(lagging: number): number;
 /**
  * The commit notification in a payload a store or broker received, or
  * \`undefined\` when there is none: \`stream\` must be a string, and only
@@ -5985,12 +6165,8 @@ export declare function fair_slots(lagging: number): number;
  * A payload with no such event is not a notification. In core so every
  * listener reads a foreign or version-skewed payload the same way.
  */
-export declare function notification_of(raw: unknown): StoreNotification | undefined;
-/**
- * How many positions \`query_streams\` returns when the caller gives no limit.
- */
-export declare const DEFAULT_QUERY_STREAMS_LIMIT = 100;
-//# sourceMappingURL=utils.d.ts.map"
+export declare function parseNotification(raw: unknown): StoreNotification | undefined;
+//# sourceMappingURL=adapter.d.ts.map"
 `;
 
 exports[`@rotorsoft/act — public API stability > stable public surface for ./test 1`] = `

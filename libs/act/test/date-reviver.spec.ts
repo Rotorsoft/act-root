@@ -1,12 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { dateReviver } from "../src/index.js";
 
-/**
- * The single date reviver every adapter shares. It lives in core
- * so PG, SQLite, and any third-party adapter revive dates identically —
- * two hand-synced copies is how `pii` ended up parsing differently from
- * `data`.
- */
+// Deprecated in 2.x and removed in 3.0 (RFC 2411); pinned until then.
 describe("dateReviver", () => {
   it("returns a Date for a valid ISO-8601 string", () => {
     const iso = "2023-01-01T10:00:00.000Z";

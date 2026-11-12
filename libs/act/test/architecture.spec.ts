@@ -108,7 +108,12 @@ describe("architecture: public types live in types/", () => {
       ))
         walk(join(file, "..", `${m[1]}.ts`));
     };
-    for (const entry of ["index.ts", "types/index.ts", "test/index.ts"])
+    for (const entry of [
+      "index.ts",
+      "adapter.ts",
+      "types/index.ts",
+      "test/index.ts",
+    ])
       walk(entry);
     return [...seen];
   })();
@@ -209,13 +214,14 @@ describe("architecture: PII stays inside the modules that own it", () => {
   });
 
   it("publishes only what another package genuinely needs", () => {
-    // `pii_fields` IS public: act-http's OpenAPI emitter marks request-body
-    // properties `writeOnly` with it (auto-generated-api.md). The transforms
-    // are not — publishing them would invite a caller to redact by hand.
+    // `sensitiveFields` IS public: act-http's OpenAPI emitter marks
+    // request-body properties `writeOnly` with it (auto-generated-api.md). The
+    // transforms are not — publishing them would invite a caller to redact by
+    // hand.
     const schemas = code_of(
       readFileSync(join(SRC, "types", "schemas.ts"), "utf8")
     );
-    expect(schemas).toMatch(/export \{ pii_fields \}/);
+    expect(schemas).toMatch(/export \{[^}]*\bsensitiveFields\b[^}]*\}/);
     expect(schemas).not.toMatch(/\bpii_(split|gate|strip)\b/);
   });
 });
@@ -265,5 +271,29 @@ describe("framework rules stay in the framework", () => {
       "utf8"
     );
     expect(tck).not.toMatch(/const is_literal\b/);
+  });
+});
+
+describe("architecture: every entry point says what it exports", () => {
+  const code = (file: string) => code_of(readFileSync(join(SRC, file), "utf8"));
+
+  it.each(["index.ts", "adapter.ts"])(
+    "%s re-exports no module whole at runtime",
+    (file) => {
+      // A runtime `export *` publishes whatever the module adds later, with
+      // no one deciding it should; `export type *` adds no runtime name.
+      expect(code(file)).not.toMatch(/^export \* from/m);
+    }
+  );
+
+  it("the adapter rules import only from types/ and are only functions", () => {
+    // A rule that reached for a port, `config` or `scoped` would stop being a
+    // pure function of its arguments.
+    const text = code("adapter.ts");
+    const sources = [...text.matchAll(/from "([^"]+)"/g)].map((m) => m[1]);
+    expect(sources).toEqual(["./types/index.js"]);
+    const exports = [...text.matchAll(/^export (\w+)/gm)].map((m) => m[1]);
+    expect(exports.length).toBe(7);
+    expect(new Set(exports)).toEqual(new Set(["function"]));
   });
 });

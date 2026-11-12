@@ -1,6 +1,7 @@
 {
   "entryPoints": [
     "../libs/act/src/index.ts",
+    "../libs/act/src/adapter.ts",
     "../libs/act-patch/src/index.ts",
     "../libs/act-notify/src/index.ts",
     "../libs/act-otel/src/index.ts",

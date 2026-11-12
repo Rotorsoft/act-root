@@ -9,6 +9,7 @@
  * orchestrator only wires its ports in and emits `"closed"`.
  */
 
+import { isStreamName } from "../adapter.js";
 import { cache, store } from "../ports.js";
 import type {
   CloseResult,
@@ -18,7 +19,6 @@ import type {
   State,
 } from "../types/index.js";
 import { SNAP_EVENT, TOMBSTONE_EVENT } from "../types/index.js";
-import { is_literal_source } from "../utils.js";
 import { AUTOCLOSE_TARGET_PREFIX } from "./autoclose-reaction.js";
 import type { EsOps } from "./event-sourcing.js";
 import { walk_streams } from "./walk-streams.js";
@@ -458,7 +458,7 @@ function source_matcher(): (
   const compiled = new Map<string, RegExp>();
   return (source, target, stream) => {
     if (!source) return true;
-    if (is_literal_source(source, target)) return source === stream;
+    if (isStreamName(source, target)) return source === stream;
     let re = compiled.get(source);
     if (!re) {
       re = new RegExp(source);

@@ -8,11 +8,8 @@
  */
 import * as fs from "node:fs";
 import { z } from "zod";
-import { resolveAutocloseConfig as resolve_autoclose } from "./internal/config.js";
 import { log } from "./ports.js";
 import {
-  type ActOptions,
-  type AutocloseConfig,
   type Config,
   type Environment,
   Environments,
@@ -179,13 +176,3 @@ export const config = (): Config => {
   }
   return _validated;
 };
-
-/**
- * Validates and defaults the autoclose knobs of `ActOptions`, the way
- * `act().build()` does. Throws `ZodError` on an out-of-range value.
- */
-export function resolveAutocloseConfig(
-  options: ActOptions | undefined
-): AutocloseConfig {
-  return resolve_autoclose(options);
-}

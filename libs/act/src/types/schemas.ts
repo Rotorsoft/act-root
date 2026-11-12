@@ -13,7 +13,7 @@ import { _mark_sensitive } from "../sensitive.js";
  */
 export const ZodEmpty = z.record(z.string(), z.never());
 
-export { pii_fields } from "../sensitive.js";
+export { pii_fields, sensitiveFields } from "../sensitive.js";
 
 /**
  * Sentinel placed in `event.data[field]` when the caller isn't authorized to

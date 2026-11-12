@@ -2,7 +2,7 @@
  * #855: orchestrator overhead on non-sensitive workloads.
  *
  * The sensitive-data foundation adds work to every event through the
- * orchestrator — `pii_fields(name)` registry lookup, `fields.length === 0`
+ * orchestrator — `sensitiveFields(name)` registry lookup, `fields.length === 0`
  * early-exit branches in `pii_merge`/`pii_gate`/`pii_strip`,
  * and the gating path in `action()`'s post-commit snapshot builder.
  *

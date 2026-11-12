@@ -5,6 +5,7 @@
  */
 
 import { createHash, randomUUID } from "node:crypto";
+import { isStreamName } from "../adapter.js";
 import { log, store } from "../ports.js";
 import type {
   EventRegister,
@@ -16,7 +17,6 @@ import type {
   SubscribeInput,
 } from "../types/index.js";
 import { DEFAULT_LANE } from "../types/index.js";
-import { is_literal_source } from "../utils.js";
 import type { DrainOps } from "./drain-ops.js";
 import { LruMap } from "./lru-map.js";
 import { report_once } from "./report-once.js";
@@ -290,7 +290,7 @@ export class CorrelateCycle<
     stream: string
   ): boolean {
     if (source === undefined || source === stream) return true;
-    if (is_literal_source(source)) return false;
+    if (isStreamName(source)) return false;
     let pattern = this._patterns.get(source);
     if (!pattern) {
       pattern = new RegExp(source);

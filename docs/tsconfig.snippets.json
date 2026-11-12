@@ -15,6 +15,7 @@
     "types": ["node", "vitest/globals"],
     "paths": {
       "@rotorsoft/act": ["../libs/act/src/index.ts"],
+      "@rotorsoft/act/adapter": ["../libs/act/src/adapter.ts"],
       "@rotorsoft/act/types": ["../libs/act/src/types/index.ts"],
       "@rotorsoft/act/test": ["../libs/act/src/test/index.ts"],
       "@rotorsoft/act-diagram": ["../libs/act-diagram/src/index.ts"],

@@ -1,13 +1,7 @@
 import { patch } from "@rotorsoft/act-patch";
 import { z } from "zod";
-import {
-  config,
-  extend,
-  notification_of,
-  sleep,
-  ValidationError,
-  validate,
-} from "../src/index.js";
+import { config, sleep, ValidationError, validate } from "../src/index.js";
+import { extend } from "../src/utils.js";
 
 describe("utils", () => {
   describe("config", () => {
@@ -273,42 +267,5 @@ describe("utils", () => {
   it("should resolve sleep with and without ms", async () => {
     await expect(sleep(1)).resolves.toBeUndefined();
     await expect(sleep()).resolves.toBeUndefined();
-  });
-
-  describe("notification_of", () => {
-    it("reads a well-formed notification, keeping only id and name", () => {
-      expect(
-        notification_of({
-          stream: "s",
-          by: "other",
-          events: [{ id: 7, name: "Incremented", extra: true }],
-        })
-      ).toEqual({ stream: "s", events: [{ id: 7, name: "Incremented" }] });
-    });
-
-    it("drops malformed events and keeps the rest", () => {
-      expect(
-        notification_of({
-          stream: "s",
-          events: [{ name: "no-id" }, null, { id: 1, name: "A" }],
-        })
-      ).toEqual({ stream: "s", events: [{ id: 1, name: "A" }] });
-    });
-
-    it.each([
-      ["nothing", undefined],
-      ["null", null],
-      ["a string", "s"],
-      ["a non-string stream", { stream: 42, events: [{ id: 1, name: "A" }] }],
-      ["no events", { stream: "s" }],
-      ["events that aren't a list", { stream: "s", events: "nope" }],
-      ["an empty list", { stream: "s", events: [] }],
-      [
-        "only malformed events",
-        { stream: "s", events: [{ id: "1", name: "X" }, null] },
-      ],
-    ])("finds no notification in %s", (_, raw) => {
-      expect(notification_of(raw)).toBeUndefined();
-    });
   });
 });

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { pii_fields } from "../src/sensitive.js";
+import { sensitiveFields } from "../src/sensitive.js";
 import { sensitive } from "../src/types/schemas.js";
 
 describe("sensitive()", () => {
@@ -25,19 +25,19 @@ describe("sensitive()", () => {
     const a = z.string();
     const b = z.string();
     sensitive(a);
-    // b was never marked — pii_fields treats it as non-sensitive
-    expect(pii_fields(z.object({ a, b }))).toEqual(["a"]);
+    // b was never marked — sensitiveFields treats it as non-sensitive
+    expect(sensitiveFields(z.object({ a, b }))).toEqual(["a"]);
   });
 });
 
-describe("pii_fields()", () => {
+describe("sensitiveFields()", () => {
   it("returns the keys whose schema was marked sensitive", () => {
     const schema = z.object({
       email: sensitive(z.string()),
       name: sensitive(z.string()),
       plan: z.enum(["free", "pro"]),
     });
-    expect(pii_fields(schema)).toEqual(["email", "name"]);
+    expect(sensitiveFields(schema)).toEqual(["email", "name"]);
   });
 
   it("returns an empty array when no field is sensitive", () => {
@@ -45,13 +45,13 @@ describe("pii_fields()", () => {
       plan: z.enum(["free", "pro"]),
       count: z.number(),
     });
-    expect(pii_fields(schema)).toEqual([]);
+    expect(sensitiveFields(schema)).toEqual([]);
   });
 
   it("returns an empty array for non-object schemas (zero-cost path)", () => {
-    expect(pii_fields(z.string())).toEqual([]);
-    expect(pii_fields(z.number())).toEqual([]);
-    expect(pii_fields(z.array(z.string()))).toEqual([]);
+    expect(sensitiveFields(z.string())).toEqual([]);
+    expect(sensitiveFields(z.number())).toEqual([]);
+    expect(sensitiveFields(z.array(z.string()))).toEqual([]);
   });
 
   it("sees through .optional() — sensitive(x).optional() is still sensitive", () => {
@@ -59,28 +59,28 @@ describe("pii_fields()", () => {
       email: sensitive(z.string()).optional(),
       plan: z.enum(["free", "pro"]),
     });
-    expect(pii_fields(schema)).toEqual(["email"]);
+    expect(sensitiveFields(schema)).toEqual(["email"]);
   });
 
   it("sees through .nullable() — sensitive(x).nullable() is still sensitive", () => {
     const schema = z.object({
       ssn: sensitive(z.string()).nullable(),
     });
-    expect(pii_fields(schema)).toEqual(["ssn"]);
+    expect(sensitiveFields(schema)).toEqual(["ssn"]);
   });
 
   it("sees through .default() — sensitive(x).default() is still sensitive", () => {
     const schema = z.object({
       nickname: sensitive(z.string()).default(""),
     });
-    expect(pii_fields(schema)).toEqual(["nickname"]);
+    expect(sensitiveFields(schema)).toEqual(["nickname"]);
   });
 
   it("sees through chained wrappers — .nullable().optional() composes", () => {
     const schema = z.object({
       middleName: sensitive(z.string()).nullable().optional(),
     });
-    expect(pii_fields(schema)).toEqual(["middleName"]);
+    expect(sensitiveFields(schema)).toEqual(["middleName"]);
   });
 
   it("does NOT descend into nested object fields — only top-level shape walked", () => {
@@ -92,6 +92,6 @@ describe("pii_fields()", () => {
         email: sensitive(z.string()),
       }),
     });
-    expect(pii_fields(schema)).toEqual([]);
+    expect(sensitiveFields(schema)).toEqual([]);
   });
 });
