@@ -266,13 +266,7 @@ Snapshots are persisted as `__snapshot__` events in the store and used as a star
 
 ## Cache
 
-Cache is always-on with `InMemoryCache` (LRU, maxSize 1000) as the default. It stores the latest state checkpoint per stream:
-
-- **On `load()`** — cache is checked first; only events after the cached position are replayed from the store
-- **On `action()`** — cache is updated after each successful commit
-- **On `ConcurrencyError`** — stale cache entries are invalidated automatically
-
-Cache and snapshots are the same checkpoint pattern at different layers. Cache eliminates store round-trips on warm hits; snapshots limit replay on cache miss.
+Cache and snapshots are the same checkpoint at two layers: the cache (always on, `InMemoryCache` by default) saves the store round-trip on a warm load, and a snapshot limits the replay when the cache is cold. [Cache and snapshots](../architecture/cache-and-snapshots.md) owns the details.
 
 ## Projections
 

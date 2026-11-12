@@ -27,36 +27,11 @@ The event store uses a port/adapter pattern:
 - **PostgresStore** (`@rotorsoft/act-pg`) — production-ready with ACID guarantees and connection pooling
 - **SqliteStore** (`@rotorsoft/act-sqlite`) — libSQL-backed adapter for embedded or single-node deployments
 
-```typescript
-import { store } from "@rotorsoft/act";
-import { PostgresStore } from "@rotorsoft/act-pg";
-
-store(new PostgresStore({
-  host: "localhost",
-  database: "myapp",
-  user: "postgres",
-  password: "secret",
-}));
-```
-
-```typescript
-import { store } from "@rotorsoft/act";
-import { SqliteStore } from "@rotorsoft/act-sqlite";
-
-store(new SqliteStore({ url: "file:myapp.db" }));
-```
+Inject one with `store(adapter)` before building the app; [Configuration § Store](./configuration.md#store) shows each.
 
 ### Cache
 
-Cache is always-on with `InMemoryCache` (LRU, maxSize 1000) as the default. It eliminates full event replay on every `load()` by storing the latest state checkpoint in memory. Actions update the cache after each commit; concurrency errors invalidate stale entries.
-
-For distributed deployments, implement the `Cache` interface backed by Redis or another external store:
-
-```typescript no-check
-import { cache } from "@rotorsoft/act";
-
-cache(new RedisCache({ url: "redis://localhost:6379" }));
-```
+Every `load()` starts from a cached checkpoint (`InMemoryCache` by default) and replays only what came after it; [Cache and snapshots](../architecture/cache-and-snapshots.md) explains when it is updated, invalidated and bypassed.
 
 ### Time-travel queries
 
@@ -98,14 +73,7 @@ await app.load(
 
 ### Logger
 
-Logging follows the same port/adapter pattern. The default `ConsoleLogger` emits JSON lines in production and colorized output in development. For pino, inject `PinoLogger` from `@rotorsoft/act-pino`:
-
-```typescript
-import { log } from "@rotorsoft/act";
-import { PinoLogger } from "@rotorsoft/act-pino";
-
-log(new PinoLogger({ level: "debug" }));
-```
+Logging is a port too: `ConsoleLogger` by default, `PinoLogger` from `@rotorsoft/act-pino` for pino ([Configuration § Logger](./configuration.md#logger)).
 
 ### Resource Disposal
 

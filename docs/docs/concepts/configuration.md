@@ -314,20 +314,7 @@ import { PinoLogger } from "@rotorsoft/act-pino";
 log(new PinoLogger({ level: "debug", pretty: true }));
 ```
 
-The `Logger` interface is minimal and compatible with pino, winston, bunyan, and other popular loggers:
-
-```typescript
-interface Logger extends Disposable {
-  level: string;
-  fatal(obj: unknown, msg?: string): void;
-  error(obj: unknown, msg?: string): void;
-  warn(obj: unknown, msg?: string): void;
-  info(obj: unknown, msg?: string): void;
-  debug(obj: unknown, msg?: string): void;
-  trace(obj: unknown, msg?: string): void;
-  child(bindings: Record<string, unknown>): Logger;
-}
-```
+The `Logger` interface is minimal and compatible with pino, winston, bunyan and other popular loggers: see [Writing a logger](../guides/writing-a-logger.md).
 
 ### Store
 
@@ -365,16 +352,7 @@ import { cache } from "@rotorsoft/act";
 cache(new RedisCache({ url: "redis://localhost:6379" }));
 ```
 
-The `Cache` interface is async for forward-compatibility with external caches:
-
-```typescript no-check
-interface Cache extends Disposable {
-  get<TState>(stream: string): Promise<CacheEntry<TState> | undefined>;
-  set<TState>(stream: string, entry: CacheEntry<TState>): Promise<void>;
-  invalidate(stream: string): Promise<void>;
-  clear(): Promise<void>;
-}
-```
+The `Cache` interface is async, so an external cache needs no framework change: see [Writing a cache](../guides/writing-a-cache.md).
 
 ### Resource Disposal
 
