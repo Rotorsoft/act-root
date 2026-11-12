@@ -8,7 +8,8 @@
  */
 import { z } from "zod";
 
-vi.mock("../src/config.js", () => ({
+vi.mock("../src/config.js", async (actual) => ({
+  ...(await actual<typeof import("../src/config.js")>()),
   config: vi.fn().mockReturnValue({
     env: "test",
     logLevel: "fatal",
