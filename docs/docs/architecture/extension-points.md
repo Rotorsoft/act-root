@@ -132,7 +132,7 @@ In-tree adapters that declare `pii_isolation`:
 
 ### `EventSource` / `EventSink` — the transfer surface
 
-Added by [ACT-1128](https://github.com/Rotorsoft/act-root/issues/787) / [#788](https://github.com/Rotorsoft/act-root/issues/788), the public types `EventSource` and `EventSink` (in `libs/act/src/types/action.ts`) split the read end and the write end of the restore pipeline into separate interfaces, so the same `Act.restore` driver can move events between any source and any sink:
+Added by [ACT-1128](https://github.com/Rotorsoft/act-root/issues/787) / [#788](https://github.com/Rotorsoft/act-root/issues/788), the public types `EventSource` and `EventSink` (in `libs/act/src/types/restore.ts`) split the read end and the write end of the restore pipeline into separate interfaces, so the same `Act.restore` driver can move events between any source and any sink:
 
 ```ts no-check
 interface EventSource extends Disposable {

@@ -1,5 +1,5 @@
-// 2.x names kept as aliases of their replacements (RFC 2411). 3.0 removes
-// this file and its block in index.ts.
+// 2.x names kept as aliases of their replacements. 3.0 removes this file,
+// its block in index.ts, and `pii_fields` in sensitive.ts.
 import type { ZodType } from "zod";
 import {
   checkAppends,

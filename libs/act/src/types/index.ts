@@ -31,6 +31,7 @@ export {
 export type * from "./reaction.js";
 export { DEFAULT_LANE } from "./reaction.js";
 export type * from "./registry.js";
+export type * from "./restore.js";
 export * from "./schemas.js";
 
 /**

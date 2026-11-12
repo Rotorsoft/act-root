@@ -3676,11 +3676,9 @@ export const runStoreTck = (options: StoreTckOptions): void => {
 
     describe("truncate", () => {
       it("leaves subscriptions untouched for restart and retire alike", async () => {
-        // `truncate` is purely event-log work. It used to remove the
-        // subscription row for a retire, and that single step was the only
-        // one spanning both the event log and the subscription table — which
-        // forced a store whose halves live on different systems into a
-        // distributed transaction it could not have.
+        // `truncate` is purely event-log work: touching the subscription
+        // table too would force a store whose halves live on different
+        // systems into a distributed transaction.
         //
         // Leaving the row costs nothing. A tombstoned stream refuses new
         // commits, so no scan can raise its work mark and `claim` never
