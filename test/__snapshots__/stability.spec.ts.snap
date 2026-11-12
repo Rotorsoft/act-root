@@ -5432,10 +5432,12 @@ import type { Disposable } from "./ports.js";
  */
 export type ScanOptions = {
     /**
-     * Skip events with \`name === SNAP_EVENT\`. The next snap policy
-     * regenerates snapshots against current code; useful for backups
-     * that should compact stale snapshot bytes. Counted in
-     * {@link ScanResult.dropped}\`.snapshots\`.
+     * Skip events with \`name === SNAP_EVENT\` that have earlier events of
+     * their stream in the source. A stream's first snapshot is kept: after
+     * a windowed close or a restart it is the stream's base, with nothing
+     * below it to fold from. The next snap policy regenerates the rest
+     * against current code; useful for backups that should compact stale
+     * snapshot bytes. Counted in {@link ScanResult.dropped}\`.snapshots\`.
      *
      * Single-pass: no source-shape implications. Default \`false\`.
      */
