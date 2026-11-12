@@ -22,18 +22,16 @@ import type {
   SubscribeInput,
   SubscribeResult,
 } from "@rotorsoft/act";
+import { ConcurrencyError, StoreError, ValidationError } from "@rotorsoft/act";
 import {
-  ConcurrencyError,
-  check_appends,
-  concurrency_error,
-  DEFAULT_QUERY_STREAMS_LIMIT,
-  fair_slots,
-  is_literal_source,
-  StoreError,
-  seed_event,
-  throw_if_stale,
-  ValidationError,
-} from "@rotorsoft/act";
+  checkAppends,
+  checkVersion,
+  concurrencyError,
+  fairSlots,
+  isStreamName,
+  seedEvent,
+} from "@rotorsoft/act/adapter";
+import { DEFAULT_QUERY_STREAMS_LIMIT } from "@rotorsoft/act/types";
 import {
   decrypt,
   type Encryption,
@@ -603,7 +601,7 @@ export class SqliteStore implements Store {
     appends: readonly Append<E>[],
     meta: EventMeta
   ): Promise<Committed<E, keyof E>[]> {
-    check_appends(appends);
+    checkAppends(appends);
     if (!appends.length) return [];
     return this._serial(async () => {
       const tx = await this._begin("commit");
@@ -620,7 +618,7 @@ export class SqliteStore implements Store {
             args: [append.stream],
           });
           const current = Number(row.rows[0].v);
-          throw_if_stale(append, current);
+          checkVersion(append, current);
           heads.set(append.stream, current);
         }
 
@@ -670,7 +668,7 @@ export class SqliteStore implements Store {
         // beat this one to the row. Every other driver error is wrapped in
         // StoreError('commit') for parity with the adapter's other methods.
         if (e instanceof ConcurrencyError) throw e;
-        if (is_unique_violation(e)) throw concurrency_error(appending, head);
+        if (is_unique_violation(e)) throw concurrencyError(appending, head);
         throw new StoreError("commit", { cause: e });
       }
     });
@@ -783,7 +781,7 @@ export class SqliteStore implements Store {
     // pointing operators to InMemory/PG for full regex claim sources —
     // before any row is written. Literal sources skip the check entirely.
     for (const { stream, source } of streams) {
-      if (source !== undefined && !is_literal_source(source, stream))
+      if (source !== undefined && !isStreamName(source, stream))
         streamPatternToGlob(source);
     }
     return this._tx("subscribe", async (tx) => {
@@ -988,7 +986,7 @@ export class SqliteStore implements Store {
       // the ones already picked, so a default-priority lagging stream is
       // never starved out by sustained higher-priority load. With all
       // priorities equal both portions order by `at`, a no-op split.
-      const fair = fair_slots(lagging);
+      const fair = fairSlots(lagging);
       const priority_slice = candidates.slice(0, lagging - fair);
       const picked = new Set(priority_slice.map((c) => c.stream));
       const fair_slice = [...candidates]
@@ -1628,7 +1626,7 @@ export class SqliteStore implements Store {
         // stream's subscription is inert, and reaping it is maintenance that
         // `seed()` performs.
 
-        const seed = seed_event(snapshot, meta);
+        const seed = seedEvent(snapshot, meta);
         const now = new Date().toISOString();
         const ins = await tx.execute({
           sql: "INSERT INTO events (stream, version, name, data, meta, created) VALUES (?, 0, ?, ?, ?, ?)",
