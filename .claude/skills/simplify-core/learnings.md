@@ -121,7 +121,7 @@ What building Act has taught, as rules to check a design or a fix against. Read 
 - Measure prose in bytes, not lines: the CLAUDE.md trim cut 4 KB (9%) and left its line count at 333. (#1838, #1850)
 - A proposal to delete a layer must name why the layer exists. `DrainOps` was proposed as a pass-through and turned out to be the trace seam, so it stayed. (#1841)
 - A gate most PRs declare away protects nothing: the rfc-gate fired on comment edits because the stability snapshot copies all source, and 175 of 300 PRs carried an exemption. Fix what the gate measures before adding exemptions. (2026-10-08 review)
-- Code the assistant writes into new apps (the scaffold skill) drifts like docs, and no check compiles it; two of its calls crashed. (2026-10-08 review)
+- Code the assistant writes into new apps (the scaffold skill) drifts like docs, and no check compiles it; two of its calls crashed. It also copies wiring the framework already does: its SIGTERM handler ran every app's shutdown twice beside the one the import registers (#2442). Before a snippet wires something, check the framework doesn't. (2026-10-08 review, 2026-11-12)
 - An entry point browser code imports must not import server code, dynamic imports included: a bundler builds a literal `import()` into its own chunk, and the browser build fails there. The gate assumed otherwise and passed for months; a downstream app's `vite build` found it. Remove the import rather than hide its path. (#2154)
 - A downstream upgrade finds what in-repo CI can't: moving the Risk app from act 0.25 to 1.34 found the browser build failure, an adapter major that no longer fits `Store` (its tests ran in memory), and an act-sse patch release that dropped four methods. (2026-10-27)
 - A doc page is code to MDX: braces outside a code span are evaluated, so a contract row quoting a test name like `trpc(app, { sse })` built nowhere but the docs site (`ReferenceError: sse is not defined`, #2245); the contracts check and snippet check both passed. Keep braces in test names out of cited rows, or inside backticks. (2026-10-31)
@@ -140,3 +140,4 @@ What building Act has taught, as rules to check a design or a fix against. Read 
 
 - Process steps are a cost on every change; each must have caught something to keep its place. Per-ticket narrative essays were dropped for this file. (2026-10)
 - Ticket numbers belong in git and here, not in code comments or test names.
+- A numeric option used only in a comparison needs validation like any other: `NaN` makes `delta > max` and `delta < -max` both false, so `verifyWebhook`'s replay window silently became unbounded (#2440). The config-validation rule applies to every package's options, not only core's.
