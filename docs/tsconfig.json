@@ -1,50 +1,13 @@
 {
-  // This file is not used in compilation. It is here just for a nice editor experience.
+  // The editor and typedoc (`typedoc.json`) read this file. Paths come from
+  // the workspace config, which `pnpm paths:sync` derives from each package's
+  // `exports`.
   "extends": "../tsconfig.workspace.json",
   "compilerOptions": {
     // act-diagram ships TSX (`client/`) under its `src/**` tree —
     // typedoc loads the whole include set into its TS program even
     // when entryPoints stay narrow, so the JSX has to parse here.
-    "jsx": "react-jsx",
-    "paths": {
-      "@rotorsoft/act": ["../libs/act/src/index.ts"],
-      "@rotorsoft/act/adapter": ["../libs/act/src/adapter.ts"],
-      "@rotorsoft/act/types": ["../libs/act/src/types/index.ts"],
-      "@rotorsoft/act/test": ["../libs/act/src/test/index.ts"],
-      "@rotorsoft/act-diagram": ["../libs/act-diagram/src/index.ts"],
-      "@rotorsoft/act-http/webhook": ["../libs/act-http/src/webhook/index.ts"],
-      "@rotorsoft/act-http/sse": ["../libs/act-http/src/sse/index.ts"],
-      "@rotorsoft/act-http/trpc": ["../libs/act-http/src/trpc/index.ts"],
-      "@rotorsoft/act-http/hono": ["../libs/act-http/src/hono/index.ts"],
-      "@rotorsoft/act-http/openapi": ["../libs/act-http/src/openapi/index.ts"],
-      "@rotorsoft/act-http/receiver/trpc": [
-        "../libs/act-http/src/receiver/trpc/index.ts"
-      ],
-      "@rotorsoft/act-http/receiver/express": [
-        "../libs/act-http/src/receiver/express/index.ts"
-      ],
-      "@rotorsoft/act-http/receiver/fastify": [
-        "../libs/act-http/src/receiver/fastify/index.ts"
-      ],
-      "@rotorsoft/act-http/receiver/hono": [
-        "../libs/act-http/src/receiver/hono/index.ts"
-      ],
-      "@rotorsoft/act-http/receiver": [
-        "../libs/act-http/src/receiver/index.ts"
-      ],
-      "@rotorsoft/act-patch": ["../libs/act-patch/src/index.ts"],
-      "@rotorsoft/act-pg": ["../libs/act-pg/src/index.ts"],
-      "@rotorsoft/act-pino": ["../libs/act-pino/src/index.ts"],
-      "@rotorsoft/act-notify": ["../libs/act-notify/src/index.ts"],
-      "@rotorsoft/act-otel": ["../libs/act-otel/src/index.ts"],
-      "@rotorsoft/act-ops/idempotency": [
-        "../libs/act-ops/src/idempotency/index.ts"
-      ],
-      "@rotorsoft/act-ops/receiver": ["../libs/act-ops/src/receiver/index.ts"],
-      "@rotorsoft/act-sqlite": ["../libs/act-sqlite/src/index.ts"],
-      "@rotorsoft/act-tck": ["../libs/act-tck/src/index.ts"],
-      "@rotorsoft/act-crypto": ["../libs/act-crypto/src/index.ts"]
-    }
+    "jsx": "react-jsx"
   },
   "include": [
     "../libs/act/src/**/*",
