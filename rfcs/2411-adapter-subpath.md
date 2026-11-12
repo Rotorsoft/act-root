@@ -8,7 +8,7 @@
 
 `src/index.ts` re-exports eight whole modules with `export *`, so anything added to `utils.ts`, `ports.ts` or `config.ts` becomes public without anyone deciding it should. The root now serves three audiences at once: apps (the builders, ports, errors and in-memory adapters), store authors (the rule helpers each adapter calls so the rule lives once in core, #2387 and #2388), and nobody (16 names with no caller outside core and no doc).
 
-The store helpers are also where the naming broke. Exported functions are camelCase (27 of 31), but `check_appends`, `throw_if_stale`, `concurrency_error`, `seed_event`, `fair_slots`, `is_literal_source`, `notification_of` and `pii_fields` are snake_case, because they were written as internal code and exported later. A third-party adapter author has no single place to read what core gives them.
+The store helpers are also where the naming broke. The root's other exported functions are camelCase, but nine are snake_case: `check_appends`, `throw_if_stale`, `concurrency_error`, `seed_event`, `fair_slots`, `is_literal_source`, `notification_of`, `pii_fields` and `default_scope`. They are snake_case because they were written as internal code and exported later. A third-party adapter author has no single place to read what core gives them.
 
 The package already splits by audience: `.` for apps, `/types` for the contract, `/test` for tests. This RFC adds the missing one, `/adapter`, and makes each entry point say exactly what it exports.
 
@@ -34,26 +34,29 @@ The two that throw on a violation both start with `check`. Signatures are unchan
 
 ### `@rotorsoft/act` (root)
 
-- **`sensitiveFields(schema): readonly string[]`**, replacing `pii_fields` ([RFC 1228](1228-pii-fields-introspection.md)) under a name that pairs with `sensitive()`. It stays on the root: act-http reads it for an app's schemas, and an integration built on an app uses the app's entry point.
+- **`sensitiveFields(schema): readonly string[]`**, replacing `pii_fields` ([RFC 1228](1228-pii-fields-introspection.md)) under a name that pairs with `sensitive()`. It goes on the root and on `/types`, next to `sensitive()` on both: act-http reads it for an app's schemas, and an integration built on an app uses the app's entry point. `pii_fields` is on both entry points today (`types/schemas.ts` re-exports it), so it is deprecated on both.
 
 ### `@rotorsoft/act/types`
 
-- **`DEFAULT_QUERY_STREAMS_LIMIT`** moves from `utils.ts` to `types/ports.ts`. It is a default of the `Store` contract, and [RFC 1959](1959-public-types-in-types.md) puts contract values in `types/`. Same name, same value.
+- **`DEFAULT_QUERY_STREAMS_LIMIT`** moves from `utils.ts` to `types/ports.ts`. It is a default of the `Store` contract, and [RFC 1959](1959-public-types-in-types.md) puts contract values in `types/`. Same name, same value. `types/index.ts` re-exports `ports.ts` with `export type *`, which carries no values, so the constant joins the explicit `export { SNAP_EVENT, TOMBSTONE_EVENT } from "./ports.js"` line beside it.
 
 ### Deprecated in the same minor, removed in 3.0
 
 Each keeps working as an alias, marked `@deprecated` with its replacement:
 
-- From the root: the seven helpers above, `pii_fields`, `DEFAULT_QUERY_STREAMS_LIMIT`.
+- From the root: the seven helpers above and `DEFAULT_QUERY_STREAMS_LIMIT`.
+- From the root and `/types`: `pii_fields`, replaced by `sensitiveFields`.
 - From the root, staying on `/types`: `ActorSchema`, `TargetSchema`, `EventMetaSchema`, `CausationEventSchema`, `CommittedMetaSchema`, `QuerySchema`, `Environments`, `LogLevels`, `ExitCodes`, `DEFAULT_LANE`, `DEFAULT_MAX_SUBSCRIBED_STREAMS`, `DEFAULT_SETTLE_DEBOUNCE_MS`. They describe the contract, and RFC 1959 published them on `/types` deliberately; an app has no use for them.
-- Everywhere: `PackageSchema`, `default_scope`, `resolveAutocloseConfig`, `dateReviver`, `extend`. Nothing outside core calls them.
+- Everywhere: `PackageSchema`, `default_scope`, `resolveAutocloseConfig`, `dateReviver`, `extend`. Nothing outside core calls them (searched `libs/`, `packages/`, `recipes/` and `docs/`; every `extend` hit is Zod's `.extend()`).
+
+STABILITY.md publishes `default_scope` and `PackageSchema` for adapter and tooling authors, so their removal is a decision, not a cleanup. `PackageSchema` describes only what `config()` reads from `package.json`, and `config()` itself stays public. `default_scope` returns the ports an Act without `ActOptions.scoped` runs in. A decorator gets the same adapters from `store()`, `cache()` and `log()` called outside a scoped handler, and none is known to need the unscoped bag from inside one. If one turns up before 3.0, `default_scope` moves to `/adapter` under a camelCase name instead of being removed.
 
 ## Where each name lives after 3.0
 
 | Entry point | Audience | Holds |
 |---|---|---|
 | `@rotorsoft/act` | apps and integrations | Builders (`act`, `state`, `slice`, `projection`, `Act`), ports (`store`, `cache`, `log`, `port`, `dispose`, `disposeAndExit`), `config`, in-memory adapters (`InMemoryStore`, `InMemoryCache`, `ConsoleLogger`), `CsvFile`, `sensitive`, `sensitiveFields`, `REDACTED`, `SHREDDED`, `ZodEmpty`, `validate`, `sleep`, the errors (`Errors`, `ValidationError`, `PreconditionError`, `ConcurrencyError`, `StreamClosedError`, `StoreError`, `NonRetryableError`, `DeferSignal`), the markers `SNAP_EVENT` and `TOMBSTONE_EVENT`, and every public type |
-| `@rotorsoft/act/types` | the contract | Every public type and contract value (errors, markers, schemas, defaults), unchanged from RFC 1959 plus `DEFAULT_QUERY_STREAMS_LIMIT` |
+| `@rotorsoft/act/types` | the contract | Every public type and contract value (errors, markers, schemas, defaults), unchanged from RFC 1959 plus `DEFAULT_QUERY_STREAMS_LIMIT` and `sensitiveFields` |
 | `@rotorsoft/act/adapter` | port implementers | The seven rule functions |
 | `@rotorsoft/act/test` | tests | `fixture`, `sandbox`, unchanged |
 
@@ -93,7 +96,8 @@ Port methods and record fields are not renamed.
 ## Stability / charter impact
 
 - **Category:** public type exports, plus a new covered subpath.
-- **2.x minor (additive, `feat(act)`):** adds `/adapter`, `sensitiveFields` and `DEFAULT_QUERY_STREAMS_LIMIT` on `/types`; deprecates the names above as aliases; moves the in-repo adapters and integrations onto the new names; rewrites `naming.md`; updates [Writing a store](../docs/docs/guides/writing-a-store.md), [Sensitive data](../docs/docs/guides/sensitive-data.md) and the other guides that name the old helpers, and the STABILITY.md paragraph that lists them. Nothing breaks. The satellites change only their imports and ship as patches, with a published peer range of `^2.<minor>`.
+- **2.x minor (additive, `feat(act)`):** adds `/adapter`, `sensitiveFields` on the root and `/types`, and `DEFAULT_QUERY_STREAMS_LIMIT` on `/types`; deprecates the names above as aliases; moves the in-repo adapters and integrations onto the new names; rewrites `naming.md`; updates [Writing a store](../docs/docs/guides/writing-a-store.md), [Sensitive data](../docs/docs/guides/sensitive-data.md) and the other guides that name the old helpers, and the STABILITY.md paragraph that lists them (rewritten to point adapter authors at `/adapter`). Nothing breaks.
+- **Releasing the satellites.** They change only their imports. A `refactor` or `chore` commit releases nothing, so each satellite's import move is its own `fix(<pkg>)` commit, and they publish as patches. Their peer range is `workspace:^`, which becomes the core version current at publish time, so core's minor must publish first. The CD job's matrix releases in dependency order, core first, so landing the minor's `feat(act)` commit and the satellites' `fix` commits in one merge gives them a `^2.<minor>` range. A satellite that doesn't publish keeps working on the deprecated names until 3.0.
 - **3.0 (breaking, `feat(act)!`):** the root becomes the explicit list and every deprecated alias is removed, with a `BREAKING CHANGE:` footer and a migration table (old name → new name and entry point) in the 3.x migration guide. No adapter code changes in that PR, because the satellites already moved in the minor. It can wait to ship with other breaking work.
 - **No port method changes,** so no TCK or adapter matrix work beyond the import moves. Every in-repo adapter keeps passing the TCK.
 
