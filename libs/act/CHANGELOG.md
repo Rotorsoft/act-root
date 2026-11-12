@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v2.0.5](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v2.0.4...@rotorsoft/act-v2.0.5) (2026-11-12)
+
+
+### Bug Fixes
+
+* **act-http:** validate webhook options, plus the 2026-11-12 run's doc fixes ([#2449](https://github.com/Rotorsoft/act-root/issues/2449)) ([51b05ba](https://github.com/Rotorsoft/act-root/commit/51b05babb66e0625431de78bc14da8d8c2c3f721))
+
 # [@rotorsoft/act-v2.0.4](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v2.0.3...@rotorsoft/act-v2.0.4) (2026-11-11)
 
 
