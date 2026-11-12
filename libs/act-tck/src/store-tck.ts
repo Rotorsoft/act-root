@@ -26,7 +26,15 @@ import type {
   StreamPosition,
   SubscribeInput,
 } from "@rotorsoft/act/types";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 import { z } from "zod";
 import type { CounterEvents } from "./fixtures/events.js";
 import {
@@ -5936,22 +5944,20 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         expect(back[2].meta.causation.event?.id).toBe(back[1].id);
       });
 
-      it("leaves causation refs unmapped when the target isn't in the source", async () => {
+      it("gives a cause missing from the source id -1, so it names no restored event", async () => {
         const s = `restore-orphan-${uid()}`;
         const t = new Date("2020-09-01T00:00:00.000Z");
+        // Source ids 5 and 6 renumber to 0..1 or 1..2, so the pruned
+        // cause's old id 1 would name a restored event if kept.
         await restore(
           as_source([
+            event(5, s, 0, "Incremented", t, { amount: 1 }),
             {
-              id: 1,
-              stream: s,
-              version: 0,
-              name: "Incremented",
-              data: { amount: 1 },
-              created: t,
+              ...event(6, s, 1, "Incremented", t, { amount: 1 }),
               meta: {
                 correlation: "c",
                 causation: {
-                  event: { id: 999, name: "Phantom", stream: "ghost" },
+                  event: { id: 1, name: "Pruned", stream: "ghost" },
                 },
               },
             },
@@ -5964,7 +5970,11 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           },
           { stream: s, stream_exact: true }
         );
-        expect(back[0].meta.causation.event?.id).toBe(999);
+        expect(back[1].meta.causation.event).toEqual({
+          id: -1,
+          name: "Pruned",
+          stream: "ghost",
+        });
       });
 
       it("rolls back atomically when the source throws mid-iteration", async () => {
