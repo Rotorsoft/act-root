@@ -18,14 +18,12 @@
 
 import { createReadStream, createWriteStream, type WriteStream } from "node:fs";
 import { createInterface } from "node:readline";
+import type { Committed, Query, Schemas } from "./types/action.js";
 import type {
-  Committed,
   CsvFileOptions,
   EventSink,
   EventSource,
-  Query,
-  Schemas,
-} from "./types/action.js";
+} from "./types/restore.js";
 
 /**
  * Same column order as the inspector's backup endpoint, kept here

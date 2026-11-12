@@ -148,9 +148,8 @@ function report_undeclared_lane(
 }
 
 /**
- * Two resolutions disagreed on one target's lane. Reported, not corrected:
- * re-laning a live stream would move it out from under a lease holder.
- * Keyed by orientation, since "first discovered" can land either way.
+ * A dynamic resolver's priority isn't a 32-bit integer (Postgres stores
+ * `int`). Run at the default priority instead, like an undeclared lane.
  */
 function report_bad_priority(
   seen: Set<string>,
@@ -160,13 +159,18 @@ function report_bad_priority(
 ): void {
   report_once(
     seen,
-    `priority|${handler}|${String(priority)}`,
+    `priority|${handler}`,
     `Reaction "${handler}" resolved priority ${String(priority)} for target "${target}", which isn't a 32-bit integer. ` +
-      "Skipping that event for this reaction; other reactions keep running. " +
+      "Running it at priority 0 instead. " +
       "The equivalent static `.to({ priority })` is rejected at build; a dynamic resolver's priority is only knowable here."
   );
 }
 
+/**
+ * Two resolutions disagreed on one target's lane. Reported, not corrected:
+ * re-laning a live stream would move it out from under a lease holder.
+ * Keyed by orientation, since "first discovered" can land either way.
+ */
 function report_lane_conflict(
   seen: Set<string>,
   handler: string,
@@ -402,7 +406,7 @@ export class CorrelateCycle<
                 resolved.target,
                 resolved.priority
               );
-              continue;
+              resolved = { ...resolved, priority: 0 };
             }
             let lane = resolved.lane;
             if (lane !== undefined && !this._declared_lanes.has(lane)) {

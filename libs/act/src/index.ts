@@ -15,7 +15,7 @@ export {
 export { act, projection, slice, state } from "./builders/index.js";
 export { config } from "./config.js";
 export { CsvFile } from "./csv.js";
-// Deprecated in 2.x, removed in 3.0 (RFC 2411).
+// Deprecated in 2.x, removed in 3.0.
 export {
   ActorSchema,
   CausationEventSchema,

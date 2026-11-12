@@ -324,7 +324,7 @@ describe("priority lanes — framework", () => {
   });
 
   describe("correlate-cycle — a dynamic priority that isn't a 32-bit integer", () => {
-    it("skips that event for that reaction only, says so once, and keeps correlating", async () => {
+    it("runs it at priority 0, says so once per reaction, and keeps correlating", async () => {
       const Pinger = state({ Pinger: z.object({ w: z.number() }) })
         .init(() => ({ w: 0 }))
         .emits({ Pinged: z.object({ w: z.number() }) })
@@ -354,17 +354,26 @@ describe("priority lanes — framework", () => {
         );
       const actor = { id: "a", name: "a" };
       try {
-        for (const w of [1, 1.5, 1.5, 2])
+        for (const w of [1, 1.5, 2.5, 2])
           await app.do("ping", { stream: "p", actor }, { w });
-        for (let i = 0; i < 3; i++) {
+        // Until every reaction has run, not a fixed number of passes.
+        for (let i = 0; i < 10 && scored.length + plain.length < 8; i++) {
           await app.correlate();
           await app.drain();
         }
       } finally {
         spy.mockRestore();
       }
-      expect(scored.sort()).toEqual([1, 2]);
-      expect(plain).toEqual([1, 1.5, 1.5, 2]);
+      expect(scored.sort()).toEqual([1, 1.5, 2, 2.5]);
+      expect(plain).toEqual([1, 1.5, 2.5, 2]);
+      const priorities: Record<string, number> = {};
+      await store().query_streams((p) => {
+        priorities[p.stream] = p.priority;
+      });
+      expect(priorities["scored-1.5"]).toBe(0);
+      expect(priorities["scored-2.5"]).toBe(0);
+      expect(priorities["scored-2"]).toBe(2);
+      // Two different bad values, one line: keyed by the reaction.
       const reports = errors.filter((m) => m.includes("32-bit integer"));
       expect(reports).toHaveLength(1);
       expect(reports[0]).toContain('"scored_reaction"');

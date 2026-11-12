@@ -7,13 +7,13 @@
 import type {
   Committed,
   EventMeta,
-  EventSource,
   Message,
   Query,
   Schema,
   Schemas,
 } from "./action.js";
 import type { BlockedLease, Lease } from "./reaction.js";
+import type { EventSource } from "./restore.js";
 
 /**
  * A function that disposes of a resource asynchronously.

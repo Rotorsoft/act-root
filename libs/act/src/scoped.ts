@@ -55,10 +55,8 @@ export type ActFrame = Scoped & {
 /**
  * AsyncLocalStorage carrying the active Act's ports.
  *
- * Exported for in-repo tooling that measures the context itself (the
- * scope-overhead bench). NOT public: `ports.ts` no longer re-exports it and
- * `index.ts` reaches this module only for the `Scoped` type, so it is not
- * importable from the package. Everything else uses the helpers below.
+ * Exported only for the scope-overhead bench; no entry point re-exports it.
+ * Everything else uses the helpers below.
  */
 export const scoped = new AsyncLocalStorage<ActFrame>();
 
