@@ -17,6 +17,7 @@ import {
   DEFAULT_MAX_RETRIES,
   resolveLaneConfig,
   resolveReactionConfig,
+  resolveTargetConfig,
 } from "../internal/config.js";
 import {
   assert_defer_when,
@@ -97,6 +98,7 @@ export function add_reaction<
   events[event].reactions.set(name, reaction);
   return Object.assign(builder, {
     to(resolver: ReactionResolver<TEvents, TKey> | string) {
+      if (typeof resolver === "object") resolveTargetConfig(resolver);
       reaction.resolver =
         typeof resolver === "string" ? { target: resolver } : resolver;
       return builder;

@@ -445,7 +445,7 @@ runStoreTck({
 });
 ```
 
-The TCK then runs cases such as: empty source, single stream, multi-stream, ISO `created`, pre-existing wipe, subscription clearing, snapshot preservation, causation remap, orphan-ref pass-through, and atomic rollback on mid-iteration throw. They cover the contract end-to-end; passing them means your adapter participates in every transfer flow the framework supports.
+The TCK then runs cases such as: empty source, single stream, multi-stream, ISO `created`, pre-existing wipe, subscription clearing, snapshot preservation, causation remap, a cause missing from the source getting id `-1`, and atomic rollback on mid-iteration throw. They cover the contract end-to-end; passing them means your adapter participates in every transfer flow the framework supports.
 
 ### Fault-injection adjacent to the TCK
 

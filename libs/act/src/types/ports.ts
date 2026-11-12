@@ -448,7 +448,7 @@ export type SubscribeInput = {
   readonly source?: string;
   /**
    * Optional scheduling priority for the lagging-frontier `claim()`
-   * ordering. Default `0`. When the same stream is subscribed by multiple
+   * ordering: a 32-bit integer, default `0`. When the same stream is subscribed by multiple
    * reactions with different priorities, implementations must keep the
    * **maximum** so the highest-priority reaction wins. Use
    * {@link Store.prioritize} for runtime overrides that ignore this max —
@@ -1025,8 +1025,8 @@ export interface Store extends Disposable, EventSource {
    *
    * @param filter - {@link PrioritizeFilter} selecting which streams
    *   to update. Required (use `{}` to target all).
-   * @param priority - New priority value. Set as-is — no `max()`,
-   *   no clamp.
+   * @param priority - New priority value, a 32-bit integer. Set
+   *   as-is — no `max()`, no clamp.
    * @returns Count of streams whose priority was changed.
    *
    * @example Boost a specific replay

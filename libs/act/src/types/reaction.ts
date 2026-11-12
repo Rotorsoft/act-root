@@ -99,7 +99,8 @@ export type ReactionResolver<
  *   path, and exact so `"s1"` never matches `"s12"`. A name carrying an
  *   anchor (e.g. `^(A|B)$`) is compiled as a `RegExp` and matched
  *   against candidate streams with the caller's own anchoring
- * @property priority - Optional scheduling hint. The lagging-frontier
+ * @property priority - Optional scheduling hint, a 32-bit integer
+ *   (Postgres stores it as `int`). The lagging-frontier
  *   `claim()` orders streams by `priority DESC, at ASC`, so a higher value
  *   makes the stream win lease slots ahead of equal-watermark peers under
  *   saturation. Default `0` — behavior identical to current dual-frontier.

@@ -17,6 +17,7 @@ import type {
   SubscribeInput,
 } from "../types/index.js";
 import { DEFAULT_LANE } from "../types/index.js";
+import { is_valid_target } from "./config.js";
 import type { DrainOps } from "./drain-ops.js";
 import { LruMap } from "./lru-map.js";
 import { report_once } from "./report-once.js";
@@ -151,6 +152,21 @@ function report_undeclared_lane(
  * re-laning a live stream would move it out from under a lease holder.
  * Keyed by orientation, since "first discovered" can land either way.
  */
+function report_bad_priority(
+  seen: Set<string>,
+  handler: string,
+  target: string,
+  priority: unknown
+): void {
+  report_once(
+    seen,
+    `priority|${handler}|${String(priority)}`,
+    `Reaction "${handler}" resolved priority ${String(priority)} for target "${target}", which isn't a 32-bit integer. ` +
+      "Skipping that event for this reaction; other reactions keep running. " +
+      "The equivalent static `.to({ priority })` is rejected at build; a dynamic resolver's priority is only knowable here."
+  );
+}
+
 function report_lane_conflict(
   seen: Set<string>,
   handler: string,
@@ -379,6 +395,15 @@ export class CorrelateCycle<
               return;
             }
             if (!resolved) continue;
+            if (!is_valid_target(resolved)) {
+              report_bad_priority(
+                this._reported,
+                reaction.handler.name,
+                resolved.target,
+                resolved.priority
+              );
+              continue;
+            }
             let lane = resolved.lane;
             if (lane !== undefined && !this._declared_lanes.has(lane)) {
               report_undeclared_lane(

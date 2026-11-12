@@ -1079,8 +1079,8 @@ export type ScanOptions = {
   readonly event_migrations?: Record<string, EventMigration<any, any>>;
 
   /**
-   * Per-stream rename applied during scan. Called once per
-   * event; the returned string replaces `event.stream`. Useful for
+   * Per-stream rename applied during scan. The returned string
+   * replaces `event.stream` and the streams named in its causation. Useful for
    * tenant relocation (`s => s.replace(/^old-tenant-/, "new-tenant-")`)
    * or prefix cleanup.
    *
