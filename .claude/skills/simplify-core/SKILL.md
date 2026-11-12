@@ -57,6 +57,7 @@ Targets the retrospective tracks (adjust them only with the user):
    - **Metric value:** a metric that hasn't informed a decision in three runs leaves `metrics.sh`; a question the run couldn't answer with numbers may add one, if it replaces another.
    - **Self-review (quarterly):** run the simplicity lens on this skill itself. Is every step still earning its keep?
    - **Learnings:** add what this run or the merged PRs taught that `learnings.md` lacks; merge duplicates, drop entries no longer true, keep it under 150 lines.
+   - **Fold** each run older than the last three in `history.md` to one line (date, lenses, tickets); the tables and the backlog stay whole.
    - **Write the changes** to `SKILL.md`, `lenses.md` and `metrics.sh` directly, and log each in `history.md` with its evidence. `SKILL.md` stays under 150 lines and `lenses.md` under 200: an addition that would cross the budget must replace something.
    - All of it ships in **one PR** with the history entry, so the user reviews every self-change. Never edit the skill outside a run.
 
