@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v2.1.2](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v2.1.1...@rotorsoft/act-v2.1.2) (2026-11-12)
+
+
+### Bug Fixes
+
+* **act:** run a bad dynamic priority at 0, plus three core cleanups ([#2469](https://github.com/Rotorsoft/act-root/issues/2469)) ([6e7deca](https://github.com/Rotorsoft/act-root/commit/6e7deca7c0bd7553ce88b8292a38843932401970)), closes [#2462](https://github.com/Rotorsoft/act-root/issues/2462) [#2464](https://github.com/Rotorsoft/act-root/issues/2464)
+
 # [@rotorsoft/act-v2.1.1](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v2.1.0...@rotorsoft/act-v2.1.1) (2026-11-12)
 
 
