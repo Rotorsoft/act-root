@@ -251,7 +251,7 @@ it("should detect concurrent modifications", async () => {
   // Attempt to commit with stale version
   await expect(
     app.do("increment", { ...t, expectedVersion: snap.version }, { by: 1 })
-  ).rejects.toThrow();
+  ).rejects.toBeInstanceOf(ConcurrencyError);
 });
 ```
 
@@ -259,5 +259,4 @@ it("should detect concurrent modifications", async () => {
 
 - Use `crypto.randomUUID()` for stream IDs to isolate tests from each other
 - Test both happy paths and error cases (preconditions, invariants, validation, concurrency)
-- For complex reaction chains, call `correlate()` → `drain()` in a loop
 - Never test against projections in the hot path — use `app.load()` for authoritative state

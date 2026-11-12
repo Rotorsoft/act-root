@@ -799,5 +799,4 @@ const state = await readProjection(streamId); // stale
 
 See dev-server.ts above for the complete seed pattern. Key points:
 - Use `systemActor` for seed actions
-- Call `correlate()` + `drain()` in a loop after seeding to process all reactions and projections
 - Seed an admin user with `hashPassword()` for development access
