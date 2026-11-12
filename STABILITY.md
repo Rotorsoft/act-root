@@ -63,9 +63,9 @@ Their names and payload shapes are stable. Adding new optional fields to a paylo
 
 ### Public type exports
 
-Everything exported from `@rotorsoft/act` and `@rotorsoft/act/types`. If you can `import { Foo } from "@rotorsoft/act"` (or `/types`), the shape of `Foo` is covered.
+Everything exported from `@rotorsoft/act`, `@rotorsoft/act/types` and `@rotorsoft/act/adapter`. If you can `import { Foo } from "@rotorsoft/act"` (or `/types`, or `/adapter`), the shape of `Foo` is covered.
 
-Some runtime exports are there for adapter and tooling authors, not for apps: `default_scope` (the ports bag an Act without `ActOptions.scoped` runs in), `PackageSchema` (the package.json fields `config()` validates), and the helpers a store calls so each framework rule lives once in core: `check_appends`, `throw_if_stale`, `concurrency_error`, `seed_event`, `fair_slots`, `notification_of`, `is_literal_source` and `DEFAULT_QUERY_STREAMS_LIMIT` (see [Writing a store](docs/docs/guides/writing-a-store.md)). They're covered like every other export.
+Each entry point serves one audience ([RFC 2411](rfcs/2411-adapter-subpath.md)): `@rotorsoft/act` for apps and integrations, `/types` for the contract, `/test` for tests, and `@rotorsoft/act/adapter` for store authors. `/adapter` holds the rules a store calls so each framework rule lives once in core: `checkAppends`, `checkVersion`, `concurrencyError`, `seedEvent`, `fairSlots`, `isStreamName` and `parseNotification` (see [Writing a store](docs/docs/guides/writing-a-store.md)). It's covered like every other entry point. The root lists every runtime name it exports; the 2.x names it keeps for older callers are deprecated aliases, removed in 3.0 (the table is in [Migrating to 2.x](docs/docs/guides/migrating-to-2.x.md#deprecated-in-2x-removed-in-30)).
 
 ## Not covered
 

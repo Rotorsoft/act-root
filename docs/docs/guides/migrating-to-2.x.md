@@ -137,6 +137,23 @@ Nothing new is deprecated in 2.0, and this still works:
 
 - **`@rotorsoft/act-tck`:** the `work_set` capability. It's ignored.
 
+### Deprecated in 2.x, removed in 3.0
+
+A 2.x minor gives each audience its own entry point ([RFC 2411](https://github.com/Rotorsoft/act-root/blob/master/rfcs/2411-adapter-subpath.md)). Every old name keeps working, marked deprecated, until 3.0. Move to the new name when convenient:
+
+| Old name (on `@rotorsoft/act`) | Use instead |
+|---|---|
+| `check_appends` | `checkAppends` from `@rotorsoft/act/adapter` |
+| `throw_if_stale` | `checkVersion` from `@rotorsoft/act/adapter` |
+| `concurrency_error` | `concurrencyError` from `@rotorsoft/act/adapter` |
+| `seed_event` | `seedEvent` from `@rotorsoft/act/adapter` |
+| `fair_slots` | `fairSlots` from `@rotorsoft/act/adapter` |
+| `is_literal_source` | `isStreamName` from `@rotorsoft/act/adapter` |
+| `notification_of` | `parseNotification` from `@rotorsoft/act/adapter` |
+| `pii_fields` (also on `/types`) | `sensitiveFields`, from `@rotorsoft/act` or `/types` |
+| `DEFAULT_QUERY_STREAMS_LIMIT`, `ActorSchema`, `TargetSchema`, `EventMetaSchema`, `CausationEventSchema`, `CommittedMetaSchema`, `QuerySchema`, `Environments`, `LogLevels`, `ExitCodes`, `DEFAULT_LANE`, `DEFAULT_MAX_SUBSCRIBED_STREAMS`, `DEFAULT_SETTLE_DEBOUNCE_MS` | the same name from `@rotorsoft/act/types` |
+| `PackageSchema`, `default_scope`, `resolveAutocloseConfig`, `dateReviver`, `extend` | nothing: `config()` and `act().build()` validate for you, `store()`/`cache()`/`log()` give the unscoped adapters, and a host app can write its own reviver |
+
 ## Nothing to do
 
 - **Your data.** No table or column changes, so a 1.x store opens as it is. 1.x and 2.0 workers can share a Postgres store during a rolling deploy, and 1.x reads events a 2.0 commit wrote if you roll back.

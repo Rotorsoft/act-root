@@ -7,6 +7,26 @@ title: Writing a custom Store adapter
 
 `Store` is the persistence port of the framework — every event log, lease table, projection watermark, and stream subscription lives behind it. The shipped adapters are `InMemoryStore`, `@rotorsoft/act-pg` (Postgres), and `@rotorsoft/act-sqlite` (libSQL). If you need another backend (MySQL, MongoDB, DynamoDB, EventStoreDB-as-Act-store, etc.), this guide walks through scaffolding one against the executable contract defined by `@rotorsoft/act-tck`.
 
+## What core gives a store
+
+A store imports its types, errors and markers from `@rotorsoft/act/types` (or the root), ports such as `log` from `@rotorsoft/act`, and the framework's rules from `@rotorsoft/act/adapter`: seven pure functions, so each rule lives once in core and your adapter can't drift from it.
+
+```ts no-check
+import { ConcurrencyError, type Store } from "@rotorsoft/act/types";
+import { checkAppends, checkVersion, concurrencyError } from "@rotorsoft/act/adapter";
+// or: import * as adapter from "@rotorsoft/act/adapter";
+```
+
+| Rule | What it decides |
+|---|---|
+| `checkAppends(appends)` | A commit refuses an append with no events and a stream named twice |
+| `checkVersion(append, head)` | A commit refuses an append whose `expectedVersion` is not the head |
+| `concurrencyError(append, head)` | The error for a race found at insert time |
+| `seedEvent(snapshot?, meta?)` | What a full `truncate` seeds a stream with |
+| `fairSlots(lagging)` | How many claim slots ignore priority |
+| `isStreamName(source, target?)` | A source is a stream's name unless anchored with `^` or `$` |
+| `parseNotification(raw)` | The commit notification in a raw payload, or none |
+
 ## The contract
 
 The interface lives in [`libs/act/src/types/ports.ts`](https://github.com/Rotorsoft/act-root/blob/master/libs/act/src/types/ports.ts):
@@ -14,7 +34,7 @@ The interface lives in [`libs/act/src/types/ports.ts`](https://github.com/Rotors
 - `seed()` / `drop()` — initialization and teardown
 - `commit(appends, meta)` — append each append's events (`{ stream, msgs, expectedVersion? }`, one per stream) atomically with optimistic concurrency: check every `expectedVersion` before appending anything and throw `ConcurrencyError` naming the first stream that moved, refuse a stream named twice and an append with no events, and assign ids in append order, then event order. All appends land or none do; no appends return `[]` (see [Upgrading to 2.0](#upgrading-an-adapter-to-20)). Map a `(stream, version)` unique-constraint violation to `ConcurrencyError` (Postgres keys off SQLSTATE `23505`, SQLite off its unique-constraint message) and wrap every other driver error in `StoreError('commit')` — never rethrow a raw dialect error, or callers can't tell a losable concurrency race from a real fault ([#1202](https://github.com/Rotorsoft/act-root/issues/1202))
 - `query(callback, query?)` — stream events to a callback with filter, range, regex, and `with_snaps` support. Respecting the `after` / `limit` pair is what gives `scan` bounded-memory restore: the framework paginates by re-issuing `query` per batch, so any adapter that already honors those filters gets memory-safe scans for free. Stream/source filters must honor the portable regex grammar (`^` / `$` anchors, `.`, `.*`, literal characters — literal `_` / `%` included) and match **case-sensitively** on every adapter: Postgres uses POSIX `~`, InMemory a `RegExp`, and SQLite `GLOB` (case-sensitive, where `.*` → `*` and `.` → `?`) rather than `LIKE`, whose ASCII case-insensitivity would let `^order-` overmatch `Order-x` ([#1197](https://github.com/Rotorsoft/act-root/issues/1197)). If your backend can't express a richer pattern exactly, **throw `ValidationError`** instead of approximating — the TCK's "stream filter grammar" suite enforces both halves ([#1114](https://github.com/Rotorsoft/act-root/issues/1114)). Two edge inputs are contractual: an empty `names: []` is an explicit empty allow-list that matches **no** events (an omitted `names` matches all), and `before` / `after` are honored at their falsy-zero values — a `before: 0` or `after: 0` is a real id bound (`id < before` / `id > after`), not a dropped filter ([#1199](https://github.com/Rotorsoft/act-root/issues/1199)). Return exactly what you stored: an ISO string stays a string, in `data`, `meta` and `pii` alike. The framework knows which fields each event's schema declares as `z.date()` and turns those back into `Date`s on read (see the [Store contract](../architecture/extension-points.md#store-contract)), and the TCK's schema-driven dates case fails an adapter that revives strings itself.
-- `claim(lagging, leading, by, millis, lane?)` — call core's `fair_slots(lagging)` for the priority-blind share; atomically discover and lease streams for reaction processing (the workhorse of `drain`); optional `lane` filter for ACT-1103 drain lanes
+- `claim(lagging, leading, by, millis, lane?)` — call core's `fairSlots(lagging)` for the priority-blind share; atomically discover and lease streams for reaction processing (the workhorse of `drain`); optional `lane` filter for ACT-1103 drain lanes
 - `subscribe(streams, correlated_at?)` — register streams so they become claimable; each row carries optional `lane` that the adapter writes when the row's priority merge allows it — at or above the stored priority, so the highest-priority registrant owns the lane and restart-driven re-laning still works at equal priority and an optional `correlated_at` **work mark** that decides claim eligibility — both covered below. It also carries the **correlate checkpoint**, read from the return and written by the optional second argument
 
   Registering a stream does **not** make it claimable on its own. `claim` follows work: a subscription with no matching event past its watermark is not returned, and that includes a fresh one sitting at `at = -1` ([#1446](https://github.com/Rotorsoft/act-root/issues/1446)). Do not special-case the fresh watermark into "claimable" — an `id > at` comparison already answers correctly at `-1`, since the first event's id is greater than it. Handing out an empty lease costs a cycle, and its no-op ack can advance the watermark past an event committed mid-cycle.
@@ -22,7 +42,7 @@ The interface lives in [`libs/act/src/types/ports.ts`](https://github.com/Rotors
 - `defer(input, deferred_at)` — park streams until a future wall-clock time without advancing their watermark (the deferred-reaction outcome, [#1090](https://github.com/Rotorsoft/act-root/issues/1090)); covered below
 - `reset(streams)` / `prioritize(filter, n)` / `truncate(targets)` — operator-facing primitives; the `StreamFilter` shape carries an optional `lane` exact-match. `truncate` targets come in two shapes — full (delete everything, seed a snapshot or tombstone) and windowed (`before` boundary, prefix delete behind a snapshot) — covered below
 - `query_streams(callback, query?)` — read-only introspection (operational dashboards); positions carry their `lane`, an optional `deferred_at` (ms since epoch) when the stream is parked on an active future defer, and the optional `correlated_at` **work mark** so a reader can tell "behind the head" from "has work". The query gained an optional `source_matches` filter — covered below
-- `notify(handler)` — *optional* cross-process commit notifications; read a payload your transport delivers with core's `notification_of(payload)`, which keeps only well-formed events
+- `notify(handler)` — *optional* cross-process commit notifications; read a payload your transport delivers with core's `parseNotification(payload)`, which keeps only well-formed events
 - `query_stats(streams, options?)` — per-stream heads, counts and tails (see below)
 - `forget_pii(stream)` — *optional* erase a stream's sensitive payloads
 - `restore(driver)` — *optional* atomic wipe-and-rebuild from an event source (see below)
@@ -40,9 +60,9 @@ await store.commit(stream, msgs, meta, expectedVersion);
 await store.commit([{ stream, msgs, expectedVersion }], meta);
 ```
 
-A commit across streams notifies once per stream, with that stream's events. Call `check_appends(appends)` from `@rotorsoft/act` first: it's the framework's rule for what a commit may hold, and the TCK's `commit across streams` block matches its messages exactly.
+A commit across streams notifies once per stream, with that stream's events. Call `checkAppends(appends)` from `@rotorsoft/act/adapter` first: it's the framework's rule for what a commit may hold, and the TCK's `commit across streams` block matches its messages exactly.
 
-An adapter checks every append's version before inserting anything, with core's `throw_if_stale(append, head)` and the stream's head (`-1` when it has no events). It inserts every append inside the transaction it already opens, and lets the unique `(stream, version)` constraint catch a race on any stream appended to; on that violation it throws `concurrency_error(append, head)`, the same `ConcurrencyError` the check raises. The TCK's "commit across streams" block is the checklist: stale first, middle and last appends, a stream named twice, an append with no events, an unguarded append beside guarded ones, and two commits racing on a shared stream.
+An adapter checks every append's version before inserting anything, with core's `checkVersion(append, head)` and the stream's head (`-1` when it has no events). It inserts every append inside the transaction it already opens, and lets the unique `(stream, version)` constraint catch a race on any stream appended to; on that violation it throws `concurrencyError(append, head)`, the same `ConcurrencyError` the check raises. The TCK's "commit across streams" block is the checklist: stale first, middle and last appends, a stream named twice, an append with no events, an unguarded append beside guarded ones, and two commits racing on a shared stream.
 
 ## The store schema is the framework's job
 
@@ -260,7 +280,7 @@ The subtle part is that the **sort comparator and the cursor comparator must be 
 
 `truncate` is the delete verb behind close-the-books, and it carries two contracts in one method, switched per target by the presence of `before`.
 
-A **full** target (`{ stream, snapshot?, meta? }`) is the classic close: in a single transaction, delete every event for the stream and insert exactly one seed event — a `__snapshot__` when `snapshot` is provided (the restart case), a `__tombstone__` otherwise. Take its name, data and meta from core's `seed_event(snapshot, meta)`, which also supplies the default meta. After the transaction the stream holds exactly one event.
+A **full** target (`{ stream, snapshot?, meta? }`) is the classic close: in a single transaction, delete every event for the stream and insert exactly one seed event — a `__snapshot__` when `snapshot` is provided (the restart case), a `__tombstone__` otherwise. Take its name, data and meta from core's `seedEvent(snapshot, meta)`, which also supplies the default meta. After the transaction the stream holds exactly one event.
 
 **Do not touch the subscriptions table**, for retired and restarted targets alike ([#1527](https://github.com/Rotorsoft/act-root/issues/1527)). `truncate` is event-log work, and keeping it that way is what lets a store hold its event log and its subscriptions on different systems — every method then belongs cleanly to one half, and a hybrid routes instead of reimplementing. Removing the subscription row was the one exception, and it forced such a store into a distributed transaction it had no way to get.
 
