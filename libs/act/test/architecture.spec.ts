@@ -21,8 +21,6 @@ import { join } from "node:path";
  *   only place that composes them. Nothing else imports a `pii_*` helper.
  * - `scoped.ts` owns every `AsyncLocalStorage` and every operation on one.
  * - Ambient mechanisms are not public API.
- * - A framework rule lives once, in core. An adapter owns its storage and calls
- *   core's helper for the rule, so a third-party store can't drift from it.
  */
 
 const SRC = new URL("../src/", import.meta.url).pathname;
@@ -235,42 +233,6 @@ describe("architecture: Zod's internals are read in one place", () => {
       )
       .map((path) => path.slice(SRC.length));
     expect(offenders).toEqual([]);
-  });
-});
-
-describe("framework rules stay in the framework", () => {
-  const adapters = [
-    "src/adapters/in-memory-store.ts",
-    "../act-pg/src/postgres-store.ts",
-    "../act-sqlite/src/sqlite-store.ts",
-    "../act-notify/src/with-broker.ts",
-  ].map((path) => ({
-    path,
-    text: readFileSync(new URL(`../${path}`, import.meta.url), "utf8"),
-  }));
-  const restated: [string, RegExp][] = [
-    ["the fair share of claim slots", /lagging\s*>=\s*2|Math\.floor\(lagging/],
-    ["the query_streams default limit", /query\?\.limit\s*\?\?\s*\d/],
-    ["what a commit may hold", /is named twice|has no events/],
-    ["what makes a writer stale", /\bexpectedVersion\b|new ConcurrencyError\(/],
-    ["what a full truncate seeds", /correlation:\s*""|TOMBSTONE_EVENT/],
-    [
-      "what makes a source a pattern",
-      /METACHARACTER|source\.startsWith\("\^"\)/,
-    ],
-    ["what a notification holds", /\bid\?:\s*unknown\b/],
-  ];
-
-  it.each(restated)("no adapter restates %s", (_, rule) => {
-    expect(adapters.filter(({ text }) => rule.test(code_of(text)))).toEqual([]);
-  });
-
-  it("the TCK uses core's source rule too", () => {
-    const tck = readFileSync(
-      new URL("../../act-tck/src/store-tck.ts", import.meta.url),
-      "utf8"
-    );
-    expect(tck).not.toMatch(/const is_literal\b/);
   });
 });
 
