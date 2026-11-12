@@ -12,7 +12,7 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { InMemoryStore } from "../src/adapters/in-memory-store.js";
-import { act, state, ZodEmpty } from "../src/index.js";
+import { act, log, state, ZodEmpty } from "../src/index.js";
 import { classify_registry } from "../src/internal/classify.js";
 import { dispose, store } from "../src/ports.js";
 
@@ -312,6 +312,62 @@ describe("priority lanes — framework", () => {
       const seen: any[] = [];
       await store().query_streams((p) => seen.push(p));
       expect(seen.find((p) => p.stream === "static-target").priority).toBe(5);
+    });
+
+    it("refuses a priority that isn't a 32-bit integer before the store sees it", async () => {
+      const app = act().build({ autoSettle: false });
+      const spy = vi.spyOn(store(), "prioritize");
+      await expect(app.prioritize({}, 1.5)).rejects.toThrow();
+      await expect(app.prioritize({}, 3_000_000_000)).rejects.toThrow();
+      expect(spy).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("correlate-cycle — a dynamic priority that isn't a 32-bit integer", () => {
+    it("skips that event for that reaction only, says so once, and keeps correlating", async () => {
+      const Pinger = state({ Pinger: z.object({ w: z.number() }) })
+        .init(() => ({ w: 0 }))
+        .emits({ Pinged: z.object({ w: z.number() }) })
+        .on({ ping: z.object({ w: z.number() }) })
+        .emit((data) => ["Pinged", data])
+        .build();
+      const scored: number[] = [];
+      const plain: number[] = [];
+      const app = act()
+        .withState(Pinger)
+        .on("Pinged")
+        .do(async function scored_reaction(e) {
+          scored.push(e.data.w);
+        })
+        .to((e) => ({ target: `scored-${e.data.w}`, priority: e.data.w }))
+        .on("Pinged")
+        .do(async function plain_reaction(e) {
+          plain.push(e.data.w);
+        })
+        .to("plain")
+        .build({ autoSettle: false });
+      const errors: string[] = [];
+      const spy = vi
+        .spyOn(log(), "error")
+        .mockImplementation((e: unknown) =>
+          errors.push(e instanceof Error ? e.message : String(e))
+        );
+      const actor = { id: "a", name: "a" };
+      try {
+        for (const w of [1, 1.5, 1.5, 2])
+          await app.do("ping", { stream: "p", actor }, { w });
+        for (let i = 0; i < 3; i++) {
+          await app.correlate();
+          await app.drain();
+        }
+      } finally {
+        spy.mockRestore();
+      }
+      expect(scored.sort()).toEqual([1, 2]);
+      expect(plain).toEqual([1, 1.5, 1.5, 2]);
+      const reports = errors.filter((m) => m.includes("32-bit integer"));
+      expect(reports).toHaveLength(1);
+      expect(reports[0]).toContain('"scored_reaction"');
     });
   });
 

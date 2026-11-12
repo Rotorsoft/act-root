@@ -21,6 +21,7 @@ import {
   resolveDrainConfig,
   resolveSettleConfig,
   resolveShutdownConfig,
+  resolveTargetConfig,
 } from "./internal/config.js";
 import {
   CorrelateCycle,
@@ -1404,6 +1405,7 @@ export class Act<
    * @param filter - Selection criteria (regex by default, like {@link query}).
    * @param priority - New priority value, a 32-bit integer. Set as-is — no clamp.
    * @returns Count of streams whose priority changed.
+   * @throws ZodError when `priority` isn't a 32-bit integer.
    *
    * @example Boost a specific projection mid-replay
    * ```typescript
@@ -1413,6 +1415,7 @@ export class Act<
    * @see {@link Store.prioritize} for the underlying primitive
    */
   async prioritize(filter: StreamFilter, priority: number): Promise<number> {
+    resolveTargetConfig({ priority });
     return this._scoped(() => store().prioritize(filter, priority));
   }
 

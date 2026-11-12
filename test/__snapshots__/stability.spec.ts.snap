@@ -523,6 +523,7 @@ export declare class Act<TSchemaReg extends SchemaRegister<TActions>, TEvents ex
      * @param filter - Selection criteria (regex by default, like {@link query}).
      * @param priority - New priority value, a 32-bit integer. Set as-is — no clamp.
      * @returns Count of streams whose priority changed.
+     * @throws ZodError when \`priority\` isn't a 32-bit integer.
      *
      * @example Boost a specific projection mid-replay
      * \`\`\`typescript
