@@ -116,6 +116,12 @@ Two things that rewrite doesn't show:
 - **Why:** it's documented as the head, and pinning to anything older refuses your own next action.
 - **How to update:** pin a later action to `version`, not `event.version`.
 
+### A reaction priority is a 32-bit integer
+
+- **What changed:** since 2.1.1, a static `.to({ priority })` that isn't a 32-bit integer throws at build, and `app.prioritize` throws before calling the store.
+- **Why:** Postgres stores priority as `int`, so a fraction or a value past 2,147,483,647 failed every `subscribe` there and stopped correlate. InMemory and SQLite accepted it.
+- **How to update:** use whole numbers. A dynamic resolver's priority is checked at correlate instead; see [Priority lanes](../architecture/priority-lanes.md).
+
 ### act-http's snake_case SSE aliases are gone
 
 - **What changed:** the deprecated aliases in `@rotorsoft/act-http/sse` are removed.
