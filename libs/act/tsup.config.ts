@@ -1,7 +1,12 @@
 import { defineConfig } from "tsup";
 
 export default defineConfig({
-  entry: ["src/index.ts", "src/types/index.ts", "src/test/index.ts"],
+  entry: [
+    "src/index.ts",
+    "src/adapter.ts",
+    "src/types/index.ts",
+    "src/test/index.ts",
+  ],
   // vitest must stay external: the /test subpath builds on vitest's
   // test.extend, which only works inside the consumer's own vitest
   // instance. Bundling a private copy of the runner (the default for

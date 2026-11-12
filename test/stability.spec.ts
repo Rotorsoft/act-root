@@ -62,7 +62,8 @@ function discover_packages(): Pkg[] {
       const key = subpath === "." ? "" : subpath;
       entry_points[key] = abs_types;
     }
-    // A subpath the root re-exports whole is already in the root's block;
+    // A subpath the root re-exports whole (`export *` or `export type *`,
+    // which the walk follows alike) is already in the root's block;
     // snapshotting it again would show every change to it twice.
     const root = entry_points[""];
     if (root) {
@@ -71,7 +72,11 @@ function discover_packages(): Pkg[] {
         const rel = path
           .relative(path.dirname(root), types)
           .replace(/\.d\.ts$/, ".js");
-        if (key && root_text.includes(`export * from "./${rel}";`))
+        if (
+          key &&
+          (root_text.includes(`export * from "./${rel}";`) ||
+            root_text.includes(`export type * from "./${rel}";`))
+        )
           delete entry_points[key];
       }
     }

@@ -81,7 +81,7 @@ const reacting = new AsyncLocalStorage<Reacting>();
  * Builds the runner an Act uses to enter its own port scope.
  *
  * Every Act gets a frame, including one built without `ActOptions.scoped` —
- * that one carries the singleton adapters (see `default_scope` in `ports.ts`).
+ * that one carries the singleton adapters (see `unscoped_ports` in `ports.ts`).
  * Entering unconditionally is what makes an Act's ports its own: a runner that
  * collapsed to `fn()` for a singleton Act did not leave whatever frame it was
  * called from, so dispatching into a shared Act from inside a tenant's handler

@@ -182,10 +182,8 @@ export const cache = ((adapter?: Cache): Cache => {
  * bag is made would pin whatever existed at build time. They read the raw
  * resolvers rather than the public `store()`/`cache()`, which consult the
  * frame this bag *is* and would recurse.
- *
- * Published for adapter and decorator authors, not for apps.
  */
-export const default_scope = (): Scoped => DEFAULT_SCOPE;
+export const unscoped_ports = (): Scoped => DEFAULT_SCOPE;
 
 const DEFAULT_SCOPE: Scoped = {
   get store() {

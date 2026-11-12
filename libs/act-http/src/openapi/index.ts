@@ -57,7 +57,7 @@
  * mount points on the same Act instance; the OpenAPI doc covers
  * the REST half only.
  */
-import { pii_fields, REDACTED, SHREDDED } from "@rotorsoft/act";
+import { REDACTED, SHREDDED, sensitiveFields } from "@rotorsoft/act";
 import { z } from "zod";
 import type { ActSurface } from "../api/dispatch.js";
 
@@ -366,12 +366,12 @@ function strip_json_schema_meta(
  * codegen / Swagger UI treat them as secrets rather than echoing them
  * freely. `z.toJSONSchema` has no knowledge of the sensitive marker
  * (`sensitive()` stamps a symbol on the schema's definition), so we walk the
- * action's declared sensitive fields — via `pii_fields`, the same lookup
+ * action's declared sensitive fields — via `sensitiveFields`, the same lookup
  * the orchestrator uses — and mark each matching property `writeOnly:
  * true` + `format: password`. Non-object schemas and actions with no
  * sensitive fields pass through untouched (the zero-cost common path).
  *
- * `pii_fields` only reports top-level keys of a `z.object`, and Zod's
+ * `sensitiveFields` only reports top-level keys of a `z.object`, and Zod's
  * JSON Schema emit always renders those as members of `properties` — so
  * once `fields` is non-empty, `body_schema.properties[field]` is
  * guaranteed present. No defensive fallback needed.
@@ -382,7 +382,7 @@ function mark_sensitive_fields(
   body_schema: Record<string, unknown>,
   zod_schema: z.ZodType
 ): Record<string, unknown> {
-  const fields = pii_fields(zod_schema);
+  const fields = sensitiveFields(zod_schema);
   if (fields.length === 0) return body_schema;
   return at_root(body_schema, (root) => {
     const properties = root.properties as Record<
@@ -550,7 +550,7 @@ function state_snapshots(
 ): Record<string, unknown> {
   const sensitive = new Set<string>();
   const variants = Object.entries(events).map(([name, data]) => {
-    const fields = pii_fields(data);
+    const fields = sensitiveFields(data);
     for (const f of fields) sensitive.add(f);
     return {
       type: "object",

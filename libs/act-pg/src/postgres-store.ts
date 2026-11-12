@@ -23,18 +23,20 @@ import type {
 } from "@rotorsoft/act";
 import {
   ConcurrencyError,
-  check_appends,
-  concurrency_error,
-  DEFAULT_QUERY_STREAMS_LIMIT,
-  fair_slots,
   log,
-  notification_of,
   SNAP_EVENT,
   StoreError,
-  seed_event,
-  throw_if_stale,
   ValidationError,
 } from "@rotorsoft/act";
+import {
+  checkAppends,
+  checkVersion,
+  concurrencyError,
+  fairSlots,
+  parseNotification,
+  seedEvent,
+} from "@rotorsoft/act/adapter";
+import { DEFAULT_QUERY_STREAMS_LIMIT } from "@rotorsoft/act/types";
 import {
   decrypt,
   type Encryption,
@@ -920,7 +922,7 @@ export class PostgresStore implements Store {
     appends: readonly Append<E>[],
     meta: EventMeta
   ) {
-    check_appends(appends);
+    checkAppends(appends);
     if (!appends.length) return [];
     // Serialize commit VISIBILITY, not just id assignment. `id` is a
     // serial: it is assigned at INSERT time but the row appears at
@@ -957,7 +959,7 @@ export class PostgresStore implements Store {
         heads.rows.map((r) => [r.stream, r.version ?? -1])
       );
       for (const append of appends)
-        throw_if_stale(append, head_of.get(append.stream)!);
+        checkVersion(append, head_of.get(append.stream)!);
 
       // Data/pii travel as text[] and cast to jsonb in SQL — the pg driver
       // can't serialize object elements inside a jsonb[] parameter.
@@ -1059,7 +1061,7 @@ export class PostgresStore implements Store {
           const detail = (error as { detail?: string }).detail ?? "";
           const key = /=\((.*), \d+\)/s.exec(detail)?.[1];
           const hit = appends.find((a) => a.stream === key) ?? appends[0];
-          throw concurrency_error(hit, head_of.get(hit.stream)!);
+          throw concurrencyError(hit, head_of.get(hit.stream)!);
         }
         throw error;
       }
@@ -1098,7 +1100,7 @@ export class PostgresStore implements Store {
       // budget for pure watermark-order claims so a default-priority
       // lagging stream is never starved out by sustained higher-priority
       // load. `fair` is always $5; the optional `lane` bind is last ($7).
-      const fair = fair_slots(lagging);
+      const fair = fairSlots(lagging);
       // A defer is due by THIS worker's clock ($6), not the database's
       // `NOW()`: the worker's process-local timer wakes the drain on its own
       // clock, so judging `deferred_at` on a second clock made a worker
@@ -1935,7 +1937,7 @@ export class PostgresStore implements Store {
       // store instance. This is what gives `notified` its cross-process
       // semantic — local commits already arm the drain via `do()`.
       if (parsed.by === this._by) return;
-      const notification = notification_of(parsed);
+      const notification = parseNotification(parsed);
       if (!notification) {
         logger.error(
           { payload: msg.payload },
@@ -2125,7 +2127,7 @@ export class PostgresStore implements Store {
           `DELETE FROM ${this._fqt} WHERE stream = $1`,
           [stream]
         );
-        const seed = seed_event(snapshot, meta);
+        const seed = seedEvent(snapshot, meta);
         const { rows } = await client.query(
           `INSERT INTO ${this._fqt}(name, data, stream, version, created, meta)
            VALUES($1, $2, $3, 0, now(), $4) RETURNING *`,

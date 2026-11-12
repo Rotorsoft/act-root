@@ -8,18 +8,21 @@ paths:
 
 # Naming conventions
 
-The codebase uses two distinct casings. Which one you pick is determined by **whether the identifier is on the public surface or not** — there is no third "shifting style by context" option.
+Which casing an identifier takes depends on what it is and whether it is public. The rules below describe what the code does.
 
-**Public — camelCase. This is the convention, not a legacy carve-out.**
+**Public — camelCase for functions, factories, builder methods and options fields.**
 
-Anything reachable from a package's `src/index.ts` (or subpath `index.ts` for `act-http`/`act-ops`) is camelCase:
+Anything reachable from a package's entry points (its `src/index.ts` or a subpath's, such as `@rotorsoft/act/adapter` or act-http's `/webhook`):
 
-- Exported functions: `verifyWebhook`, `applyPatchMessage`, `withIdempotency`, `runStoreTck`, `webhookMiddleware`, `minSafeTtl`, `extractIdempotencyKey`, `checkWebhook`.
-- Public type fields: `IAct.forget` return `{eventCount}`, `forgotten` event `eventCount`, `StateNode.varName`, `EventNode.hasCustomPatch`, `WebhookConfig.timeoutMs`/`idempotencyKey`, `HttpDeliveryErrorInit.responseBody`, `VerifyOptions.maxAgeSeconds`, `RetryProfile.safetyFactor`, `Projection.batchHandler`, `QueryStreamsResult.maxEventId`, `InMemoryIdempotencyStore` options `ttlMs`/`maxEntries`/`retryProfile`.
-- ActOptions / RetryOptions / ReactionOptions / Backoff / DrainOptions / SettleOptions / LaneConfig fields: `maxRetries`, `blockOnError`, `baseMs`, `maxMs`, `jitter`, `strategy`, `leaseMillis`, `eventLimit`, `streamLimit`, `cycleMs`, `debounceMs`, `maxSubscribedStreams`, `onlyLanes`, `settleDebounceMs`, `maxPasses`, `expectedVersion`, `reactingTo`, `asOf`, `maxSize`.
+- Exported functions: `verifyWebhook`, `applyPatchMessage`, `withIdempotency`, `runStoreTck`, `webhookMiddleware`, `minSafeTtl`, `extractIdempotencyKey`, `checkWebhook`, and the store rules on `@rotorsoft/act/adapter` (`checkAppends`, `checkVersion`, `isStreamName`, `parseNotification`, …). A function that throws on a violation starts with `check`.
+- Options and config fields: `maxRetries`, `blockOnError`, `baseMs`, `maxMs`, `jitter`, `strategy`, `leaseMillis`, `eventLimit`, `streamLimit`, `cycleMs`, `debounceMs`, `maxSubscribedStreams`, `onlyLanes`, `settleDebounceMs`, `maxPasses`, `expectedVersion`, `reactingTo`, `asOf`, `maxSize`, `WebhookConfig.timeoutMs`/`idempotencyKey`, `VerifyOptions.maxAgeSeconds`, `RetryProfile.safetyFactor`.
 - Builder methods: `withState`, `withProjection`, `withReaction`, `withActor`, `withLane`, `withSlice`.
 - Top-level factories: short single-word lowercase — `act`, `state`, `slice`, `projection`, `sensitive`, `webhook`, `receiver`.
 - Public class names + types — PascalCase always: `StateNode`, `BroadcastChannel`, `InMemoryStore`, `ConsoleLogger`, `RetryProfile`, `WebhookConfig`, `IdempotencyStore`. Suffix with `XxxOptions` / `XxxResult` / `XxxConfig` when applicable.
+
+**Public — snake_case for port methods and record fields, by design.** The `Store`, `Cache` and `Logger` methods (`query_stats`, `query_streams`, `forget_pii`) and the fields of the records, queries and results they carry (`with_snaps`, `correlated_at`, `deferred_at`, `stream_exact`) are snake_case and stay that way: they mirror the store's columns, and renaming them is a breaking change for every adapter. A few app-facing result fields are camelCase (`eventCount`, `maxEventId`, `StateNode.varName`); match the type you're extending.
+
+**Public — `SCREAMING_SNAKE` for exported constants:** `SNAP_EVENT`, `TOMBSTONE_EVENT`, `REDACTED`, `SHREDDED`, `DEFAULT_*`.
 
 **Internal — short snake_case, no exceptions:**
 

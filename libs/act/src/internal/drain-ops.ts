@@ -14,6 +14,7 @@
  * construction time. No tracing imports here.
  */
 
+import { isStreamName } from "../adapter.js";
 import { store } from "../ports.js";
 import type {
   BlockedLease,
@@ -24,7 +25,6 @@ import type {
   SubscribeInput,
   SubscribeResult,
 } from "../types/index.js";
-import { is_literal_source } from "../utils.js";
 
 export interface DrainOps<TEvents extends Schemas> {
   claim: typeof claim;
@@ -54,9 +54,7 @@ export async function fetch<TEvents extends Schemas>(
       // pattern source (e.g. `^(A|B)$`) stays a regex query, matching the
       // same streams correlate resolved it for.
       const stream_exact =
-        source !== undefined && is_literal_source(source, stream)
-          ? true
-          : undefined;
+        source !== undefined && isStreamName(source, stream) ? true : undefined;
       try {
         await store().query<TEvents>((e) => events.push(e), {
           stream: source,

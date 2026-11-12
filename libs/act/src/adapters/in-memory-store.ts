@@ -6,6 +6,12 @@
  * @category Adapters
  */
 
+import {
+  checkAppends,
+  checkVersion,
+  fairSlots,
+  seedEvent,
+} from "../adapter.js";
 import type {
   Append,
   BlockedLease,
@@ -24,15 +30,12 @@ import type {
   StreamStats,
   SubscribeInput,
 } from "../types/index.js";
-import { DEFAULT_LANE, SNAP_EVENT } from "../types/index.js";
 import {
-  check_appends,
+  DEFAULT_LANE,
   DEFAULT_QUERY_STREAMS_LIMIT,
-  fair_slots,
-  seed_event,
-  sleep,
-  throw_if_stale,
-} from "../utils.js";
+  SNAP_EVENT,
+} from "../types/index.js";
+import { sleep } from "../utils.js";
 
 /**
  * One subscription row: watermark, lease, retry and schedule. Its state is
@@ -410,11 +413,11 @@ export class InMemoryStore implements Store {
     meta: EventMeta
   ) {
     await sleep();
-    check_appends(appends);
+    checkAppends(appends);
     // Every version is checked before anything is appended, so a stale
     // append leaves every stream as it was.
     for (const append of appends)
-      throw_if_stale(append, this._stream_versions.get(append.stream) ?? -1);
+      checkVersion(append, this._stream_versions.get(append.stream) ?? -1);
     const created = new Date();
     return appends.flatMap(({ stream, msgs }) => {
       let version = this._stream_versions.get(stream) ?? -1;
@@ -457,7 +460,7 @@ export class InMemoryStore implements Store {
     // Lagging: priority DESC, then watermark ASC, like the PG SQL. The
     // `fair` slots ignore priority so sustained high-priority load can't
     // starve a default-priority stream.
-    const fair = fair_slots(lagging);
+    const fair = fairSlots(lagging);
     const by_priority = [...available].sort(
       (a, b) => b.priority - a.priority || a.at - b.at
     );
@@ -839,7 +842,7 @@ export class InMemoryStore implements Store {
         stream,
         version: 0,
         created: new Date(),
-        ...seed_event(snapshot, meta),
+        ...seedEvent(snapshot, meta),
       };
       this._events.push(event);
       this._stream_versions.set(stream, 0);

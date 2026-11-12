@@ -1409,3 +1409,8 @@ export const SNAP_EVENT = "__snapshot__";
  * @see {@link Act.close} for the close-the-books API
  */
 export const TOMBSTONE_EVENT = "__tombstone__";
+
+/**
+ * How many positions `query_streams` returns when the caller gives no limit.
+ */
+export const DEFAULT_QUERY_STREAMS_LIMIT = 100;

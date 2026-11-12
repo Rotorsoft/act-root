@@ -5,7 +5,7 @@
  * the public `Store`, never orchestration internals.
  */
 
-import { pii_fields } from "../sensitive.js";
+import { sensitiveFields } from "../sensitive.js";
 import type {
   AuditCategory,
   AuditFinding,
@@ -218,7 +218,7 @@ const make_schema_pass: PassFactory = (deps) => {
       }
       const schema = state.events[name];
       // `sensitive()` keys live in the pii sidecar, so omit them from the parse.
-      const sensitive = pii_fields(schema);
+      const sensitive = sensitiveFields(schema);
       let parse_schema = schema;
       if (sensitive.length > 0) {
         const omitter = (

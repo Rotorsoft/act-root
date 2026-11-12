@@ -185,7 +185,7 @@ Source-of-truth for what lives where:
 - `libs/act/src/ports.ts` + `libs/act/src/adapters/` — port singletons and in-memory defaults
 - `libs/act-pg/src/postgres-store.ts`, `libs/act-sqlite/src/sqlite-store.ts` — production adapters
 - `libs/act/src/types/` — public type contracts (`Store`, `Cache`, `Logger`, `Snapshot`, errors)
-- **Three layers, by audience:** `types/` declares every public type (and the public contract values: errors and signals, schemas, sentinels, defaults); the public runtime modules (`act.ts`, `builders/`, `adapters/`, `ports.ts`, `config.ts`, `csv.ts`, `utils.ts`, `sensitive.ts`, `test/`) implement them and declare no public types; `internal/` is private, never re-exported and never imported by `types/`. `architecture.spec.ts` enforces all three.
+- **Three layers, by audience:** `types/` declares every public type (and the public contract values: errors and signals, schemas, sentinels, defaults); the public runtime modules (`act.ts`, `builders/`, `adapters/`, `adapter.ts`, `ports.ts`, `config.ts`, `csv.ts`, `utils.ts`, `sensitive.ts`, `test/`) implement them and declare no public types; `internal/` is private, never re-exported and never imported by `types/`. The root `index.ts` lists every runtime name it exports, and `adapter.ts` (`@rotorsoft/act/adapter`, the rules a store calls) imports only from `types/`. `architecture.spec.ts` enforces all of it.
 
 ## Development Workflow
 
@@ -225,7 +225,7 @@ Durable workflow rules the AI assistant follows when working on the framework it
 
 ### Naming conventions
 
-Anything reachable from a package's `src/index.ts` (or a subpath `index.ts`) is camelCase; top-level factories are short single-word lowercase (`act`, `state`, `webhook`) and types are PascalCase (`XxxOptions` / `XxxResult` / `XxxConfig`). Everything internal is short snake_case, including function parameters, with `_snake_case` for private fields. **Parameter properties are banned** by `erasableSyntaxOnly`: declare each field and assign it in the constructor. `pnpm check:stability` snapshots the public declarations, so a rename shows up as a diff. Examples: [`.claude/rules/naming.md`](.claude/rules/naming.md).
+Exported functions, builder methods and options fields are camelCase; port methods and record fields are snake_case by design (`query_stats`, `with_snaps`); exported constants are `SCREAMING_SNAKE`; top-level factories are short single-word lowercase (`act`, `state`, `webhook`) and types are PascalCase (`XxxOptions` / `XxxResult` / `XxxConfig`). Everything internal is short snake_case, including function parameters, with `_snake_case` for private fields. **Parameter properties are banned** by `erasableSyntaxOnly`: declare each field and assign it in the constructor. `pnpm check:stability` snapshots the public declarations, so a rename shows up as a diff. Examples: [`.claude/rules/naming.md`](.claude/rules/naming.md).
 
 ### Config-validation schemas
 

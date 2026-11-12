@@ -23,7 +23,11 @@ export type {
 } from "./builders.js";
 export * from "./errors.js";
 export type * from "./ports.js";
-export { SNAP_EVENT, TOMBSTONE_EVENT } from "./ports.js";
+export {
+  DEFAULT_QUERY_STREAMS_LIMIT,
+  SNAP_EVENT,
+  TOMBSTONE_EVENT,
+} from "./ports.js";
 export type * from "./reaction.js";
 export { DEFAULT_LANE } from "./reaction.js";
 export type * from "./registry.js";

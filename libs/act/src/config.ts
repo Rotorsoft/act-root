@@ -8,11 +8,8 @@
  */
 import * as fs from "node:fs";
 import { z } from "zod";
-import { resolveAutocloseConfig as resolve_autoclose } from "./internal/config.js";
 import { log } from "./ports.js";
 import {
-  type ActOptions,
-  type AutocloseConfig,
   type Config,
   type Environment,
   Environments,
@@ -20,13 +17,12 @@ import {
   LogLevels,
   type Package,
 } from "./types/index.js";
-import { extend } from "./utils.js";
+import { validate } from "./utils.js";
 
 /**
- * Zod schema for the package.json fields {@link config} validates. Published
- * for tooling that reads the same file, not for apps.
+ * Zod schema for the package.json fields {@link config} validates.
  */
-export const PackageSchema = z.object({
+export const package_schema = z.object({
   name: z.string().min(1),
   version: z.string().min(1),
   description: z.string().min(1).optional(),
@@ -77,7 +73,7 @@ const get_package = (): Package => {
       name: FALLBACK_PACKAGE.name,
       version: FALLBACK_PACKAGE.version,
     };
-    for (const [key, schema] of Object.entries(PackageSchema.shape)) {
+    for (const [key, schema] of Object.entries(package_schema.shape)) {
       const field = schema.safeParse(raw?.[key]);
       if (field.success && field.data !== undefined) pkg[key] = field.data;
     }
@@ -96,7 +92,7 @@ let pkg_load_error: unknown;
  * Includes package metadata, environment, logging, and timing options.
  * @internal
  */
-const BaseSchema = PackageSchema.extend({
+const BaseSchema = package_schema.extend({
   env: z.enum(Environments),
   logLevel: z.enum(LogLevels),
   logSingleLine: z.boolean(),
@@ -117,7 +113,7 @@ const sleepMs = parseInt(NODE_ENV === "test" ? "0" : (SLEEP_MS ?? "100"), 10);
 
 const pkg = get_package();
 
-// Lazily validated on first call. Cannot run extend() at module load
+// Lazily validated on first call. Cannot run validate() at module load
 // because of a utils.ts <-> config.ts cycle (utils imports config for
 // sleep()'s default). Inputs are frozen after import, so the cached
 // result is stable for the life of the process.
@@ -156,7 +152,8 @@ let _validated: Config | undefined;
  */
 export const config = (): Config => {
   if (!_validated) {
-    _validated = extend(
+    _validated = validate(
+      "config",
       { ...pkg, env, logLevel, logSingleLine, sleepMs },
       BaseSchema
     );
@@ -179,13 +176,3 @@ export const config = (): Config => {
   }
   return _validated;
 };
-
-/**
- * Validates and defaults the autoclose knobs of `ActOptions`, the way
- * `act().build()` does. Throws `ZodError` on an out-of-range value.
- */
-export function resolveAutocloseConfig(
-  options: ActOptions | undefined
-): AutocloseConfig {
-  return resolve_autoclose(options);
-}

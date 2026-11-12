@@ -1,13 +1,6 @@
 import { patch } from "@rotorsoft/act-patch";
 import { z } from "zod";
-import {
-  config,
-  extend,
-  notification_of,
-  sleep,
-  ValidationError,
-  validate,
-} from "../src/index.js";
+import { config, sleep, ValidationError, validate } from "../src/index.js";
 
 describe("utils", () => {
   describe("config", () => {
@@ -234,81 +227,8 @@ describe("utils", () => {
     });
   });
 
-  describe("extend", () => {
-    it("should extend target with validated source", () => {
-      const source = { key: "value" };
-      const target = { otherKey: 123 };
-      const extended = extend(source, schema, target);
-      expect(extended).toEqual({ otherKey: 123, key: "value" });
-    });
-
-    it("should throw ValidationError on invalid source", () => {
-      const source = { key: 123 };
-      const target = { otherKey: 123 };
-      // @ts-expect-error invalid source
-      expect(() => extend(source, schema, target)).toThrow(ValidationError);
-    });
-
-    it("should extend with no target", () => {
-      const schema = z.object({ key: z.string() });
-      const source = { key: "value" };
-      const extended = extend(source, schema);
-      expect(extended).toEqual({ key: "value" });
-    });
-
-    it("should not mutate the target object across calls", () => {
-      const defaults = { otherKey: 123 };
-      const snapshot = { ...defaults };
-
-      extend({ key: "first" }, schema, defaults);
-      extend({ key: "second" }, schema, defaults);
-
-      // defaults must remain pristine — extend returns a new object,
-      // not a mutated target. Otherwise shared defaults leak across calls.
-      expect(defaults).toEqual(snapshot);
-      expect(defaults).not.toHaveProperty("key");
-    });
-  });
-
   it("should resolve sleep with and without ms", async () => {
     await expect(sleep(1)).resolves.toBeUndefined();
     await expect(sleep()).resolves.toBeUndefined();
-  });
-
-  describe("notification_of", () => {
-    it("reads a well-formed notification, keeping only id and name", () => {
-      expect(
-        notification_of({
-          stream: "s",
-          by: "other",
-          events: [{ id: 7, name: "Incremented", extra: true }],
-        })
-      ).toEqual({ stream: "s", events: [{ id: 7, name: "Incremented" }] });
-    });
-
-    it("drops malformed events and keeps the rest", () => {
-      expect(
-        notification_of({
-          stream: "s",
-          events: [{ name: "no-id" }, null, { id: 1, name: "A" }],
-        })
-      ).toEqual({ stream: "s", events: [{ id: 1, name: "A" }] });
-    });
-
-    it.each([
-      ["nothing", undefined],
-      ["null", null],
-      ["a string", "s"],
-      ["a non-string stream", { stream: 42, events: [{ id: 1, name: "A" }] }],
-      ["no events", { stream: "s" }],
-      ["events that aren't a list", { stream: "s", events: "nope" }],
-      ["an empty list", { stream: "s", events: [] }],
-      [
-        "only malformed events",
-        { stream: "s", events: [{ id: "1", name: "X" }, null] },
-      ],
-    ])("finds no notification in %s", (_, raw) => {
-      expect(notification_of(raw)).toBeUndefined();
-    });
   });
 });

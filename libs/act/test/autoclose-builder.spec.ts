@@ -10,12 +10,13 @@
  */
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { act, resolveAutocloseConfig, state, ZodEmpty } from "../src/index.js";
+import { act, state, ZodEmpty } from "../src/index.js";
 import {
   hour_in_zone,
   in_autoclose_window,
   next_window_open,
 } from "../src/internal/autoclose-window.js";
+import { resolveAutocloseConfig } from "../src/internal/config.js";
 
 const make_ticket = () =>
   state({

@@ -128,7 +128,7 @@ For a retire the delete is correct, and the orchestrator additionally forgets th
 
 The seed is not optional. After truncate, the events table for this stream has exactly one row — either a snapshot (allowing future actions to start fresh from it) or a tombstone (closing the stream permanently).
 
-The result map contains `{ deleted: count, committed: seed_event }` per stream. The cache is then updated:
+The result map contains `{ deleted: count, committed: <the seed event> }` per stream. The cache is then updated:
 
 - **Restart**: `cache.set(stream, { state: seed, version: 0, event_id: seed.id, patches: 0, snaps: 1 })`. Future loads serve the seed state from cache.
 - **Tombstone**: `cache.invalidate(stream)`. The cache is cleared; future loads will see only the tombstone and `action()` will throw `StreamClosedError`.

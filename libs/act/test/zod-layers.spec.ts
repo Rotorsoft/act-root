@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { date_reviver_schema } from "../src/internal/date-reviver.js";
 import { output_of, some_layer, wrapped } from "../src/internal/zod.js";
-import { _mark_sensitive, pii_fields } from "../src/sensitive.js";
+import { _mark_sensitive, sensitiveFields } from "../src/sensitive.js";
 import { sensitive } from "../src/types/schemas.js";
 
 /**
@@ -24,7 +24,7 @@ const placements: Record<string, (inner: () => z.ZodType) => z.ZodType> = {
 };
 
 const is_sensitive = (field: z.ZodType) =>
-  pii_fields(z.object({ f: field })).length === 1;
+  sensitiveFields(z.object({ f: field })).length === 1;
 
 describe("seeing through Zod wrappers", () => {
   for (const [name, place] of Object.entries(placements)) {
