@@ -2,7 +2,6 @@ import {
   act,
   ConcurrencyError,
   InMemoryCache,
-  is_literal_source,
   PreconditionError,
   SNAP_EVENT,
   sensitive,
@@ -11,6 +10,7 @@ import {
   TOMBSTONE_EVENT,
   ValidationError,
 } from "@rotorsoft/act";
+import { isStreamName } from "@rotorsoft/act/adapter";
 import type {
   BlockedLease,
   Committed,
@@ -284,7 +284,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           row.source !== undefined
             ? {
                 stream: row.source,
-                stream_exact: is_literal_source(row.source, row.stream),
+                stream_exact: isStreamName(row.source, row.stream),
               }
             : {}
         );
