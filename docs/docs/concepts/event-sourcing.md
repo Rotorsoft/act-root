@@ -109,17 +109,11 @@ log(new PinoLogger({ level: "debug" }));
 
 ### Resource Disposal
 
-All adapters (logger, store, cache, custom disposers) are cleaned up via `dispose()()`:
+All adapters (logger, store, cache, custom disposers) are cleaned up via `dispose()()`. Importing the framework already runs it on SIGINT and SIGTERM, so an app doesn't bind those signals itself ([Production checklist § Graceful shutdown](../guides/production-checklist.md#6-graceful-shutdown)). Tests call it after each file:
 
 ```typescript
 import { dispose } from "@rotorsoft/act";
 
-// Graceful shutdown
-process.on("SIGTERM", async () => {
-  await dispose()();
-});
-
-// In tests
 afterAll(async () => {
   await dispose()();
 });
