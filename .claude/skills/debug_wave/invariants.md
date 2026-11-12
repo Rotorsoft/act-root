@@ -73,6 +73,10 @@ These are load-bearing facts about the framework. A red test that only "works" b
 - **Names are basic ASCII by convention.** Streams, events and actions are alphanumeric or ASCII, so a non-ASCII or half-emoji name isn't a finding. `+`, `.` and `(` are ASCII and in scope. The framework doesn't support a payload holding half a surrogate pair either: Postgres refuses it with its own error, and that's the whole story.
 - **A finding has to pass the practical bar before it ranks.** State what a normal app must do to hit it and what its user sees. A contrived combination is an edge case, not a bug to fix before a release.
 
+- **A remap that passes unmapped values through is a collision once ids restart from 0.** #2451: restore remapped a causation id only when its cause was in the source, so a cause deleted by a close kept an old id that now named another event. Ask what an unmapped value means in the new id space, and put the TCK case's id inside the restored range, not at 999.
+- **A port field typed `number` can be narrower in SQL.** #2452: `priority` is `number` in the contract and `int` in Postgres, so `1.5` stops correlate. When a SQL adapter casts a field, try a fraction and a value past int32.
+- **A published test kit runs without this repo's vitest globals.** #2453: the repo sets `globals: true`, so a bare `beforeEach` in act-tck passed CI and fails for every outside user. Prove a published helper from a fresh project on vitest's default config.
+
 ## Mechanics that bit us
 
 - Postgres test DB is on **5431** (not 5432): `postgres://postgres:postgres@localhost:5431`. `docker ps` shows container `act-pg`.
