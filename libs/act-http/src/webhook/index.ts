@@ -26,6 +26,7 @@
  */
 
 import type { Committed, ReactionHandler, Schemas } from "@rotorsoft/act";
+import { z } from "zod";
 import { classifyHttpResponse } from "./classify.js";
 import { sign_request } from "./sign.js";
 import {
@@ -70,6 +71,12 @@ function has_header(headers: Record<string, string>, name: string): boolean {
   return false;
 }
 
+// Refuses a NaN or non-positive timeout when the reaction is built, not at
+// its first delivery.
+const WebhookOptionsSchema = z.object({
+  timeoutMs: z.number().positive().default(5_000),
+});
+
 /**
  * Build a reaction handler that POSTs each event to an external URL.
  *
@@ -87,7 +94,9 @@ function has_header(headers: Record<string, string>, name: string): boolean {
 export function webhook<TEvents extends Schemas = Schemas>(
   config: WebhookConfig<TEvents>
 ): ReactionHandler<TEvents, keyof TEvents> {
-  const timeoutMs = config.timeoutMs ?? 5_000;
+  const { timeoutMs } = WebhookOptionsSchema.parse({
+    timeoutMs: config.timeoutMs,
+  });
   const method = config.method ?? "POST";
   const fetch_impl = config.fetch ?? globalThis.fetch;
 

@@ -140,6 +140,12 @@ describe("webhook", () => {
   });
 
   describe("network and timeout errors", () => {
+    it("refuses a NaN or non-positive timeoutMs when the handler is built", () => {
+      for (const timeoutMs of [Number.NaN, 0, -1])
+        expect(() => webhook({ url: "https://x.test", timeoutMs })).toThrow();
+      expect(() => webhook({ url: "https://x.test" })).not.toThrow();
+    });
+
     it("throws WebhookError with status 0 on network error", async () => {
       const fetch = vi.fn(async () => {
         throw new TypeError("network down");

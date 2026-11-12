@@ -167,6 +167,21 @@ describe("verifyWebhook", () => {
       ).toEqual({ ok: true });
     });
 
+    it("refuses a NaN or negative maxAgeSeconds instead of accepting any age", () => {
+      const headers = signedHeaders(NOW - 10 * 24 * 3600);
+      for (const maxAgeSeconds of [Number.NaN, Number.POSITIVE_INFINITY, -1])
+        expect(() =>
+          verifyWebhook(headers, BODY, SECRET, { now: NOW, maxAgeSeconds })
+        ).toThrow();
+      expect(() =>
+        verifyWebhook(headers, BODY, SECRET, { now: Number.NaN })
+      ).toThrow();
+      expect(verifyWebhook(headers, BODY, SECRET, { now: NOW })).toEqual({
+        ok: false,
+        reason: "stale",
+      });
+    });
+
     it("honors caller-supplied maxAgeSeconds (tighter window)", () => {
       const headers = signedHeaders(NOW - 60);
       expect(

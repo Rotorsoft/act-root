@@ -52,7 +52,8 @@ export type WebhookConfig<TEvents extends Schemas = Schemas> = {
     | WebhookBody
     | ((event: Committed<TEvents, keyof TEvents>) => WebhookBody);
   /**
-   * Per-request timeout in milliseconds. Defaults to 5000.
+   * Per-request timeout in milliseconds. Defaults to 5000. A value that
+   * isn't a positive number (`NaN` included) throws when `webhook()` is called.
    * The handler throws after the timeout via `AbortController`.
    *
    * The budget covers the **whole** exchange, not just the connection:
