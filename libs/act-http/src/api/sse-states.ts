@@ -1,4 +1,4 @@
-import { pii_fields } from "@rotorsoft/act";
+import { sensitiveFields } from "@rotorsoft/act";
 import type { ZodType } from "zod";
 import type { ActSurface } from "./dispatch.js";
 
@@ -20,7 +20,7 @@ export function sse_state_names(app: ActSurface, transport: string): string[] {
   }
   for (const [name, events] of names) {
     const sensitive = Object.entries(events).filter(
-      ([, schema]) => pii_fields(schema).length > 0
+      ([, schema]) => sensitiveFields(schema).length > 0
     );
     if (sensitive.length)
       throw new Error(
