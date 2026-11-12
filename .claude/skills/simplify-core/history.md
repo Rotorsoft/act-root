@@ -8,24 +8,24 @@ Least recently run goes next. A lens with no accepted proposal in its last three
 
 | lens | last run | runs | accepted | status |
 |---|---|---|---|---|
-| Public surface | 2026-11-10 | 10 | 2 | active (58 exports; seven store helpers exported but hidden from the API reference by `@internal`, and STABILITY names two; the closed-surface proposal rejected, reshaped by the maintainer into #2411 for 3.0) |
-| Dead code (tool) | 2026-11-11 | 11 | 12 | active (knip clean in core; one act-pg bench script nothing cites) |
+| Public surface | 2026-11-12 | 11 | 2 | active (59 exports, 26 of them deprecated aliases; no deprecated name used outside its spec; `query_array` repeats `query` (#2462)) |
+| Dead code (tool) | 2026-11-12 | 12 | 12 | active (knip: 38 files, 19 exports, every one on the false-positive list or cited) |
 | Hotspots (tool) | 2026-10-20 | 5 | 1 | retired 2026-10-20: two runs with no proposal; every branch in the hot functions (correlate, action, drain) is a separate rule |
-| File budget | 2026-11-10 | 11 | 1 | active (10 over 300 code lines; no split subtracts) |
-| Comment noise | 2026-11-11 | 11 | 11 | active (core clean; the inspector holds 102 of the repo's 105 ticket refs and a write-gate comment that contradicts the code) |
+| File budget | 2026-11-12 | 12 | 1 | active (10 over 300 code lines; event-sourcing.ts, types/builders.ts and act-builder.ts grew; the restore types can leave types/action.ts (#2465)) |
+| Comment noise | 2026-11-12 | 12 | 11 | active (core ticket refs 2, both RFC 2411 from #2450; one doc detached by #2459) |
 | Concepts and options | 2026-11-12 | 12 | 3 | active (core's bags unchanged; act-http's two bags unvalidated, a NaN `maxAgeSeconds` turns off replay protection) |
 | Core or decorator? | 2026-10-15 | 3 | 0 | retired 2026-10-15: three runs, findings only (PII, audit, breaker, lanes stay; priority is a major-version question) |
-| DRY across adapters and builders | 2026-11-11 | 11 | 18 | active (every moved rule lives once in core; the guard that keeps them there missed one and matched two only by their old spelling) |
+| DRY across adapters and builders | 2026-11-12 | 12 | 18 | active (every store calls core's helpers; the guard still matches only old spellings, 7 of 8 rows (#2460)) |
 | Reading path | 2026-11-12 | 11 | 3 | active (path unchanged: 13 files, 2 quickstart imports; seven doc pages name things the code doesn't have) |
 | Newcomer test (quarterly) | 2026-10-17 | 2 | 0 | active (21 concepts, 3 imports; a package.json without name/version crashes) |
 | Tests by concept | 2026-11-11 | 11 | 20 | active (4 of 4 full runs green, 0 time-budget tests under an injected stall; four specs repeat core or the TCK) |
 | Mutation evidence (monthly, CI) | never | 0 | 0 | retired: setup removed (#1805), see baselines below |
 | Packages earn their place | 2026-10-15 | 4 | 0 | retired 2026-10-15: four runs, no proposal (removal is ruled out; act-tck churn is the snapshot, now P2026-10-15p-1) |
-| Infra | 2026-11-10 | 11 | 2 | active (node-compat tests below the engines floor; lock-file maintenance can never pass its own age check (#914)) |
+| Infra | 2026-11-12 | 12 | 2 | active (a lib README edit skips `check:readmes`; the docs tsconfigs copy the paths and drifted (#2461, #2463)) |
 | One source of truth | 2026-11-12 | 12 | 8 | active (docs and the scaffold skill bind SIGTERM the framework already binds; a stale Store contract copy; port topics written up to 5 times) |
 | Examples | 2026-11-12 | 11 | 3 | active (recipes green, 55 tests; the correlate → drain loop tip races the background settle; 44 of 259 snippets type-checked) |
-| Process | 2026-11-10 | 10 | 9 | active (the learnings step caught nothing in 64 PRs; `/pr`'s two shapes; the 2.0 window fixed every round twice) |
-| Feature interactions | 2026-11-11 | 11 | 20 | active (a snapshot takes a stream version, so every reader that pins a version must know `.snap`: the timer recipe and three SSE copies don't) |
+| Process | 2026-11-12 | 11 | 9 | active (a scope-less squash releases by path, correctly; history.md 183 KB (#2466)) |
+| Feature interactions | 2026-11-12 | 12 | 20 | active (bad resolver output has three policies: throw stops, bad lane reroutes, bad priority skips and loses the event) |
 
 ## Interaction register
 
@@ -44,7 +44,7 @@ Where two features meet, and why. The Feature interactions lens reads this first
 | defer wake, breaker | fixed by #1872: the breaker check sits inside the drain's `try`, so `finally` re-aims the wake | resolved | P2026-10-10o-1, #1874 |
 | defer wake, drain lock / streamLimit | resolved by #1928: only an empty claim is idle; the wake drains until a pass leases nothing | resolved | P2026-10-15o-1 |
 | drain failure, wake | a failed drain pass retries at `max(leaseMillis, cooldownMs)` (#1928) and a failed settle pass through the breaker's `on_retry` (#1950) | resolved | #1928, #1950 |
-| app errors, correlation | one throwing resolver stops the scan before its event, so discovery stops for every reaction until it stops throwing | justified | #1913, the user's choice: nothing is lost; isolating one reaction needs per-reaction checkpoints |
+| app errors, correlation | one throwing resolver stops the scan before its event, so discovery stops for every reaction until it stops throwing | justified | #1913, the user's choice: nothing is lost; isolating one reaction needs per-reaction checkpoints. A bad dynamic lane runs on `default` and a bad dynamic priority skips the event (#2459): three policies for bad resolver output |
 | lease, lanes | background drains claim with the lane's `leaseMillis`; a per-call `leaseMillis` covers only that call | resolved | documented by #1898 (`error-handling.md`, `configuration.md`) |
 | drain `RETRY` wake, breaker cooldown | the drain reads `breaker.cooldown_ms` and retries at `max(leaseMillis, cooldownMs)` | justified | the breaker doesn't know the failed pass's leases (dropping the lease floor fails a defer-outcome case), and a lease-only retry spins with a 1 ms lease (two `store-failure-budget` cases) |
 | defer wake loop, shutdown | the wake drains in a loop that never checks `_stopped`; shutdown waits for one pass | resolved | #1950 |
@@ -58,6 +58,9 @@ Where two features meet, and why. The Feature interactions lens reads this first
 | `autoSettle`, `cycleMs` | with `autoSettle` on, a lane's `cycleMs` tick finds nothing settle hasn't drained (52 vs 53 ms, 0 extra claims) | justified only with `autoSettle: false` | P2026-10-18s-2 (docs); the option is published and stays |
 | `autoSettle`, `maxPasses` | each reaction commit schedules a new pass with no options, so `maxPasses` doesn't cap a chain that keeps committing | resolved (documented) | #1973 |
 | writer-only app, notify | `_wake` arms lanes on a `drain: false` instance too; nothing there reads the armed flag | shared primitive | #1978; harmless (probed) |
+| priority check, build / correlate / `app.prioritize` | one `TargetOptionsSchema` (int32) at three entry points | shared primitive | Postgres stores `int`; a static target is checked at build, a dynamic one only at correlate (#2459) |
+| dynamic priority check, checkpoint / work mark | a bad priority skips the event while the checkpoint moves past it, so that reaction never runs it | justified if the user keeps the skip | the user chose skip (#2459); the lane check runs on `default` instead, and the choice is reopened 2026-11-12 |
+| restore causation `-1`, audit / inspector / reducers | a cause a close or prune deleted is `-1` after restore; it matches no event | harmless | probed retire, restart and prune: the same orphan-parent findings before and after; reducers' `-1` is `event.id`, another field |
 | restore, other workers on the store | another process keeps the correlation lease and scans from its old checkpoint: 10 of 20 restored events run (control, one worker: 20 of 20) | justified, documented | the `Store.restore` port doc says to restart other processes; the user docs don't yet (P2026-10-22-2) |
 | restore, drain in flight | the in-flight `ack` writes nothing into the restored store | harmless | InMemory probe 3 of 3; Postgres not probed |
 | correlate outcome, lane arming / settle progress | Act arms on `marked > 0` and settle counts `read` | resolved | #2084 (P2026-10-22f-2); `subscribed` stays only in `app.correlate()`'s public return |
@@ -117,6 +120,7 @@ The last trusted Stryker scores, recorded when the setup was removed (#1805) bec
 
 Sound proposals that missed a run's cut. The next run ranks these before looking for new ones.
 
+- Split `types/builders.ts` (604 code lines) by concept: the action-chain type checks (242) and the projection types (124) each in their own file, to about 238. Both moves are needed; measured, not simulated. (P2026-11-12b-s4)
 - Design finding for a future major: a snapshot is an event in the stream, so it takes a version, and every reader of a version has to know about `.snap` (#2384 SSE, #2427 the timer recipe, the 2.0 "pin `version`, not `event.version`" note). Marten keeps snapshots as documents and counts only events; Axon keys them by the last event's sequence in a separate store; Kurrent recommends a separate stream; only Equinox's rolling snapshots on EventStore write into the stream as Act does. Moving them touches load, close seeds, the cache and every adapter. (2026-11-11, interactions)
 
 
@@ -1069,3 +1073,42 @@ Findings, not proposed: the snippet check compiles 44 of 259 blocks, and compili
 Lens metrics: reading path 13 runtime files, ~33 names, quickstart 2 imports; recipes 12 files / 55 tests green; snippets type-checked 44 of 259; option bags outside core validated 0 of 2 in act-http.
 
 Tickets: #2440–#2447, and #2439 (RFC 2411's plan) from the conversation.
+
+### 2026-11-12 (second) — full run (four specialists: public surface + file budget, process + infra, feature interactions + field, DRY + dead code + comment noise)
+
+| metric | 2026-11-12 | now | why |
+|---|---|---|---|
+| core lines (libs/act/src) | 18519 | 18691 | #2450 (`adapter.ts`, `deprecated.ts`, the explicit root) and #2459 (the priority check, the restore causation rewrite) |
+| runtime exports | 58 | 59 | `sensitiveFields` (#2450, RFC 2411) |
+| ticket refs in core source | 0 | 2 | "RFC 2411" in `deprecated.ts` and `index.ts` (#2450) |
+| spec files | 235 | 237 | `adapter.spec`, `deprecated.spec`, `pretty-options.spec` in, `date-reviver.spec` out |
+| docs lines / CLAUDE.md | 10,011 / 28 KB | 9,959 / 15 KB | #2449 (#2446, #2447), #2458 |
+| everything else | | unchanged | 41% (28% / 14%) comments, 10 files over 300 code lines, 5 workflows / 579 lines |
+
+Audit: #2449 (#2440–#2447), #2450 (RFC 2411, #2439), #2457 (debug wave 30), #2458 (CLAUDE.md), #2459 (#2451–#2456) since the last run. #2459's priority check is a fix-in-the-same-day chain: two defects in it were found by this run.
+
+Decisions on P2026-11-12*: all shipped. c-D1–D3, s-D1–D3, r-D1, e-D1 and 1–3 → #2449; RFC 2411's plan → #2450.
+
+Promises kept: #2445 −4 → −4; #2446 and #2447 ≈ −1.7 KB → docs −52 lines.
+
+Verified in the main loop before ranking: the guard's regexes (`architecture.spec.ts:251-274`, spelling-specific); `report_bad_priority`'s key built from the computed value, against `report-once.ts`'s header; the detached lane-conflict doc (`correlate-cycle.ts:150`); CLAUDE.md:111's covered-files list against STABILITY.md; the `ci` filter (`ci-cd.yml:32-50`, no `libs/*/README.md`); `conformance.yml:135`'s floor; no reference to RELEASE_NOTES_1.0.md.
+
+My own defects (fixed in a PR of their own, not ticketed): #2459's priority report logs once per distinct value, not once (a `w + 0.5` resolver: 50 lines for 50 events), and detached `report_lane_conflict`'s doc; #2450's two RFC refs; #2458 kept CLAUDE.md's stale covered-files list (no `adapter.ts`, `index.ts`, `types/action.ts`). Open question for the user: keep the skip, or run a bad dynamic priority at 0 like a bad lane (simulated: 50 of 50 run, 1 line, suites green but the test that pins the skip).
+
+Proposals, ticketed when the reports were in. Defects first:
+- D1. The framework-rules guard catches only the old spelling (1 of 8 rows fails a rewritten copy); the second time after #2429 → #2460.
+- D2. A lib README edit skips `check:readmes`; a stale Node floor comment → #2461.
+Simplifications:
+- 1 (s-2). `query_array` calls `query` (−4) → #2462.
+- 2 (p-1). The docs tsconfigs extend the workspace paths (−85, and their drift goes) → #2463.
+- 3 (dry-1, rest). Two false or historical comments → #2464.
+- 4 (s-3). The restore types into `types/restore.ts` (types/action.ts under budget) → #2465.
+- 5 (p-2). Fold old runs in history.md (≈ −125 KB), the user's call → #2466.
+- 6 (p-3). Delete or move RELEASE_NOTES_1.0.md, the user's call → #2467.
+Backlog: s-4 (split `types/builders.ts`).
+
+Findings, not proposed: a fractional static priority that built on InMemory and SQLite now throws (never worked on Postgres; a migration note). STABILITY.md doesn't say whether `/test` is covered, though the snapshot guards it. Kurrent and Marten carry causation as an event GUID, so a restore never renumbers it (a major-version question). vitest `globals: true` stays: removing it adds ~100 imports, and published src already builds without the globals types. `/types` still uses `export *`. #2459's scope-less squash released all three packages by path.
+
+Lens metrics: knip 38 files / 19 exports, all known; guard rows that fail a rewritten copy 1 of 8; detached docs 1; CI 808 runs since 10-12, 28 red, never red: paths, snippets and self-test, build, browser-safe, readmes, CLI smokes.
+
+Tickets: #2460–#2467.
