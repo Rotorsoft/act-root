@@ -1,3 +1,10 @@
+# [@rotorsoft/act-http-v2.1.0](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-http-v2.0.5...@rotorsoft/act-http-v2.1.0) (2026-11-12)
+
+
+### Features
+
+* **act:** /adapter subpath, explicit root exports, camelCase store rules ([#2450](https://github.com/Rotorsoft/act-root/issues/2450)) ([f58b772](https://github.com/Rotorsoft/act-root/commit/f58b772dfc13043d85f00fc0efc8f573dbbb7aee))
+
 # [@rotorsoft/act-http-v2.0.5](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-http-v2.0.4...@rotorsoft/act-http-v2.0.5) (2026-11-12)
 
 
