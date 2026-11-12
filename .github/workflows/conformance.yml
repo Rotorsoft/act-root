@@ -132,7 +132,7 @@ jobs:
         if: always()
         run: cat stress-report.md >> "$GITHUB_STEP_SUMMARY"
 
-  # Proves the engines floor (Node >=22.23.3) and 24 still pass; CI runs 26.
+  # Proves the engines floor (Node >=22.23.4) and 24 still pass; CI runs 26.
   node-compat:
     runs-on: ubuntu-latest
     strategy:

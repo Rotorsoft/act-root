@@ -43,6 +43,7 @@ jobs:
               - 'test/**'
               - 'packages/**'
               - 'recipes/**'
+              - 'libs/*/README.md'
               - 'docs/docs/architecture/behavior-contracts.md'
               - 'scripts/**'
               - 'pnpm-lock.yaml'
