@@ -44,6 +44,7 @@ import {
   makeKeyResolver,
 } from "@rotorsoft/act-crypto";
 import pg from "pg";
+import { z } from "zod";
 
 const logger: Logger = log();
 
@@ -179,6 +180,30 @@ const to_committed = <E extends Schemas>(
 function assert_safe_identifier(value: string, label: string) {
   if (!SAFE_IDENTIFIER.test(value))
     throw new Error(`Unsafe SQL identifier for ${label}: "${value}"`);
+}
+
+// The defaulted pool numbers. An env var parsed with `Number()` gives NaN,
+// which pg reads as "no limit", so a typo would silently turn a timeout off.
+const PoolOptionsSchema = z.object({
+  max: z.number().min(0),
+  connectionTimeoutMillis: z.number().min(0),
+  idleTimeoutMillis: z.number().min(0).nullable(),
+  statement_timeout: z.union([z.number().min(0), z.literal(false)]),
+});
+
+/**
+ * Merge caller config over the defaults, ignoring keys set to `undefined`
+ * (an unset env var), and validate it. Throws `ZodError` on a bad number.
+ */
+function resolve_config(config: Partial<Config>): Config {
+  const defined = Object.fromEntries(
+    Object.entries(config).filter(([, value]) => value !== undefined)
+  );
+  const merged = { ...DEFAULT_CONFIG, ...defined } as Config;
+  PoolOptionsSchema.parse(merged);
+  assert_safe_identifier(merged.schema, "schema");
+  assert_safe_identifier(merged.table, "table");
+  return merged;
 }
 
 const DEFAULT_CONFIG: Config = {
@@ -361,9 +386,7 @@ export class PostgresStore implements Store {
   private readonly _resolve_pii_key: (() => Promise<Buffer>) | undefined;
 
   constructor(config: Partial<Config> = {}) {
-    this.config = { ...DEFAULT_CONFIG, ...config };
-    assert_safe_identifier(this.config.schema, "schema");
-    assert_safe_identifier(this.config.table, "table");
+    this.config = resolve_config(config);
     const {
       schema: _,
       table: __,
