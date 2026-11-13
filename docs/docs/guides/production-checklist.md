@@ -199,7 +199,7 @@ All three hook off the lifecycle-event emitter — observability is deliberately
 **Restore is not your disaster-recovery plan.** `pg_dump` / `pg_restore` for Postgres and a periodic SQLite file copy are still the right tools for recovering from a lost server. They preserve every byte, run at the storage layer, and don't require the application to be running. `app.restore` is for *content-level* operations:
 
 - **Cross-adapter migration** (PG → SQLite for a customer extract, or vice versa)
-- **Compaction** — drop `__snapshot__` events (`drop_snapshots`) so the next snap policy regenerates them, drop entire closed streams (`drop_closed_streams`) so the new store contains only currently-live streams
+- **Compaction** — drop `__snapshot__` events (`drop_snapshots`) so the next snap policy regenerates them (a stream's first snapshot stays, since a pruned stream starts from it), drop entire closed streams (`drop_closed_streams`) so the new store contains only currently-live streams
 - **Schema migration** — schema-guarded event rewrites via `event_migrations` (rename + transform old payloads into their current-version shape), bulk stream rename via `stream_rename` (tenant relocation, prefix cleanup). All transfer-time only; the connected store is never modified
 - **Validated re-imports** from a curated CSV
 

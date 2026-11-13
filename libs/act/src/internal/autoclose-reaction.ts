@@ -130,10 +130,12 @@ export function synthesize_autoclose_reactions<
           throw new CloseSignal({
             stream: aggregate,
             archive: archiver ? () => archiver(aggregate, head) : undefined,
-            // Ack this reaction's own watermark to the live head so the
-            // close-cycle guard (which matches subscriptions by source =
-            // aggregate) sees it caught up instead of blocking its own close.
-            at: head.id,
+            // Hold the head and look again tomorrow: a close skipped for a
+            // lagging reaction, or a failed archive, retries then, and a
+            // closed stream has no head left to act on. The close guard
+            // ignores this parked row, so it doesn't block its own close.
+            at: head.id - 1,
+            defer: days_after(new Date(), 1),
           });
         // Rolling window: when the oldest domain event has aged out of the
         // window, stage a windowed close — prune the prefix older than the
