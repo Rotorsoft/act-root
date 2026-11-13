@@ -1,4 +1,5 @@
 import { patch as apply_patch, type Patch } from "@rotorsoft/act-patch";
+import { z } from "zod";
 import { StateCache } from "./state-cache.js";
 import {
   type BroadcastState,
@@ -111,6 +112,12 @@ const tag_overlay_keys = <S extends object>(
   return state;
 };
 
+// `size > NaN` is always false, so a NaN cache never evicts and grows with
+// every stream ever published; 0 drops each state right after publishing it.
+const BroadcastOptionsSchema = z.object({
+  cacheSize: z.number().min(1).default(50),
+});
+
 /**
  * Server-side broadcast channel for incremental state sync over SSE.
  *
@@ -153,7 +160,10 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
   private on_overlay_miss: (streamId: string) => void;
 
   constructor(options?: {
-    /** Max number of stream states kept in the LRU cache (default 50). */
+    /**
+     * Max number of stream states kept in the LRU cache (default 50), at
+     * least 1. A `NaN` or a value below 1 throws.
+     */
     cacheSize?: number;
     /**
      * Called when overlay-contributed state is lost, on either of the two
@@ -179,9 +189,11 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
      */
     onSubscriberError?: (error: unknown, streamId: string) => void;
   }) {
-    this.state_cache = new StateCache<S>(
-      options?.cacheSize ?? 50,
-      (streamId, dropped) => this.on_cache_evict(streamId, dropped)
+    const { cacheSize } = BroadcastOptionsSchema.parse({
+      cacheSize: options?.cacheSize,
+    });
+    this.state_cache = new StateCache<S>(cacheSize, (streamId, dropped) =>
+      this.on_cache_evict(streamId, dropped)
     );
     this.on_overlay_miss = options?.onOverlayMiss ?? (() => {});
     this.on_subscriber_error =
