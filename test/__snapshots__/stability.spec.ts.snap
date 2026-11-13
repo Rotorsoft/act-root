@@ -1350,8 +1350,8 @@ export type AutoclosePredicate<TEvents extends Schemas> = (stream: string, head:
  * {@link CloseTarget.archive} so the existing close-cycle's
  * archive-while-guarded invariant carries over: the stream is locked
  * against new writes while the archiver runs, and a thrown archiver
- * leaves the stream guarded but un-truncated (no data loss). It is not
- * retried automatically; \`app.close([{ stream, archive }])\` resumes it.
+ * leaves the stream guarded but un-truncated (no data loss). The policy
+ * retries the next day; \`app.close([{ stream, archive }])\` resumes it sooner.
  *
  * State-level (one per state, last-write-wins). Hosts with per-stream
  * archiving differences branch inside the function. Absent →
@@ -2429,8 +2429,8 @@ export type ActionBuilder<TState extends Schema, TEvents extends Schemas, TActio
      * \`app.close({ stream, archive })\` already uses — the cycle holds
      * the stream's guard while the archiver runs, and a thrown
      * archiver leaves the stream guarded but un-truncated. No partial
-     * truncate state, no data loss. It is not retried automatically;
-     * \`app.close([{ stream, archive }])\` resumes the guarded stream.
+     * truncate state, no data loss. The policy retries the next day;
+     * \`app.close([{ stream, archive }])\` resumes the guarded stream sooner.
      *
      * One archiver per state. A second \`.archives(...)\` call replaces
      * the first (same shape as \`.snap\` / \`.discloses\` /
