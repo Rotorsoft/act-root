@@ -1,6 +1,10 @@
 import { InMemoryIdempotencyStore } from "@rotorsoft/act-ops/idempotency";
 import { describe, expect, it } from "vitest";
 import { checkWebhook } from "../../src/receiver/check.js";
+import { webhookMiddleware as express } from "../../src/receiver/express/index.js";
+import { webhookMiddleware as fastify } from "../../src/receiver/fastify/index.js";
+import { webhookMiddleware as hono } from "../../src/receiver/hono/index.js";
+import { webhookMiddleware as trpc } from "../../src/receiver/trpc/index.js";
 import { sign_request } from "../../src/webhook/sign.js";
 
 const SECRET = "test-secret";
@@ -21,6 +25,15 @@ function signedHeaders(at: number = NOW, body: string = BODY) {
 }
 
 describe("checkWebhook", () => {
+  it("refuses an empty secret, which the webhook sender reads as unsigned", async () => {
+    const store = freshStore();
+    await expect(
+      checkWebhook({ "idempotency-key": "k" }, BODY, { store, secret: "" })
+    ).rejects.toThrow();
+    for (const middleware of [express, fastify, hono, trpc])
+      expect(() => middleware({ store, secret: "" })).toThrow();
+  });
+
   describe("happy path", () => {
     it("returns { ok: true, key, deduped: false } on first claim with no secret", async () => {
       const store = freshStore();

@@ -71,10 +71,12 @@ function has_header(headers: Record<string, string>, name: string): boolean {
   return false;
 }
 
-// Refuses a NaN or non-positive timeout when the reaction is built, not at
-// its first delivery.
+// Refuses a NaN or non-positive timeout, and an empty secret (the receiver
+// reads one as "verify"), when the reaction is built, not at its first
+// delivery.
 const WebhookOptionsSchema = z.object({
   timeoutMs: z.number().positive().default(5_000),
+  secret: z.string().min(1).optional(),
 });
 
 /**
@@ -96,6 +98,7 @@ export function webhook<TEvents extends Schemas = Schemas>(
 ): ReactionHandler<TEvents, keyof TEvents> {
   const { timeoutMs } = WebhookOptionsSchema.parse({
     timeoutMs: config.timeoutMs,
+    secret: config.secret,
   });
   const method = config.method ?? "POST";
   const fetch_impl = config.fetch ?? globalThis.fetch;
