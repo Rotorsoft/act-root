@@ -271,6 +271,9 @@ export async function scan(
 
     await source.query<Schemas>(
       async (event) => {
+        // A source that ignores `after` (a CSV file) hands back events this
+        // scan already read; skip them, or a full page repeats forever.
+        if (at !== undefined && event.id <= at) return;
         got++;
         id = event.id;
         processed++;
