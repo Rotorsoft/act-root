@@ -288,4 +288,20 @@ describe("InMemoryIdempotencyStore", () => {
       expect(store.claim("k", t0 + dayMs + 1)).toBe(true);
     });
   });
+
+  it("refuses a window or bound that would turn dedup off", () => {
+    const unset = Number(undefined);
+    for (const ttlMs of [unset, 0, -1, Number.POSITIVE_INFINITY])
+      expect(() => new InMemoryIdempotencyStore({ ttlMs })).toThrow(/ttlMs/);
+    expect(
+      () =>
+        new InMemoryIdempotencyStore({
+          retryProfile: { maxRetries: 3, timeoutMs: unset },
+        })
+    ).toThrow(/minSafeTtl/);
+    for (const maxEntries of [unset, 0])
+      expect(() => new InMemoryIdempotencyStore({ maxEntries })).toThrow(
+        /maxEntries/
+      );
+  });
 });

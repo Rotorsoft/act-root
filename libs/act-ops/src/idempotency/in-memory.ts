@@ -81,6 +81,17 @@ export class InMemoryIdempotencyStore implements IdempotencyStore {
         ? minSafeTtl(options.retryProfile)
         : 24 * 60 * 60 * 1000);
     this._max_entries = options?.maxEntries ?? 100_000;
+    // A NaN, zero or negative window expires every entry on the next call,
+    // which turns dedup off without a word; `Number(process.env.X)` of an
+    // unset variable is NaN.
+    if (!Number.isFinite(this._ttl_ms) || this._ttl_ms <= 0)
+      throw new Error(
+        `InMemoryIdempotencyStore: ttlMs must be a positive number of milliseconds, got ${this._ttl_ms}`
+      );
+    if (!(this._max_entries >= 1))
+      throw new Error(
+        `InMemoryIdempotencyStore: maxEntries must be at least 1, got ${this._max_entries}`
+      );
   }
 
   claim(key: string, now: number = Date.now()): boolean {
