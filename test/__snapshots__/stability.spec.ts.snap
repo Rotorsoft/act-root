@@ -7619,7 +7619,10 @@ export declare class BroadcastChannel<S extends BroadcastState = BroadcastState>
     private on_subscriber_error;
     private on_overlay_miss;
     constructor(options?: {
-        /** Max number of stream states kept in the LRU cache (default 50). */
+        /**
+         * Max number of stream states kept in the LRU cache (default 50), at
+         * least 1. A \`NaN\` or a value below 1 throws.
+         */
         cacheSize?: number;
         /**
          * Called when overlay-contributed state is lost, on either of the two
