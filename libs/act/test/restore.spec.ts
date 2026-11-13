@@ -574,6 +574,39 @@ describe("scan (with committer)", () => {
     });
   });
 
+  it("names a migrated cause by its new name", async () => {
+    const seen: E["meta"]["causation"][] = [];
+    let next_id = 1;
+    await scan(
+      fromArray([
+        baseEvent({ id: 5, name: "Foo" }),
+        baseEvent({
+          id: 6,
+          name: "Bar",
+          meta: {
+            correlation: "c",
+            causation: { event: { id: 5, name: "Foo", stream: "s" } },
+          },
+        }),
+      ]),
+      {
+        event_migrations: {
+          Foo: {
+            to: "Foo_v2",
+            from_schema: { parse: (d) => d },
+            to_schema: { parse: (d) => d },
+            migrate: (d) => d,
+          },
+        },
+      },
+      async (e) => {
+        seen.push(e.meta.causation);
+        return next_id++;
+      }
+    );
+    expect(seen[1].event).toEqual({ id: 1, name: "Foo_v2", stream: "s" });
+  });
+
   it("stream_rename renames the streams in causation too", async () => {
     const seen: E["meta"]["causation"][] = [];
     let next_id = 1;
