@@ -301,3 +301,42 @@ describe("PostgresStore.dispose racing an in-flight re-LISTEN", () => {
     expect(inner._listen_client).toBeUndefined();
   }, 30_000);
 });
+
+describe("PostgresStore.notify channel names", () => {
+  it("delivers on an uppercase table name", async () => {
+    const config = {
+      port: PORT,
+      schema: schema("schema_notify_upper"),
+      table: "OrderEvents",
+      notify: true,
+    };
+    const writer = new PostgresStore(config);
+    const listener = new PostgresStore(config);
+    try {
+      await writer.drop();
+      await writer.seed();
+      const received: unknown[] = [];
+      const dispose = await listener.notify!((n) => received.push(n));
+      await writer.commit(
+        [{ stream: "upper-1", msgs: [{ name: "Placed", data: {} }] }],
+        { correlation: "c", causation: {} }
+      );
+      await vi.waitFor(() => expect(received).toHaveLength(1), {
+        timeout: 1_500,
+      });
+      await dispose();
+    } finally {
+      await writer.drop();
+      await listener.dispose();
+      await writer.dispose();
+    }
+  });
+
+  it("refuses a channel over Postgres's 63-byte name limit", () => {
+    const table = "t".repeat(60);
+    expect(
+      () => new PostgresStore({ port: PORT, table, notify: true })
+    ).toThrow(/over 63 bytes/);
+    expect(() => new PostgresStore({ port: PORT, table })).not.toThrow();
+  });
+});

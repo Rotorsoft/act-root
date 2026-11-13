@@ -113,7 +113,7 @@ When the pool does saturate, acquisition fails after `connectionTimeoutMillis` a
 
 ### Cross-process `LISTEN`/`NOTIFY` (opt-in)
 
-For multi-instance deployments, `PostgresStore` implements the optional `Store.notify` hook via `LISTEN`/`NOTIFY` so the orchestrator wakes `settle()` immediately on commits from other processes — no polling delay. Off by default to keep single-instance deployments allocation-free; enable on every store instance in a multi-process app:
+For multi-instance deployments, `PostgresStore` implements the optional `Store.notify` hook via `LISTEN`/`NOTIFY` so the orchestrator wakes `settle()` immediately on commits from other processes — no polling delay. Off by default to keep single-instance deployments allocation-free; enable on every store instance in a multi-process app. The channel is `act_commit_<schema>_<table>`, lowercased; with `notify: true` the constructor refuses a schema and table whose channel would pass Postgres's 63-byte name limit:
 
 ```ts
 const config = { schema: "myapp", table: "events", notify: true };
