@@ -77,6 +77,11 @@ These are load-bearing facts about the framework. A red test that only "works" b
 - **A port field typed `number` can be narrower in SQL.** #2452: `priority` is `number` in the contract and `int` in Postgres, so `1.5` stops correlate. When a SQL adapter casts a field, try a fraction and a value past int32.
 - **A published test kit runs without this repo's vitest globals.** #2453: the repo sets `globals: true`, so a bare `beforeEach` in act-tck passed CI and fails for every outside user. Prove a published helper from a fresh project on vitest's default config.
 
+- **A pager that stops only on a short page loops on a source that ignores the page filter.** #2472: `CsvFile` returns every row for any `after`/`limit`, so a file of exactly the page size reads forever. Stop on no progress (the page didn't move past the last id), not only on a short page, and test sizes at and around the page size.
+- **After a prune or a restart, a stream's first snapshot is its base, not a cache.** #2473: `drop_snapshots` assumed snapshots can always be regenerated, which needs the history a prune deleted. Before dropping or skipping a snapshot, ask whether anything of that stream comes before it.
+- **A reaction that consumes its trigger before an action that can be refused loses the trigger.** #2474: autoclose acks to the head, the close is skipped for a lagging sibling, and nothing re-triggers it. Same family as #1669/#1670: a refusal or skip must leave something that brings the work back.
+- **`{ ...DEFAULTS, ...options }` over a `Partial<>` lets `undefined` replace a default.** #2477: `schema: process.env.X` with X unset wrote to a schema named `"undefined"`. Treat any spread-merged config as unvalidated until undefined keys are dropped and the values are parsed.
+
 ## Mechanics that bit us
 
 - Postgres test DB is on **5431** (not 5432): `postgres://postgres:postgres@localhost:5431`. `docker ps` shows container `act-pg`.

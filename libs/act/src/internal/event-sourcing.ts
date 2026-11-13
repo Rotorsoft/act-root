@@ -230,6 +230,9 @@ export async function scan(
   let migrated_count = 0;
   let processed = 0;
   let at: number | undefined;
+  // Streams with an event already scanned: a snapshot is droppable only
+  // when its stream has history before it to fold from.
+  const started = new Set<string>();
 
   // `drop_closed_streams`: one extra walk to collect tombstoned streams.
   const closed_streams = new Set<string>();
@@ -268,7 +271,11 @@ export async function scan(
         if (!is_valid(event))
           throw new Error(`Invalid event at index ${processed}`);
         if (on_progress) on_progress({ processed, id: event.id, max_id });
-        if (drop_snapshots && event.name === SNAP_EVENT) {
+        const has_history = started.has(event.stream);
+        started.add(event.stream);
+        // A stream's first snapshot is its base after a prune or a restart,
+        // so dropping it would lose the state.
+        if (drop_snapshots && event.name === SNAP_EVENT && has_history) {
           dropped_snaps++;
           return;
         }

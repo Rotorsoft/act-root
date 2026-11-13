@@ -145,12 +145,15 @@ describe("autoclose as a synthesized reaction", () => {
     await app.do("open", { stream: "t-throw", actor }, {});
     await app.do("resolve", { stream: "t-throw", actor }, {});
     await app.correlate();
-    const drain = await app.drain();
+    await app.drain();
 
     // The cycle completed normally: no fictitious store failure, and the
-    // caller still gets its acks.
+    // close still happened.
     expect(errors).toHaveLength(0);
-    expect(drain.acked.length).toBeGreaterThan(0);
+    const names = (
+      await app.query_array({ stream: "t-throw", stream_exact: true })
+    ).map((e) => e.name);
+    expect(names).toEqual(["__tombstone__"]);
   });
 
   it("runs the .archives archiver while guarded, before truncating", async () => {
@@ -207,6 +210,97 @@ describe("autoclose as a synthesized reaction", () => {
   // retry. Phase 1 used to drop every tombstone-headed stream, so the
   // retry found nothing: an empty, error-free CloseResult, and a stream
   // that was write-dead, unarchived and untruncated forever.
+  // Drain until nothing is claimable, not for a fixed number of passes.
+  // The clock is faked, so the worker's own defer timer never fires: a
+  // commit on another stream wakes the drain instead.
+  const settle_all = async (app: {
+    do: (...args: any[]) => Promise<unknown>;
+    correlate: () => Promise<unknown>;
+    drain: () => Promise<{ leased: unknown[] }>;
+  }) => {
+    await app.do("open", { stream: "wake", actor }, {});
+    for (let i = 0; i < 20; i++) {
+      await app.correlate();
+      if ((await app.drain()).leased.length === 0) return;
+    }
+  };
+
+  it("retries a close it skipped for another reaction still behind, the next day", async () => {
+    vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true });
+    try {
+      const surveyed: string[] = [];
+      const closed: CloseResult[] = [];
+      const app = act()
+        .withState(ticket({ is: "Resolved" }))
+        .on("Resolved")
+        .defer({ after: { minutes: 30 } })
+        .do(async function survey(e) {
+          surveyed.push(e.stream);
+        })
+        .to("surveys")
+        .build({ autoSettle: false });
+      app.on("closed", (r) => closed.push(r));
+      const names = async () =>
+        (await app.query_array({ stream: "t-later", stream_exact: true })).map(
+          (e) => e.name
+        );
+
+      await app.do("open", { stream: "t-later", actor }, {});
+      await app.do("resolve", { stream: "t-later", actor }, {});
+      await settle_all(app);
+      // The survey is 30 minutes out, so the close is skipped, not lost.
+      expect(closed.flatMap((r) => r.skipped)).toEqual(["t-later"]);
+      expect(await names()).toEqual(["Opened", "Resolved"]);
+
+      vi.setSystemTime(Date.now() + 31 * 60_000);
+      await settle_all(app);
+      expect(surveyed).toEqual(["t-later"]);
+
+      vi.setSystemTime(Date.now() + 25 * 60 * 60_000);
+      await settle_all(app);
+      expect(await names()).toEqual(["__tombstone__"]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("retries a close whose archive callback threw, the next day", async () => {
+    vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true });
+    try {
+      const archived: string[] = [];
+      let failed = false;
+      const app = act()
+        .withState(
+          base()
+            .autocloses({ is: "Resolved" })
+            .archives(async (stream) => {
+              if (!failed) {
+                failed = true;
+                throw new Error("s3 down");
+              }
+              archived.push(stream);
+            })
+            .build()
+        )
+        .build({ autoSettle: false });
+
+      await app.do("open", { stream: "t-retry", actor }, {});
+      await app.do("resolve", { stream: "t-retry", actor }, {});
+      await settle_all(app);
+      expect(archived).toEqual([]);
+
+      vi.setSystemTime(Date.now() + 25 * 60 * 60_000);
+      await settle_all(app);
+      expect(archived).toEqual(["t-retry"]);
+      const names = (
+        await app.query_array({ stream: "t-retry", stream_exact: true })
+      ).map((e) => e.name);
+      expect(names).toEqual(["__tombstone__"]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("resumes a close whose archive callback threw", async () => {
     const archived: string[] = [];
     let failed = false;

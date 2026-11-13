@@ -2,7 +2,8 @@
  * Compaction toggles section of the restore dialog.
  *
  * `drop_snapshots` drops `__snapshot__` events so the next snap policy
- * regenerates them with current state. `drop_closed_streams` walks the
+ * regenerates them with current state, keeping each stream's first one
+ * (a pruned stream's base). `drop_closed_streams` walks the
  * source once upfront for tombstone events and, in the main pass, drops
  * every **pre-close event** for those streams while **keeping the
  * tombstone** — preserving the close gate in the rebuilt store.
