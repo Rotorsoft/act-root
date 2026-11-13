@@ -82,6 +82,18 @@ function variant_schema(
  * is a date at all, so a recursive schema with none still builds nothing. The
  * second ties each of those stops back to the schema's own result.
  */
+/**
+ * Revive the dates `schema` locates, never rejecting: a stored payload can
+ * disagree with the declaration in ways the schema deliberately doesn't
+ * describe, and handing back what is stored beats refusing to read it.
+ */
+export const revive_dates =
+  (schema: z.ZodType) =>
+  (data: unknown): unknown => {
+    const revived = schema.safeParse(data);
+    return revived.success ? revived.data : data;
+  };
+
 export function date_reviver_schema(schema: unknown): z.ZodType | undefined {
   let recursive = false;
   const pass = (tie: boolean): z.ZodType | undefined => {
