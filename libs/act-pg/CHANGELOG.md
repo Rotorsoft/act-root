@@ -1,3 +1,10 @@
+# [@rotorsoft/act-pg-v2.1.1](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-pg-v2.1.0...@rotorsoft/act-pg-v2.1.1) (2026-11-13)
+
+
+### Bug Fixes
+
+* **act-pg:** keep the defaults for config keys set to undefined, and refuse NaN pool numbers ([#2485](https://github.com/Rotorsoft/act-root/issues/2485)) ([6c04997](https://github.com/Rotorsoft/act-root/commit/6c049973bc6eb38f71d801473355d887dbe9cde7))
+
 # [@rotorsoft/act-pg-v2.1.0](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-pg-v2.0.3...@rotorsoft/act-pg-v2.1.0) (2026-11-12)
 
 
