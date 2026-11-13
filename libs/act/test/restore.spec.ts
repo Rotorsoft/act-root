@@ -352,34 +352,48 @@ describe("scan (pre-flight, no committer)", () => {
     // Same stream-a close, plus a snapshot on stream-b. With both flags:
     //   - stream-a pre-close events dropped under closed_streams
     //   - stream-a tombstone kept (the close gate)
-    //   - stream-b snapshot dropped under snapshots
-    //   - stream-b regular event kept.
+    //   - stream-b snapshot dropped under snapshots (history before it)
+    //   - stream-b regular events kept.
     const events: E[] = [
       baseEvent({ id: 1, stream: "stream-a", name: "Tick", version: 0 }),
+      baseEvent({ id: 2, stream: "stream-b", name: "Tick", version: 0 }),
       baseEvent({
-        id: 2,
+        id: 3,
         stream: "stream-b",
         name: "__snapshot__",
         version: 0,
       }),
       baseEvent({
-        id: 3,
+        id: 4,
         stream: "stream-a",
         name: "__tombstone__",
         version: 1,
       }),
-      baseEvent({ id: 4, stream: "stream-b", name: "Tick", version: 1 }),
+      baseEvent({ id: 5, stream: "stream-b", name: "Tick", version: 1 }),
     ];
     const result = await scan(
       fromArray(events),
       { drop_closed_streams: true, drop_snapshots: true },
       async (e) => e.id
     );
-    // 1 stream-b Tick + 1 stream-a tombstone kept
-    expect(result.kept).toBe(2);
+    // 2 stream-b Ticks + 1 stream-a tombstone kept
+    expect(result.kept).toBe(3);
     // 1 stream-a pre-close Tick dropped
     expect(result.dropped.closed_streams).toBe(1);
     // 1 stream-b snapshot dropped
+    expect(result.dropped.snapshots).toBe(1);
+  });
+
+  it("drop_snapshots keeps a stream's first snapshot, its base after a prune", async () => {
+    const result = await scan(
+      fromArray([
+        baseEvent({ id: 7, name: "__snapshot__", version: 5 }),
+        baseEvent({ id: 8, version: 6 }),
+        baseEvent({ id: 9, name: "__snapshot__", version: 6 }),
+      ]),
+      { drop_snapshots: true }
+    );
+    expect(result.kept).toBe(2);
     expect(result.dropped.snapshots).toBe(1);
   });
 
@@ -473,15 +487,15 @@ describe("scan (with committer)", () => {
       [];
     const result = await scan(
       fromArray([
-        baseEvent({ id: 1, name: "__snapshot__" }),
-        baseEvent({ id: 2, name: "OrderPaid", data: { amount: 40 } }),
+        baseEvent({ id: 1, name: "OrderPaid", data: { amount: 40 } }),
+        baseEvent({ id: 2, name: "__snapshot__" }),
         baseEvent({
           id: 3,
           name: "OrderPaid",
           data: { amount: 90 },
           meta: {
             correlation: "c",
-            causation: { event: { id: 2, name: "OrderPaid", stream: "s" } },
+            causation: { event: { id: 1, name: "OrderPaid", stream: "s" } },
           },
         }),
       ]),
@@ -509,13 +523,13 @@ describe("scan (with committer)", () => {
     );
 
     expect(result.migrated).toBe(2);
-    // Event id=2 committed first at new id 1000 (no causation ref).
+    // Event id=1 committed first at new id 1000 (no causation ref).
     expect(seen[0]).toEqual({
       name: "OrderPaid_v2",
       data: { amount_cents: 4000 },
       causationId: undefined,
     });
-    // Event id=3's causation.event.id (2) is remapped to 1000 — and the
+    // Event id=3's causation.event.id (1) is remapped to 1000 — and the
     // migrated name/data must survive the remap.
     expect(seen[1]).toEqual({
       name: "OrderPaid_v2",
@@ -778,6 +792,36 @@ describe("restore from a real Store source", () => {
 
       expect(result.kept).toBe(1);
       expect(await names_in(sink, "r2")).toEqual(["__snapshot__"]);
+    } finally {
+      await ctx.dispose();
+    }
+  });
+
+  it("drop_snapshots keeps a pruned stream's state", async () => {
+    const ctx = await sandbox(act().withState(Counter));
+    try {
+      for (let i = 0; i < 6; i++)
+        await ctx.app.do("Tick", { stream: "r4", actor }, {});
+      await ctx.app.close([
+        { stream: "r4", before: new Date(Date.now() + 60_000) },
+      ]);
+      await ctx.app.do("Tick", { stream: "r4", actor }, {});
+
+      const sink = new InMemoryStore();
+      await sink.seed();
+      const result = await ctx.app.restore(
+        ctx.store,
+        { drop_snapshots: true },
+        sink
+      );
+
+      // The base snapshot stays; the snapshot the last Tick wrote goes.
+      expect(await names_in(sink, "r4")).toEqual(["__snapshot__", "Ticked"]);
+      expect(result.dropped.snapshots).toBe(1);
+      const restored = act()
+        .withState(Counter)
+        .build({ scoped: { store: sink, cache: new InMemoryCache() } });
+      expect((await restored.load(Counter, "r4")).state.count).toBe(7);
     } finally {
       await ctx.dispose();
     }
