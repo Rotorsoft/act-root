@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v2.1.4](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v2.1.3...@rotorsoft/act-v2.1.4) (2026-11-13)
+
+
+### Bug Fixes
+
+* **act:** read a restore source that ignores the page filter only once ([#2484](https://github.com/Rotorsoft/act-root/issues/2484)) ([9894d78](https://github.com/Rotorsoft/act-root/commit/9894d78fe4e388349e2e420168a600631ceb0277))
+
 # [@rotorsoft/act-v2.1.3](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v2.1.2...@rotorsoft/act-v2.1.3) (2026-11-13)
 
 

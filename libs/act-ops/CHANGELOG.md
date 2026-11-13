@@ -1,3 +1,10 @@
+# [@rotorsoft/act-ops-v0.2.13](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-ops-v0.2.12...@rotorsoft/act-ops-v0.2.13) (2026-11-13)
+
+
+### Bug Fixes
+
+* **act-ops:** refuse a ttlMs or maxEntries that would turn dedup off ([#2486](https://github.com/Rotorsoft/act-root/issues/2486)) ([a185d7d](https://github.com/Rotorsoft/act-root/commit/a185d7def14b8a2035f1148089c4117ee7145994))
+
 # [@rotorsoft/act-ops-v0.2.12](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-ops-v0.2.11...@rotorsoft/act-ops-v0.2.12) (2026-11-07)
 
 
