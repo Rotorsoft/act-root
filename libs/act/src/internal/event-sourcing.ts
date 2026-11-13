@@ -40,6 +40,7 @@ import {
 import { sleep, validate } from "../utils.js";
 import { compute_backoff_delay } from "./backoff.js";
 import { default_correlator } from "./correlation-id.js";
+import { date_reviver_schema } from "./date-reviver.js";
 
 /** The default patch step: a bare merge, so the hot path pays nothing. */
 export const bare_patch: PatchFn = (_me, state, partial) =>
@@ -233,6 +234,14 @@ export async function scan(
   // Streams with an event already scanned: a snapshot is droppable only
   // when its stream has history before it to fold from.
   const started = new Set<string>();
+  // A stored date is an ISO string from SQL and CSV sources, so the dates a
+  // migration's `from_schema` declares are revived first, as a load does.
+  const migration_dates = new Map(
+    Object.entries(event_migrations ?? {}).map(([name, { from_schema }]) => [
+      name,
+      date_reviver_schema(from_schema),
+    ])
+  );
 
   // `drop_closed_streams`: one extra walk to collect tombstoned streams.
   const closed_streams = new Set<string>();
@@ -291,7 +300,12 @@ export async function scan(
         let migrated: typeof event = event;
         const migration = event_migrations?.[event.name as string];
         if (migration) {
-          const old_data = migration.from_schema.parse(event.data);
+          const revived = migration_dates
+            .get(event.name as string)
+            ?.safeParse(event.data);
+          const old_data = migration.from_schema.parse(
+            revived?.success ? revived.data : event.data
+          );
           const new_data = migration.migrate(old_data);
           migration.to_schema.parse(new_data);
           migrated = {
@@ -330,6 +344,7 @@ export async function scan(
                     // A cause missing from the source has no id in the new
                     // log; its old id would name another event there.
                     id: id_map.get(cause.id) ?? -1,
+                    name: event_migrations?.[cause.name]?.to ?? cause.name,
                     stream: stream_rename
                       ? stream_rename(cause.stream)
                       : cause.stream,

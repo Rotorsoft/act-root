@@ -4,6 +4,7 @@ import { join } from "node:path";
 import type { Committed, EventSource, Query, Schemas } from "@rotorsoft/act";
 import { act, CsvFile, InMemoryStore } from "@rotorsoft/act";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { z } from "zod";
 
 type E = Committed<Schemas, string>;
 
@@ -397,5 +398,39 @@ describe("CsvFile as a restore source at the page size", () => {
     let count = 0;
     await sink.query(() => count++);
     expect(count).toBe(n);
+  });
+});
+
+describe("CsvFile as a restore source with event migrations", () => {
+  // A CSV (like Postgres and SQLite) hands back a stored date as its ISO
+  // string; the old event's own schema, with z.date(), still works.
+  it("revives the dates the migration's from_schema declares", async () => {
+    const blob = [
+      "id,name,data,stream,version,created,meta",
+      `1,Paid,"{""amount"":4,""at"":""2024-03-04T05:06:07.000Z""}",o1,0,2024-01-01T00:00:00.000Z,"{""correlation"":""c"",""causation"":{}}"`,
+    ].join("\n");
+    const seen: unknown[] = [];
+    const app = act().build({ autoSettle: false });
+    const sink = new InMemoryStore();
+    await sink.seed();
+    const result = await app.restore(
+      new CsvFile({ blob }),
+      {
+        event_migrations: {
+          Paid: {
+            to: "Paid_v2",
+            from_schema: z.object({ amount: z.number(), at: z.date() }),
+            to_schema: z.object({ cents: z.number(), at: z.date() }),
+            migrate: (d: { amount: number; at: Date }) => {
+              seen.push(d.at);
+              return { cents: d.amount * 100, at: d.at };
+            },
+          },
+        },
+      },
+      sink
+    );
+    expect(result.migrated).toBe(1);
+    expect(seen[0]).toBeInstanceOf(Date);
   });
 });

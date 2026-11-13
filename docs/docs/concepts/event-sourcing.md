@@ -376,7 +376,7 @@ Omit the third argument to default to the connected store as sink. Pass an expli
 - **`drop_closed_streams: true`** — compact streams that have a `__tombstone__` event (closed via `app.close()`). Scan walks the source once upfront with a tombstone-name filter to collect the closed-stream set, then the main pass drops every **pre-close event** whose stream is in that set. The tombstone itself is **kept** — it's the gate that makes `app.do()` throw `StreamClosedError` in the rebuilt store, so dropping it would silently reopen the stream. Counted in `ScanResult.dropped.closed_streams`.
 - **`on_progress(p)`** — fired once per event with `{ processed }`. Callers throttle/debounce as needed. Powers the inspector's reactive progress bar.
 - **`event_migrations`** — per-event schema migration applied during the scan ([ACT-1126](https://github.com/Rotorsoft/act-root/issues/785)). Keys are source event names; values describe how to rewrite them. See [Migration overlay](#migration-overlay) below.
-- **`stream_rename`** — function that returns a new stream name per event, for tenant relocation and prefix cleanup. It renames the streams named in each event's causation too. See [Migration overlay](#migration-overlay).
+- **`stream_rename`** — function that returns a new stream name per event, for tenant relocation and prefix cleanup. It renames the streams named in each event's causation too, and `event_migrations` renames a migrated cause there. See [Migration overlay](#migration-overlay).
 
 ### Migration overlay
 
@@ -408,7 +408,7 @@ await app.restore(source, {
 
 Per matched event, `scan`:
 
-1. Parses `event.data` against `from_schema` — fails fast if the stored payload doesn't match what you said you were migrating from.
+1. Parses `event.data` against `from_schema` — fails fast if the stored payload doesn't match what you said you were migrating from. The dates a Zod `from_schema` declares are revived first, as a load does, so the old event's own schema works as `from_schema`: a `z.date()` field reads as a `Date` from every source (Postgres, SQLite and CSV store it as an ISO string).
 2. Runs `migrate(parsed)` to transform the data.
 3. Parses the result against `to_schema` — verifies the migration produced a valid new-version payload.
 4. Rewrites the event with `name = to` and `data = migrated`, increments `ScanResult.migrated`.

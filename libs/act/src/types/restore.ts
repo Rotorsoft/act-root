@@ -111,7 +111,9 @@ export type ScanOptions = {
    * dialog when moving from an old store to a new one).
    *
    * Each row that matches a key:
-   *   1. parses `event.data` against `from_schema` (validates source);
+   *   1. parses `event.data` against `from_schema` (validates source),
+   *      with the dates a Zod `from_schema` declares revived first, as a
+   *      load does, so `z.date()` reads a `Date` from every source;
    *   2. runs `migrate(parsed)` to transform the payload;
    *   3. parses the result against `to_schema` (validates target);
    *   4. is rewritten with `name = to` and `data = migrated`.
