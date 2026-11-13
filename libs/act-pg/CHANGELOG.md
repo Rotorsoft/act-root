@@ -1,3 +1,10 @@
+# [@rotorsoft/act-pg-v2.1.2](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-pg-v2.1.1...@rotorsoft/act-pg-v2.1.2) (2026-11-13)
+
+
+### Bug Fixes
+
+* **act-pg:** lowercase the notify channel, and refuse one over 63 bytes ([#2489](https://github.com/Rotorsoft/act-root/issues/2489)) ([e90228f](https://github.com/Rotorsoft/act-root/commit/e90228f4cca890ffc88c3269a1a0c13f37e06978))
+
 # [@rotorsoft/act-pg-v2.1.1](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-pg-v2.1.0...@rotorsoft/act-pg-v2.1.1) (2026-11-13)
 
 
