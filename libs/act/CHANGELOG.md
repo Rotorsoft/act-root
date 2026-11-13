@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v2.1.5](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v2.1.4...@rotorsoft/act-v2.1.5) (2026-11-13)
+
+
+### Bug Fixes
+
+* **act:** revive a migration's dates before from_schema, and rename a migrated cause ([#2487](https://github.com/Rotorsoft/act-root/issues/2487)) ([428631e](https://github.com/Rotorsoft/act-root/commit/428631ef2a7e6f00c0f78589feec2d49112240a6))
+
 # [@rotorsoft/act-v2.1.4](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v2.1.3...@rotorsoft/act-v2.1.4) (2026-11-13)
 
 
