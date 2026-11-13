@@ -408,7 +408,7 @@ await app.restore(source, {
 
 Per matched event, `scan`:
 
-1. Parses `event.data` against `from_schema` — fails fast if the stored payload doesn't match what you said you were migrating from. The dates `from_schema` declares are revived first, as a load does, so a `z.date()` field reads as a `Date` from every source (Postgres, SQLite and CSV store it as an ISO string).
+1. Parses `event.data` against `from_schema` — fails fast if the stored payload doesn't match what you said you were migrating from. `from_schema` sees the stored JSON, so a date is an ISO string from Postgres, SQLite and CSV sources: declare it `z.coerce.date()`, which also takes the `Date` an InMemory source holds, and `migrate` gets a `Date` from every source.
 2. Runs `migrate(parsed)` to transform the data.
 3. Parses the result against `to_schema` — verifies the migration produced a valid new-version payload.
 4. Rewrites the event with `name = to` and `data = migrated`, increments `ScanResult.migrated`.

@@ -32,7 +32,7 @@
  */
 
 import { z } from "zod";
-import { date_reviver_schema, revive_dates } from "../internal/date-reviver.js";
+import { date_reviver_schema } from "../internal/date-reviver.js";
 import {
   type EventGate,
   IDENTITY_GATE,
@@ -89,13 +89,18 @@ export function event_tags(schema: z.ZodType): EventTags {
   }
 
   const data_reviver_schema = date_reviver_schema(schema);
+  // Reviving must never reject. A stored payload can disagree with the current
+  // declaration in ways this schema deliberately does not describe, and handing
+  // back what is stored beats refusing to read it.
+  const revive = (schema: z.ZodType) => (data: unknown) => {
+    const revived = schema.safeParse(data);
+    return revived.success ? revived.data : data;
+  };
   const dated_pii = Object.keys(pii_dates).length > 0;
   return {
     sensitive: pii,
-    date_reviver: data_reviver_schema && revive_dates(data_reviver_schema),
-    pii_date_reviver: dated_pii
-      ? revive_dates(z.looseObject(pii_dates))
-      : undefined,
+    date_reviver: data_reviver_schema && revive(data_reviver_schema),
+    pii_date_reviver: dated_pii ? revive(z.looseObject(pii_dates)) : undefined,
   };
 }
 

@@ -40,7 +40,6 @@ import {
 import { sleep, validate } from "../utils.js";
 import { compute_backoff_delay } from "./backoff.js";
 import { default_correlator } from "./correlation-id.js";
-import { date_reviver_schema, revive_dates } from "./date-reviver.js";
 
 /** The default patch step: a bare merge, so the hot path pays nothing. */
 export const bare_patch: PatchFn = (_me, state, partial) =>
@@ -234,16 +233,6 @@ export async function scan(
   // Streams with an event already scanned: a snapshot is droppable only
   // when its stream has history before it to fold from.
   const started = new Set<string>();
-  // A stored date reads back as an ISO string from SQL and CSV sources, so a
-  // migration's `from_schema` gets its dates revived first, as a load does.
-  // Built once per migration; one with no dates gets none.
-  const revivers = new Map<string, (data: unknown) => unknown>();
-  for (const [name, { from_schema }] of Object.entries(
-    event_migrations ?? {}
-  )) {
-    const dates = date_reviver_schema(from_schema);
-    if (dates) revivers.set(name, revive_dates(dates));
-  }
 
   // `drop_closed_streams`: one extra walk to collect tombstoned streams.
   const closed_streams = new Set<string>();
@@ -302,10 +291,7 @@ export async function scan(
         let migrated: typeof event = event;
         const migration = event_migrations?.[event.name as string];
         if (migration) {
-          const revive = revivers.get(event.name as string);
-          const old_data = migration.from_schema.parse(
-            revive ? revive(event.data) : event.data
-          );
+          const old_data = migration.from_schema.parse(event.data);
           const new_data = migration.migrate(old_data);
           migration.to_schema.parse(new_data);
           migrated = {
