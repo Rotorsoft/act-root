@@ -77,7 +77,12 @@ export function minSafeTtl(profile: RetryProfile): number {
   const safetyFactor = profile.safetyFactor ?? 4;
   const backoff_sum = sum_backoff(profile.maxRetries, profile.backoff);
   const timeout_sum = (profile.maxRetries + 1) * profile.timeoutMs;
-  return (backoff_sum + timeout_sum) * safetyFactor;
+  const ttl = (backoff_sum + timeout_sum) * safetyFactor;
+  if (!Number.isFinite(ttl))
+    throw new Error(
+      `minSafeTtl: the profile gives no usable window (${ttl}); check timeoutMs, maxRetries, backoff and safetyFactor for NaN.`
+    );
+  return ttl;
 }
 
 function sum_backoff(
