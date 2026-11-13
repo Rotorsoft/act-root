@@ -155,9 +155,16 @@ const NOTIFY_RECONNECT_MAX_MS = 30_000;
 // is never listener-less during the reconnect backoff window.
 const swallow_error = (): void => {};
 
+// Lowercased because an unquoted `LISTEN` folds the name to lowercase while
+// `pg_notify` keeps it as given, so an uppercase schema or table would never
+// hear its own commits.
 function notify_channel(schema: string, table: string): string {
-  return `${NOTIFY_CHANNEL_PREFIX}_${schema}_${table}`;
+  return `${NOTIFY_CHANNEL_PREFIX}_${schema}_${table}`.toLowerCase();
 }
+
+// PG truncates a longer identifier for `LISTEN` and refuses it in
+// `pg_notify`, so a longer channel would fail every commit.
+const NOTIFY_CHANNEL_MAX_BYTES = 63;
 /**
  * The event columns of a row; `prefix` reads the `t_` tail columns of a
  * `query_stats` row.
@@ -376,6 +383,10 @@ export class PostgresStore implements Store {
     this._fqc = `"${this.config.schema}"."${this.config.table}_correlated"`;
     this._channel = notify_channel(this.config.schema, this.config.table);
     if (this.config.notify) {
+      if (Buffer.byteLength(this._channel) > NOTIFY_CHANNEL_MAX_BYTES)
+        throw new Error(
+          `Notify channel "${this._channel}" is over ${NOTIFY_CHANNEL_MAX_BYTES} bytes; shorten the schema or table name, or turn notify off`
+        );
       this.notify = this._subscribe_notifications.bind(this);
     }
     this._resolve_pii_key = this.config.pii_encryption
