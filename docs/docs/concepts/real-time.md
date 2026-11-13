@@ -69,7 +69,7 @@ type AppState = BroadcastState & {
 };
 
 const broadcast = new BroadcastChannel<AppState>({
-  cacheSize: 50, // LRU entries; default 50
+  cacheSize: 50, // LRU entries; default 50, at least 1
   // Called when a subscriber callback throws. The frame still reaches every
   // other subscriber and the publish still returns — a bad consumer must not
   // break the publisher. Defaults to console.error.

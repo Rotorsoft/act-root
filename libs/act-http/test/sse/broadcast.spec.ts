@@ -125,6 +125,12 @@ describe("BroadcastChannel", () => {
     expect(entries[0][0]).toBe("s1");
   });
 
+  it("refuses a cacheSize that would never evict or never keep a state", () => {
+    for (const cacheSize of [Number.NaN, 0, -1])
+      expect(() => new BroadcastChannel<TestState>({ cacheSize })).toThrow();
+    expect(() => new BroadcastChannel<TestState>()).not.toThrow();
+  });
+
   it("respects cacheSize option", () => {
     const bc = new BroadcastChannel<TestState>({ cacheSize: 1 });
     bc.publish("s1", makeState(1));
