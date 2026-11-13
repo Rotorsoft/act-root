@@ -1,5 +1,6 @@
 import type { IdempotencyStore } from "@rotorsoft/act-ops/idempotency";
 import { extractIdempotencyKey } from "./extract.js";
+import { check_options } from "./options.js";
 import { type VerifyOptions, verifyWebhook } from "./verify.js";
 
 /**
@@ -77,6 +78,7 @@ export async function checkWebhook(
   body: string,
   options: CheckWebhookOptions
 ): Promise<CheckResult> {
+  check_options(options);
   if (options.secret !== undefined) {
     // Raw body not captured (default JSON parser ate the bytes) but a
     // secret is configured — hashing the empty string is a guaranteed

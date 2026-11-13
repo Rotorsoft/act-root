@@ -58,6 +58,7 @@
 import type { NextFunction, Request, RequestHandler, Response } from "express";
 import { type CheckWebhookOptions, checkWebhook } from "../check.js";
 import { type Finalizers, make_idempotency } from "../finalize.js";
+import { check_options } from "../options.js";
 
 /** Shape attached to `req.idempotency` by the Express adapter. */
 export type ExpressIdempotency = {
@@ -73,6 +74,7 @@ export type ExpressIdempotency = {
 export function webhookMiddleware(
   options: CheckWebhookOptions
 ): RequestHandler {
+  check_options(options);
   return async function check(
     req: Request,
     res: Response,

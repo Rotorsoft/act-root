@@ -59,6 +59,7 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { type CheckWebhookOptions, checkWebhook } from "../check.js";
 import { type Finalizers, make_idempotency } from "../finalize.js";
+import { check_options } from "../options.js";
 
 /** Shape attached to `request.idempotency` by the Fastify adapter. */
 export type FastifyIdempotency = {
@@ -80,6 +81,7 @@ type WebhookRequest = FastifyRequest & {
 export function webhookMiddleware(
   options: CheckWebhookOptions
 ): (request: FastifyRequest, reply: FastifyReply) => Promise<void> {
+  check_options(options);
   return async function check(
     request: FastifyRequest,
     reply: FastifyReply
