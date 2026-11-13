@@ -532,6 +532,42 @@ describe("PostgresStore", () => {
         /Unsafe SQL identifier/
       );
     });
+
+    it("keeps the defaults for keys set to undefined, as an unset env var is", () => {
+      const env: Record<string, string | undefined> = {};
+      const store = new PostgresStore({
+        schema: env.DB_SCHEMA,
+        table: env.DB_TABLE,
+        connectionTimeoutMillis: undefined,
+        statement_timeout: undefined,
+      });
+      expect(store.config).toMatchObject({
+        schema: "public",
+        table: "events",
+        connectionTimeoutMillis: 10_000,
+        statement_timeout: 60_000,
+      });
+    });
+
+    it("rejects a NaN or negative pool number, which pg would read as no limit", () => {
+      for (const bad of [
+        { connectionTimeoutMillis: Number.NaN },
+        { statement_timeout: Number.NaN },
+        { idleTimeoutMillis: -1 },
+        { max: Number.POSITIVE_INFINITY },
+      ])
+        expect(() => new PostgresStore(bad)).toThrow();
+      // 0 and false are pg's own "off" values, and stay allowed.
+      expect(
+        () =>
+          new PostgresStore({
+            connectionTimeoutMillis: 0,
+            idleTimeoutMillis: null,
+            statement_timeout: false,
+            max: 0,
+          })
+      ).not.toThrow();
+    });
   });
 
   describe("reset (array form)", () => {
