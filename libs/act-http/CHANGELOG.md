@@ -1,3 +1,11 @@
+# [@rotorsoft/act-http-v2.1.1](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-http-v2.1.0...@rotorsoft/act-http-v2.1.1) (2026-11-13)
+
+
+### Bug Fixes
+
+* **act-http:** refuse a BroadcastChannel cacheSize that is NaN or below 1 ([#2490](https://github.com/Rotorsoft/act-root/issues/2490)) ([e4e3ecf](https://github.com/Rotorsoft/act-root/commit/e4e3ecff0a093db012b469953f4dda10a5369868))
+* **act-http:** refuse an empty webhook secret on both sides ([#2488](https://github.com/Rotorsoft/act-root/issues/2488)) ([c36cc82](https://github.com/Rotorsoft/act-root/commit/c36cc8240e33ceaf29eb4001b7b62ff31bdabeb0))
+
 # [@rotorsoft/act-http-v2.1.0](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-http-v2.0.5...@rotorsoft/act-http-v2.1.0) (2026-11-12)
 
 
