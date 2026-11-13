@@ -1,3 +1,11 @@
+# [@rotorsoft/act-v2.1.3](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v2.1.2...@rotorsoft/act-v2.1.3) (2026-11-13)
+
+
+### Bug Fixes
+
+* **act:** keep a stream's first snapshot when a restore drops snapshots ([#2482](https://github.com/Rotorsoft/act-root/issues/2482)) ([73b82fd](https://github.com/Rotorsoft/act-root/commit/73b82fd63636ce02aad85941671935dcaf002b13))
+* **act:** retry an autoclose that was skipped or whose archive threw, the next day ([#2483](https://github.com/Rotorsoft/act-root/issues/2483)) ([d33576c](https://github.com/Rotorsoft/act-root/commit/d33576c4768a9b931162da3e69f8ed4d66d83ccb))
+
 # [@rotorsoft/act-v2.1.2](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v2.1.1...@rotorsoft/act-v2.1.2) (2026-11-12)
 
 
