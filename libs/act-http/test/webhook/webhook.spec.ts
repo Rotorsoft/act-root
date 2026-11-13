@@ -146,6 +146,10 @@ describe("webhook", () => {
       expect(() => webhook({ url: "https://x.test" })).not.toThrow();
     });
 
+    it("refuses an empty secret, which the receiver would read as signed", () => {
+      expect(() => webhook({ url: "https://x.test", secret: "" })).toThrow();
+    });
+
     it("throws WebhookError with status 0 on network error", async () => {
       const fetch = vi.fn(async () => {
         throw new TypeError("network down");
