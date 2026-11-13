@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Committed, EventSource, Query, Schemas } from "@rotorsoft/act";
-import { CsvFile, InMemoryStore } from "@rotorsoft/act";
+import { act, CsvFile, InMemoryStore } from "@rotorsoft/act";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 type E = Committed<Schemas, string>;
@@ -355,5 +355,47 @@ describe("file lifecycle", () => {
     await writeFile(path, "");
     await rm(dir, { recursive: true, force: true });
     expect(true).toBe(true);
+  });
+});
+
+describe("CsvFile as a restore source at the page size", () => {
+  const csv = (n: number) =>
+    [
+      "id,name,data,stream,version,created,meta",
+      ...Array.from(
+        { length: n },
+        (_, i) =>
+          `${i + 1},Tick,"{""tick"":1}",s${i},0,2024-01-01T00:00:00.000Z,"{""correlation"":""c"",""causation"":{}}"`
+      ),
+    ].join("\n");
+
+  // CsvFile returns every row whatever page is asked for, so a file whose
+  // row count is a multiple of the page size used to read forever.
+  it.each([3, 6, 4])("restores %i rows with a page of 3", async (n) => {
+    // Fail fast instead of hanging if the scan rereads the file.
+    const once = () => {
+      let seen = 0;
+      return () => {
+        if (++seen > n) throw new Error(`read ${seen} events from ${n} rows`);
+      };
+    };
+    const app = act().build({ autoSettle: false });
+    const dry = await app.restore(new CsvFile({ blob: csv(n) }), {
+      dry_run: true,
+      batch_size: 3,
+      on_progress: once(),
+    });
+    expect(dry.kept).toBe(n);
+    const sink = new InMemoryStore();
+    await sink.seed();
+    const real = await app.restore(
+      new CsvFile({ blob: csv(n) }),
+      { batch_size: 3, on_progress: once() },
+      sink
+    );
+    expect(real.kept).toBe(n);
+    let count = 0;
+    await sink.query(() => count++);
+    expect(count).toBe(n);
   });
 });
