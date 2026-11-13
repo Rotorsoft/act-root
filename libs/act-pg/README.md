@@ -58,7 +58,7 @@ Full type reference: [typedoc](https://github.com/Rotorsoft/act-root/blob/master
 
 ## Configuration
 
-All fields are optional and have sensible defaults:
+All fields are optional and have sensible defaults. A field set to `undefined` (an unset env var) keeps its default, and the four pool numbers below must be numbers ≥ 0 (`statement_timeout` may also be `false`), so a `NaN` from `Number(process.env.X)` throws at construction instead of turning a timeout off:
 
 | Option | Default | Description |
 |---|---|---|
