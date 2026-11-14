@@ -1,3 +1,10 @@
+# [@rotorsoft/act-http-v2.1.2](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-http-v2.1.1...@rotorsoft/act-http-v2.1.2) (2026-11-14)
+
+
+### Bug Fixes
+
+* **act-http:** check a receiver's verify.maxAgeSeconds when the middleware is built ([#2505](https://github.com/Rotorsoft/act-root/issues/2505)) ([aa18db6](https://github.com/Rotorsoft/act-root/commit/aa18db66ba3dfd5a83fadbe99f98c25dfc9fe14a))
+
 # [@rotorsoft/act-http-v2.1.1](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-http-v2.1.0...@rotorsoft/act-http-v2.1.1) (2026-11-13)
 
 
