@@ -180,7 +180,7 @@ The breaker counts store failures, not errors in your code. When application cod
 
 - **A resolver throws while correlate reads new events.** The scan stops just before that event and is logged once per reaction and event. New events behind it are not matched to reactions; work already found keeps draining. Every later trigger (a commit, a settle) retries from that event, so nothing is lost: once the resolver stops throwing, correlation picks up where it stopped.
 - **A resolver throws while the drain matches a leased stream's events.** Only that stream fails, exactly like a failing handler: it retries on the reaction's backoff and blocks once `maxRetries` is spent (with `blockOnError`). A dynamic target without a `source` reads every stream's events, so one bad event fails every such target. Give resolvers a `source` where you can.
-- **A reaction-requested close fails for any reason other than a `StoreError`** (its archive callback throws, say). It is logged once and not retried; close the stream with `app.close(...)` once the cause is fixed.
+- **A reaction-requested close fails for any reason other than a `StoreError`** (its archive callback throws, say). It is logged, and the `.autocloses` policy retries it: a full close the next day, a `keep` prune on the stream's next commit. To close it sooner, call `app.close([{ stream, archive }])` once the cause is fixed.
 
 Reaction handlers were already contained this way: a throwing handler retries and blocks its own stream. That includes a handler that throws a `DeferSignal` whose schedule the schema rejects (`{ after: { minutes: 0 } }`, an invalid `Date`): it fails like any other error instead of deferring.
 
