@@ -126,7 +126,7 @@ Easy to get subtly wrong. Read the linked doc before editing related code.
 
 ### Naming conventions
 
-Exported functions, builder methods and options fields are camelCase; port methods and record fields are snake_case; exported constants `SCREAMING_SNAKE`; factories short lowercase; types PascalCase; internals short snake_case. Full rules: [`.claude/rules/naming.md`](.claude/rules/naming.md). Options bags are validated with Zod: [`.claude/rules/config-validation.md`](.claude/rules/config-validation.md).
+Exported functions, builder methods and options fields are camelCase; port methods and record fields are snake_case; exported constants `SCREAMING_SNAKE`; factories short lowercase; types PascalCase; internals short snake_case. Full rules: [`.claude/rules/naming.md`](.claude/rules/naming.md). Every numeric option is validated where its bag enters (Zod, except act-ops): [`.claude/rules/config-validation.md`](.claude/rules/config-validation.md).
 
 ## Troubleshooting
 

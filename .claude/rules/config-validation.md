@@ -3,17 +3,14 @@ paths:
   - "libs/**/src/**/*.ts"
 ---
 
-# Config-validation schemas
+# Config validation
 
-Any options bag that ships to `act().build()` / `openapi(app, ...)` / similar entry points is validated with Zod, not hand-written `if (x < min) throw` ladders. Out-of-range values throw `ZodError` at the entry point so misconfiguration surfaces at startup, not on the first cycle tick. The standard:
+Every numeric option on a public bag, in core or a satellite, is checked where the bag enters: the builder call, `build()`, a constructor or a factory. `NaN` makes every comparison false, so an unchecked bound is no bound.
 
-| Element | Convention |
-|---|---|
-| Schema name | `<Type>OptionsSchema` — `AutocloseOptionsSchema`, `SseOptionsSchema`, `OpenAPIOptionsSchema` |
-| Schema visibility | Internal `const`, never re-exported. The public surface is the type + resolver, not the schema itself. |
-| Config type | Internal: `type <Type>Config = z.infer<typeof <Type>OptionsSchema>`. Public: written out in `types/`, and the schema ends in `satisfies z.ZodType<…>`, so a schema whose output stops fitting the type fails to compile (a field added to the type but not the schema still compiles, and parsing drops it: add both together). |
-| Resolver | `resolve<Type>Config(options: <Type>Options): <Type>Config` — camelCase, parses + applies defaults in one call |
-| Defaults | `DEFAULT_*` SCREAMING_SNAKE constants, referenced from the schema via `.default(DEFAULT_*)` so there's one source of truth; a public default lives in `types/act.ts` |
-| Custom error messages | `{ message: "..." }` on the individual constraint when callers depend on the wording (test assertions, structured logs). Don't override Zod's default for shape errors callers don't read. |
-
-**Single home:** every builder-facing act-core config bag (schema + resolver + private `DEFAULT_*`) lives in **`libs/act/src/internal/config.ts`**; resolvers stay internal (the one that was public, `resolveAutocloseConfig`, is a deprecated alias removed in 3.0) — one discoverable module, one section per bag (`Backoff`, `Reaction`, `Action`, `Lane`, `Drain`/`Settle`, `Act`, `Autoclose`, `CircuitBreaker`, `Fold`). Feature logic (the `CircuitBreaker` state machine, the fold engine, the autoclose window math in `autoclose-window.ts`) imports its resolved-config type from there. A new config bag adds a section to `config.ts` and wires its `resolve<Type>Config` at the declaration/runtime site (`.on(...)` / `.do(...)` / `.withLane(...)` / `act().build(...)` / `drain(...)` / `settle(...)`) — never a hand-rolled range check. Validation is fail-closed but non-tightening: reject `NaN`/`±Infinity`/nonsensical-negatives, never newly reject a value that works today. The sibling env/package config (`config()`) stays in the public `libs/act/src/config.ts`; `@rotorsoft/act-http` transport bags (`sse-wiring.ts`, `openapi/index.ts`) stay in that package. Never reinvent `*_MIN` / `*_MAX` companion constants or scatter ladders across the resolver.
+- **Zod**, throwing `ZodError`, in every package that depends on zod. act-ops has no dependencies and throws `Error` from plain checks. Never a `*_MIN`/`*_MAX` companion constant.
+- **Fail closed, never tighter:** refuse `NaN`, `±Infinity`, and negatives or fractions where they make no sense; never newly refuse a value that works today.
+- **Schema:** an internal `const <Type>OptionsSchema`, never exported from an entry point. Where its output is a public type in `types/`, end it in `satisfies z.ZodType<…>` and add a field to both together.
+- **Defaults:** a shared or public default is a `DEFAULT_*` constant used in `.default(...)`; a public one lives in `types/act.ts`. A default only one schema uses may be a literal there.
+- **Names:** a function that parses and returns the config is `resolve<Type>Config`, camelCase, the one internal exception to naming.md; one that only throws is `check_<thing>`.
+- **Home:** act-core's bags live in `libs/act/src/internal/config.ts`, one section per bag; a satellite keeps its bag next to its entry point.
+- Override Zod's message only where callers read the wording.
