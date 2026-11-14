@@ -24,7 +24,7 @@ Anything reachable from a package's entry points (its `src/index.ts` or a subpat
 
 **Public — `SCREAMING_SNAKE` for exported constants:** `SNAP_EVENT`, `TOMBSTONE_EVENT`, `REDACTED`, `SHREDDED`, `DEFAULT_*`.
 
-**Internal — short snake_case, no exceptions:**
+**Internal — short snake_case, with one exception:** core's config resolvers, `resolve<Type>Config` in `internal/config.ts`, are camelCase (see [config-validation.md](config-validation.md)); every other internal name is snake_case:
 
 - Internal helper functions: `run_close_cycle`, `classify_registry`, `compute_backoff_delay`, `build_handle`, `merge_event_register`, `current_version_of`.
 - Local variables: `event_to_state`, `last_event_name`, `stream_info`, `raw_body`, `headers_bag`.

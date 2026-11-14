@@ -78,10 +78,8 @@ export class CsvFile implements EventSource, EventSink {
       const event: Committed<E, keyof E> = {
         id: Number.parseInt(fields[0]!, 10),
         name: fields[1]! as keyof E,
-        // Revive dates like every Store adapter does — a Date in an event
-        // payload must not depend on whether it came back through a store or
-        // through a CSV restore. The `created` column below has
-        // always been parsed explicitly; the JSON columns were missed.
+        // Plain JSON, as every store returns it: a date in `data` stays its
+        // ISO string here, and a load revives it from the event's schema.
         data: JSON.parse(fields[2]!),
         stream: fields[3]!,
         version: Number.parseInt(fields[4]!, 10),

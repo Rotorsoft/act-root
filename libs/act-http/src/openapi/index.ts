@@ -345,7 +345,7 @@ const OpenAPIOptionsSchema = z.object({
     .optional(),
 });
 
-function validate_options(options: OpenAPIOptions): void {
+function check_options(options: OpenAPIOptions): void {
   OpenAPIOptionsSchema.parse({
     info: { title: options.info?.title, version: options.info?.version },
     servers: options.servers,
@@ -678,7 +678,7 @@ export function openapi<TApp extends Pick<ActSurface, "registry">>(
   app: TApp,
   options: OpenAPIOptions
 ): OpenAPIDocument {
-  validate_options(options);
+  check_options(options);
   const base_path = options.basePath ?? DEFAULT_BASE_PATH;
   const paths: Record<string, OpenAPIPathItem> = {};
   const state_schemas: Record<string, Record<string, unknown>> = {};

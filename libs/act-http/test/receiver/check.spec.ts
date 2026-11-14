@@ -34,6 +34,18 @@ describe("checkWebhook", () => {
       expect(() => middleware({ store, secret: "" })).toThrow();
   });
 
+  it("refuses a bad verify.maxAgeSeconds when a middleware is built, not per request", () => {
+    const store = freshStore();
+    for (const maxAgeSeconds of [Number.NaN, -1])
+      for (const middleware of [express, fastify, hono, trpc])
+        expect(() =>
+          middleware({ store, secret: "s", verify: { maxAgeSeconds } })
+        ).toThrow();
+    expect(() =>
+      express({ store, secret: "s", verify: { maxAgeSeconds: 0 } })
+    ).not.toThrow();
+  });
+
   describe("happy path", () => {
     it("returns { ok: true, key, deduped: false } on first claim with no secret", async () => {
       const store = freshStore();

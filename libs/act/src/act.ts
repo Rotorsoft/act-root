@@ -13,7 +13,9 @@ import {
   run_close_cycle,
 } from "./internal/close-cycle.js";
 import {
+  check_scan_options,
   check_store,
+  check_target,
   DEFAULT_LEASE_MILLIS,
   MAX_SHUTDOWN_GRACE_MS,
   resolveAutocloseConfig,
@@ -21,7 +23,6 @@ import {
   resolveDrainConfig,
   resolveSettleConfig,
   resolveShutdownConfig,
-  resolveTargetConfig,
 } from "./internal/config.js";
 import {
   CorrelateCycle,
@@ -1285,6 +1286,7 @@ export class Act<
     opts: ScanOptions = {},
     sink?: EventSink
   ): Promise<ScanResult> {
+    check_scan_options(opts);
     return this._scoped(async () => {
       const started = Date.now();
       // Dry-run: count what a restore would land, touching no sink.
@@ -1411,7 +1413,7 @@ export class Act<
    * @see {@link Store.prioritize} for the underlying primitive
    */
   async prioritize(filter: StreamFilter, priority: number): Promise<number> {
-    resolveTargetConfig({ priority });
+    check_target({ priority });
     return this._scoped(() => store().prioritize(filter, priority));
   }
 
