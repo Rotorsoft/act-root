@@ -63,8 +63,10 @@ export type ScanOptions = {
   /**
    * Per-batch row count for the scan pagination loop. Each
    * call to `source.query` requests `limit: batch_size` and `after:
-   * <last id seen>`. Default `500`. Lower values trade round trips for
-   * memory; higher values approach the cost of an unbounded query.
+   * <last id seen>`. Default `500`, an integer of at least 1 (anything
+   * else throws before the sink is touched). Lower values trade round
+   * trips for memory; higher values approach the cost of an unbounded
+   * query.
    */
   readonly batch_size?: number;
 

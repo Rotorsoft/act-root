@@ -13,6 +13,7 @@ import {
   run_close_cycle,
 } from "./internal/close-cycle.js";
 import {
+  check_scan_options,
   check_store,
   DEFAULT_LEASE_MILLIS,
   MAX_SHUTDOWN_GRACE_MS,
@@ -1285,6 +1286,7 @@ export class Act<
     opts: ScanOptions = {},
     sink?: EventSink
   ): Promise<ScanResult> {
+    check_scan_options(opts);
     return this._scoped(async () => {
       const started = Date.now();
       // Dry-run: count what a restore would land, touching no sink.
