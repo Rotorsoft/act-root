@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v2.1.7](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v2.1.6...@rotorsoft/act-v2.1.7) (2026-11-14)
+
+
+### Bug Fixes
+
+* **act:** refuse a restore batch_size that isn't a positive integer ([#2503](https://github.com/Rotorsoft/act-root/issues/2503)) ([d2ba7df](https://github.com/Rotorsoft/act-root/commit/d2ba7df2778658831c8032d0d2cd3b0a2ef66c81))
+
 # [@rotorsoft/act-v2.1.6](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v2.1.5...@rotorsoft/act-v2.1.6) (2026-11-14)
 
 
