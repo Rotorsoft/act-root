@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v2.1.6](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v2.1.5...@rotorsoft/act-v2.1.6) (2026-11-14)
+
+
+### Bug Fixes
+
+* **act:** finish [#2483](https://github.com/Rotorsoft/act-root/issues/2483)'s docs, and make the autoclose retry tests depend on the retry's own wake ([#2501](https://github.com/Rotorsoft/act-root/issues/2501)) ([bd0dc2a](https://github.com/Rotorsoft/act-root/commit/bd0dc2a6ed609c4eb7b3599459328193781d395a)), closes [#2482](https://github.com/Rotorsoft/act-root/issues/2482)
+
 # [@rotorsoft/act-v2.1.5](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v2.1.4...@rotorsoft/act-v2.1.5) (2026-11-13)
 
 
