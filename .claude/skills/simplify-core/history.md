@@ -13,17 +13,17 @@ Least recently run goes next. A lens with no accepted proposal in its last three
 | Hotspots (tool) | 2026-10-20 | 5 | 1 | retired 2026-10-20: two runs with no proposal; every branch in the hot functions (correlate, action, drain) is a separate rule |
 | File budget | 2026-11-12 | 12 | 1 | active (10 over 300 code lines; event-sourcing.ts, types/builders.ts and act-builder.ts grew; the restore types can leave types/action.ts (#2465)) |
 | Comment noise | 2026-11-12 | 12 | 11 | active (core ticket refs 2, both RFC 2411 from #2450; one doc detached by #2459) |
-| Concepts and options | 2026-11-12 | 12 | 3 | active (core's bags unchanged; act-http's two bags unvalidated, a NaN `maxAgeSeconds` turns off replay protection) |
+| Concepts and options | 2026-11-14 | 13 | 3 | active (12 option checks in five packages, four shapes; the rule no longer says what the code does (#2495); restore `batch_size` unvalidated (#2491)) |
 | Core or decorator? | 2026-10-15 | 3 | 0 | retired 2026-10-15: three runs, findings only (PII, audit, breaker, lanes stay; priority is a major-version question) |
 | DRY across adapters and builders | 2026-11-12 | 12 | 18 | active (every store calls core's helpers; the guard still matches only old spellings, 7 of 8 rows (#2460)) |
-| Reading path | 2026-11-12 | 11 | 3 | active (path unchanged: 13 files, 2 quickstart imports; seven doc pages name things the code doesn't have) |
+| Reading path | 2026-11-14 | 12 | 3 | active (do/settle unchanged: 13 files, ~33 names; restore → scan 7 files, ~15 local names in one 165-line loop) |
 | Newcomer test (quarterly) | 2026-10-17 | 2 | 0 | active (21 concepts, 3 imports; a package.json without name/version crashes) |
-| Tests by concept | 2026-11-11 | 11 | 20 | active (4 of 4 full runs green, 0 time-budget tests under an injected stall; four specs repeat core or the TCK) |
+| Tests by concept | 2026-11-14 | 12 | 20 | active (4 of 4 full runs green, 14–15 s; the autoclose retry tests passed with the wake removed; priority.spec repeats the TCK (#2497)) |
 | Mutation evidence (monthly, CI) | never | 0 | 0 | retired: setup removed (#1805), see baselines below |
 | Packages earn their place | 2026-10-15 | 4 | 0 | retired 2026-10-15: four runs, no proposal (removal is ruled out; act-tck churn is the snapshot, now P2026-10-15p-1) |
 | Infra | 2026-11-12 | 12 | 2 | active (a lib README edit skips `check:readmes`; the docs tsconfigs copy the paths and drifted (#2461, #2463)) |
-| One source of truth | 2026-11-12 | 12 | 8 | active (docs and the scaffold skill bind SIGTERM the framework already binds; a stale Store contract copy; port topics written up to 5 times) |
-| Examples | 2026-11-12 | 11 | 3 | active (recipes green, 55 tests; the correlate → drain loop tip races the background settle; 44 of 259 snippets type-checked) |
+| One source of truth | 2026-11-14 | 13 | 8 | active (#2483 left five stale passages; recipes resumed a failed archive with a call that truncates without one) |
+| Examples | 2026-11-14 | 12 | 3 | active (recipes 12 files / 55 tests green, packages 205; 160 of 213 no-check snippets type-check, one doesn't (#2494)) |
 | Process | 2026-11-12 | 11 | 9 | active (a scope-less squash releases by path, correctly; history.md 183 KB (#2466)) |
 | Feature interactions | 2026-11-12 | 12 | 20 | active (bad resolver output has three policies: throw stops, bad lane reroutes, bad priority skips and loses the event) |
 
@@ -61,6 +61,7 @@ Where two features meet, and why. The Feature interactions lens reads this first
 | priority check, build / correlate / `app.prioritize` | one `TargetOptionsSchema` (int32) at three entry points | shared primitive | Postgres stores `int`; a static target is checked at build, a dynamic one only at correlate (#2459) |
 | dynamic priority check, checkpoint / work mark | a bad priority skips the event while the checkpoint moves past it, so that reaction never runs it | justified if the user keeps the skip | the user chose skip (#2459); the lane check runs on `default` instead, and the choice is reopened 2026-11-12 |
 | restore causation `-1`, audit / inspector / reducers | a cause a close or prune deleted is `-1` after restore; it matches no event | harmless | probed retire, restart and prune: the same orphan-parent findings before and after; reducers' `-1` is `event.id`, another field |
+| autoclose terminal close, close guard | the terminal close parks one short of the head for a day; the full close's guard skips `__autoclose__:` rows, the windowed close relies on `at` | justified | #2483: the retry needs the pending event; the windowed hold also caps the prune below the head |
 | restore, other workers on the store | another process keeps the correlation lease and scans from its old checkpoint: 10 of 20 restored events run (control, one worker: 20 of 20) | justified, documented | the `Store.restore` port doc says to restart other processes; the user docs don't yet (P2026-10-22-2) |
 | restore, drain in flight | the in-flight `ack` writes nothing into the restored store | harmless | InMemory probe 3 of 3; Postgres not probed |
 | correlate outcome, lane arming / settle progress | Act arms on `marked > 0` and settle counts `read` | resolved | #2084 (P2026-10-22f-2); `subscribed` stays only in `app.correlate()`'s public return |
@@ -120,6 +121,8 @@ The last trusted Stryker scores, recorded when the setup was removed (#1805) bec
 
 Sound proposals that missed a run's cut. The next run ranks these before looking for new ones.
 
+- Move `scan` from `internal/event-sourcing.ts` into `internal/restore.ts` (803 → ~620 lines there); it took four guards in two weeks (#2459, #2482, #2484, #2487), each its own rule. Plainer, not smaller; unsimulated. (P2026-11-14d-4)
+- A `keep` stream that goes quiet stops pruning (#1619, close-policies.md:154). Since #2483 the terminal path parks a day; parking every `keep` stream the same way might drop #1619 and the `waiting` branch, at one `query_stats` per kept stream per day. Needs a probe. (P2026-11-14e-q)
 - Split `types/builders.ts` (604 code lines) by concept: the action-chain type checks (242) and the projection types (124) each in their own file, to about 238. Both moves are needed; measured, not simulated. (P2026-11-12b-s4)
 - Design finding for a future major: a snapshot is an event in the stream, so it takes a version, and every reader of a version has to know about `.snap` (#2384 SSE, #2427 the timer recipe, the 2.0 "pin `version`, not `event.version`" note). Marten keeps snapshots as documents and counts only events; Axon keys them by the last event's sequence in a separate store; Kurrent recommends a separate stream; only Equinox's rolling snapshots on EventStore write into the stream as Act does. Moving them touches load, close seeds, the cache and every adapter. (2026-11-11, interactions)
 
@@ -228,38 +231,7 @@ Runs before the last three are one line each (with their tickets where the entry
 - 2026-11-03 — full run (four specialists: public surface + file budget + reading path, concepts and options + field, source of truth + examples, process + infra). Tickets: #2284–#2293.
 - 2026-11-08 — full run (four specialists: dead code + comment noise, DRY across adapters and builders, tests by concept, feature interactions + field). Tickets: #2383–#2392.
 - 2026-11-10 — full run (four specialists: public surface + file budget + reading path, concepts and options + field, source of truth + examples, process + infra). Tickets: #2412–#2422, and #2411 (3.0) from the conversation.
-
-### 2026-11-11 — full run (four specialists: dead code + comment noise, DRY across adapters and builders, tests by concept, feature interactions + field)
-
-| metric | 2026-11-10 | now | why |
-|---|---|---|---|
-| core lines (libs/act/src) | 18535 | 18519 | #2424 dropped the store helpers' eight `@internal` tags |
-| everything else | | unchanged | 58 runtime exports, 0 ticket refs in core, 41% (28% / 14%) comments, 10 files over 300 code lines, 241 spec files, 5 workflows / 579 lines, CLAUDE.md 28 KB |
-
-Audit: four PRs since the last run, none in product code: #2423 (the run record), #2424 (#2412–#2419), #2425 (#2420), #2426 (#2421, #2422). Core last changed in #2404–#2409, which this run's code lenses audited.
-
-Decisions on P2026-11-10*: all shipped. D1–D4 and 1–4 → #2424; 5 → #2425 (lock-file maintenance dropped, #914 closed); 7 → #2426. 6 was reshaped by its own evidence: merged Renovate PRs since October were 26 `fix(deps)` (they release) and 23 dev-only `chore(deps)` (they don't), and the dev group is what keeps the 23 as chores, so dropping it would release every library weekly; #2426 instead adds one rule that puts the peer packages' minor and patch updates in the weekly non-major group (a local dry run: 8 branches → 6).
-
-Promises kept: #2417 ≈ −26 → −26 lines; #2418 1.9 KB moved → −958 B net; #2419 −1.15 KB → −804 B; #2420 −5 → −5; #2421 −4 rules → +1 rule (above); #2416, 7 stale ranges → 0.
-
-Verified in the main loop before ranking: the timer probe (pin + `.snap`: ticks `[1, 2]`; pin without `.snap`, the state-rule fix with and without, and both redelivery cases green); the three SSE copies against real-time.md; the guard's rules in `architecture.spec.ts:244-257` (no notification row, no `with-broker.ts`, `METACHARACTERS`, no `code_of`); the inspector gate comment against `router.ts:1567` and the stacked doc at `:533`; act-pg's fixed `retry_compat` / `retry_overflow` schemas; no row citing `close-outcome.spec.ts`.
-
-Proposals, ticketed when the report was done. Defects first:
-- D1. The recurring-timer recipe stops for good at the first snapshot → #2427.
-- D2. Three SSE wiring copies (act-http README, `BroadcastChannel` doc, auto-generated-api.md) resync on every snapshot; delete them for links → #2428.
-- D3. The framework-rules guard misses the notification parser and matches two rules only by their old spelling → #2429.
-Simplifications:
-- 1 (t-1–t-4). Four specs that repeat other specs or core (≈ −279) → #2430.
-- 2 (t-5). The adapters' one-off seed tests into seed-upgrade.spec, on suffixed schemas (≈ −90) → #2431.
-- 3 (dc-1, dc-D1, dc-D2). The inspector's comments: a write-gate comment that contradicts the code, a stacked doc, 102 ticket refs → #2432.
-- 4 (dc-2). "Used to" comments in the TCK and SQL adapters (≈ −15–20) → #2433.
-- 5 (dc-3). An act-pg bench script nothing cites, the maintainer's call → #2434.
-
-Findings, not proposed: a snapshot takes a stream version, the root of #2384 and #2427; Marten, Axon and Kurrent keep snapshots out of the event sequence (backlog, a major-version question). The PG differential's `skip: { queryEdgeInputs: true }` hides 15 assertions where only one diverges (published TCK surface). A timed-out property in the store TCK keeps writing into the next property's store, so one timeout reds two tests. Nine register rows marked accidental are fixed in the code; marked resolved.
-
-Lens metrics: knip 39 unused files (one uncited: #2434), 19 unused exports; stacked docs 1 (inspector); ticket refs core 0, inspector 102; 4 of 4 full runs green at 13.6 s, 0 tests near a framework default, 0 time-budget tests under an injected stall; guard rules that fail a differently spelled copy 4 of 6.
-
-Tickets: #2427–#2434.
+- 2026-11-11 — full run (four specialists: dead code + comment noise, DRY across adapters and builders, tests by concept, feature interactions + field). Tickets: #2427–#2434.
 
 ### 2026-11-12 — full run (four specialists: reading path, one source of truth, examples, concepts and options)
 
@@ -331,3 +303,45 @@ Findings, not proposed: a fractional static priority that built on InMemory and 
 Lens metrics: knip 38 files / 19 exports, all known; guard rows that fail a rewritten copy 1 of 8; detached docs 1; CI 808 runs since 10-12, 28 red, never red: paths, snippets and self-test, build, browser-safe, readmes, CLI smokes.
 
 Tickets: #2460–#2467.
+
+### 2026-11-14 — full run (four specialists: tests by concept, concepts and options + field, reading path + one source of truth, examples)
+
+| metric | 2026-11-12 (second) | now | why |
+|---|---|---|---|
+| core lines (libs/act/src) | 18691 | 18726 | #2469, #2482–#2484, #2487 |
+| ticket refs in core source | 2 | 0 | #2469 |
+| files over 300 code lines | 10 | 9 | #2465 (restore types to `types/restore.ts`) |
+| CI workflows / lines | 5 / 579 | 5 / 580 | #2461 (`libs/*/README.md` in the `ci` filter) |
+| docs lines | 9959 | 9973 | the wave 31 fixes' docs |
+| everything else | | unchanged | 59 runtime exports, 41% (28% / 14%) comments, 237 spec files, CLAUDE.md 15 KB |
+
+Audit: #2469, #2470, #2471, #2481 (wave 31 record) and the wave 31 fixes #2482–#2490 since the last run. `scan` took four guards in two weeks (#2459, #2482, #2484, #2487); each is its own rule, not one cancelling another (backlog d-4). #2483 shipped with five stale passages, a stale log line and tests that couldn't fail: a fix on a fix in the same feature, found by this run.
+
+Decisions on P2026-11-12b*: D1 (#2460) rejected and the guard removed: keeping rules in core is a practice the adapters follow, not a test. D2 and 1–4 shipped (#2461 → #2470, #2462/#2464/#2465 → #2469, #2463 → #2470); 5 and 6 shipped (#2466, #2467 → #2471).
+
+Promises kept: #2462 −4 → −4; #2463 −85 → −85; #2465 put `types/action.ts` under the budget (files over 300 code lines 10 → 9); #2466 188 KB → 55 KB.
+
+Verified in the main loop before ranking: every doc defect against its code (`close-cycle.ts:647-650` for the bare `app.close` resume, `close-cycle.md:234`, `error-handling.md:183`, `act.ts:473`, `extension-points.md:170`, `csv.ts:81`, `priority-lanes.md:8`, the archival example's signature and key); `AuditOptions.page_size` read nowhere; `batch_size` reaching the stores unchecked; the autoclose retry tests green with the parked row's wake removed (and red after the rewrite in #2501).
+
+My own defects (#2482, #2483), fixed in #2501, not ticketed: five stale passages and a log line on the autoclose retry and `drop_snapshots`; the recipes' bare `app.close([{ stream }])` resume, which truncates without archiving; the retry tests' wake commit.
+
+Proposals, ticketed when the reports were in. Defects first:
+- D1. Restore `batch_size` is unvalidated; `-1` keeps one event of a wiped store → #2491.
+- D2. `AuditOptions.page_size` does nothing (the maintainer's call), and a NaN audit threshold reports a clean store → #2492.
+- D3. A receiver's `verify.maxAgeSeconds` isn't checked when the middleware is built → #2493.
+- D4. Three passages that contradict the code (`csv.ts` comment, `.priority(n)`, a no-check snippet) → #2494.
+Simplifications:
+- 1 (o-1). Rewrite config-validation.md to say what the code does (−55%), with a naming question → #2495.
+- 2 (o-2). One name, `check_*`, for validators that only throw → #2496.
+- 3 (t-2). Drop the priority.spec blocks the TCK and classify.spec already run (−256 lines, 14 tests) → #2497.
+- 4 (t-3–t-5). Wait on outcomes in the notify and restore tests; two small concept moves → #2498.
+- 5 (d-1–d-3, e2). One write-up each for the archive contract, autoclose, `ScanOptions` and restore paging (≈ −4.5 KB) → #2499.
+- 6 (e-1). The scaffold skill builds timers with `.defer`, not a polling interval → #2500.
+Backlog: d-4 (`scan` to `internal/restore.ts`), e-q (park quiet `keep` streams, needs a probe).
+
+Findings, not proposed: the tRPC `webhookMiddleware` is typed `any`, against the end-to-end typing rule; a shared cross-package validation helper would be new surface; the Postgres test schemas are named per checkout, so concurrent `pnpm test` runs in one tree can collide.
+
+Lens metrics: 4 of 4 full runs green at 14.2–15.2 s, 0 tests near a framework default; option checks 12, in four shapes and five names; numeric options still accepting NaN 3 (low impact) plus #2491–#2493; recipes 55 tests, packages 205; no-check snippets type-checked 160 of 213; reading path do/settle 13 files, restore 7.
+
+Tickets: #2491–#2500, and #2501 (my own fixes).
+
