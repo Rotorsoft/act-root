@@ -72,7 +72,10 @@ export type AuditOptions = {
    * before / etc.). When omitted, the audit scans the whole table.
    */
   query?: Query;
-  /** Pagination size for event scans. Default 500. */
+  /**
+   * @deprecated Has no effect: the audit pages its scans itself. Removed
+   * in 3.0.
+   */
   page_size?: number;
   /** Per-category thresholds; see {@link AuditThresholds}. */
   thresholds?: AuditThresholds;
