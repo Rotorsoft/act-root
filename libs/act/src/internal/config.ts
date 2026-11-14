@@ -102,6 +102,19 @@ export function is_valid_target(options: { priority?: number }): boolean {
   return TargetOptionsSchema.safeParse(options).success;
 }
 
+// Restore — `app.restore(source, options)`. The stores read a falsy limit as
+// "no limit" and stop at `count >= limit`, so a NaN or 0 page reads the whole
+// source at once and a negative or fractional one ends the scan early, after
+// the sink has already been wiped.
+const ScanOptionsSchema = z.object({
+  batch_size: z.number().int().min(1).optional(),
+});
+
+/** Validate a restore's options. Throws `ZodError`. */
+export function check_scan_options(options: { batch_size?: number }): void {
+  ScanOptionsSchema.parse({ batch_size: options.batch_size });
+}
+
 // Action — `.on(entry, options)`. `maxRetries` gates the command retry loop's
 // exit (`attempt >= maxRetries`), so a `NaN` here can spin the loop forever on
 // a contended stream. All fields optional (the argument itself is optional).

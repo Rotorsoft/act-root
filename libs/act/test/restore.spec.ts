@@ -693,6 +693,28 @@ describe("Act.restore (orchestrator)", () => {
     await ctx.dispose();
   });
 
+  it("refuses a batch_size that isn't a positive integer, before touching the store", async () => {
+    const ctx = await sandbox(act().withState(Calculator));
+    try {
+      const stream = "kept-before-restore";
+      await ctx.store.commit(
+        [{ stream, msgs: [{ name: "DigitPressed", data: { digit: "1" } }] }],
+        { correlation: "c", causation: {} }
+      );
+      const source = calc([baseEvent({ id: 1 }), baseEvent({ id: 2 })]);
+      for (const batch_size of [Number.NaN, 0, -1, 1.5])
+        await expect(ctx.app.restore(source, { batch_size })).rejects.toThrow();
+      await expect(
+        ctx.app.restore(source, { batch_size: -1, dry_run: true })
+      ).rejects.toThrow();
+      // Nothing was wiped.
+      const left = await ctx.app.query_array({ stream, stream_exact: true });
+      expect(left).toHaveLength(1);
+    } finally {
+      await ctx.dispose();
+    }
+  });
+
   it("throws when the adapter has no restore capability", async () => {
     const ctx = await sandbox(act().withState(Calculator));
     // Remove the optional method on the scoped store to simulate a
