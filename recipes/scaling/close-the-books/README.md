@@ -103,8 +103,9 @@ declarator with a `.archives(fn)` declarator on the same state.
 The archiver runs inside the close's guard window: tombstone
 committed, archiver awaited, truncate. If it throws, nothing is lost:
 the stream stays guarded and un-truncated, and the policy retries
-the close the next day. To retry sooner, `app.close([{ stream }])`
-resumes it. See
+the close the next day. To retry sooner, pass the archiver:
+`app.close([{ stream, archive }])` (a bare `app.close([{ stream }])`
+truncates with no archive). See
 [recipes/scaling/archival/README.md](../archival/README.md) for the
 recipe and
 [close-policies.md § The archive contract](../../../docs/docs/guides/close-policies.md#the-archive-contract)

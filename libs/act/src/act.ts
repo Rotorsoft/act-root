@@ -470,7 +470,7 @@ export class Act<
             if (error instanceof StoreError) throw error;
             this._logger.error(
               error,
-              `Reaction-requested close of ${targets.map((t) => `"${t.stream}"`).join(", ")} failed and was not retried; close it with app.close(...) once the cause is fixed.`
+              `Reaction-requested close of ${targets.map((t) => `"${t.stream}"`).join(", ")} failed; the policy retries it (a full close the next day, a prune on the stream's next commit), or close it now with app.close(...) once the cause is fixed.`
             );
           }
         },
