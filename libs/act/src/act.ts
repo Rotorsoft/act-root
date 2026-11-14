@@ -14,6 +14,7 @@ import {
 } from "./internal/close-cycle.js";
 import {
   check_store,
+  check_target,
   DEFAULT_LEASE_MILLIS,
   MAX_SHUTDOWN_GRACE_MS,
   resolveAutocloseConfig,
@@ -21,7 +22,6 @@ import {
   resolveDrainConfig,
   resolveSettleConfig,
   resolveShutdownConfig,
-  resolveTargetConfig,
 } from "./internal/config.js";
 import {
   CorrelateCycle,
@@ -1411,7 +1411,7 @@ export class Act<
    * @see {@link Store.prioritize} for the underlying primitive
    */
   async prioritize(filter: StreamFilter, priority: number): Promise<number> {
-    resolveTargetConfig({ priority });
+    check_target({ priority });
     return this._scoped(() => store().prioritize(filter, priority));
   }
 
