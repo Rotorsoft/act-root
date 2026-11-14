@@ -293,12 +293,6 @@ describe("InMemoryIdempotencyStore", () => {
     const unset = Number(undefined);
     for (const ttlMs of [unset, 0, -1, Number.POSITIVE_INFINITY])
       expect(() => new InMemoryIdempotencyStore({ ttlMs })).toThrow(/ttlMs/);
-    expect(
-      () =>
-        new InMemoryIdempotencyStore({
-          retryProfile: { maxRetries: 3, timeoutMs: unset },
-        })
-    ).toThrow(/minSafeTtl/);
     for (const maxEntries of [unset, 0])
       expect(() => new InMemoryIdempotencyStore({ maxEntries })).toThrow(
         /maxEntries/

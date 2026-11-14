@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Committed, EventSource, Query, Schemas } from "@rotorsoft/act";
@@ -349,16 +349,6 @@ describe("CsvFile via Act.restore as a sink", () => {
  * Verifies the source file used by the CSV round-trip writer
  * lifecycle is clean: temp dir gone after `afterAll`.
  */
-describe("file lifecycle", () => {
-  it("temp dir setup + teardown round-trip", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "act-csv-life-"));
-    const path = join(dir, "x.csv");
-    await writeFile(path, "");
-    await rm(dir, { recursive: true, force: true });
-    expect(true).toBe(true);
-  });
-});
-
 describe("CsvFile as a restore source at the page size", () => {
   const csv = (n: number) =>
     [

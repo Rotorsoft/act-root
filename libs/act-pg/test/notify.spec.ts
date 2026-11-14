@@ -183,8 +183,16 @@ describe("PostgresStore.notify", () => {
         [{ stream: "stream-no-notify", msgs: [{ name: "Quiet", data: {} }] }],
         { correlation: "c", causation: {} }
       );
-      await sleep(200);
-      expect(received).toHaveLength(0);
+      // Postgres delivers in commit order, so once a later notifying commit
+      // arrives, a notification for the quiet one would have arrived first.
+      await writer.commit(
+        [{ stream: "stream-fence", msgs: [{ name: "Fence", data: {} }] }],
+        { correlation: "c", causation: {} }
+      );
+      await vi.waitFor(() => expect(received).toHaveLength(1), {
+        timeout: 1_500,
+      });
+      expect(received.map((n) => n.stream)).toEqual(["stream-fence"]);
     } finally {
       await dispose();
       await optOutWriter.dispose();
@@ -210,7 +218,6 @@ describe("PostgresStore.notify", () => {
         causation: {},
       }
     );
-    await sleep(100);
     // Second commit should still be delivered to the recovered handler.
     await writer.commit(
       [
