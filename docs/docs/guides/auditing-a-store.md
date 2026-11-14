@@ -196,7 +196,7 @@ for await (const f of app.audit([
 
 ## Thresholds
 
-All thresholds are operator-tunable per call:
+All thresholds are operator-tunable per call. Each numeric one must be a number of at least 0: a `NaN` or a negative value throws, since a `NaN` cutoff would match nothing and report a clean store.
 
 | Threshold | Default | Used by |
 |---|---|---|

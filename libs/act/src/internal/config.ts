@@ -102,6 +102,25 @@ export function is_valid_target(options: { priority?: number }): boolean {
   return TargetOptionsSchema.safeParse(options).success;
 }
 
+// Audit — `app.audit(categories, options)`. Each threshold is a cutoff, and
+// every comparison with NaN is false, so a NaN threshold reports a clean
+// store.
+const AuditOptionsSchema = z.object({
+  idle_days: z.number().min(0).optional(),
+  restart_min: z.number().min(0).optional(),
+  stuck_minutes: z.number().min(0).optional(),
+  near_block: z.number().min(0).optional(),
+  deprecated_min: z.number().min(0).optional(),
+  drift_min: z.number().min(0).optional(),
+});
+
+/** Validate an audit's thresholds. Throws `ZodError`. */
+export function check_audit_options(options?: {
+  thresholds?: Record<string, unknown>;
+}): void {
+  AuditOptionsSchema.parse(options?.thresholds ?? {});
+}
+
 // Action — `.on(entry, options)`. `maxRetries` gates the command retry loop's
 // exit (`attempt >= maxRetries`), so a `NaN` here can spin the loop forever on
 // a contended stream. All fields optional (the argument itself is optional).

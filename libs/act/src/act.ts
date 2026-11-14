@@ -13,6 +13,7 @@ import {
   run_close_cycle,
 } from "./internal/close-cycle.js";
 import {
+  check_audit_options,
   check_store,
   DEFAULT_LEASE_MILLIS,
   MAX_SHUTDOWN_GRACE_MS,
@@ -1379,6 +1380,7 @@ export class Act<
     categories?: AuditCategory[],
     options?: AuditOptions
   ): AsyncIterable<AuditFinding> {
+    check_audit_options(options);
     // Step the generator inside `_scoped`: its body runs lazily in the
     // consumer's frame, which would otherwise resolve the wrong store.
     const it = audit(this._audit_deps, categories, options)[
