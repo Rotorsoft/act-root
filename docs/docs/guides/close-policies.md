@@ -236,12 +236,12 @@ A stream whose name starts with `^` or ends with `$` has no autoclose: a store w
 
 `.autocloses(policy)` compiles to an internal **reaction**, synthesized at `act().build()` against every event the state owns. There is no sweep and no ticker iterating the whole store. When the aggregate commits, the reaction fires and evaluates the policy against the aggregate's **live head** (read via `query_stats`, so a reopened stream re-evaluates correctly), then does one of three things:
 
-1. **The terminate policy matches** → the reaction throws an internal close signal. The orchestrator runs the candidate through `run_close_cycle` — the same pipeline `app.close` uses — so the safety partition, tombstone guard, archive-while-guarded, and atomic truncate all apply unchanged, and a `closed` lifecycle event fires with the `CloseResult`. The reaction keeps the terminal event pending and looks again the next day: a close skipped because another reaction on the stream was still behind (a `.defer`red one, one on another lane, one retrying), or a failed archive, is retried then, and a closed stream leaves nothing to do.
-2. **A `keep` window is declared and the oldest domain event has aged out** → the reaction stages a *windowed* close with `before = now − keep`: the store prunes the prefix behind the closest safe snapshot (capped at the laggiest consumer's watermark), the stream stays live, and the windowed entry rides the same `closed` lifecycle event with its `before` echoed.
-3. **Neither fires but a due-time is derivable** (`after` cooldown, `keep` window, or both) → the reaction *defers* to the earliest of `head.created + after` and `tail.created + keep`. The drain holds the event pending without advancing the watermark or bumping `retry`, persists the due-time in the store, and re-delivers when it passes. The deferral is durable shared state — every competing worker honors it — with a per-worker timer layered on top to wake the local worker promptly.
-4. **No due-time is derivable** (`is` / `reaches` only) → the reaction acks and waits for the next event on the aggregate to re-trigger.
+1. **The terminate policy matches** → the stream goes through the same close cycle `app.close` uses, and a `closed` event fires. The reaction looks again the next day, so a close skipped for another reaction still behind, or whose archive threw, is retried then.
+2. **A `keep` window has aged out** → a *windowed* close prunes the prefix behind the closest safe snapshot; the stream stays live.
+3. **Neither, but a due-time is derivable** (an `after` cooldown or the `keep` age-out) → the reaction defers to the earliest one, a persisted schedule every worker honors.
+4. **No due-time** (`is` / `reaches` only) → it waits for the next event on the aggregate.
 
-Critically, the autoclose reaction runs on a **synthetic per-aggregate stream** (`__autoclose__:<stream>`) so its lease and deferrals never interfere with the aggregate's own reactions. For the full state machine, see [Online close-the-books in the close-cycle architecture](../architecture/close-cycle.md#online-close-the-books).
+The mechanism, its flowchart and the synthetic `__autoclose__:<stream>` that keeps it off the aggregate's own reactions are in [Close cycle § Autoclose as a synthesized reaction](../architecture/close-cycle.md#autoclose-as-a-synthesized-reaction).
 
 ### Off-hours window
 

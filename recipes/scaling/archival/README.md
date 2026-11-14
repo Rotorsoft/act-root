@@ -16,12 +16,7 @@ If none of these apply, drop `.archives(...)` and let `.autocloses({...})` trunc
 
 ## The contract
 
-The `.archives(fn)` declarator is documented in [docs/docs/guides/close-policies.md § The archive contract](../../../docs/docs/guides/close-policies.md). The four invariants the cycle gives you, restated for operators:
-
-1. **The archiver runs inside the guard window.** A tombstone marker has already been committed with `expectedVersion`, so no new writes can land on the stream while the archiver is running. The events you read are the final ones.
-2. **A thrown archiver leaves the stream un-truncated.** The error propagates to the cycle's `closed`-emission path; no events are deleted and the stream stays guarded, refusing new writes. The policy retries the close the next day (archive, then truncate); to retry sooner, call `app.close([{ stream, archive }])` with your archiver. A bare `app.close([{ stream }])` truncates with no archive: an explicit close never runs the state's `.archives`. A network blip on the S3 PUT doesn't lose data.
-3. **The host owns idempotency.** A retry can call the archiver a second time on the same stream. Most archivers achieve idempotency by using the stream name as the destination key: `tickets/${stream}.jsonl` is the same key every retry, so the second PUT overwrites the first cleanly. If your destination is append-only (an analytics warehouse, a Kafka topic), put a dedup key in the payload.
-4. **Resolve only when the data is durable.** The framework doesn't check whether S3 actually accepted the bytes. It only knows the archiver resolved. Don't ack from a queue ("I queued the write, the broker will handle it") and then return — the truncate will fire while the broker is still flushing. Wait for the storage backend to confirm, then resolve.
+[close-policies.md § The archive contract](../../../docs/docs/guides/close-policies.md#the-archive-contract) owns it: the archiver runs inside the guard window, a throw leaves the stream guarded and un-truncated and the policy retries the next day, the host owns idempotency, and the archiver resolves only once the data is durable. To retry sooner by hand, pass the archiver: `app.close([{ stream, archive }])`. A bare `app.close([{ stream }])` never runs `.archives`, so it truncates with no copy in cold storage.
 
 The archiver also holds the guard. A 10-second archiver delays the truncate by 10 seconds and adds 10 seconds to the cycle's flush. Keep it under a few hundred milliseconds where you can; stage the heavy work to a queue if it can't.
 
@@ -37,7 +32,7 @@ The shape that fits 80% of cases: dump each stream as one JSONL object per event
 
 **Throw on AWS errors.** Catch nothing. If `s3.send(...)` rejects, let it bubble — the framework's safety property turns a thrown archiver into "leave the stream alone" until the policy retries the next day, or you resume it with `app.close([{ stream, archive }])`. Swallowing the error and resolving would silently truncate the stream with no archive in cold storage.
 
-The sample at [examples/s3-jsonl-archiver.ts](examples/s3-jsonl-archiver.ts) exports a model-agnostic `archiveStreamToS3(stream)` function: it queries the stream's events by name and uploads them as JSONL, so it works for any state. Copy it into your service and wire it with `.archives(...)`.
+The sample at [examples/s3-jsonl-archiver.ts](examples/s3-jsonl-archiver.ts) exports a model-agnostic `archiveStreamToS3(stream, head)` function: it queries the stream's events by name and uploads them as JSONL, so it works for any state. Copy it into your service and wire it with `.archives(...)`.
 
 ## Pair with `.autocloses({...})`
 
@@ -57,7 +52,7 @@ export const TicketCreation = state({ Ticket: TicketCreationState })
   .build();
 ```
 
-The cycle does the rest — predicate matches, the archiver ships the stream's events to `${stream}.jsonl` in S3, truncate fires. See the full function at [examples/s3-jsonl-archiver.ts](examples/s3-jsonl-archiver.ts).
+The cycle does the rest — predicate matches, the archiver ships the stream's events to `tickets/${stream}-${head.id}.jsonl` in S3, truncate fires. See the full function at [examples/s3-jsonl-archiver.ts](examples/s3-jsonl-archiver.ts).
 
 ## The rolling-window variant: archive the prefix, keep the tail
 
