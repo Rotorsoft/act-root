@@ -179,9 +179,9 @@ The section below is the custom-server path — the same loop the generator writ
 `act-http/sse` doesn't dictate the wire format — your tRPC handler decides. A typical pattern yields the cached state on connect, then forwards each patch message. Wrap the two shapes in a small app-level envelope so the client can tell them apart:
 
 ```typescript no-check
-import type { PatchMessage } from "@rotorsoft/act-http/sse";
+import type { BroadcastState, PatchMessage } from "@rotorsoft/act-http/sse";
 
-type Envelope<S> =
+type Envelope<S extends BroadcastState> =
   | { kind: "snap"; state: S }
   | { kind: "patch"; msg: PatchMessage<S> };
 
