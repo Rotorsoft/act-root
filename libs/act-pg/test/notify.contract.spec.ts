@@ -1,26 +1,3 @@
-/**
- * Conformance tests for cross-process NOTIFY semantics that live outside
- * the shared TCK (they need two store instances against the same physical
- * store — see the "needs two processes" note in
- * `libs/act-tck/src/store-tck.ts`). Two contracts the orchestrator relies
- * on are pinned here, against the docker PG instance (port 5431):
- *
- * 1. **Per-instance self-filtering.** Every `PostgresStore` carries a
- *    per-instance `_by` UUID; the LISTEN handler skips payloads where
- *    `by === this._by`, so a store instance never wakes itself — local
- *    commits already arm the drain via `do()`.
- * 2. **8KB payload cap → poll fallback.** PG rejects NOTIFY payloads at
- *    or above 8000 bytes ("payload string too long"), and inside the
- *    commit transaction that error would abort the whole INSERT batch.
- *    `commit()` measures the payload and skips the NOTIFY when it would
- *    not fit — the commit succeeds, no notification is delivered, and
- *    the events remain discoverable via the poll path (subscribe/claim/
- *    query), preserving at-least-once delivery.
- *
- * Complements `notify.spec.ts`, which covers delivery, disposal, and
- * malformed-payload robustness on a single listener.
- */
-import { sleep } from "@rotorsoft/act";
 import { PostgresStore } from "../src/postgres-store.js";
 import { schema } from "./schema.js";
 
@@ -88,8 +65,16 @@ describe("PostgresStore notify contract", () => {
     expect(committed).toHaveLength(100);
 
     // Delivery degrades: no notification goes out for the oversize batch.
-    await sleep(200);
-    expect(seen_by_b).toHaveLength(0);
+    // Postgres delivers in commit order, so a later small commit arriving
+    // alone shows none went out for it.
+    await a.commit(
+      [{ stream: "stream-fence", msgs: [{ name: "Fence", data: {} }] }],
+      { correlation: "c", causation: {} }
+    );
+    await vi.waitFor(() => expect(seen_by_b).toHaveLength(1), {
+      timeout: 1_500,
+    });
+    expect(seen_by_b.map((n) => n.stream)).toEqual(["stream-fence"]);
 
     // ...but never lost: the poll path still discovers the stream
     // (subscribe + claim, the drain's polling primitives) and every

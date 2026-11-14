@@ -161,25 +161,26 @@ On SIGINT or SIGTERM the framework's own handler runs `dispose()`, which stops t
 
 ## Automated Jobs
 
-Query projected read models and dispatch actions on schedules:
+A timer is a deferred reaction, not a poll: the due-time is stored with the subscription, every worker honors it, and nothing scans a read model that may lag. Close an item when its `closeAfter` passes:
 
 ```typescript
-import { systemActor } from "@my-app/domain";
+import { slice } from "@rotorsoft/act";
+import { Item, systemActor } from "@my-app/domain";
 
-async function autoClose(batchSize: number) {
-  const stale = await db.select()
-    .from(items)
-    .where(lt(items.closeAfter, Date.now()))
-    .limit(batchSize);
-
-  for (const item of stale) {
-    await app.do("CloseItem", { stream: item.id, actor: systemActor }, {})
-      .catch(console.error);
-  }
-}
-
-setInterval(() => autoClose(10), 15_000);
+export const ItemTimers = slice()
+  .withState(Item)
+  .on("ItemOpened")
+  .defer((event) => ({ at: event.data.closeAfter }))
+  .do(async function autoClose(event, _target, app) {
+    const { state } = await app.load(Item, event.stream);
+    if (state.closed) return;
+    await app.do("CloseItem", { stream: event.stream, actor: systemActor }, {});
+  })
+  .to((event) => ({ target: `close:${event.stream}`, source: event.stream }))
+  .build();
 ```
+
+For a timer that repeats (a daily nudge until resolved), see [recipes/temporal/recurring-timers](../../../recipes/temporal/recurring-timers/README.md).
 
 ## Error Handling in Production
 

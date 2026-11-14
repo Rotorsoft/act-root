@@ -93,13 +93,26 @@ export function resolveReactionConfig(
 const TargetOptionsSchema = z.object({ priority: z.int32().optional() });
 
 /** Validate a reaction target's options. Throws `ZodError`. */
-export function resolveTargetConfig(options: { priority?: number }): void {
+export function check_target(options: { priority?: number }): void {
   TargetOptionsSchema.parse(options);
 }
 
-/** Whether a resolved target's options pass {@link resolveTargetConfig}. */
+/** Whether a resolved target's options pass {@link check_target}. */
 export function is_valid_target(options: { priority?: number }): boolean {
   return TargetOptionsSchema.safeParse(options).success;
+}
+
+// Restore — `app.restore(source, options)`. The stores read a falsy limit as
+// "no limit" and stop at `count >= limit`, so a NaN or 0 page reads the whole
+// source at once and a negative or fractional one ends the scan early, after
+// the sink has already been wiped.
+const ScanOptionsSchema = z.object({
+  batch_size: z.number().int().min(1).optional(),
+});
+
+/** Validate a restore's options. Throws `ZodError`. */
+export function check_scan_options(options: { batch_size?: number }): void {
+  ScanOptionsSchema.parse({ batch_size: options.batch_size });
 }
 
 // Audit — `app.audit(categories, options)`. Each threshold is a cutoff, and

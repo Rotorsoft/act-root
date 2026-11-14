@@ -5,7 +5,7 @@ title: Reaction priority lanes
 
 # Reaction priority lanes
 
-How an operator biases the `claim()` lagging-frontier ordering when the worker is saturated. The short version: `.priority(n)` on the resolver target adds an `ORDER BY priority DESC, at ASC` clause to the lagging CTE so a high-priority replay wins lease slots before equal-watermark peers. Default `0`. Only meaningful under contention.
+How an operator biases the `claim()` lagging-frontier ordering when the worker is saturated. The short version: a `priority` on the resolver target (`.to({ target, priority })`) adds an `ORDER BY priority DESC, at ASC` clause to the lagging CTE so a high-priority replay wins lease slots before equal-watermark peers. Default `0`. Only meaningful under contention.
 
 :::note Priority is intra-lane
 

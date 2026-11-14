@@ -172,7 +172,7 @@ The orchestrator-side validator lives in `scan` (`libs/act/src/internal/event-so
 - `event_migrations` and `stream_rename` — transfer-time schema migration ([ACT-1126](https://github.com/Rotorsoft/act-root/issues/785)). Schema-guarded event rewrites + bulk stream rename for tenant relocation; see [Concepts → Migration overlay](../concepts/event-sourcing.md#migration-overlay).
 - `on_progress` — one callback per event (caller throttles/debounces)
 - `dry_run` — validate the source without touching the store (same scan loop, no transaction, no sink call; powers the inspector's transfer-preview)
-- `batch_size` — pagination chunk size for the underlying `source.query` calls
+- `batch_size` — pagination chunk size for the underlying `source.query` calls; an integer of at least 1, checked before the sink is touched
 
 All transforms run inside scan's existing pagination loop and atomic-rollback contract — any throw aborts the whole pass.
 

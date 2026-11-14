@@ -1,5 +1,6 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { z } from "zod";
+import { MaxAgeSecondsSchema } from "./options.js";
 
 /**
  * Outcome of {@link verifyWebhook}. Either the request signature
@@ -36,10 +37,9 @@ export type VerifyOptions = {
   now?: number;
 };
 
-// A NaN or infinite bound makes both window checks false, so a replay of
-// any age would pass: refuse it at the call instead.
+// Refused at the call, so a bad bound can't quietly accept old replays.
 const VerifyOptionsSchema = z.object({
-  maxAgeSeconds: z.number().min(0).default(300),
+  maxAgeSeconds: MaxAgeSecondsSchema,
   now: z.number(),
 });
 
