@@ -164,6 +164,12 @@ describe("minSafeTtl", () => {
   });
 
   describe("edge cases", () => {
+    it("refuses a profile that gives a NaN window", () => {
+      expect(() =>
+        minSafeTtl({ maxRetries: 3, timeoutMs: Number.NaN })
+      ).toThrow(/minSafeTtl/);
+    });
+
     it("maxRetries=0 collapses to a single attempt × safetyFactor", () => {
       // backoff_sum = 0 (no retries to delay before)
       // timeout_sum = 1 * 500 = 500

@@ -878,6 +878,15 @@ describe("restore from a real Store source", () => {
 });
 
 describe("restore into a store that already correlated", () => {
+  // Correlate and drain until a pass leases nothing, not a fixed count.
+  const walk = async (app: {
+    correlate: () => Promise<unknown>;
+    drain: () => Promise<{ leased: unknown[] }>;
+  }) => {
+    do await app.correlate();
+    while ((await app.drain()).leased.length > 0);
+  };
+
   const Tick = state({ RTick: z.object({ n: z.number() }) })
     .init(() => ({ n: 0 }))
     .emits({ Ticked: z.object({}) })
@@ -922,10 +931,7 @@ describe("restore into a store that already correlated", () => {
     await app.restore(await backup(), {});
     for (let i = 0; i < 3; i++)
       await app.do("tick", { stream: "after", actor: who }, {});
-    for (let i = 0; i < 4; i++) {
-      await app.correlate();
-      await app.drain();
-    }
+    await walk(app);
     await done();
     // 3 restored + 3 new, all reached their reaction
     expect(seen).toBe(6);
@@ -976,10 +982,7 @@ describe("restore into a store that already correlated", () => {
     release();
     await restoring;
     await in_flight;
-    for (let i = 0; i < 4; i++) {
-      await app.correlate();
-      await app.drain();
-    }
+    await walk(app);
     await done();
     // only the 3 restored events, the 10 before were replaced
     expect(seen).toBe(3);
@@ -1051,10 +1054,7 @@ describe("restore into a store that already correlated", () => {
     g.open();
     await restoring;
     await in_flight;
-    for (let i = 0; i < 4; i++) {
-      await app.correlate();
-      await app.drain();
-    }
+    await walk(app);
     await done();
     expect(seen).toBe(3);
   });
@@ -1101,10 +1101,7 @@ describe("restore into a store that already correlated", () => {
     expect(await app.correlate()).toEqual({ subscribed: 0, last_id: 9 });
     g.open();
     await restoring;
-    for (let i = 0; i < 6; i++) {
-      await app.correlate();
-      await app.drain();
-    }
+    await walk(app);
     await done();
     expect(seen).toBe(20);
   });
@@ -1167,10 +1164,7 @@ describe("restore into a store that already correlated", () => {
     g.open();
     await restoring;
     await in_flight;
-    for (let i = 0; i < 6; i++) {
-      await app.correlate();
-      await app.drain();
-    }
+    await walk(app);
     await app.shutdown();
     expect(seen).toBe(20);
   });
