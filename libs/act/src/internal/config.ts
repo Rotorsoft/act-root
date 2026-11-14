@@ -93,11 +93,11 @@ export function resolveReactionConfig(
 const TargetOptionsSchema = z.object({ priority: z.int32().optional() });
 
 /** Validate a reaction target's options. Throws `ZodError`. */
-export function resolveTargetConfig(options: { priority?: number }): void {
+export function check_target(options: { priority?: number }): void {
   TargetOptionsSchema.parse(options);
 }
 
-/** Whether a resolved target's options pass {@link resolveTargetConfig}. */
+/** Whether a resolved target's options pass {@link check_target}. */
 export function is_valid_target(options: { priority?: number }): boolean {
   return TargetOptionsSchema.safeParse(options).success;
 }
