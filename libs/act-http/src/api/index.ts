@@ -46,11 +46,9 @@ export {
   DEFAULT_SSE_HEARTBEAT_MS,
   DEFAULT_SSE_MAX_CONNECTIONS,
   DEFAULT_SSE_MAX_PENDING_PER_CONNECTION,
-  fireAndForget,
   type RunSseOptions,
   runSseSubscription,
   type SseAccounting,
-  SseConnectionCounter,
   type SseOptions,
   type SseSubscriptionFrame,
 } from "./sse-wiring.js";
