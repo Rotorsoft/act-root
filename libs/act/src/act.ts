@@ -341,6 +341,7 @@ export class Act<
           .map((l) => `"${l}"`)
           .join(", ")}`
       );
+    check("act", options);
     // Every Act runs in its own ports frame (the singletons when unscoped),
     // so a shared Act never inherits its caller's frame.
     if (options.scoped) check("store", options.scoped.store);
