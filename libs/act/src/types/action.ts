@@ -480,18 +480,6 @@ export type PatchHandlers<TState extends Schema, TEvents extends Schemas> = {
 };
 
 /**
- * Internal marker for the framework-default passthrough reducer
- * (`({ data }) => data`). Custom user-supplied reducers never carry this
- * flag. The builder merger uses it to resolve patch conflicts between
- * partial states: a passthrough always yields to a custom reducer.
- *
- * @internal
- */
-export type PassthroughPatchHandler = ((event: {
-  data: unknown;
-}) => unknown) & { readonly _passthrough: true };
-
-/**
  * Handles an action, producing the events to emit, or `undefined` (or `[]`) to commit nothing.
  * @template TState - State schema.
  * @template TEvents - Event schemas.
