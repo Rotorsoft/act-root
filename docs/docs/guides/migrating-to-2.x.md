@@ -161,7 +161,7 @@ A 2.x minor gives each audience its own entry point ([RFC 2411](https://github.c
 | `DEFAULT_QUERY_STREAMS_LIMIT`, `ActorSchema`, `TargetSchema`, `EventMetaSchema`, `CausationEventSchema`, `CommittedMetaSchema`, `QuerySchema`, `Environments`, `LogLevels`, `ExitCodes`, `DEFAULT_LANE`, `DEFAULT_MAX_SUBSCRIBED_STREAMS`, `DEFAULT_SETTLE_DEBOUNCE_MS` | the same name from `@rotorsoft/act/types` |
 | `PackageSchema`, `default_scope`, `dateReviver`, `extend` | nothing: `config()` and `act().build()` validate for you, `store()`/`cache()`/`log()` give the unscoped adapters, and a host app can write its own reviver |
 
-Two validators were exported by mistake and are gone without a deprecation: `resolveAutocloseConfig` from `@rotorsoft/act` and `resolveSseConfig` from `@rotorsoft/act-http/api`. Nothing replaces them: `act().build()` checks the autoclose window, and `trpc(...)` and `hono(...)` check their `sse` options.
+Two validators were exported by mistake and are gone without a deprecation: `resolveAutocloseConfig` from `@rotorsoft/act` and `resolveSseConfig` from `@rotorsoft/act-http/api`, with its `SseConfig` return type. Nothing replaces them: `act().build()` checks the autoclose window, and `trpc(...)` and `hono(...)` check their `sse` options.
 
 ## Nothing to do
 

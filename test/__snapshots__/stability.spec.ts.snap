@@ -6461,7 +6461,7 @@ export declare function withIdempotency<T>(store: IdempotencyStore, key: string,
 export type { ActorExtractor } from "./actor.js";
 export { type ApiError, ERROR_MAP, type ErrorMapEntry, toApiError, } from "./errors.js";
 export { type IdempotencyResult, withIdempotency } from "./idempotency.js";
-export { DEFAULT_SSE_HEARTBEAT_MS, DEFAULT_SSE_MAX_CONNECTIONS, DEFAULT_SSE_MAX_PENDING_PER_CONNECTION, fireAndForget, type RunSseOptions, runSseSubscription, type SseAccounting, type SseConfig, SseConnectionCounter, type SseOptions, type SseSubscriptionFrame, } from "./sse-wiring.js";
+export { DEFAULT_SSE_HEARTBEAT_MS, DEFAULT_SSE_MAX_CONNECTIONS, DEFAULT_SSE_MAX_PENDING_PER_CONNECTION, fireAndForget, type RunSseOptions, runSseSubscription, type SseAccounting, SseConnectionCounter, type SseOptions, type SseSubscriptionFrame, } from "./sse-wiring.js";
 //# sourceMappingURL=index.d.ts.map
 // === sse-wiring.d.ts ===
 import type { BroadcastChannel } from "../sse/broadcast.js";
@@ -6532,19 +6532,6 @@ export type SseOptions = {
      * Default \`256\`. Validated range \`[1, 100_000]\`.
      */
     readonly maxPendingPerConnection?: number;
-};
-/**
- * Resolved SSE configuration after validation and default expansion.
- * Internal — the resolved values are what every transport actually
- * runs against.
- *
- * @internal
- */
-export type SseConfig = {
-    readonly channel: BroadcastChannel<BroadcastState>;
-    readonly maxConnections: number;
-    readonly heartbeatMs: number;
-    readonly maxPendingPerConnection: number;
 };
 /**
  * Default cap on concurrent open subscriptions per generator

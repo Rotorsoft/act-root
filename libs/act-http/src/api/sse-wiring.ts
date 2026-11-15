@@ -76,20 +76,6 @@ export type SseOptions = {
 };
 
 /**
- * Resolved SSE configuration after validation and default expansion.
- * Internal — the resolved values are what every transport actually
- * runs against.
- *
- * @internal
- */
-export type SseConfig = {
-  readonly channel: BroadcastChannel<BroadcastState>;
-  readonly maxConnections: number;
-  readonly heartbeatMs: number;
-  readonly maxPendingPerConnection: number;
-};
-
-/**
  * Default cap on concurrent open subscriptions per generator
  * instance. Sized for typical business-app dashboards (dozens to a
  * few hundred viewers); high enough not to surprise small
