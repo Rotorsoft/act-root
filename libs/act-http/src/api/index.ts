@@ -50,7 +50,6 @@ export {
   type RunSseOptions,
   runSseSubscription,
   type SseAccounting,
-  type SseConfig,
   SseConnectionCounter,
   type SseOptions,
   type SseSubscriptionFrame,
