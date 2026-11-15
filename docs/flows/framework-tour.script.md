@@ -62,7 +62,7 @@ every append, each from its own head, with ids in append order".
 
 ### 2. A state and its first action · first app
 
-**Scenario.** Ana opens ticket 4821, then adds a message.
+**Scenario.** Maya, a customer, opens ticket 4830, then adds a message.
 
 ```ts
 const Ticket = state({ Ticket: z.object({ title: z.string(), status: z.string(), messages: z.number() }) })
@@ -86,7 +86,7 @@ const app = act().withState(Ticket).build();
 | 2.2 | Token: actor → action `OpenTicket`; the payload is checked | "`app.do` validates the payload against the action's schema first." | `app.do(action, { stream, actor }, payload)` |
 | 2.3 | Token: action → state card; the state loads at its initial value, version −1 | "Then it loads the stream. A new stream starts at the initial state, version −1." | `.init` |
 | 2.4 | The handler returns `TicketOpened`; the state card folds it (`status: open`) | "The handler decides the events. Each folds into the state once, through its patch, before anything is stored." | `.patch` (an event with no patch merges its data into the state) |
-| 2.5 | Token: state → log; cell #4 appends; `ticket-4821`... (new stream) v0 | "The commit expects version −1. It lands: global id #4, stream version 0." | `expectedVersion` (derived) |
+| 2.5 | Token: state → log; cell #4 appends; `ticket-4830` (a new stream) v0 | "The commit expects version −1. It lands: global id #4, stream version 0." | `expectedVersion` (derived) |
 | 2.6 | Second action: `AddMessage` → cell #5, v1 | "The next action loads v0 and commits v1. Each action returns one snapshot per event it committed." | `Snapshot` (`state`, `version`, `event`, `patch`) |
 | 2.7 | `app.load(Ticket, "ticket-4821")`: token log → state card, state folds v0..v1 | "`app.load` rebuilds the state from the stream's events." | `app.load(State, stream)` |
 
@@ -117,13 +117,13 @@ Doc: `concepts/state-management.md#preconditions`, `#invariants`. Test:
 
 ### 4. Two writers, one stream · first app
 
-**Scenario.** Ana and the agent Bo act on ticket 4821 (at v1) at the same moment.
+**Scenario.** Maya and the agent Ana add a message to ticket 4821 (at v1) at the same moment.
 
 | # | Viewer sees | Narration | API |
 |---|---|---|---|
 | 4.1 | Two tokens load the stream; both see v1 | "Both actions load ticket 4821 at version 1." | |
-| 4.2 | Ana's commit lands as v2 (#6); Bo's commit expects 1, finds 2: red ghost cell | "The first commit wins. The other expected version 1 and found 2: `ConcurrencyError`, with `stream`, `expectedVersion` and `lastVersion`." | `ConcurrencyError` |
-| 4.3 | `.on({ AddMessage }, { maxRetries: 2 })`: Bo's action reloads v2, re-checks, commits v3 (#7) | "With a retry budget on the action, Act reloads and runs it again on the new state; its rules are checked again." | `.on(entry, { maxRetries, backoff })` |
+| 4.2 | Maya's commit lands as v2 (#7); Ana's commit expects 1, finds 2: red ghost cell | "The first commit wins. The other expected version 1 and found 2: `ConcurrencyError`, with `stream`, `expectedVersion` and `lastVersion`." | `ConcurrencyError` |
+| 4.3 | `.on({ AddMessage }, { maxRetries: 2 })`: Ana's action reloads v2, re-checks, commits v3 (#8) | "With a retry budget on the action, Act reloads and runs it again on the new state; its rules are checked again." | `.on(entry, { maxRetries, backoff })` |
 | 4.4 | A caller pins `expectedVersion: 1`: refused at once, no retry | "A version the caller pins is a fixed conflict: it is thrown at once, never retried." | `{ stream, actor, expectedVersion }` |
 
 Doc: `concepts/error-handling.md#concurrencyerror`, `architecture/concurrency-model.md`.
@@ -134,15 +134,15 @@ Test: `action-retry.spec.ts` → "succeeds on second attempt after one conflict"
 
 ### 5. Loading fast: cache, snapshots, time travel · production
 
-**Scenario.** Ticket 4821 grows; the app snapshots it every three events (a small number so
+**Scenario.** Ticket 4821 grows; the app snapshots it every five events (a small number so
 it fits on screen).
 
 | # | Viewer sees | Narration | API |
 |---|---|---|---|
 | 5.1 | A warm load: the state card reads from the cache, no log read | "A load starts from the cache (in memory by default) and replays only what came after it." | `cache()`, `InMemoryCache` |
-| 5.2 | `.snap((s) => s.patches >= 3)` on the state; the next action appends its event, then a `__snapshot__` cell on the next version | "A snapshot is an event too: `__snapshot__`, committed right after the action's events, on the stream's next version." | `.snap(predicate)`, `SNAP_EVENT` |
+| 5.2 | `.snap((s) => s.patches >= 5)` on the state; the next action appends its event, then a `__snapshot__` cell on the next version | "A snapshot is an event too: `__snapshot__`, committed right after the action's events, on the stream's next version." | `.snap(predicate)`, `SNAP_EVENT` |
 | 5.3 | Cold load: the cache empties; the load starts at the snapshot cell and folds only what follows | "When the cache is cold, the load starts from the latest snapshot." | |
-| 5.4 | Time travel: `app.load(Ticket, "ticket-4821", undefined, { before: 6 })`: the cells from #6 on dim | "A time-travel load skips the cache and replays the real events below the cutoff. It is read-only." | `AsOf` (`before`, `created_before`, `created_after`, `limit`) |
+| 5.4 | Time travel: `app.load(Ticket, "ticket-4821", undefined, { before: 8 })`: the cells from #8 on dim | "A time-travel load skips the cache and replays the real events below the cutoff. It is read-only." | `AsOf` (`before`, `created_before`, `created_after`, `limit`) |
 
 Doc: `architecture/cache-and-snapshots.md`, `concepts/event-sourcing.md#time-travel-queries`.
 Test: `event-sourcing.spec.ts` → "should persist snapshot event on snap success",
@@ -268,11 +268,11 @@ open tickets (the `Agent` state in wolfdesk).
 
 | # | Viewer sees | Narration | API |
 |---|---|---|---|
-| 11.1 | The action loads three streams at once: `ticket-4821`, `agent-ana`, `agent-bo` | "`.loads` loads another state the decision needs. Each load lists the events the action may append to that stream." | `.loads(State, target, events, name?)` |
-| 11.2 | One bracket: three cells append together, three streams, three consecutive ids | "Every event lands in one commit, each stream guarded by the version it had at load. All or nothing." | |
-| 11.3 | `agent-bo` already holds five: the fold breaks `open ≤ 5`; ✕, nothing on any stream | "The loaded state's schema guards its fold, whichever action emits into it." | `ValidationError` |
-| 11.4 | A rival takes a slot on `agent-bo` in between: `ConcurrencyError` names `agent-bo`; the retry reloads and commits | "If any loaded stream moved, the whole commit fails, naming that stream, and the action's retry budget runs it again." | |
-| 11.5 | A target returning `undefined` (no current agent) skips that load | "A target that returns `undefined` skips its load." | |
+| 11.1 | A fresh store: two agents (Bo already holds five), tickets 5200 and 5201. `AssignTicket` 5200 → Ana loads the ticket and `agent-ana`; the `current` target returns `undefined`, so that load is skipped | "`.loads` loads another state the decision needs. A target that returns `undefined` skips its load." | `.loads(State, target, events, name?)` |
+| 11.2 | One bracket: two cells append together on two streams, consecutive ids (#9, #10) | "Every event lands in one commit, each stream guarded by the version it had at load. All or nothing." | |
+| 11.3 | 5201 → Bo: the fold breaks `open ≤ 5`; ✕, nothing on any stream | "The loaded state's schema guards its fold, whichever action emits into it." | `ValidationError` |
+| 11.4 | 5201 → Ana loads `agent-ana` at v1; meanwhile `CloseTicket` on 5200 drops Ana's slot in its own commit (v2); Lee's commit fails with `ConcurrencyError` naming `agent-ana` | "If any loaded stream moved, the whole commit fails, naming that stream." | `ConcurrencyError.stream` |
+| 11.5 | The retry reloads and commits (#13, #14) | "The action's retry budget runs it again with fresh loads. A load without events is only a read, and isn't guarded." | `maxRetries` |
 
 Doc: `guides/rules-across-streams.md`, `concepts/state-management.md#rules-across-streams-loads`.
 Test: `loads.spec.ts` → "commits to both streams at once and returns its own snapshots";
