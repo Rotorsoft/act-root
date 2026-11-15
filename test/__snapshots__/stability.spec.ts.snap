@@ -5789,8 +5789,9 @@ export declare const QuerySchema: z.ZodReadonly<ZodObject<{
  * The sensitive-data marker: the symbol \`sensitive(zodType)\` stamps on a
  * schema's definition, and the lookups that read it. The public
  * \`sensitive()\` and the two sentinels live in \`types/schemas.ts\`, which
- * re-exports \`sensitiveFields\` from here. The transforms that apply the marker at
- * commit, load and dispatch live in \`internal/pii.ts\`.
+ * re-exports \`sensitiveFields\` from here. The marker and its lookups live in
+ * \`internal/sensitive.ts\`; the transforms that apply it at commit, load and
+ * dispatch live in \`internal/pii.ts\`.
  */
 import type { z } from "zod";
 /**
@@ -5799,28 +5800,6 @@ import type { z } from "zod";
  * plain text.
  */
 export declare function _mark_sensitive(schema: z.ZodType): void;
-/**
- * Derive an event's sensitive fields, as the declared schema of each.
- *
- * Walks the top-level shape of a \`z.object({...})\` and keeps the keys whose
- * schema was marked via \`sensitive(...)\`, behind any wrapper (see \`is_pii\`). Returns an empty object for non-object schemas or events
- * with no sensitive fields — the common-case zero-cost path.
- *
- * Only the top-level shape is walked. Sensitive fields nested inside a
- * \`z.object\` declared inside the event payload would require recursive
- * descent; that's deferred until a real callsite needs it.
- *
- * A union event has no top-level shape, so the options are walked and merged:
- * a key sensitive in any variant must be split, because the stored payload
- * could be that variant.
- * The first variant to declare a key wins, which only matters to a caller that
- * wants the schema rather than the name.
- *
- * Returning the schemas rather than just the names is what lets a caller do
- * something per field — the event builder asks each one whether it holds a
- * date, so the \`pii\` sidecar's dates can be revived like any other.
- */
-export declare function pii_schemas(schema: z.ZodType): Record<string, z.ZodType>;
 /**
  * The top-level field names of a schema marked with \`sensitive()\`. Adapters
  * and tooling use it to reflect sensitivity on their own wire surface (the
@@ -6452,7 +6431,7 @@ export { DEFAULT_SSE_HEARTBEAT_MS, DEFAULT_SSE_MAX_CONNECTIONS, DEFAULT_SSE_MAX_
 //# sourceMappingURL=index.d.ts.map
 // === sse-wiring.d.ts ===
 import type { BroadcastChannel } from "../sse/broadcast.js";
-import { type BroadcastState, type PatchMessage } from "../sse/types.js";
+import type { BroadcastState, PatchMessage } from "../sse/types.js";
 /**
  * SSE wiring options shared by the auto-generated \`trpc\` and \`hono\`
  * transports. When supplied, each transport emits one streaming
@@ -7546,7 +7525,7 @@ export declare function applyPatchMessage<S extends BroadcastState>(msg: PatchMe
 // === broadcast.d.ts ===
 import { type Patch } from "@rotorsoft/act-patch";
 import { StateCache } from "./state-cache.js";
-import { type BroadcastState, type PatchMessage, type Subscriber } from "./types.js";
+import type { BroadcastState, PatchMessage, Subscriber } from "./types.js";
 /**
  * Server-side broadcast channel for incremental state sync over SSE.
  *
@@ -7813,25 +7792,6 @@ export type PatchMessage<S extends BroadcastState = BroadcastState> = Record<num
  * Subscriber callback — receives version-keyed patch messages.
  */
 export type Subscriber<S extends BroadcastState = BroadcastState> = (msg: PatchMessage<S>) => void;
-/**
- * The frame that tells a client to refetch: no versions, so
- * \`applyPatchMessage\` always reports \`behind\`.
- *
- * Every producer of a resync uses this — \`overlay()\` on a missing baseline,
- * the cache on evicting overlay state, and the SSE backlog when it cannot
- * drop a frame without losing it silently. One factory so the shape cannot
- * drift between them.
- */
-export declare const resync_frame: <S extends BroadcastState>() => PatchMessage<S>;
-/**
- * Whether a frame carries no versions, so \`applyPatchMessage\` can never
- * classify it as a gap.
- *
- * A version-keyed patch that goes missing is self-announcing: the next frame
- * skips a version and the client refetches. An \`_overlay\` or \`_resync\` frame
- * is not, which is why anything that drops frames has to tell them apart.
- */
-export declare const is_version_neutral: <S extends BroadcastState>(msg: PatchMessage<S>) => boolean;
 //# sourceMappingURL=types.d.ts.map"
 `;
 
@@ -9804,7 +9764,7 @@ export type CounterEvents = {
 export declare const COUNTER_EVENT_NAMES: readonly ["Incremented", "Decremented", "Reset"];
 //# sourceMappingURL=events.d.ts.map
 // === helpers.d.ts ===
-import type { Committed, EventMeta, Message, Store } from "@rotorsoft/act/types";
+import type { Committed, Message, Store } from "@rotorsoft/act/types";
 import type { CounterEvents } from "./events.js";
 export type CounterMessage = Message<CounterEvents, keyof CounterEvents>;
 export type CommittedCounterEvent = Committed<CounterEvents, keyof CounterEvents>;
@@ -9818,20 +9778,9 @@ export declare const actor: (name?: string) => {
     id: \`\${string}-\${string}-\${string}-\${string}-\${string}\`;
     name: string;
 };
-/** Build an EventMeta with a correlation id and optional action causation. */
-export declare const make_meta: (opts?: {
-    correlation?: string;
-    stream?: string;
-    action?: string;
-}) => EventMeta;
 export declare const inc: (amount?: number) => CounterMessage;
 export declare const dec: (amount?: number) => CounterMessage;
 export declare const reset: () => CounterMessage;
-/**
- * Commit \`count\` Incremented events to \`stream\` on the given store, each
- * within its own commit transaction (so they receive distinct event ids).
- */
-export declare const seed_stream: (store: Store, stream: string, count: number, correlation?: string) => Promise<CommittedCounterEvent[]>;
 /**
  * Drain a \`query\` call into an array. Convenience wrapper for assertions.
  */

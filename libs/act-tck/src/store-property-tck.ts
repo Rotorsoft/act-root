@@ -2,8 +2,9 @@ import { fc, test } from "@fast-check/vitest";
 import type { Store } from "@rotorsoft/act/types";
 import { afterAll, beforeAll, describe, expect } from "vitest";
 import type { CounterEvents } from "./fixtures/events.js";
-import { collect, inc, make_meta } from "./fixtures/helpers.js";
+import { collect, inc } from "./fixtures/helpers.js";
 import { mark_all } from "./fixtures/mark-all.js";
+import { make_meta } from "./fixtures/seed.js";
 
 /**
  * Property-based contract for the store-level invariants the drain pipeline

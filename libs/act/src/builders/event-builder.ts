@@ -40,8 +40,8 @@ import {
   pii_split,
   pii_strip,
 } from "../internal/pii.js";
+import { pii_schemas } from "../internal/sensitive.js";
 import { def_of, output_of } from "../internal/zod.js";
-import { pii_schemas } from "../sensitive.js";
 import type { Actor, LaneConfig, Registry } from "../types/index.js";
 import { DEFAULT_LANE, SNAP_EVENT } from "../types/index.js";
 

@@ -12,11 +12,11 @@ import {
   type CounterMessage,
   dec,
   inc,
-  make_meta,
   reset as reset_event,
   uid,
 } from "./fixtures/helpers.js";
 import { mark_all } from "./fixtures/mark-all.js";
+import { make_meta } from "./fixtures/seed.js";
 
 /**
  * One {@link Store} implementation to feed into
