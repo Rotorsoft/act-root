@@ -1,3 +1,5 @@
+# [@rotorsoft/act-diagram-v2.0.2](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-diagram-v2.0.1...@rotorsoft/act-diagram-v2.0.2) (2026-11-15)
+
 # [@rotorsoft/act-diagram-v2.0.1](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-diagram-v2.0.0...@rotorsoft/act-diagram-v2.0.1) (2026-11-09)
 
 
