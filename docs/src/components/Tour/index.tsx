@@ -537,7 +537,7 @@ function Inspector({ cell, onClose }: { cell: Cell; onClose: () => void }) {
         )}
         <dt>meta.correlation</dt>
         <dd>
-          <code>{cell.corr}</code>
+          <code>{cell.corr}</code> <small>(a stand-in: events with the same value share one workflow)</small>
         </dd>
         <dt>meta.causation</dt>
         <dd>{cell.cause ? `event #${cell.cause.id} ${cell.cause.name}` : "an action (no event)"}</dd>

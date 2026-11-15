@@ -205,7 +205,7 @@ Test: `libs/act-tck/src/store-tck.ts` → "does not hand an unexpired lease to a
 
 | # | Viewer sees | Narration | API |
 |---|---|---|---|
-| 8.1 | Attempt 1 fails (503); the target shows retry 1 and a clock "~200 ms" | "A failed attempt is retried after a backoff. The schedule is stored on the target, so every worker honors it." | `.do(handler, { maxRetries, backoff })` |
+| 8.1 | Code card: `backoff: { strategy: "exponential", baseMs: 200, maxMs: 10_000, jitter: true }`. Attempt 1 fails (503); the target shows retry 1 and a clock "200 ms × jitter" | "A failed attempt waits out the backoff in the code card: `baseMs` for the first retry, times a jitter factor between 0.5 and 1.5. The schedule is stored on the target, so every worker honors it." | `.do(handler, { maxRetries, backoff })` |
 | 8.2 | Attempts 2–4 fail; the target turns red: blocked; `blocked` fires | "After `maxRetries + 1` attempts the target blocks. Its watermark stays where it was." | `blockOnError`, `app.on("blocked")`, `app.blocked_streams()` |
 | 8.3 | The receiver comes back; `app.unblock([target])`; the drain resumes at the watermark | "`app.unblock` resumes at the watermark. Nothing before it runs again." | `app.unblock` |
 | 8.4 | A 400 answer: the handler throws `NonRetryableError`; blocked at the first attempt | "A `NonRetryableError` blocks at once, without spending the budget (unless `blockOnError` is false)." | `NonRetryableError` |

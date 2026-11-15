@@ -1196,7 +1196,7 @@ await app.prioritize({ source: "^audit-" }, -5); // lower`,
 })`,
         steps: [
           {
-            say: "The webhook POSTs #17 and the service answers 503. A failed attempt is retried after a **backoff**, and the schedule is stored on the target, so no worker retries before it is due.",
+            say: "The webhook POSTs #17 and the service answers 503. A failed attempt waits out the **backoff** in the code card: `baseMs: 200` for the first retry, times a jitter factor between 0.5 and 1.5. The schedule is stored on the target, so no worker retries before it is due.",
             moves: [
               { from: "webhook", to: "svc", label: "POST #17" },
               { from: "svc", to: "webhook", label: "503", tone: "bad" },
@@ -1206,12 +1206,12 @@ await app.prioritize({ source: "^audit-" }, -5); // lower`,
                 op: "retry",
                 target: "ticket-escalation-webhooks",
                 retry: 1,
-                due: "~200 ms",
+                due: "200 ms × jitter",
               },
             ],
           },
           {
-            say: "Retries two and three fail too, each waiting longer: exponential, with jitter.",
+            say: "Retries two and three fail too. Exponential doubles the wait each time (400 ms, then 800 ms, capped at `maxMs`), each times its jitter.",
             moves: [
               { from: "webhook", to: "svc", label: "retry" },
               { from: "svc", to: "webhook", label: "503", tone: "bad" },
@@ -1221,7 +1221,7 @@ await app.prioritize({ source: "^audit-" }, -5); // lower`,
                 op: "retry",
                 target: "ticket-escalation-webhooks",
                 retry: 3,
-                due: "~800 ms",
+                due: "800 ms × jitter",
               },
             ],
           },
@@ -2504,7 +2504,7 @@ act().withState(Ticket).build({
   .build();`,
         steps: [
           {
-            say: "Some streams never end. `keep: { days: 180 }` prunes history older than the window. Today is Oct 1, so the cutoff is Apr 4. The closest snapshot older than the cutoff is the one from Mar 01 (#5).",
+            say: "Some streams never end. `keep: { days: 180 }` prunes history older than the window. Say today is Oct 1 (the dates here are picked for the example), so the cutoff is Apr 4. The closest snapshot older than the cutoff is the one from Mar 01 (#5).",
             ops: [
               { op: "flag", on: "cell:l-snap1", text: "closest safe snapshot" },
             ],
