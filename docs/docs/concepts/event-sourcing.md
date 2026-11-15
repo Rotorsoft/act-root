@@ -374,9 +374,10 @@ Omit the third argument to default to the connected store as sink. Pass an expli
 - **`dry_run: true`** — walk the source, validate every event, count kept and dropped, but never open the sink's transaction. No `Store.restore` capability required. The kept/dropped counts match what a destructive run would land. Used by the inspector's transfer-preview affordance.
 - **`drop_snapshots: true`** — skip the `__snapshot__` events in the source that have earlier events of their stream before them; the next snap policy regenerates them with the current state. A stream's first snapshot stays: after a windowed close or a restart, it is the stream's base, and dropping it would lose the state. Useful for compaction.
 - **`drop_closed_streams: true`** — compact streams that have a `__tombstone__` event (closed via `app.close()`). Scan walks the source once upfront with a tombstone-name filter to collect the closed-stream set, then the main pass drops every **pre-close event** whose stream is in that set. The tombstone itself is **kept** — it's the gate that makes `app.do()` throw `StreamClosedError` in the rebuilt store, so dropping it would silently reopen the stream. Counted in `ScanResult.dropped.closed_streams`.
-- **`on_progress(p)`** — fired once per event with `{ processed }`. Callers throttle/debounce as needed. Powers the inspector's reactive progress bar.
+- **`on_progress(p)`** — fired once per event with `{ processed, id, max_id }` (`max_id` when the source can say). Callers throttle/debounce as needed. Powers the inspector's reactive progress bar.
 - **`event_migrations`** — per-event schema migration applied during the scan ([ACT-1126](https://github.com/Rotorsoft/act-root/issues/785)). Keys are source event names; values describe how to rewrite them. See [Migration overlay](#migration-overlay) below.
 - **`stream_rename`** — function that returns a new stream name per event, for tenant relocation and prefix cleanup. It renames the streams named in each event's causation too, and `event_migrations` renames a migrated cause there. See [Migration overlay](#migration-overlay).
+- **`batch_size`** — rows per page `scan` asks the source for, default 500, an integer of at least 1. See [paging](../architecture/extension-points.md#backpressure).
 
 ### Migration overlay
 
@@ -419,7 +420,7 @@ Then `stream_rename` runs (after the event migration, so it sees the migrated ev
 
 ### Memory: how restore avoids OOM on large sources
 
-`scan` paginates the `EventSource.query` interface — re-issuing it with `limit: ScanOptions.batch_size` (default 500, caller-tunable via `Act.restore(source, { batch_size })`) and `after: <last id seen>` per batch. Stores that respect `limit` hold at most one batch's worth of rows per round trip. Sources that ignore the filter (`CsvFile`) stream events through internal line-by-line reads and signal `scan` to exit after one call by returning more events than the requested limit. Combined with the source's per-event `await Promise.resolve(callback(event))`, the restore pipeline holds at most `batch_size` rows in the producer adapter and one event in flight through the callback — independent of total source size. A multi-million-event PG → SQLite migration runs with bounded heap end-to-end. See [Extension points → Backpressure](../architecture/extension-points.md#backpressure) for the full contract.
+`scan` reads the source a page at a time, so a restore holds at most `batch_size` rows in the producer and one event in flight, whatever the source's size. [Extension points → Backpressure](../architecture/extension-points.md#backpressure) owns the details.
 
 ### Restore vs reset vs truncate vs close
 

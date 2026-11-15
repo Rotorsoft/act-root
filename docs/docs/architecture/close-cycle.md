@@ -210,7 +210,7 @@ flowchart TD
   W -- yes --> Q{"a live domain head?"}
   Q -- "no: already closed" --> R1["return"]
   Q -- "head and count (query_stats,<br/>tombstones and snapshots left out)" --> P{"policy holds?"}
-  P -- "policy(aggregate, head, count)" --> C1["CloseSignal: close the stream"]:::good
+  P -- "policy(aggregate, head, count)" --> C1["CloseSignal: close the stream,<br/>and look again in a day"]:::good
   P -- false --> K{"keep: oldest event<br/>past the cutoff?"}
   K -- yes --> C2["CloseSignal with before:<br/>prune behind a snapshot"]:::good
   K -- "no, or no keep" --> F{"a future<br/>due time?"}
