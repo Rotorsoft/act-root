@@ -23,6 +23,9 @@ export default defineConfig({
   clean: true,
   sourcemap: true,
   minify: false,
+  // Keep function and class names through bundling: a port keys its
+  // registry by its injector's name, and logs the adapter's class name.
+  keepNames: true,
   target: "es2022",
   tsconfig: "tsconfig.build.json",
 });
