@@ -164,9 +164,11 @@ export interface ActBuilder<
    * Registers a state definition with the builder.
    *
    * State names, action names, and event names must be unique across the
-   * application (partial states with the same name are merged automatically).
+   * application (partial states with the same name are merged automatically),
+   * and no action may share an event's name.
    *
-   * @throws {Error} If duplicate action or event names are detected
+   * @throws {Error} If duplicate action or event names are detected, or an
+   *   action and an event share a name
    */
   withState: <
     TNewState extends Schema,
@@ -188,9 +190,11 @@ export interface ActBuilder<
    *
    * Merges all the slice's states and reactions into the application.
    * State names, action names, and event names must be unique across the
-   * application (partial states with the same name are merged automatically).
+   * application (partial states with the same name are merged automatically),
+   * and no action may share an event's name.
    *
-   * @throws {Error} If duplicate action or event names are detected
+   * @throws {Error} If duplicate action or event names are detected, or an
+   *   action and an event share a name
    */
   withSlice: <
     TNewSchemaReg extends SchemaRegister<TNewActions>,

@@ -16,7 +16,7 @@ import { join } from "node:path";
  * - `internal/` holds stateless implementations. They RECEIVE what they need
  *   (see `ReactionDeps.reaction_scope`, `DrainDeps.run_scoped`); they never
  *   reach for ambient state.
- * - PII is one module's business. `sensitive.ts` owns the marker,
+ * - PII is one module's business. `internal/sensitive.ts` owns the marker,
  *   `internal/pii.ts` the transforms, and `builders/event-builder.ts` is the
  *   only place that composes them. Nothing else imports a `pii_*` helper.
  * - `scoped.ts` owns every `AsyncLocalStorage` and every operation on one.
@@ -212,15 +212,27 @@ describe("architecture: PII stays inside the modules that own it", () => {
   });
 
   it("publishes only what another package genuinely needs", () => {
-    // `sensitiveFields` IS public: act-http's OpenAPI emitter marks
-    // request-body properties `writeOnly` with it (auto-generated-api.md). The
-    // transforms are not — publishing them would invite a caller to redact by
+    // An app's sensitive fields are `registry.sensitive_fields`. The
+    // transforms are not published — that would invite a caller to redact by
     // hand.
     const schemas = code_of(
       readFileSync(join(SRC, "types", "schemas.ts"), "utf8")
     );
-    expect(schemas).toMatch(/export \{[^}]*\bsensitiveFields\b[^}]*\}/);
     expect(schemas).not.toMatch(/\bpii_(split|gate|strip)\b/);
+  });
+
+  it("answers sensitive fields from the registry alone", () => {
+    // `sensitiveFields` and `pii_fields` are deprecated aliases for 2.x
+    // callers; the framework itself asks the registry.
+    const offenders = ts_files(SRC)
+      .filter((p) => !p.endsWith("/deprecated.ts"))
+      .filter((path) =>
+        /\b(sensitiveFields|pii_fields)\s*\(/.test(
+          code_of(readFileSync(path, "utf8"))
+        )
+      )
+      .map((path) => path.slice(SRC.length));
+    expect(offenders).toEqual([]);
   });
 });
 

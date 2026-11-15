@@ -37,8 +37,10 @@ export {
   LogLevels,
   notification_of,
   PackageSchema,
+  pii_fields,
   QuerySchema,
   seed_event,
+  sensitiveFields,
   TargetSchema,
   throw_if_stale,
 } from "./deprecated.js";
@@ -50,8 +52,6 @@ export {
   port,
   store,
 } from "./ports.js";
-// Deprecated in 2.x, removed in 3.0: use sensitiveFields.
-export { pii_fields } from "./sensitive.js";
 export type * from "./types/index.js";
 export {
   ConcurrencyError,
@@ -65,7 +65,6 @@ export {
   StoreError,
   StreamClosedError,
   sensitive,
-  sensitiveFields,
   TOMBSTONE_EVENT,
   ValidationError,
   ZodEmpty,

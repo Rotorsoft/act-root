@@ -95,9 +95,9 @@ describe("invariants", () => {
       Doubled: z.object({ n: z.number().transform((n) => n * 2) }),
     })
       .init(() => ({ n: 0 }))
-      .emits({ set: z.object({ n: z.number() }) })
+      .emits({ wasSet: z.object({ n: z.number() }) })
       .on({ set: z.object({ n: z.number() }) })
-      .emit("set")
+      .emit("wasSet")
       .build();
     const app = act().withState(doubled).build();
     const [snap] = await app.do("set", { stream: "c5", actor }, { n: 3 });
@@ -303,9 +303,9 @@ describe("invariants", () => {
     it("checks a marker string in full on a state without sensitive events", async () => {
       const plain = state({ Plain: z.object({ email: z.email().optional() }) })
         .init(() => ({}))
-        .emits({ set: z.object({ email: z.string() }) })
+        .emits({ wasSet: z.object({ email: z.string() }) })
         .on({ set: z.object({ email: z.string() }) })
-        .emit("set")
+        .emit("wasSet")
         .build();
       const app = act().withState(plain).build();
       await expect(

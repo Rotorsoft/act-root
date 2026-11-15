@@ -113,7 +113,7 @@ export function act<
   const registry: Registry<TSchemaReg, TEvents, TActions> = {
     actions: {} as Registry<TSchemaReg, TEvents, TActions>["actions"],
     events: {} as Registry<TSchemaReg, TEvents, TActions>["events"],
-    sensitive_fields: (event_name) => _sf.get(event_name) ?? [],
+    sensitive_fields: (name) => _sf.get(name) ?? [],
     query_gate: (event_name) => _qg.get(event_name) ?? IDENTITY_GATE,
     disclosure_predicate: (state_name) => _dp.get(state_name) ?? null,
     deprecated_events: (state_name) => _de.get(state_name) ?? EMPTY_DEPRECATED,

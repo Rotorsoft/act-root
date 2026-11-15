@@ -1,10 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type {
-  Committed,
-  EventMeta,
-  Message,
-  Store,
-} from "@rotorsoft/act/types";
+import type { Committed, Message, Store } from "@rotorsoft/act/types";
 import type { CounterEvents } from "./events.js";
 
 export type CounterMessage = Message<CounterEvents, keyof CounterEvents>;
@@ -22,22 +17,6 @@ export const uid = (): string => randomUUID().slice(0, 8);
 
 export const actor = (name = "tester") => ({ id: randomUUID(), name });
 
-/** Build an EventMeta with a correlation id and optional action causation. */
-export const make_meta = (
-  opts: { correlation?: string; stream?: string; action?: string } = {}
-): EventMeta => ({
-  correlation: opts.correlation ?? randomUUID(),
-  causation: opts.stream
-    ? {
-        action: {
-          name: opts.action ?? "Test",
-          stream: opts.stream,
-          actor: actor(),
-        },
-      }
-    : {},
-});
-
 export const inc = (amount = 1): CounterMessage => ({
   name: "Incremented",
   data: { amount },
@@ -49,27 +28,6 @@ export const dec = (amount = 1): CounterMessage => ({
 });
 
 export const reset = (): CounterMessage => ({ name: "Reset", data: {} });
-
-/**
- * Commit `count` Incremented events to `stream` on the given store, each
- * within its own commit transaction (so they receive distinct event ids).
- */
-export const seed_stream = async (
-  store: Store,
-  stream: string,
-  count: number,
-  correlation?: string
-): Promise<CommittedCounterEvent[]> => {
-  const out: CommittedCounterEvent[] = [];
-  for (let i = 0; i < count; i++) {
-    const committed = await store.commit<CounterEvents>(
-      [{ stream, msgs: [inc(1)] }],
-      make_meta({ correlation, stream })
-    );
-    out.push(...(committed as CommittedCounterEvent[]));
-  }
-  return out;
-};
 
 /**
  * Drain a `query` call into an array. Convenience wrapper for assertions.

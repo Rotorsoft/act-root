@@ -156,7 +156,7 @@ A 2.x minor gives each audience its own entry point ([RFC 2411](https://github.c
 | `fair_slots` | `fairSlots` from `@rotorsoft/act/adapter` |
 | `is_literal_source` | `isStreamName` from `@rotorsoft/act/adapter` |
 | `notification_of` | `parseNotification` from `@rotorsoft/act/adapter` |
-| `pii_fields` (also on `/types`) | `sensitiveFields`, from `@rotorsoft/act` or `/types` |
+| `pii_fields`, `sensitiveFields` | `app.registry.sensitive_fields(name)`, for any action or event the app registers |
 | `AuditOptions.page_size` | nothing: it has no effect, so drop it |
 | `DEFAULT_QUERY_STREAMS_LIMIT`, `ActorSchema`, `TargetSchema`, `EventMetaSchema`, `CausationEventSchema`, `CommittedMetaSchema`, `QuerySchema`, `Environments`, `LogLevels`, `ExitCodes`, `DEFAULT_LANE`, `DEFAULT_MAX_SUBSCRIBED_STREAMS`, `DEFAULT_SETTLE_DEBOUNCE_MS` | the same name from `@rotorsoft/act/types` |
 | `PackageSchema`, `default_scope`, `dateReviver`, `extend` | nothing: `config()` and `act().build()` validate for you, `store()`/`cache()`/`log()` give the unscoped adapters, and a host app can write its own reviver |
@@ -168,6 +168,7 @@ A few internal names were exported by mistake. They are gone without a deprecati
 - `fireAndForget` and `SseConnectionCounter` from `@rotorsoft/act-http/api`: `trpc(...)` and `hono(...)` cap connections themselves; a custom transport passes its own `SseAccounting` to `runSseSubscription`.
 - The `PassthroughPatchHandler` type from `@rotorsoft/act`: it marked the default reducer inside the state builder.
 - `streamPatternToGlob` from `@rotorsoft/act-sqlite`: the store translates stream filters itself.
+- `sensitiveFields` and `pii_fields` from `@rotorsoft/act/types`: they were only there because their module was re-exported whole. Both stay on `@rotorsoft/act`, deprecated, until 3.0.
 
 ## Nothing to do
 

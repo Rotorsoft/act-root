@@ -1,9 +1,9 @@
 import { z } from "zod";
 import * as adapter from "../src/adapter.js";
 import { package_schema } from "../src/config.js";
+import { sensitiveFields } from "../src/deprecated.js";
 import * as root from "../src/index.js";
 import { unscoped_ports } from "../src/ports.js";
-import { sensitiveFields } from "../src/sensitive.js";
 import * as types from "../src/types/index.js";
 import { ValidationError } from "../src/types/index.js";
 
@@ -40,8 +40,17 @@ describe("deprecated root names (removed in 3.0)", () => {
     expect(exported.get(name)).toBe(replacement);
   });
 
-  it("pii_fields stays on /types too, beside sensitiveFields", () => {
-    expect(types.pii_fields).toBe(types.sensitiveFields);
+  it("sensitiveFields still names a schema's sensitive keys", () => {
+    const schema = z.object({
+      email: root.sensitive(z.string()),
+      n: z.number(),
+    });
+    expect(root.sensitiveFields(schema)).toEqual(["email"]);
+  });
+
+  it("are on the root only, not on /types", () => {
+    expect("sensitiveFields" in types).toBe(false);
+    expect("pii_fields" in types).toBe(false);
   });
 });
 

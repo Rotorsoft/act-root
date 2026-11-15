@@ -1,10 +1,6 @@
 import type { BroadcastChannel } from "../sse/broadcast.js";
-import {
-  type BroadcastState,
-  is_version_neutral,
-  type PatchMessage,
-  resync_frame,
-} from "../sse/types.js";
+import { is_version_neutral, resync_frame } from "../sse/frames.js";
+import type { BroadcastState, PatchMessage } from "../sse/types.js";
 
 /**
  * SSE wiring options shared by the auto-generated `trpc` and `hono`

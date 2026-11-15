@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { date_reviver_schema } from "../src/internal/date-reviver.js";
+import { pii_schemas } from "../src/internal/sensitive.js";
 import { output_of, some_layer, wrapped } from "../src/internal/zod.js";
-import { _mark_sensitive, sensitiveFields } from "../src/sensitive.js";
 import { sensitive } from "../src/types/schemas.js";
 
 /**
@@ -24,7 +24,7 @@ const placements: Record<string, (inner: () => z.ZodType) => z.ZodType> = {
 };
 
 const is_sensitive = (field: z.ZodType) =>
-  sensitiveFields(z.object({ f: field })).length === 1;
+  Object.keys(pii_schemas(z.object({ f: field }))).length === 1;
 
 describe("seeing through Zod wrappers", () => {
   for (const [name, place] of Object.entries(placements)) {
@@ -94,7 +94,7 @@ describe("seeing through Zod wrappers", () => {
   });
 
   it("refuses to mark a schema without a Zod 4 definition", () => {
-    expect(() => _mark_sensitive({} as z.ZodType)).toThrow(
+    expect(() => sensitive({} as z.ZodType)).toThrow(
       "sensitive() takes a Zod 4 schema"
     );
   });

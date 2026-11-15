@@ -505,6 +505,7 @@ export class Act<
     return {
       store,
       event_to_state: this._event_to_state,
+      sensitive_fields: this.registry.sensitive_fields,
       // Declared lanes, not this process's controllers: a lane another
       // worker drains is not `unknown-lane`.
       declared_lanes: new Set(this._declared_lanes),

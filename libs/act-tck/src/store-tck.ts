@@ -42,11 +42,10 @@ import {
   collect,
   dec,
   inc,
-  make_meta,
   reset as reset_event,
-  seed_stream,
   uid,
 } from "./fixtures/helpers.js";
+import { make_meta, seed_stream } from "./fixtures/seed.js";
 
 /**
  * Optional features a {@link Store} implementation may or may not

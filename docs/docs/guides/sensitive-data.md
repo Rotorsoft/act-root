@@ -86,6 +86,17 @@ The one place the marker is **not** followed is a field nested inside a `z.objec
 
 **Declare sensitive fields as strings.** A caller who may not see a sensitive field reads `"[REDACTED]"` or `"[SHREDDED]"` in its place, and so does any state field a reducer copies it into, whatever its name. For a `string` field that fits its type. For a `sensitive(z.number())`, a date, an enum or an object it doesn't: the type says `number` and the value is a string. The first `build()` names each such field in one warning (`Act has N sensitive field(s) whose type isn't a string: …`): the event field, and the state field of the same name. A copy under another name can't be seen from the types, so check those yourself. It's advice, not a refusal: the app runs as before. To clear it, store the value as a string (an ISO date, a formatted amount) and parse it where it's read with the plaintext.
 
+### Which fields are sensitive — `registry.sensitive_fields`
+
+An app answers the question itself: `app.registry.sensitive_fields(name)` returns the sensitive top-level fields of any action or event the app registers, typed to those names, and `[]` for one with none. The framework splits and gates an event's fields; it does nothing with a `sensitive(...)` in an action's payload, but reports it, so tooling that describes the input can mark it. act-http's OpenAPI document marks those request-body fields `writeOnly`.
+
+```ts no-check
+app.registry.sensitive_fields("UserRegistered"); // ["email", "name"]
+app.registry.sensitive_fields("register");       // the action's payload
+```
+
+`sensitiveFields(schema)`, which reads one schema, is deprecated and removed in 3.0.
+
 ## Reading sensitive events — the auth-aware load
 
 `IAct.load` has two shapes that differ only in how they answer the question "is this caller allowed to see the plaintext?"
@@ -212,7 +223,8 @@ This is a deliberate performance trade-off rather than a bug. PII-aware states p
 ## Pointers
 
 - `libs/act/src/types/schemas.ts` — `sensitive(zodType)` public marker, which re-exports the sentinels
-- `libs/act/src/sensitive.ts` — the marker and `sensitiveFields`
+- `libs/act/src/internal/sensitive.ts` — the marker and the lookup that reads it
+- `libs/act/src/types/registry.ts` — `registry.sensitive_fields`
 - `libs/act/src/types/schemas.ts` — `sensitive()` and the `REDACTED` / `SHREDDED` sentinels
 - `libs/act/src/internal/pii.ts` — `pii_split`, `pii_gate`, `pii_strip`, the transforms the orchestrator calls
 - `libs/act/src/builders/state-builder.ts` — `.discloses(predicate)` builder method
