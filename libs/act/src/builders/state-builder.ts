@@ -26,7 +26,6 @@ import type {
   AutoclosePredicate,
   Committed,
   Load,
-  PassthroughPatchHandler,
   PatchHandlers,
   Precondition,
   Schema,
@@ -35,6 +34,12 @@ import type {
   State,
   ZodTypes,
 } from "../types/index.js";
+
+// Marks the default reducer (`({ data }) => data`). The merger lets a
+// passthrough yield to a custom reducer when two partial states meet.
+type PassthroughPatchHandler = ((event: { data: unknown }) => unknown) & {
+  readonly _passthrough: true;
+};
 
 /**
  * Creates a new state definition with event sourcing capabilities.

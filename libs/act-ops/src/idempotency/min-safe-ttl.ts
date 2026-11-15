@@ -1,15 +1,11 @@
 /**
  * @module act-ops/idempotency/min-safe-ttl
  *
- * Internal math for sizing the dedup window of an
- * {@link IdempotencyStore} from a sender's retry profile.
- *
- * **Not re-exported from the package root** by design — the math is
- * an implementation detail of {@link InMemoryIdempotencyStore} (and
- * any future durable adapter). Operators configure dedup windows
- * through the store's `retryProfile` option, not by calling this
- * function directly. Tests import it from this path; external
- * consumers can't reach it.
+ * The math for sizing the dedup window of an {@link IdempotencyStore}
+ * from a sender's retry profile. Exported from
+ * `@rotorsoft/act-ops/idempotency` for adapter authors, so every store
+ * given a `retryProfile` applies the same math; apps pass `retryProfile`
+ * to the store instead of calling it.
  */
 
 /**

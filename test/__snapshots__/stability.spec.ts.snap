@@ -1205,19 +1205,6 @@ export type PatchHandlers<TState extends Schema, TEvents extends Schemas> = {
     [TKey in keyof TEvents]: PatchHandler<TState, TEvents, TKey>;
 };
 /**
- * Internal marker for the framework-default passthrough reducer
- * (\`({ data }) => data\`). Custom user-supplied reducers never carry this
- * flag. The builder merger uses it to resolve patch conflicts between
- * partial states: a passthrough always yields to a custom reducer.
- *
- * @internal
- */
-export type PassthroughPatchHandler = ((event: {
-    data: unknown;
-}) => unknown) & {
-    readonly _passthrough: true;
-};
-/**
  * Handles an action, producing the events to emit, or \`undefined\` (or \`[]\`) to commit nothing.
  * @template TState - State schema.
  * @template TEvents - Event schemas.
@@ -8585,15 +8572,11 @@ export type { IdempotencyStore } from "./port.js";
 /**
  * @module act-ops/idempotency/min-safe-ttl
  *
- * Internal math for sizing the dedup window of an
- * {@link IdempotencyStore} from a sender's retry profile.
- *
- * **Not re-exported from the package root** by design — the math is
- * an implementation detail of {@link InMemoryIdempotencyStore} (and
- * any future durable adapter). Operators configure dedup windows
- * through the store's \`retryProfile\` option, not by calling this
- * function directly. Tests import it from this path; external
- * consumers can't reach it.
+ * The math for sizing the dedup window of an {@link IdempotencyStore}
+ * from a sender's retry profile. Exported from
+ * \`@rotorsoft/act-ops/idempotency\` for adapter authors, so every store
+ * given a \`retryProfile\` applies the same math; apps pass \`retryProfile\`
+ * to the store instead of calling it.
  */
 /**
  * A sender's retry behaviour, described in enough detail to size a
@@ -9530,43 +9513,6 @@ export interface SqliteConfig {
      */
     pii_encryption?: Encryption;
 }
-/** Translate a stream filter (regex-shaped or plain substring) into a
- *  SQLite \`GLOB\` pattern.
- *
- *  \`GLOB\` — not \`LIKE\` — because \`GLOB\` is **case-sensitive**,
- *  matching PG's \`~\` and InMemory's \`RegExp\`. SQLite's \`LIKE\` is ASCII
- *  case-insensitive, and its per-connection \`PRAGMA case_sensitive_like\`
- *  override is unreliable under libsql's pooled connections (a
- *  transaction and a follow-up read can land on different connections).
- *  \`GLOB\` carries its case-sensitivity in the operator itself, so it is
- *  correct regardless of which pooled connection runs the statement.
- *
- *  Honors \`^\` / \`$\` anchors and converts \`.*\` → \`*\`, \`.\` → \`?\`.
- *  Unanchored input gets \`*\` wildcards on both sides. \`GLOB\` has no
- *  ESCAPE clause and \`%\` / \`_\` are ordinary literals under it — so no
- *  escaping is needed. The portable grammar rejects \`*\`, \`?\`, and \`[\`
- *  as literals (they are metacharacters), so a literal can never collide
- *  with a \`GLOB\` wildcard.
- *
- *  Only the portable filter grammar documented on
- *  {@link QueryStreams.stream} is convertible: \`^\` / \`$\` anchors, \`.\`,
- *  \`.*\`, and literal characters. Any richer regex syntax throws
- *  {@link ValidationError} — a lossy approximation would silently
- *  return wrong rows, the worst available failure mode when the filter
- *  drives \`reset\` / \`unblock\`.
- *
- *  Examples:
- *  - \`^abc$\`  → \`abc\`        (exact)
- *  - \`^abc.*\` → \`abc*\`       (starts-with)
- *  - \`.*abc$\` → \`*abc\`       (ends-with)
- *  - \`abc\`    → \`*abc*\`      (contains)
- *  - \`a.c\`    → \`*a?c*\`      (single-char wildcard, contains)
- *  - \`^a_c$\`  → \`a_c\`        (literal underscore — ordinary under GLOB)
- *  - \`(a|b)\`  → throws {@link ValidationError}
- *
- *  @internal exported for testing
- */
-export declare function streamPatternToGlob(input: string): string;
 /**
  * SQLite event store adapter for [@rotorsoft/act](https://www.npmjs.com/package/@rotorsoft/act).
  *
