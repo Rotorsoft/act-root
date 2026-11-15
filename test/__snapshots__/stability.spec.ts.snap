@@ -9010,7 +9010,9 @@ import type { Patch, Schema } from "./types.js";
  * returns a deterministic result for the same inputs.
  *
  * **Merging rules:**
- * - Plain objects: Deep merge recursively
+ * - Plain objects: Deep merge recursively into a plain-object original; an
+ *   original that isn't one (a primitive, an array, a \`Date\`, …) is replaced
+ *   by the patch, with its \`null\`s dropped
  * - Arrays, Dates, RegExp, Maps, Sets, TypedArrays: Replace entirely
  * - \`undefined\` or \`null\` values: Delete the property
  * - Primitives: Replace with patch value

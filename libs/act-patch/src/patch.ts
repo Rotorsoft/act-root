@@ -1,5 +1,12 @@
 import type { Patch, Schema } from "./types.js";
 
+/** Whether a value is an ordinary object, which a patch merges into. */
+const is_plain = (value: unknown): boolean => {
+  if (typeof value !== "object" || value === null) return false;
+  const ctor = value.constructor;
+  return ctor === Object || ctor === undefined;
+};
+
 /**
  * Immutably deep-merges `patches` into `original`.
  *
@@ -24,12 +31,6 @@ import type { Patch, Schema } from "./types.js";
  * @param patches - The patches to apply (recursive partial of the state shape)
  * @returns A new state object with patches applied, sharing unpatched subtree references
  */
-const is_plain = (value: unknown): boolean => {
-  if (typeof value !== "object" || value === null) return false;
-  const ctor = value.constructor;
-  return ctor === Object || ctor === undefined;
-};
-
 export const patch = <S extends Schema>(
   original: Readonly<S>,
   patches: Readonly<Patch<S>> | null | undefined
