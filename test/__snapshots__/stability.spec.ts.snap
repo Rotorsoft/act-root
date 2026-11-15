@@ -4476,7 +4476,7 @@ export interface Store extends Disposable, EventSource {
      * stream — useful for "reset all priorities to N" but a footgun
      * otherwise.
      *
-     * @param filter - {@link PrioritizeFilter} selecting which streams
+     * @param filter - {@link StreamFilter} selecting which streams
      *   to update. Required (use \`{}\` to target all).
      * @param priority - New priority value, a 32-bit integer. Set
      *   as-is — no \`max()\`, no clamp.

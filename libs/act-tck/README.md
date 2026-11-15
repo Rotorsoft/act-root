@@ -47,7 +47,7 @@ That's the whole integration. `run*Tck` calls vitest's `describe`/`it` internall
 - **`runLoggerDifferentialTck(options)`** — drives the identical call surface against multiple `Logger` instances and asserts robustness + structural parity (what throws, what conforms).
 - **`runStabilityTck(options)`** — snapshot-based public-API stability gate. Catches accidental rename / removal / signature drift on a package's public surface before it merges.
 - **`StoreCapabilities`** / **`CacheCapabilities`** / **`LoggerCapabilities`** — flag types for opting into optional surface (e.g., `Store.notify`).
-- Fixture helpers re-exported from `@rotorsoft/act-tck/fixtures` for adapter-specific tests that want the same Counter domain.
+- Fixture helpers, on the package root (`@rotorsoft/act-tck`), for adapter-specific tests that want the same Counter domain.
 
 ## What's covered
 
