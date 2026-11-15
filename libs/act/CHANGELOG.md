@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v2.1.9](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v2.1.8...@rotorsoft/act-v2.1.9) (2026-11-15)
+
+
+### Bug Fixes
+
+* **act:** refuse a NaN or negative audit threshold, and mark page_size as having no effect ([#2504](https://github.com/Rotorsoft/act-root/issues/2504)) ([bd6469e](https://github.com/Rotorsoft/act-root/commit/bd6469e76c093a77310f676023ffa2bf636ee508))
+
 # [@rotorsoft/act-v2.1.8](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v2.1.7...@rotorsoft/act-v2.1.8) (2026-11-14)
 
 # [@rotorsoft/act-v2.1.7](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v2.1.6...@rotorsoft/act-v2.1.7) (2026-11-14)
