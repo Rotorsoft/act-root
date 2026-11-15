@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { z } from "zod";
+import { ZodError, z } from "zod";
 import { act, slice, state, ZodEmpty } from "../src/index.js";
 import { check } from "../src/internal/config.js";
 import { sandbox } from "../src/test/index.js";
@@ -201,6 +201,35 @@ describe("config is validated at the declaration/runtime site", () => {
     .on({ tick: ZodEmpty })
     .emit(() => ["ticked", {}])
     .build();
+
+  it("refuses a poll frequency or a page limit Node or the store can't honor", async () => {
+    const ctx = await sandbox(act().withState(counter), {
+      actOptions: { autoSettle: false },
+    });
+    try {
+      const { app } = ctx;
+      // A NaN, negative or too-large frequency runs a Node timer every 1 ms.
+      for (const frequency of [Number.NaN, -5, Number.POSITIVE_INFINITY])
+        expect(() => app.start_correlations({}, frequency)).toThrow(ZodError);
+      expect(() => app.start_correlations({ limit: Number.NaN })).toThrow(
+        ZodError
+      );
+      await expect(app.correlate({ limit: Number.NaN })).rejects.toThrow(
+        ZodError
+      );
+      await expect(app.blocked_streams({ limit: -1 })).rejects.toThrow(
+        ZodError
+      );
+      expect(() => app.settle({ correlate: { limit: 1.5 } })).toThrow(ZodError);
+      // Control: 0 keeps its meaning (the poll's default, no limit elsewhere).
+      expect(app.start_correlations({ limit: 0 }, 0)).toBe(true);
+      app.stop_correlations();
+      await expect(app.correlate({ limit: 0 })).resolves.toBeDefined();
+      await expect(app.blocked_streams({ limit: 0 })).resolves.toEqual([]);
+    } finally {
+      await ctx.dispose();
+    }
+  });
 
   it("reaction with a NaN maxRetries throws at build", () => {
     async function react() {}

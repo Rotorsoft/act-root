@@ -87,8 +87,20 @@ const LaneConfigSchema = z.object({
   cycleMs: z.number().min(0).optional(),
 });
 
+// Page — the `limit` of `app.correlate`, `app.start_correlations`,
+// `app.blocked_streams` and settle's `correlate`. The stores read a falsy
+// limit as "no limit" (the poll reads 0 as its default), so 0 stays; a NaN
+// read the whole log.
+const LimitSchema = z.number().int().min(0).optional();
+const PageOptionsSchema = z.object({ limit: LimitSchema });
+
+// Poll — `app.start_correlations`' frequency. Node runs a timer below 1 ms,
+// above 2^31 − 1 ms or NaN every millisecond.
+const PollOptionsSchema = z.object({
+  frequency: z.number().min(0).max(2_147_483_647),
+});
+
 // Drain / Settle — the knobs of `app.drain(...)` and `app.settle(...)`.
-// `correlate` is a query filter the store validates.
 
 /** Streams a drain claims per cycle. */
 export const DEFAULT_STREAM_LIMIT = 10;
@@ -105,6 +117,7 @@ const DrainOptionsSchema = z.object({
 
 const SettleOptionsSchema = DrainOptionsSchema.extend({
   debounceMs: z.number().min(0).optional(),
+  correlate: PageOptionsSchema.optional(),
   // `0` runs no passes; `Infinity` is the documented default (no cap), which
   // an integer check alone would refuse.
   maxPasses: z
@@ -318,6 +331,8 @@ const SCHEMAS = {
   drain: DrainOptionsSchema,
   fold: FoldOptionsSchema,
   lane: LaneConfigSchema,
+  page: PageOptionsSchema,
+  poll: PollOptionsSchema,
   reaction: ReactionOptionsSchema,
   scan: ScanOptionsSchema,
   settle: SettleOptionsSchema,

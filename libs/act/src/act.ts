@@ -1064,6 +1064,7 @@ export class Act<
   async correlate(
     query: Query = {}
   ): Promise<{ subscribed: number; last_id: number }> {
+    check("page", query);
     const pass = await this._correlate_pass(query.limit ?? 10);
     return {
       subscribed: pass.kind === "scanned" ? pass.subscribed : 0,
@@ -1118,6 +1119,8 @@ export class Act<
    * @see {@link stop_correlations} to stop the poll
    */
   start_correlations(query: Query = {}, frequency = 10_000): boolean {
+    check("page", query);
+    check("poll", { frequency });
     if (this._poll) return false;
     this._poll_limit = query.limit || undefined;
     this._poll = setInterval(() => {
@@ -1340,6 +1343,7 @@ export class Act<
     after?: string;
     limit?: number;
   }): Promise<StreamPosition[]> {
+    check("page", options ?? {});
     return this._scoped(async () => {
       const positions: StreamPosition[] = [];
       await store().query_streams(
