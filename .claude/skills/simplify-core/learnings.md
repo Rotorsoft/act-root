@@ -14,7 +14,6 @@ What building Act has taught, as rules to check a design or a fix against. Read 
 - The call site is the spec. If the line doesn't read as plain English, the API isn't done, even when the types are right. (#1134)
 - Packaging is a distribution choice, not a discipline. An expensive operator call can be an `IAct` method if it is never auto-invoked. (#723)
 - Integration helpers live in their own package, scoped by shape (`act-http` is HTTP only). (#602)
-- Small gaps left at ship time resolve better as targeted follow-ups than as an over-designed first version. (#602 → #604)
 - The framework's job is narrow: express the declaration, route the data, gate the read, emit the lifecycle. Key management, encryption and compliance belong to the operator. (#566)
 - Before promoting legacy code to a port, audit what it does by accident; accidents become contract. (#1124)
 - A wakeup is a hint, never the truth: decorators that carry notifications must pass the full Store TCK unchanged. (#987)
@@ -99,9 +98,12 @@ What building Act has taught, as rules to check a design or a fix against. Read 
 - Making the test seam the API can be the right call. (#402: `act -q`)
 - Benchmark on real adapters; InMemory understates every win. (#102)
 - A performance mechanism serves a bench, not a contract row; "no row needs it" is no reason to remove it. Measure on a real adapter first. (#1923, closed)
-- A guard test that greps for a moved rule guards only the spelling it greps for: `architecture.spec.ts` matched the stale-writer check by its old `typeof … === "number"`, looked for a name no store ever had, and had no row for the notification parser #2408 moved. Match what any copy must touch (the field it reads, the error it builds), and plant a differently spelled copy to prove the rule fails (#2429).
 - A test that takes almost exactly a framework default (10 s backoff, 10 s lease) is stalled, not slow, and a generous budget hides it until a slow runner tips it over: Wolfdesk's 10 s tests were a lost race with no action retries and a shared SQLite file (#2383). Fix each cause, then rerun the whole suite several times: one fix removed one stall, not the symptom. (2026-11-07, 2026-11-08)
 - Merging two branches that both added a test keeps both copies with no conflict: `stream-names.spec.ts` ran one test twice after the 1.x fixes merged into `v2`. Diff test names after a merge of related branches. (#2386)
+- When a rule stops matching the code, write the one pattern the code should follow, not a description of the drift: the 11-14 run's rewrite named a resolver exception and a second prefix, and #2514 replaced both with one `check(kind, options)` the next day.
+- Two operations that replace history must reset the same derived state: `app.reset` dropped the projections' fold caches and `app.restore` didn't, so a `.of()` row kept the old log's state (#2517). When one path clears a cache, grep every path that rewrites what the cache was built from.
+- A framework that installs process crash handlers owns the exit code: act's handlers clean up and skip `process.exit` under `test` (and keep production alive), so a script that throws exits 0 and the perf job read an empty result (#2518). A handler that catches a crash sets `process.exitCode`.
+- An arrow function in a constructor that reads `this` shares one scope with every closure that constructor creates, so a closure handed to a weak registry keeps the instance alive: #2514 inlined a lane check that read `this._declared_lanes` and every Act stayed in memory, caught only by the `--expose-gc` test. Read a local instead.
 
 ## Hunting and fixing
 
@@ -112,11 +114,10 @@ What building Act has taught, as rules to check a design or a fix against. Read 
 ## Process
 
 - A grep of this repo can't show who uses a published export. Never call an export "unused"; say what was searched, and don't deprecate public surface. (#1817)
-- Estimate a comment cut by sampling first: stripping all history moved comments only 52% → 49%, because most comment volume is explanation. (#1820)
+- Estimate a cut by sampling first and measure after formatting: stripping all comment history moved comments only 52% → 49% (#1820), and #2011, simulated at −11, shipped +15 once Biome spread a six-argument call.
 - Merging spec files without a shared fixture saves files, not lines. (#1821)
 - A commit pushed after its PR merged is lost; check the PR is still open before pushing a follow-up. (#1816, #1819)
 - A scripted comment rewrite can swallow code; diff the non-comment lines before trusting it. (#1820)
-- Estimate lines saved after formatting: #2011 was simulated at −11 and shipped +15, because Biome spread the new six-argument call over many lines. (2026-10-20)
 - Read a hook's config before obeying a doc's paraphrase of it: CLAUDE.md said subjects "must be lowercase"; commitlint only rejects a capitalized start, and six squash subjects lowercased type names for nothing. (2026-10-20)
 - Measure prose in bytes, not lines: the CLAUDE.md trim cut 4 KB (9%) and left its line count at 333. (#1838, #1850)
 - A proposal to delete a layer must name why the layer exists. `DrainOps` was proposed as a pass-through and turned out to be the trace seam, so it stayed. (#1841)
@@ -139,11 +140,9 @@ What building Act has taught, as rules to check a design or a fix against. Read 
 - A check is a duplicate only if its other copy runs on every trigger the first did: docs-build runs the snippet self-test on `docs/**` changes, not on lockfile or TypeScript bumps, so ci-cd's copy stayed. (#2051)
 
 - Process steps are a cost on every change; each must have caught something to keep its place. Per-ticket narrative essays were dropped for this file. (2026-10)
-- Ticket numbers belong in git and here, not in code comments or test names.
 - A numeric option used only in a comparison needs validation like any other: `NaN` makes `delta > max` and `delta < -max` both false, so `verifyWebhook`'s replay window silently became unbounded (#2440). The config-validation rule applies to every package's options, not only core's.
-- A guard that matches how a rule was written guards that spelling, not the rule: the framework-rules guard was "fixed" by adding spellings (#2429) and a rewritten copy still passed 7 of 8 rows (#2460). Prove a guard with a copy spelled another way. The maintainer then dropped this one: keeping rules in core is a practice the adapters follow, not something to test (#2460).
+- A grep that guards a rule guards one spelling: the framework-rules guard passed a rewritten copy on 7 of 8 rows (#2460, then dropped by the maintainer), and #2514's reviewer grep matched `function check_x(` but not `const check_x = () =>`. Plant a copy spelled another way before trusting one.
 - Read the header of the helper you call: `report_once` forbids keys built from computed values, and #2459 keyed its report by the priority, so one bad resolver logged once per value. A test that feeds the same bad value twice can't see a per-value key.
 - A slimming pass that keeps a list keeps its staleness: #2458 carried CLAUDE.md's covered-files list over without `adapter.ts` or `types/action.ts`. An index points at the source (STABILITY.md, the snapshot) instead of copying it.
 - A test of a timer-driven retry has to let the timer do the waking: #2483's "next day" tests woke the drain with an unrelated commit, so they passed with the retry's own wake removed. Fake the timers and move the clock, then break the wake on purpose and watch the test fail.
 - A behavior change hides in log strings and recipe calls, not only docs: #2483 changed a promise and left five passages, a log line and a recipe call saying the old one. The doc-audit grep covers the log messages in `libs/*/src` and the calls in `recipes/` too.
-
