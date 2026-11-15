@@ -90,7 +90,7 @@ The `.nullable()` belongs on the action and event schemas, the ones that carry t
 
 | Value type | `patch` behavior |
 |---|---|
-| Plain objects | Deep merge recursively |
+| Plain objects | Deep merge recursively into a plain object; replace any other value (a string, an array, a `Date`) |
 | Arrays, Dates, RegExp, Maps, Sets, TypedArrays | Replace entirely |
 | `undefined` or `null` | Delete the property |
 | Primitives (string, number, boolean) | Replace with patch value |

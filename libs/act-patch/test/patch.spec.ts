@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { patch } from "../src/index.js";
+import { delta, patch } from "../src/index.js";
 
 type Schema = Record<string, any>;
 
@@ -220,6 +220,37 @@ describe("patch", () => {
       const s2 = new SharedArrayBuffer(16);
       const result = patch<Schema>({ buf: s1 }, { buf: s2 });
       expect(result.buf).toBe(s2);
+    });
+  });
+
+  describe("an object patch over a value that isn't a plain object", () => {
+    it("replaces a primitive or an array instead of merging into it", () => {
+      expect(patch({ a: "hi" } as any, { a: { x: 1 } })).toEqual({
+        a: { x: 1 },
+      });
+      expect(patch({ a: [1, 2] } as any, { a: { x: 1 } })).toEqual({
+        a: { x: 1 },
+      });
+      expect(patch({ a: new Date(0) } as any, { a: { x: 1 } })).toEqual({
+        a: { x: 1 },
+      });
+    });
+
+    it("replaces it with an empty object", () => {
+      expect(patch({ a: 5 } as any, { a: {} })).toEqual({ a: {} });
+      expect(patch({ a: [1, 2] } as any, { a: {} })).toEqual({ a: {} });
+    });
+
+    it("drops the nulls of the replacement", () => {
+      expect(patch({ a: "hi" } as any, { a: { x: 1, y: null } })).toEqual({
+        a: { x: 1 },
+      });
+    });
+
+    it("round-trips a delta that changes a field's kind", () => {
+      const before = { meta: "raw", tags: ["x", "y"] } as any;
+      const after = { meta: { x: 1 }, tags: {} } as any;
+      expect(patch(before, delta(before, after))).toEqual(after);
     });
   });
 
