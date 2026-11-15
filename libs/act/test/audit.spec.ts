@@ -94,6 +94,21 @@ describe("audit", () => {
     expect(findings).toEqual([]);
   });
 
+  it("refuses a NaN or negative threshold, which would report a clean store", async () => {
+    const app = act().withState(widget).build();
+    for (const thresholds of [
+      { idle_days: Number.NaN },
+      { drift_min: -1 },
+      { deprecated_min: Number.NaN },
+    ])
+      await expect(
+        collect(app.audit(undefined, { thresholds }))
+      ).rejects.toThrow();
+    await expect(
+      collect(app.audit(undefined, { thresholds: { idle_days: 0 } }))
+    ).resolves.toEqual([]);
+  });
+
   describe("schema category", () => {
     it("flags events whose name is unknown to the registry", async () => {
       const app = act().withState(widget).build();

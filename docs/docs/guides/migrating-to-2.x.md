@@ -157,6 +157,7 @@ A 2.x minor gives each audience its own entry point ([RFC 2411](https://github.c
 | `is_literal_source` | `isStreamName` from `@rotorsoft/act/adapter` |
 | `notification_of` | `parseNotification` from `@rotorsoft/act/adapter` |
 | `pii_fields` (also on `/types`) | `sensitiveFields`, from `@rotorsoft/act` or `/types` |
+| `AuditOptions.page_size` | nothing: it has no effect, so drop it |
 | `DEFAULT_QUERY_STREAMS_LIMIT`, `ActorSchema`, `TargetSchema`, `EventMetaSchema`, `CausationEventSchema`, `CommittedMetaSchema`, `QuerySchema`, `Environments`, `LogLevels`, `ExitCodes`, `DEFAULT_LANE`, `DEFAULT_MAX_SUBSCRIBED_STREAMS`, `DEFAULT_SETTLE_DEBOUNCE_MS` | the same name from `@rotorsoft/act/types` |
 | `PackageSchema`, `default_scope`, `resolveAutocloseConfig`, `dateReviver`, `extend` | nothing: `config()` and `act().build()` validate for you, `store()`/`cache()`/`log()` give the unscoped adapters, and a host app can write its own reviver |
 
