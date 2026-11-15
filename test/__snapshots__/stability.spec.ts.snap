@@ -3465,11 +3465,6 @@ export declare const cache: (adapter?: Cache) => Cache;
  */
 export declare const unscoped_ports: () => Scoped;
 /**
- * Registered cleanup functions live in \`disposers.ts\`, which holds
- * lifetime-bound entries weakly so registering never pins its target for the
- * process lifetime. The public surface here is unchanged.
- */
-/**
  * Disposes all registered adapters and disposers, then exits the process.
  *
  * Execution order:
@@ -6469,8 +6464,7 @@ import { type BroadcastState, type PatchMessage } from "../sse/types.js";
  * hundreds of human viewers per process). Both numeric knobs are
  * validated at transport-function construction; out-of-range values
  * throw \`ZodError\` immediately so misconfiguration surfaces at startup
- * instead of at first connection (the framework-wide convention for
- * config bags — see .claude/rules/config-validation.md).
+ * instead of at first connection.
  */
 export type SseOptions = {
     /**

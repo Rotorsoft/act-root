@@ -36,7 +36,6 @@ import {
 } from "./types.js";
 
 export type { HttpDisposition, TryOkOptions } from "./classify.js";
-// See rfcs/1621-webhook-classify-exports.md.
 export { classifyHttpResponse, tryOk } from "./classify.js";
 export type {
   HttpDeliveryErrorInit,
