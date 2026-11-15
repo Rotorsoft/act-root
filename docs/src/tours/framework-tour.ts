@@ -1,10 +1,4 @@
-import type {
-  Chapter,
-  Check,
-  Link,
-  Node,
-  TourSpec,
-} from "../components/Tour/types";
+import type { Chapter, Link, Node, TourSpec } from "../components/Tour/types";
 
 /**
  * The framework tour: every capability of Act shown as what it does to the
@@ -72,31 +66,6 @@ const port = (id: string, label: string, sub?: string): Node => ({
   label,
   sub,
 });
-
-/** The checks an action walks, in order: `ok` before `at`, then `fail` or `todo`. */
-const STEPS = [
-  "payload schema",
-  "load",
-  "preconditions",
-  "handler · event schemas",
-  "fold · state schema",
-  "commit",
-];
-const checks = (at: number, fail = false): Check[] =>
-  STEPS.map((label, i) => ({
-    label,
-    state:
-      i < at
-        ? "ok"
-        : i === at
-          ? fail
-            ? "fail"
-            : "todo"
-          : fail
-            ? "skip"
-            : "todo",
-  }));
-const passed = checks(STEPS.length);
 
 const ticketState = `const Ticket = state({
   Ticket: z.object({ title: z.string(), status: z.string(), messages: z.number() }),
@@ -171,6 +140,7 @@ const all = await app.query_array({});
 // all[0] → { id: 0, stream: "ticket-4821", version: 0, name: "TicketOpened", … }`,
         steps: [
           {
+            now: "The store holds four events, #0 to #3, in one global log",
             say: "This is a ticket desk's **event store**. It keeps every change as an event in **one ordered log**, the all stream. Each event gets a global `id` when it commits: #0, #1, #2, #3.",
             ops: [
               {
@@ -181,6 +151,7 @@ const all = await app.query_array({});
             ],
           },
           {
+            now: "ticket-4821 holds v0 (#0) and v1 (#3); other streams sit between them",
             say: "Each event also belongs to one **stream** and takes that stream's next **version**. Ticket 4821 holds v0 and v1; its events interleave with other streams in the log.",
             ops: [
               { op: "unflag" },
@@ -190,12 +161,14 @@ const all = await app.query_array({});
             focus: ["cell:t21-open", "cell:t21-m1"],
           },
           {
+            now: '`app.query_array({ stream: "ticket-4821", stream_exact: true })` reads one stream',
             say: "Reading one stream is a query over the same log: `stream_exact` picks one stream's events, in version order. The stream table below folds the log the same way.",
             code: `const ticket = await app.query_array({ stream: "ticket-4821", stream_exact: true });
 // [ v0 TicketOpened, v1 MessageAdded ]`,
             ops: [{ op: "unflag" }, { op: "dim", only: "ticket-4821" }],
           },
           {
+            now: "Every event carries `meta.correlation` and `meta.causation`",
             say: "Every event carries who caused it: `meta.causation` names the action and its actor, and `meta.correlation` is an id that a whole workflow shares. **Click any event** to see it.",
             ops: [
               { op: "dim" },
@@ -243,13 +216,15 @@ const all = await app.query_array({});
         code: ticketState,
         steps: [
           {
+            now: "Declare `state({ Ticket })` and build the app with `act().withState(Ticket)`",
             say: "A **state** is a Zod schema, an initial value, the events it emits, how each event **patches** it, and the **actions** that emit them. `act().withState(Ticket).build()` turns it into an app.",
             focus: ["ticket", "OpenTicket", "AddMessage"],
           },
           {
+            now: "Maya runs `OpenTicket` on ticket-4830: the payload passes its schema",
+            pipe: { name: "action", at: 1 },
             say: 'Maya calls `app.do("OpenTicket", { stream: "ticket-4830", actor }, { title })`. First the payload is checked against the action\'s schema.',
             moves: [{ from: "maya", to: "OpenTicket", label: "{ title }" }],
-            checks: checks(1),
             code: `await app.do(
   "OpenTicket",
   { stream: "ticket-4830", actor: { id: "maya", name: "Maya" } },
@@ -257,6 +232,8 @@ const all = await app.query_array({});
 );`,
           },
           {
+            now: "`OpenTicket` loads ticket-4830: a new stream, the initial state at v−1",
+            pipe: { name: "action", at: 3 },
             say: "Then it **loads** the stream. Ticket 4830 has no events yet, so the state is its initial value at version −1.",
             moves: [{ from: "OpenTicket", to: "ticket", label: "load" }],
             ops: [
@@ -267,9 +244,10 @@ const all = await app.query_array({});
                 version: -1,
               },
             ],
-            checks: checks(2),
           },
           {
+            now: "The handler emits `TicketOpened`; it folds, and the state passes its schema",
+            pipe: { name: "action", at: 6 },
             say: "The handler decides the events: here `TicketOpened`, with the payload as its data. Each event folds into the state once, through its patch, **before** anything is stored. The final state is checked against the schema.",
             ops: [
               {
@@ -279,9 +257,10 @@ const all = await app.query_array({});
                 version: -1,
               },
             ],
-            checks: checks(5),
           },
           {
+            now: "Commit: #4 `TicketOpened` · ticket-4830 v0",
+            pipe: { name: "action", at: 7 },
             say: "The commit expects version −1 and lands: global id **#4**, stream version **0**. `app.do` returns one snapshot per event it committed.",
             moves: [
               {
@@ -310,9 +289,10 @@ const all = await app.query_array({});
                 version: 0,
               },
             ],
-            checks: passed,
           },
           {
+            now: "Maya runs `AddMessage`: #5 `MessageAdded` · ticket-4830 v1",
+            pipe: { name: "action", at: 7 },
             say: "The next action loads v0 and commits v1. The log grows by one: **#5**. Versions count per stream, ids count across the whole store.",
             moves: [
               { from: "maya", to: "AddMessage", label: "{ body }" },
@@ -343,9 +323,9 @@ const all = await app.query_array({});
                 version: 1,
               },
             ],
-            checks: passed,
           },
           {
+            now: '`app.load(Ticket, "ticket-4830")` folds v0 and v1',
             say: '`app.load(Ticket, "ticket-4830")` rebuilds the state from the stream\'s events: each folds through its patch, in version order.',
             moves: [
               { from: "cell:t30-open", to: "ticket", label: "fold v0" },
@@ -369,7 +349,7 @@ const all = await app.query_array({});
       "An action runs only when its rules hold, and the state it leaves must keep the schema. A refusal stores nothing.",
     scenes: [
       {
-        title: "Six checks, in order",
+        title: "Seven stages, in order",
         nodes: [
           actor("maya", "Maya", "customer"),
           actor("bo", "Bo", "agent"),
@@ -400,10 +380,13 @@ const all = await app.query_array({});
   .emit((_, __, { actor }) => ["TicketClosed", { closedBy: actor.id }])`,
         steps: [
           {
+            now: "An action walks seven stages, in order",
+            pipe: { name: "action", at: 0 },
             say: "Every action walks the same checks, in this order, and refuses at the first that fails. Nothing is stored until the last one.",
-            checks: checks(0),
           },
           {
+            now: "Maya runs `CloseTicket` with `{ reason: 42 }`: refused at the payload (`ValidationError`)",
+            pipe: { name: "action", at: 0, fail: true },
             say: "A payload that breaks the action's schema (`reason: 42`) is a `ValidationError`. The action never loads.",
             moves: [
               {
@@ -421,9 +404,10 @@ const all = await app.query_array({});
                 error: "ValidationError",
               },
             ],
-            checks: checks(0, true),
           },
           {
+            now: "Bo runs `CloseTicket`: #6 `TicketClosed` · ticket-4830 v2",
+            pipe: { name: "action", at: 7 },
             say: "Bo closes the ticket with a good reason. Every check passes, and `TicketClosed` commits as v2.",
             moves: [
               { from: "bo", to: "CloseTicket", label: "{ reason }" },
@@ -458,9 +442,10 @@ const all = await app.query_array({});
                 version: 2,
               },
             ],
-            checks: passed,
           },
           {
+            now: "Maya runs `CloseTicket` again: refused at preconditions (`PreconditionError`)",
+            pipe: { name: "action", at: 2, fail: true },
             say: 'Maya tries to close it again. A **precondition** is a named rule the action needs right now: `.requires([mustBeOpen])` doesn\'t hold, so it throws `PreconditionError` with the message "CloseTicket failed precondition: Ticket must be open".',
             moves: [
               { from: "maya", to: "CloseTicket", label: "{ reason }" },
@@ -474,9 +459,10 @@ const all = await app.query_array({});
                 error: "PreconditionError",
               },
             ],
-            checks: checks(2, true),
           },
           {
+            now: "A buggy `CloseTicket` on ticket-4822: refused at the state check (`ValidationError`)",
+            pipe: { name: "action", at: 5, fail: true },
             say: "What must hold after **every** action is an **invariant**, and it lives in the state's schema. Suppose a buggy handler closes ticket 4822 without a closer: the fold leaves a state the schema rejects, so the action is refused with a `ValidationError` before the commit.",
             code: `const Ticket = z
   .object({ status: z.string(), closedBy: z.string().optional() /* … */ })
@@ -495,9 +481,9 @@ const all = await app.query_array({});
                 error: "ValidationError",
               },
             ],
-            checks: checks(4, true),
           },
           {
+            now: "Nothing was stored: the log still ends at #6",
             say: "Refusals never reach the log: no event, no version, no reaction wakes. The log still ends at #6.",
             ops: [
               {
@@ -548,6 +534,8 @@ const all = await app.query_array({});
         ),
         steps: [
           {
+            now: "Maya and Ana both run `AddMessage` on ticket-4821; both load v1",
+            pipe: { name: "action", at: 2 },
             say: "Maya and Ana add a message to ticket 4821 at the same moment. Both actions load the stream at **version 1**.",
             moves: [
               { from: "maya", to: "AddMessage", label: "Maya's" },
@@ -564,6 +552,8 @@ const all = await app.query_array({});
             ],
           },
           {
+            now: "Maya's commit lands as #7 v2; Ana's commit fails: `ConcurrencyError`",
+            pipe: { name: "action", at: 6, fail: true },
             say: "Maya's commit gets there first and lands as v2 (#7). Ana's commit expected 1 and found 2: `ConcurrencyError`, carrying `stream`, `expectedVersion` and `lastVersion`. Nothing of hers is stored.",
             moves: [
               {
@@ -601,6 +591,8 @@ const all = await app.query_array({});
             ],
           },
           {
+            now: "Ana's action retries: reloads v2, checks again, commits #8 · ticket-4821 v3",
+            pipe: { name: "action", at: 7 },
             say: "Give the action a retry budget and Act owns the loop: on `ConcurrencyError` it reloads, checks the rules again on the new state, and commits. Ana's message lands as v3 (#8). The caller never sees the conflict.",
             code: `.on({ AddMessage: z.object({ body: z.string() }) }, {
   maxRetries: 2,
@@ -635,9 +627,10 @@ const all = await app.query_array({});
                 version: 3,
               },
             ],
-            checks: passed,
           },
           {
+            now: "Ana runs `AddMessage` with `expectedVersion: 1`: `ConcurrencyError`, no retry",
+            pipe: { name: "action", at: 6, fail: true },
             say: "A version the **caller** pins is a fixed conflict. With `expectedVersion: 1` the action fails at once with `ConcurrencyError`, and the budget doesn't retry it: reloading can't make v3 equal 1.",
             code: `await app.do("AddMessage", { stream: "ticket-4821", actor, expectedVersion: 1 }, { body });
 // ConcurrencyError: thrown at once, never retried`,
@@ -697,6 +690,7 @@ const all = await app.query_array({});
   .build();`,
         steps: [
           {
+            now: '`app.load(Ticket, "ticket-4821")` hits the cache at v3',
             say: "A warm load starts from the **cache** (`InMemoryCache` by default) and replays only what came after its entry. Here the cache already holds ticket 4821 at v3, and nothing came after it, so there is nothing to fold.",
             moves: [
               {
@@ -717,6 +711,8 @@ const all = await app.query_array({});
             ],
           },
           {
+            now: "Ana runs `AddMessage`: #9 · ticket-4821 v4, then #10 `__snapshot__` v5",
+            pipe: { name: "action", at: 7 },
             say: "With `.snap(...)` on the state, an action whose commit makes the predicate true also commits a **snapshot**. It is an event too, `__snapshot__`, on the stream's next version (v5, #10), holding the state.",
             moves: [
               { from: "ana", to: "AddMessage", label: "{ body }" },
@@ -751,6 +747,7 @@ const all = await app.query_array({});
             ],
           },
           {
+            now: "After a restart, a cold load starts from the snapshot #10",
             say: "After a restart the cache is empty. A **cold** load starts from the latest snapshot and folds only the events after it, instead of the whole stream.",
             moves: [
               { from: "cell:t21-snap", to: "ticket", label: "start here" },
@@ -760,6 +757,7 @@ const all = await app.query_array({});
             ],
           },
           {
+            now: '`app.load(Ticket, "ticket-4821", undefined, { before: 8 })` folds #0, #3, #7: v2',
             say: "A **time-travel** load reads the past: `{ before: 8 }` replays the real events below id #8, skipping the cache and any snapshot outside the window. It is read-only.",
             code: `const past = await app.load(Ticket, "ticket-4821", undefined, { before: 8 });
 // state → { messages: 2 }, version → 2
@@ -825,6 +823,8 @@ const all = await app.query_array({});
   .build();`,
         steps: [
           {
+            now: "Maya runs `OpenTicket`: #11 `TicketOpened` · ticket-4831 v0, and settle is scheduled",
+            pipe: { name: "action", at: 7 },
             say: "Maya opens ticket 4831 (#11). Its event has a reaction, so the commit schedules `settle()` on its own: no wiring, no message queue. The log is the backbone.",
             ops: [
               { op: "dim" },
@@ -851,6 +851,8 @@ const all = await app.query_array({});
             ],
           },
           {
+            now: "Correlate reads #11 and subscribes `assign:ticket-4831`",
+            pipe: { name: "reaction", at: 0 },
             say: "**Correlate** reads the log past its checkpoint and asks each reaction's resolver where it runs. `assign` names the target stream `assign:ticket-4831`: it is subscribed, and its work is marked up to #11.",
             moves: [
               { from: "cell:t31-open", to: "assign", label: "resolve" },
@@ -867,6 +869,8 @@ const all = await app.query_array({});
             ],
           },
           {
+            now: "Drain leases `assign:ticket-4831` and fetches #11",
+            pipe: { name: "reaction", at: 2 },
             say: "**Drain** claims targets that have work, each under a **lease**, and fetches the source's events past the target's watermark (−1 here).",
             moves: [
               {
@@ -880,6 +884,8 @@ const all = await app.query_array({});
             focus: ["target:assign:ticket-4831"],
           },
           {
+            now: "`assign` runs `AssignTicket`: #12 `TicketAssigned` · ticket-4831 v1",
+            pipe: { name: "reaction", at: 3 },
             say: "The handler calls `app.do`. That action **inherits** the event that woke it (`reactingTo` is injected): the same correlation, and `TicketOpened` as its cause. Click #12 to see it.",
             moves: [
               { from: "assign", to: "AssignTicket", label: "app.do" },
@@ -906,11 +912,15 @@ const all = await app.query_array({});
             ],
           },
           {
+            now: "Drain acks `assign:ticket-4831` at #11 and releases the lease",
+            pipe: { name: "reaction", at: 4 },
             say: "On success the drain **acks**: the target's watermark moves past #11 and the lease is released. A stream is never acked past an event a reaction hasn't handled.",
             ops: [{ op: "ack", target: "assign:ticket-4831", at: "t31-open" }],
             focus: ["target:assign:ticket-4831"],
           },
           {
+            now: "Settle's next pass reads #12, finds no reaction, and emits `settled`",
+            pipe: { name: "reaction", at: 5 },
             say: "**Settle** loops correlate and drain until a pass finds nothing. The next pass reads #12, which no reaction handles, so the app is settled and emits `settled`.",
             code: `app.on("settled", (drain) => {
   // notify clients, refresh caches, …
@@ -921,6 +931,7 @@ const all = await app.query_array({});
             ],
           },
           {
+            now: "In a test: `app.correlate()`, then `app.drain()`",
             say: "Leave out `.to(...)` and the reaction runs on the event's own stream. In tests, build with `autoSettle: false` and walk the pipeline yourself.",
             code: `import { fixture } from "@rotorsoft/act/test";
 
@@ -961,6 +972,8 @@ test("assigns a new ticket", async ({ app }) => {
         ),
         steps: [
           {
+            now: "Worker A leases `assign:ticket-4832`; worker B leases `assign:ticket-4833`",
+            pipe: { name: "reaction", at: 1 },
             say: "Two tickets open (#13, #14) and correlate marks two targets. Two processes drain the same store, and they **compete**: each claims a different target, because an unexpired lease is invisible to other claimers.",
             ops: [
               {
@@ -1004,6 +1017,8 @@ test("assigns a new ticket", async ({ app }) => {
             ],
           },
           {
+            now: "A's lease expires; B leases `assign:ticket-4832`",
+            pipe: { name: "reaction", at: 1 },
             say: "Worker A dies mid-handler. Its lease runs out after `leaseMillis`, and **exactly one** other worker takes it over. B now runs both, and the attempt counts against the target's retry budget.",
             moves: [
               {
@@ -1022,6 +1037,8 @@ test("assigns a new ticket", async ({ app }) => {
             ],
           },
           {
+            now: "B commits #15 and #16, then acks both targets",
+            pipe: { name: "reaction", at: 4 },
             say: "B's handlers assign both tickets (#15, #16), then ack both targets.",
             moves: [
               {
@@ -1099,6 +1116,7 @@ test("assigns a new ticket", async ({ app }) => {
   .build();`,
         steps: [
           {
+            now: "Declare lane `webhooks` for target `ticket-escalation-webhooks`",
             say: "A **lane** is a separate drain controller with its own lease and claim budget. Webhook calls are slow, so they get their own lane with 30-second leases.",
             ops: [
               {
@@ -1110,6 +1128,8 @@ test("assigns a new ticket", async ({ app }) => {
             focus: ["hooks", "target:ticket-escalation-webhooks"],
           },
           {
+            now: "#17 `TicketEscalated` · ticket-4832; the webhooks lane leases its target",
+            pipe: { name: "reaction", at: 1 },
             say: "Ticket 4832 escalates (#17). The webhooks lane claims its target while the default lane keeps draining: lanes run **in parallel**, so a slow lane never holds up the fast one.",
             moves: [
               {
@@ -1144,6 +1164,7 @@ test("assigns a new ticket", async ({ app }) => {
             ],
           },
           {
+            now: "Set priority 10 on `ticket-escalation-webhooks`",
             say: "Inside a lane, **priority** decides which targets that are behind get claimed first when the worker is saturated. It never reorders the events of a stream. `app.prioritize` changes it at run time.",
             code: `.to({ target: "notifications-out", priority: 10 })
 
@@ -1196,6 +1217,8 @@ await app.prioritize({ source: "^audit-" }, -5); // lower`,
 })`,
         steps: [
           {
+            now: "The webhook POSTs #17: 503, retry 1 due in 200 ms × jitter",
+            pipe: { name: "reaction", at: 3, fail: true },
             say: "The webhook POSTs #17 and the service answers 503. A failed attempt waits out the **backoff** in the code card: `baseMs: 200` for the first retry, times a jitter factor between 0.5 and 1.5. The schedule is stored on the target, so no worker retries before it is due.",
             moves: [
               { from: "webhook", to: "svc", label: "POST #17" },
@@ -1211,6 +1234,8 @@ await app.prioritize({ source: "^audit-" }, -5); // lower`,
             ],
           },
           {
+            now: "Retries 2 and 3 fail: the next is due in 800 ms × jitter",
+            pipe: { name: "reaction", at: 3, fail: true },
             say: "Retries two and three fail too. Exponential doubles the wait each time (400 ms, then 800 ms, capped at `maxMs`), each times its jitter.",
             moves: [
               { from: "webhook", to: "svc", label: "retry" },
@@ -1226,6 +1251,8 @@ await app.prioritize({ source: "^audit-" }, -5); // lower`,
             ],
           },
           {
+            now: "Attempt 4 fails: `ticket-escalation-webhooks` blocks",
+            pipe: { name: "reaction", at: 3, fail: true },
             say: "The fourth attempt fails. After `maxRetries + 1` attempts the target **blocks**: claim skips it, its watermark stays before #17, and the `blocked` event fires.",
             moves: [
               { from: "webhook", to: "svc", label: "attempt 4" },
@@ -1242,6 +1269,8 @@ const stuck = await app.blocked_streams();`,
             ],
           },
           {
+            now: "The operator runs `app.unblock`: #17 is delivered and acked",
+            pipe: { name: "reaction", at: 4 },
             say: "The service is back. `app.unblock` resumes **at the watermark**: #17 is delivered once more, and nothing before it runs again.",
             code: `await app.unblock(["ticket-escalation-webhooks"]);`,
             moves: [
@@ -1263,6 +1292,8 @@ const stuck = await app.blocked_streams();`,
             ],
           },
           {
+            now: "#18 is POSTed: 400, and `NonRetryableError` blocks at once",
+            pipe: { name: "reaction", at: 3, fail: true },
             say: "Ticket 4833 escalates (#18) and the service answers **400**: a request that will never succeed. The webhook throws `NonRetryableError`, which blocks at the first attempt without spending the budget (unless `blockOnError` is false).",
             moves: [
               { from: "webhook", to: "svc", label: "POST #18" },
@@ -1296,6 +1327,7 @@ throw new NonRetryableError("user deleted", { cause: error });`,
             ],
           },
           {
+            now: "`app.reset` would replay every webhook from #0: don't",
             say: "Don't reach for `app.reset` here. Reset rewinds the watermark to −1 and replays **everything**: every webhook would be sent again. Reset rebuilds; unblock recovers.",
             ops: [
               {
@@ -1306,6 +1338,7 @@ throw new NonRetryableError("user deleted", { cause: error });`,
             ],
           },
           {
+            now: "The store fails: `error` fires and the breaker opens",
             say: "When the **store itself** fails, the drain, settle and autoclose loops share a circuit breaker: after `failureThreshold` failures it opens, skips the store, and tries again after `cooldownMs`, so recovery needs no new commit. The `error` event fires on each failure.",
             code: `const app = act().withState(Ticket).build({
   circuitBreaker: { failureThreshold: 5, cooldownMs: 30_000 },
@@ -1321,6 +1354,8 @@ app.on("error", ({ error, circuit }) => metrics.increment("store_error", { circu
             ],
           },
           {
+            now: "The breaker closes; the operator unblocks; #18 is acked",
+            pipe: { name: "reaction", at: 4 },
             say: "The store comes back and the breaker closes on the next pass. The bad request is fixed upstream, and the operator unblocks the target.",
             moves: [
               {
@@ -1384,6 +1419,8 @@ app.on("error", ({ error, circuit }) => metrics.increment("store_error", { circu
   .to((event) => ({ target: \`escalate:\${event.stream}\`, source: event.stream }))`,
         steps: [
           {
+            now: "#19 `TicketAssigned`: `escalate:ticket-4821` is deferred until 10:00",
+            pipe: { name: "reaction", at: 3 },
             say: "Ticket 4821 is assigned with `escalateAfter: 10:00` (#19). Correlate marks `escalate:ticket-4821`, and the drain finds the reaction **deferred**: the event stays pending and the target holds a due time.",
             ops: [
               { op: "status" },
@@ -1416,6 +1453,8 @@ app.on("error", ({ error, circuit }) => metrics.increment("store_error", { circu
             ],
           },
           {
+            now: "At 10:00 `autoEscalate` runs `EscalateTicket`: #20 `TicketEscalated`, then ack",
+            pipe: { name: "reaction", at: 4 },
             say: "Claim skips the target until 10:00. The due time derives from the event, never from `Date.now()`, so a worker that claims it later lands on the same time. At 10:00 a worker runs it, and the ticket escalates (#20).",
             moves: [
               {
@@ -1449,6 +1488,7 @@ app.on("error", ({ error, circuit }) => metrics.increment("store_error", { circu
             ],
           },
           {
+            now: "#21 `TicketAssigned` (escalate at 11:00), then #22 `TicketClosed` by Bo",
             say: "Ticket 4822 is assigned with `escalateAfter: 11:00` (#21), then Bo closes it at 10:40 (#22).",
             ops: [
               {
@@ -1484,6 +1524,8 @@ app.on("error", ({ error, circuit }) => metrics.increment("store_error", { circu
             ],
           },
           {
+            now: "At 11:00 `autoEscalate` finds ticket-4822 closed and returns; ack, nothing appended",
+            pipe: { name: "reaction", at: 4 },
             say: "At 11:00 the timer wakes, loads the ticket, finds it closed and returns. The drain acks; nothing is appended. A guard like this is how a deferred chain ends.",
             moves: [
               {
@@ -1504,6 +1546,7 @@ app.on("error", ({ error, circuit }) => metrics.increment("store_error", { circu
             ],
           },
           {
+            now: "A handler can `throw new DeferSignal({ at })` instead",
             say: "When the wait depends on loaded state, a query or a branch, the handler throws `DeferSignal` instead. It holds the stream until due, then delivers the event again.",
             code: `.on("TicketOpened")
   .do(async function autoClose(event, _, app) {
@@ -1515,6 +1558,7 @@ app.on("error", ({ error, circuit }) => metrics.increment("store_error", { circu
             ops: [{ op: "state", node: "ticket", data: null }],
           },
           {
+            now: "A defer redelivers every reaction on its target",
             say: "Reactions that share a target are one group: when one defers, the event stays pending and the **whole group** runs again when due. Give a deferred reaction its own `.to(...)` and only it waits.",
             focus: [
               "target:escalate:ticket-4821",
@@ -1563,6 +1607,8 @@ app.on("error", ({ error, circuit }) => metrics.increment("store_error", { circu
 act().withState(Ticket).withProjection(Tickets).build();`,
         steps: [
           {
+            now: "Subscribe the projection target `tickets` at −1",
+            pipe: { name: "reaction", at: 0 },
             say: "A **state projection** folds a state's own patches and flushes one row per stream. Its target is `tickets`; a new one starts at watermark −1.",
             ops: [
               { op: "table", name: "tickets", title: "tickets table" },
@@ -1572,6 +1618,8 @@ act().withState(Ticket).withProjection(Tickets).build();`,
             focus: ["proj", "target:tickets"],
           },
           {
+            now: "Drain replays #0 to #22 into `tickets`, flushes six rows, acks at #22",
+            pipe: { name: "reaction", at: 4 },
             say: "It drains like any reaction: it catches up on the whole log, then flushes the rows, then acks. A failed flush holds the watermark.",
             moves: [
               { from: "drain", to: "target:tickets", label: "claim" },
@@ -1618,6 +1666,8 @@ act().withState(Ticket).withProjection(Tickets).build();`,
             ],
           },
           {
+            now: "Maya adds #23 · ticket-4831 v2; `tickets` updates one row",
+            pipe: { name: "reaction", at: 4 },
             say: "Maya adds a message to ticket 4831 (#23). The projection's next drain updates one row.",
             moves: [
               {
@@ -1649,6 +1699,7 @@ act().withState(Ticket).withProjection(Tickets).build();`,
             ],
           },
           {
+            now: "Group states, projections and reactions with `slice()`",
             say: "A **slice** groups partial states, projections and reactions into one feature. Partial states with the same name merge into one state, so features grow without touching each other.",
             code: `export const TicketSlice = slice()
   .withState(TicketCreation)   // partial "Ticket"
@@ -1660,6 +1711,7 @@ act().withState(Ticket).withProjection(Tickets).build();`,
 const app = act().withSlice(TicketSlice).withSlice(AgentSlice).build();`,
           },
           {
+            now: 'The operator empties the table and runs `app.reset(["tickets"])`: the watermark goes to −1',
             say: 'To rebuild the table after a code change, empty it and call `app.reset(["tickets"])`. The watermark goes back to −1 and the reset schedules the replay on its own.',
             code: `await db.delete(tickets); // the read model is yours to empty
 await app.reset(["tickets"]); // or a filter: app.reset({ stream: "^proj-" })`,
@@ -1670,6 +1722,8 @@ await app.reset(["tickets"]); // or a filter: app.reset({ stream: "^proj-" })`,
             ],
           },
           {
+            now: "The replay walks #0 to #23 and the six rows come back",
+            pipe: { name: "reaction", at: 4 },
             say: "The replay walks the log from #0 and the rows come back. Nothing in the log changed: a projection is derived data.",
             moves: [
               { from: "cell:t21-open", to: "table:tickets", label: "replay" },
@@ -1779,6 +1833,8 @@ const Agent = state({ Agent: z.object({ name: z.string(), open: z.number().min(0
   .emit((data) => [["TicketAssigned", data], ["TicketDropped", {}], ["TicketTaken", {}]])`,
         steps: [
           {
+            now: "Lee runs `AssignTicket` ticket-5200 → Ana: loads ticket-5200 and agent-ana",
+            pipe: { name: "action", at: 3 },
             say: "A fresh store: two agents, Bo already holding five tickets, two open tickets. Lee assigns ticket 5200 to Ana. `.loads` loads every state the decision needs, at once. The ticket has no agent yet, so the `current` target returns `undefined` and that load is skipped.",
             moves: [
               { from: "lead", to: "AssignTicket", label: "{ agentId: ana }" },
@@ -1809,9 +1865,10 @@ const Agent = state({ Agent: z.object({ name: z.string(), open: z.number().min(0
                 version: 0,
               },
             ],
-            checks: checks(3),
           },
           {
+            now: "One commit: #9 · ticket-5200 v1 and #10 · agent-ana v1",
+            pipe: { name: "action", at: 7 },
             say: "Each event goes to the stream whose load lists it: `TicketAssigned` to the ticket, `TicketTaken` to `agent-ana` (`TicketDropped` is dropped with the skipped load). Both land in **one commit**, each stream guarded by the version it had at load. All or nothing.",
             moves: [
               {
@@ -1858,9 +1915,10 @@ const Agent = state({ Agent: z.object({ name: z.string(), open: z.number().min(0
                 version: 1,
               },
             ],
-            checks: passed,
           },
           {
+            now: "Lee runs `AssignTicket` ticket-5201 → Bo: refused at the state check (`open` 6 > 5)",
+            pipe: { name: "action", at: 5, fail: true },
             say: "Lee assigns ticket 5201 to Bo. The fold makes Bo's `open` 6, which his state's schema refuses: `ValidationError`, and nothing lands on **any** stream. The loaded state's schema guards its fold, whichever action emits into it.",
             moves: [
               { from: "lead", to: "AssignTicket", label: "{ agentId: bo }" },
@@ -1891,9 +1949,9 @@ const Agent = state({ Agent: z.object({ name: z.string(), open: z.number().min(0
                 error: "ValidationError",
               },
             ],
-            checks: checks(4, true),
           },
           {
+            now: "Meanwhile `CloseTicket` commits #11 · ticket-5200 and #12 · agent-ana v2",
             say: "Lee assigns 5201 to Ana instead, loading `agent-ana` at v1. Meanwhile ticket 5200 closes, and `CloseTicket` (which loads the agent too) drops Ana's slot in its own commit: `agent-ana` moves to v2.",
             moves: [
               { from: "AssignTicket", to: "next", label: "load agent-ana v1" },
@@ -1924,6 +1982,8 @@ const Agent = state({ Agent: z.object({ name: z.string(), open: z.number().min(0
             ],
           },
           {
+            now: "Lee's commit fails: `ConcurrencyError` on agent-ana",
+            pipe: { name: "action", at: 6, fail: true },
             say: "Lee's commit expected `agent-ana` at v1 and found v2: the **whole** commit fails with `ConcurrencyError` naming `agent-ana`. The action's `maxRetries` reloads every stream and decides again.",
             moves: [
               { from: "next", to: "log", label: "expect 1", tone: "bad" },
@@ -1938,6 +1998,8 @@ const Agent = state({ Agent: z.object({ name: z.string(), open: z.number().min(0
             ],
           },
           {
+            now: "The retry commits #13 · ticket-5201 v1 and #14 · agent-ana v3",
+            pipe: { name: "action", at: 7 },
             say: "The retry sees Ana at `open: 0` and commits both events. A load that lists no events is only a read: nothing is appended to it, so it isn't guarded.",
             moves: [
               {
@@ -1984,7 +2046,6 @@ const Agent = state({ Agent: z.object({ name: z.string(), open: z.number().min(0
                 version: 3,
               },
             ],
-            checks: passed,
           },
         ],
       },
@@ -2039,6 +2100,8 @@ const User = state({ User: UserSchema })
   .build();`,
         steps: [
           {
+            now: "Lee runs `register`: #1 `UserRegistered` · user-42, with the email in pii",
+            pipe: { name: "action", at: 7 },
             say: "Lee registers. `email` is marked `sensitive(...)`, so the commit never puts it in the event's data: it goes to a separate **pii** column of the same row, in the same transaction.",
             moves: [
               { from: "lee", to: "register", label: "{ email, plan }" },
@@ -2070,6 +2133,7 @@ const User = state({ User: UserSchema })
             ],
           },
           {
+            now: '`app.load(User, "user-42")` with no actor reads `[REDACTED]`',
             say: "A read with no actor (a background worker, a script) gets `[REDACTED]` in place of every sensitive field. Reactions and projections never see them either.",
             moves: [
               { from: "cell:u42-reg", to: "user", label: "load, no actor" },
@@ -2085,6 +2149,7 @@ const User = state({ User: UserSchema })
             ],
           },
           {
+            now: "Lee loads with his own actor: `.discloses` lets him read the email",
             say: "`.discloses` decides who may read the plaintext. Lee loads his own stream with his actor, the predicate holds, and he reads his email.",
             code: `const snap = await app.load(User, { stream: "user-42", actor: lee });
 // snap.event.data.email → "lee@example.com"`,
@@ -2106,6 +2171,7 @@ const User = state({ User: UserSchema })
             ],
           },
           {
+            now: 'The operator runs `app.forget("user-42")`: pii wiped, reads get `[SHREDDED]`',
             say: 'Lee asks to be forgotten. `app.forget("user-42")` wipes the pii column of every event on the stream, in place. Every later read gets `[SHREDDED]`, even an authorized one. Everything else in the log stays.',
             code: `const { eventCount } = await app.forget("user-42"); // 1
 app.on("forgotten", ({ stream, at, eventCount }) => audit.write({ stream, at, eventCount }));`,
@@ -2134,6 +2200,7 @@ app.on("forgotten", ({ stream, at, eventCount }) => audit.write({ stream, at, ev
             ],
           },
           {
+            now: "`.snap()` on this state would throw at build",
             say: "A snapshot would copy derived state where forget can't reach it, so a state whose events declare sensitive fields can't `.snap()`: the build throws. For the same reason a restart close skips such a stream.",
             ops: [{ op: "unflag" }],
           },
@@ -2211,6 +2278,8 @@ app.on("forgotten", ({ stream, at, eventCount }) => audit.write({ stream, at, ev
 ]);`,
         steps: [
           {
+            now: "The operator runs `app.close` on ticket-4822: skipped, `tickets` is behind",
+            pipe: { name: "close", at: 0, fail: true },
             say: "Ticket 4822 is done. Close first checks that no reaction still has work on it. The `tickets` projection has handled up to #4 only, so the stream is **skipped** this time: a close never drops events a reaction hasn't seen.",
             moves: [
               { from: "ops", to: "close", label: "close ticket-4822" },
@@ -2228,6 +2297,8 @@ app.on("forgotten", ({ stream, at, eventCount }) => audit.write({ stream, at, ev
             ],
           },
           {
+            now: "`tickets` catches up; close commits the guard #7 `__tombstone__` · ticket-4822 v3",
+            pipe: { name: "close", at: 1 },
             say: "The projection catches up. Close tries again and commits a `__tombstone__` **guard** at the stream's version (#7, v3). From here, no writer can land on the stream.",
             moves: [{ from: "close", to: "cell:c-guard", label: "guard" }],
             ops: [
@@ -2246,6 +2317,8 @@ app.on("forgotten", ({ stream, at, eventCount }) => audit.write({ stream, at, ev
             ],
           },
           {
+            now: "The archive callback runs while the stream is guarded",
+            pipe: { name: "close", at: 2 },
             say: "The archive callback runs while the stream is guarded. If it throws, the stream stays guarded and nothing is deleted, so the close can simply run again.",
             moves: [
               { from: "cell:c-guard", to: "s3", label: "archive" },
@@ -2253,6 +2326,8 @@ app.on("forgotten", ({ stream, at, eventCount }) => audit.write({ stream, at, ev
             ],
           },
           {
+            now: "Truncate deletes ticket-4822 and seeds #8 `__tombstone__` v0",
+            pipe: { name: "close", at: 5 },
             say: "Then the stream's events are deleted in one transaction, and one seed is left: a `__tombstone__` at **version 0** (#8). The cache is updated and `closed` fires.",
             moves: [
               { from: "close", to: "cell:c-seed", label: "truncate + seed" },
@@ -2267,6 +2342,8 @@ app.on("forgotten", ({ stream, at, eventCount }) => audit.write({ stream, at, ev
             ],
           },
           {
+            now: "`AddMessage` on ticket-4822 throws `StreamClosedError`",
+            pipe: { name: "action", at: 1, fail: true },
             say: "An action on a closed stream throws `StreamClosedError`. The tombstone is its head forever.",
             moves: [
               { from: "ops", to: "log", label: "AddMessage", tone: "bad" },
@@ -2281,6 +2358,8 @@ app.on("forgotten", ({ stream, at, eventCount }) => audit.write({ stream, at, ev
             ],
           },
           {
+            now: "Restart agent-ana: guard #9, then seed #10 `__snapshot__` v0",
+            pipe: { name: "close", at: 5 },
             say: "A **restart** keeps the stream alive: Ana's stream is guarded, deleted, and seeded with a `__snapshot__` of its final state at v0 (#10).",
             moves: [{ from: "close", to: "cell:c-ana-seed", label: "restart" }],
             ops: [
@@ -2304,6 +2383,7 @@ app.on("forgotten", ({ stream, at, eventCount }) => audit.write({ stream, at, ev
             ],
           },
           {
+            now: "Ana's next action lands as #11 `TicketTaken` · agent-ana v1",
             say: "Her next action lands on v1 (#11), folding from the seed. Closing the books shrinks the log; the state carries on.",
             ops: [
               {
@@ -2421,6 +2501,8 @@ act().withState(Ticket).build({
 });`,
         steps: [
           {
+            now: "`__autoclose__:ticket-7001` is deferred until May 21",
+            pipe: { name: "reaction", at: 3 },
             say: "`.autocloses` compiles to a reaction on the state's events, on a per-stream target. Ticket 7001 closed on Feb 20, so the reaction defers to **90 days later**: a stored schedule, no sweep.",
             moves: [
               {
@@ -2448,6 +2530,8 @@ act().withState(Ticket).build({
             ],
           },
           {
+            now: "Due: guard #10, archive, then seed #11 `__tombstone__` · ticket-7001 v0",
+            pipe: { name: "close", at: 5 },
             say: "When it is due (inside the off-hours window), it checks the **live head**: still `TicketClosed`, so it runs the same close cycle as `app.close`, with `.archives` as the archive. A reopened ticket would not close.",
             moves: [
               { from: "auto", to: "s3", label: "archive" },
@@ -2504,6 +2588,7 @@ act().withState(Ticket).build({
   .build();`,
         steps: [
           {
+            now: "The closest snapshot older than the Apr 4 cutoff is #5",
             say: "Some streams never end. `keep: { days: 180 }` prunes history older than the window. Say today is Oct 1 (the dates here are picked for the example), so the cutoff is Apr 4. The closest snapshot older than the cutoff is the one from Mar 01 (#5).",
             ops: [
               { op: "flag", on: "cell:l-snap1", text: "closest safe snapshot" },
@@ -2511,6 +2596,7 @@ act().withState(Ticket).build({
             focus: ["cell:l-snap1"],
           },
           {
+            now: "The windowed close prunes #1, #2 and #4, below #5",
             say: "A **windowed** close deletes only the events **below** that snapshot. No tombstone, no seed: the snapshot holds the balance, and the stream stays live and keeps taking actions.",
             moves: [{ from: "auto", to: "cell:l-snap1", label: "prune below" }],
             ops: [
@@ -2519,6 +2605,7 @@ act().withState(Ticket).build({
             ],
           },
           {
+            now: "`app.close([{ stream, before }])` prunes a quiet stream",
             say: "The window advances on the stream's commits. A stream that went quiet is pruned with an explicit windowed close: `app.close([{ stream, before }])`, which archives only through its own `archive`.",
             code: `const cutoff = new Date(Date.now() - 180 * 86_400_000);
 await app.close([{ stream: "ledger-9", before: cutoff, archive: () => archiveLedger(cutoff) }]);`,
@@ -2567,6 +2654,7 @@ const sqlite = new SqliteStore({ url: "file:./desk.db" });
 const result = await app.restore(pg, {}, sqlite); // source → sink, one transaction`,
         steps: [
           {
+            now: "The operator runs `app.restore`: six events into the SQLite store, ids #0 to #5",
             say: "The store after the last chapter has gaps: closed and pruned streams left holes in the ids. Restore copies a source into a sink in **one transaction**. Ids renumber densely, `created` is kept, and causation is rewritten to the new ids.",
             moves: [{ from: "restore", to: "log:sink", label: "scan → sink" }],
             ops: [
@@ -2577,6 +2665,7 @@ const result = await app.restore(pg, {}, sqlite); // source → sink, one transa
             ],
           },
           {
+            now: "Restore again with `drop_snapshots`: snapshot #9 is dropped, five events",
             say: "It can compact on the way: `drop_snapshots` drops every snapshot that has history before it, but keeps a stream's **first** one, which a pruned or restarted stream starts from.",
             code: `await app.restore(pg, { drop_snapshots: true }, sqlite);`,
             ops: [
@@ -2589,6 +2678,7 @@ const result = await app.restore(pg, {}, sqlite); // source → sink, one transa
             ],
           },
           {
+            now: "Restore with `event_migrations`: `Posted` becomes `Posted_v2`",
             say: "It can migrate events too. On the live store an event never changes: a new name like `Posted_v2` deprecates the old one. A restore can physically rewrite old events as they pass, validated on both sides.",
             code: `await app.restore(pg, {
   drop_snapshots: true,
@@ -2612,11 +2702,13 @@ const result = await app.restore(pg, {}, sqlite); // source → sink, one transa
             ],
           },
           {
+            now: "Clear the cache and rebuild projections with `app.reset`",
             say: "Restore doesn't touch the cache or your read models: after a destructive restore, clear the cache and rebuild projections with `app.reset`.",
             code: `await cache().clear();
 await app.reset({ stream: "^proj-" });`,
           },
           {
+            now: "`app.audit()` flags ledger-9 as a close candidate",
             say: "`app.audit()` walks a store and yields findings an operator can act on: schema drift, close and restart candidates, blocked or stuck reactions, snapshot drift, correlation gaps.",
             code: `for await (const f of app.audit(["close-candidate", "reaction-health"], {
   thresholds: { idle_days: 14 },
@@ -2678,6 +2770,7 @@ await app.reset({ stream: "^proj-" });`,
 const app = act().withSlice(TicketSlice).build();`,
         steps: [
           {
+            now: "Process A commits #1 · ticket-8002; B sees it on its next poll",
             say: "Two processes run the same app over one Postgres store. Without notify, process B sees A's commit only when it polls (`start_correlations`, every 10 s by default).",
             ops: [
               { op: "store", name: "main", label: "PostgresStore" },
@@ -2697,6 +2790,7 @@ const app = act().withSlice(TicketSlice).build();`,
             moves: [{ from: "pa", to: "cell:s-2", label: "commit" }],
           },
           {
+            now: "A commits #2 · ticket-8003; a Postgres NOTIFY wakes B at once",
             say: "With a store that notifies, A's commit wakes B at once: B gets `notified` and settles. An instance never hears its own commits; its own commit already settles locally. Inject the store before `build()`, or nothing is wired.",
             moves: [
               { from: "pa", to: "cell:s-3", label: "commit" },
@@ -2718,6 +2812,7 @@ const app = act().withSlice(TicketSlice).build();`,
             ],
           },
           {
+            now: "Swap the wakeup channel with `withBroker`",
             say: "Notify is a hint, not a guarantee: correctness always comes from claim and drain over the store. That's why the channel can be swapped, for example to Redis with `withBroker`.",
             code: `store(withBroker(new PostgresStore({ notify: false }), new RedisBroker({ publisher, subscriber })));`,
           },
@@ -2743,6 +2838,7 @@ const tenantA = build("tenant_a");
 const tenantB = build("tenant_b");`,
         steps: [
           {
+            now: "Tenant A commits #3 to tenant_a; tenant B commits #0 to tenant_b",
             say: "Several Acts in one process can each get their **own store and cache**, passed together. Two tenants, two logs, no cross-talk. One store always belongs to one application.",
             moves: [
               { from: "ta", to: "cell:s-a", label: "commit" },
@@ -2782,6 +2878,7 @@ const tenantB = build("tenant_b");`,
             ],
           },
           {
+            now: "Both apps run `shutdown()`",
             say: "`app.shutdown()` waits for in-flight drains up to a grace budget, hands back the correlation lease, and starts nothing after it resolves.",
             code: `await tenantA.shutdown();
 await tenantB.shutdown();`,
@@ -2836,6 +2933,8 @@ export const api = hono(app, { actor, stream, sse }); // POST /api/actions/<acti
 export const router = trpc(app, { actor, stream, sse });`,
         steps: [
           {
+            now: "The browser POSTs `OpenTicket`: #4 · ticket-8100 v0, answered 200",
+            pipe: { name: "action", at: 7 },
             say: "`@rotorsoft/act-http` walks the registry and generates a route per action: the action's payload in, its snapshots out, typed end to end on the client.",
             moves: [
               { from: "browser", to: "route", label: "{ title }" },
@@ -2870,6 +2969,8 @@ export const router = trpc(app, { actor, stream, sse });`,
             ],
           },
           {
+            now: "The browser closes ticket-8100 twice: 409 `PRECONDITION`",
+            pipe: { name: "action", at: 2, fail: true },
             say: "Errors map to status codes in one table: a refused precondition answers **409** `PRECONDITION`.",
             moves: [
               { from: "browser", to: "route", label: "close twice" },
@@ -2890,6 +2991,7 @@ export const router = trpc(app, { actor, stream, sse });`,
             ],
           },
           {
+            now: "SSE pushes the v0 patch to the browser",
             say: "With `sse`, each committed change reaches the clients subscribed to that state as a small patch, versioned, so a client that falls behind knows to refetch.",
             moves: [
               { from: "cell:e-open", to: "sse", label: "committed" },
@@ -2897,6 +2999,7 @@ export const router = trpc(app, { actor, stream, sse });`,
             ],
           },
           {
+            now: "A reaction calls out with `webhook(...)`",
             say: "Calls out of the process are reactions too: `webhook(...)` from `@rotorsoft/act-http/webhook` is a handler with a timeout, an idempotency key from the event id, and typed errors that drive retries and blocking.",
             code: `.on("TicketOpened")
   .do(webhook({ url, body: (e) => ({ ticket: e.stream }), timeoutMs: 2_000 }), { maxRetries: 5, backoff })
@@ -2943,15 +3046,18 @@ store(new PostgresStore({ host, database, schema: "desk" })); // production
 // InMemoryStore is the default: dev and tests`,
         steps: [
           {
+            now: "Everything ran on the store port: `InMemoryStore`",
             say: "Everything in this tour ran against the store **port**. InMemory is the default; Postgres and SQLite run the same log in production. Inject one before building the app.",
             ops: [{ op: "store", name: "main", label: "InMemoryStore" }],
             focus: ["port"],
           },
           {
+            now: "Swap in `SqliteStore`: the log is unchanged",
             say: "Swap the adapter and nothing above the log changes: same ids, same versions, same leases.",
             ops: [{ op: "store", name: "main", label: "SqliteStore" }],
           },
           {
+            now: "`runStoreTck` proves a new adapter",
             say: "A new adapter proves the contract with the **TCK**: the same suite the in-tree stores run. A commit across streams is all or nothing, an unexpired lease goes to no one else, a truncate seeds, notify never echoes.",
             code: `import { runStoreTck } from "@rotorsoft/act-tck";
 
@@ -2971,6 +3077,7 @@ runStoreTck({
             ],
           },
           {
+            now: "Every adapter applies the rules from `@rotorsoft/act/adapter`",
             say: "The rules a store must apply are exported from `@rotorsoft/act/adapter`, so every store refuses the same bad appends and builds the same seeds. That's the whole tour: every capability is something the log does.",
             code: `import { checkAppends, checkVersion, seedEvent } from "@rotorsoft/act/adapter";`,
           },
@@ -2982,6 +3089,19 @@ runStoreTck({
 
 const tour: TourSpec = {
   title: "The Act framework tour",
+  pipelines: {
+    action: [
+      "payload",
+      "load",
+      "preconditions",
+      "handler",
+      "fold",
+      "state check",
+      "commit",
+    ],
+    reaction: ["correlate", "claim", "fetch", "handle", "ack"],
+    close: ["probe", "guard", "archive", "truncate", "seed"],
+  },
   stores: [{ name: "main", label: "InMemoryStore" }],
   chapters,
 };

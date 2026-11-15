@@ -55,8 +55,13 @@ export type Move = {
   par?: boolean;
 };
 
-/** One row of the check list an action walks. */
-export type Check = { label: string; state: "ok" | "fail" | "todo" | "skip" };
+/**
+ * Where a step stands in a multi-stage operation: the stages before `at` are
+ * done, `at` is the active one (red with `fail`, and the rest never run), and
+ * `at` past the last stage means all done. `name` picks one of the spec's
+ * pipelines.
+ */
+export type Pipe = { name: string; at: number; fail?: boolean };
 
 export type Op =
   /** append events in one commit; each stream takes its next version */
@@ -149,10 +154,14 @@ export type Op =
   | { op: "unflag"; on?: string };
 
 export type Step = {
+  /** one short line: who does what to which target, with the API in backticks */
+  now: string;
+  /** what the Now/Next bar previews; by default the next step's `now` */
+  next?: string;
   say: string;
   moves?: Move[];
   ops?: Op[];
-  checks?: Check[];
+  pipe?: Pipe;
   /** replaces the scene's code card from this step on */
   code?: string;
   /** node ids, cells (`cell:ref`) or targets (`target:id`) to light up */
@@ -184,6 +193,8 @@ export type Chapter = {
 
 export type TourSpec = {
   title: string;
+  /** the stages of each multi-stage operation, named for `Step.pipe` */
+  pipelines: Record<string, string[]>;
   stores: { name: string; label: string }[];
   chapters: Chapter[];
 };

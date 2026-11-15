@@ -26,7 +26,7 @@ import {
 import { type Box, data_lines, type Layout, layout, type Mode, short } from "./layout";
 import styles from "./styles.module.css";
 import type { Move, Step, TourSpec } from "./types";
-import { type Cell, type Frame, frames as fold } from "./world";
+import { type Cell, type Frame, frames as fold, type World } from "./world";
 
 export type { TourSpec } from "./types";
 
@@ -59,7 +59,10 @@ function schedule(moves: Move[]): { starts: number[]; total: number } {
   return { starts, total: last };
 }
 
-const dwell = (step: Step, total: number) => total + Math.max(2600, Math.min(7000, step.say.length * 42));
+// the token travels, the change lands and pulses, then the step holds to be read
+const LAND_MS = 900;
+const dwell = (step: Step, total: number) =>
+  total + LAND_MS + Math.max(2600, Math.min(7500, (step.say.length + step.now.length) * 38));
 
 /** How wide the player is: narrow (a phone), wide, or xl (the narration moves beside the stage). */
 type Fit = { mode: "narrow" | "wide" | "xl"; px: number };
@@ -172,6 +175,7 @@ function CellView({
   flag,
   dim,
   selected,
+  off,
   onSelect,
 }: {
   cell: Cell;
@@ -180,6 +184,7 @@ function CellView({
   flag?: { text: string; tone?: string };
   dim: boolean;
   selected: boolean;
+  off?: boolean;
   onSelect: (uid: number) => void;
 }) {
   const state = cell.leaving ? styles.leaving : cell.fresh ? styles.fresh : cell.moved ? styles.moved : "";
@@ -187,7 +192,7 @@ function CellView({
   return (
     <g className={styles.cellPos} style={{ transform: `translate(${box.x}px, ${box.y}px)` }}>
       <g
-        className={`${styles.cell} ${state} ${dim ? styles.dim : ""} ${selected ? styles.selected : ""}`}
+        className={`${styles.cell} ${state} ${dim ? styles.dim : ""} ${selected ? styles.selected : ""} ${off ? styles.off : ""}`}
         data-kind={cell.kind}
         data-color={color}
         role="button"
@@ -237,6 +242,7 @@ function Stage({
   reduce,
   enter,
   focus,
+  lit,
   selected,
   onSelect,
 }: {
@@ -248,11 +254,14 @@ function Stage({
   reduce: boolean;
   enter: number;
   focus: Set<string>;
+  lit?: { nodes: Set<string>; cells: Set<number>; targets: Set<string>; streams: Set<string>; tables: Set<string> };
   selected?: number;
   onSelect: (uid: number) => void;
 }) {
   const w = frame.world;
-  const focused = (id: string) => focus.has(id);
+  const focused = (id: string) => focus.has(id) || !!lit?.nodes.has(id);
+  // the spotlight: what the step doesn't touch steps back
+  const off = (on: boolean) => (lit && !on ? styles.off : "");
   return (
     <svg
       viewBox={`0 0 ${lay.width} ${lay.height}`}
@@ -272,7 +281,7 @@ function Stage({
         return (
           <g
             key={node.id}
-            className={`${styles.node} ${focused(node.id) ? styles.focus : ""}`}
+            className={`${styles.node} ${focused(node.id) ? styles.focus : ""} ${off(focused(node.id))}`}
             data-kind={node.kind}
           >
             <rect x={box.x} y={box.y} width={box.w} height={box.h} rx={10} />
@@ -371,6 +380,7 @@ function Stage({
                 flag={cell.ref && w.refs[cell.ref] === cell.uid ? w.flags[`cell:${cell.ref}`] : undefined}
                 dim={(s.dim_from !== undefined && cell.id >= s.dim_from) || (s.only !== undefined && cell.stream !== s.only)}
                 selected={selected === cell.uid}
+                off={!!lit && !lit.cells.has(cell.uid)}
                 onSelect={onSelect}
               />
             ))}
@@ -425,7 +435,11 @@ function Stage({
           Streams <tspan className={styles.storeSub}>· each folds its own events · head version</tspan>
         </text>
         {lay.streams.rows.map((r) => (
-          <g key={`${r.store}-${r.stream}`} className={styles.streamRow} data-color={colors.get(r.stream) ?? 0}>
+          <g
+            key={`${r.store}-${r.stream}`}
+            className={`${styles.streamRow} ${off(!!lit?.streams.has(r.stream))}`}
+            data-color={colors.get(r.stream) ?? 0}
+          >
             <rect className={styles.dot} x={r.box.x} y={r.box.y + 6} width={10} height={10} rx={3} />
             <text x={r.box.x + 16} y={r.box.y + 15}>
               {trim(r.stream, 22)}
@@ -469,7 +483,7 @@ function Stage({
           return (
             <g
               key={t.id}
-              className={`${styles.targetRow} ${t.fresh ? styles.fresh : ""} ${focused(`target:${t.id}`) ? styles.focus : ""}`}
+              className={`${styles.targetRow} ${t.fresh ? styles.fresh : ""} ${focused(`target:${t.id}`) || lit?.targets.has(t.id) ? styles.focus : ""} ${off(!!lit?.targets.has(t.id))}`}
               data-state={t.blocked ? "blocked" : t.due ? "due" : t.lease ? "leased" : "idle"}
             >
               <rect x={box.x - 4} y={box.y + 1} width={box.w + 4} height={box.h - 2} rx={5} className={styles.rowBg} />
@@ -495,7 +509,7 @@ function Stage({
 
       {/* read models */}
       {lay.tables.map(({ table, box }) => (
-        <g key={table.name} className={styles.table}>
+        <g key={table.name} className={`${styles.table} ${off(!!lit?.tables.has(table.name))}`}>
           <rect x={box.x - 6} y={box.y} width={box.w + 6} height={box.h} rx={10} />
           <text x={box.x + 4} y={box.y + 17} className={styles.sectionTitle}>
             {table.title}
@@ -560,6 +574,52 @@ function Inspector({ cell, onClose }: { cell: Cell; onClose: () => void }) {
       </dl>
     </div>
   );
+}
+
+/** What the step touches: everything else on the stage dims. */
+type Lit = { nodes: Set<string>; cells: Set<number>; targets: Set<string>; streams: Set<string>; tables: Set<string> };
+
+function spotlight(step: Step, w: World): Lit | undefined {
+  const lit: Lit = { nodes: new Set(), cells: new Set(), targets: new Set(), streams: new Set(), tables: new Set() };
+  const mark = (a: string) => {
+    if (a.startsWith("cell:")) {
+      const uid = w.refs[a.slice(5)];
+      if (uid !== undefined) lit.cells.add(uid);
+    } else if (a.startsWith("target:")) lit.targets.add(a.slice(7));
+    else if (a.startsWith("table:")) lit.tables.add(a.slice(6));
+    else if (a.startsWith("stream:")) lit.streams.add(a.slice(7));
+    else if (!a.startsWith("log") && !a.startsWith("store:")) lit.nodes.add(a);
+  };
+  for (const m of step.moves ?? []) {
+    mark(m.from);
+    mark(m.to);
+  }
+  for (const f of step.focus ?? []) mark(f);
+  for (const key of Object.keys(w.flags)) mark(key);
+  for (const s of w.stores) {
+    for (const c of s.cells) if (c.fresh || c.leaving || c.moved) lit.cells.add(c.uid);
+    if (s.ghost) lit.streams.add(s.ghost.stream);
+  }
+  for (const t of w.targets) if (t.fresh) lit.targets.add(t.id);
+  for (const t of w.tables) if (t.fresh.length) lit.tables.add(t.name);
+  for (const [id, st] of Object.entries(w.states)) if (st.fresh) lit.nodes.add(id);
+  for (const s of w.stores) for (const c of s.cells) if (lit.cells.has(c.uid)) lit.streams.add(c.stream);
+  const any = lit.nodes.size + lit.cells.size + lit.targets.size + lit.streams.size + lit.tables.size;
+  return any ? lit : undefined;
+}
+
+/** The Next line: the next step's, or the next scene or chapter at the end of one. */
+function next_line(spec: TourSpec, all: Frame[], index: number): string {
+  const here = all[index]!;
+  const step = spec.chapters[here.chapter]!.scenes[here.scene]!.steps[here.step]!;
+  if (step.next) return step.next;
+  const after = all[index + 1];
+  if (!after) return "the end of the tour";
+  const chapter = spec.chapters[after.chapter]!;
+  if (after.chapter !== here.chapter) return `chapter ${after.chapter + 1}: ${chapter.title}`;
+  const scene = chapter.scenes[after.scene]!;
+  if (after.scene !== here.scene) return `scene: ${scene.title}`;
+  return scene.steps[after.step]!.now;
 }
 
 export default function Tour({ spec }: { spec: TourSpec }) {
@@ -643,6 +703,28 @@ export default function Tour({ spec }: { spec: TourSpec }) {
   const chapterFrames = all.filter((f) => f.chapter === frame.chapter);
   const atStart = index === 0;
   const atEnd = index === all.length - 1;
+  const lit = useMemo(() => spotlight(step, frame.world), [step, frame.world]);
+  const next = next_line(spec, all, index);
+  const pipe = step.pipe && spec.pipelines[step.pipe.name] ? step.pipe : undefined;
+  const feed = useMemo(() => {
+    const lines: { at: number; text: string }[] = [];
+    for (let i = frame.chapter_start; i <= index; i++) for (const text of all[i]!.world.feed) lines.push({ at: i, text });
+    return lines.reverse();
+  }, [all, frame.chapter_start, index]);
+
+  const feedList = (
+    <ol className={styles.feed} aria-label="What happened so far in this chapter">
+      {feed.map((l, i) => (
+        <li key={`${l.at}-${i}`} className={l.at === index ? styles.feedNow : ""}>
+          <button type="button" onClick={() => go(l.at)}>
+            <span className={styles.feedStep}>{l.at - frame.chapter_start + 1}</span>
+            <span>{rich(l.text)}</span>
+          </button>
+        </li>
+      ))}
+      {!feed.length && <li className={styles.hint}>Nothing yet: press Play or step forward.</li>}
+    </ol>
+  );
 
   return (
     <div
@@ -703,103 +785,143 @@ export default function Tour({ spec }: { spec: TourSpec }) {
         </header>
 
         <div className={styles.body}>
-        <div className={styles.stageCol}>
-        <div className={styles.stageWrap}>
-          <Stage
-            lay={lay}
-            frame={frame}
-            colors={colors}
-            moves={moves}
-            run={run}
-            reduce={reduce}
-            enter={reduce ? 0 : total}
-            focus={focus}
-            selected={sel?.uid}
-            onSelect={(uid) => setSelected((s) => (s === uid ? undefined : uid))}
-          />
-          {sel && <Inspector cell={sel} onClose={() => setSelected(undefined)} />}
-        </div>
-
-        <div className={styles.controls}>
-          <button type="button" onClick={() => go(index - 1)} disabled={atStart} aria-label="Previous step">
-            ‹
-          </button>
-          <button type="button" className={styles.play} onClick={() => setPlaying((p) => !p)}>
-            {playing ? "Pause" : "Play"}
-          </button>
-          <button type="button" onClick={() => go(index + 1)} disabled={atEnd} aria-label="Next step">
-            ›
-          </button>
-          <div className={styles.progress} aria-label="Steps in this chapter">
-            {chapterFrames.map((f) => {
-              const i = all.indexOf(f);
-              return (
-                <button
-                  key={i}
-                  type="button"
-                  className={`${i === index ? styles.on : i < index ? styles.past : ""} ${f.step === 0 ? styles.sceneStart : ""}`}
-                  onClick={() => go(i)}
-                  aria-label={`Scene ${f.scene + 1}, step ${f.step + 1}`}
-                />
-              );
-            })}
-          </div>
-          <span className={styles.count}>
-            {index - frame.chapter_start + 1} / {chapterFrames.length}
-          </span>
-        </div>
-        </div>
-
-        <div className={styles.side}>
-        <section className={styles.narration} aria-live="polite">
-          <h3>
-            {scene.title}
-            <span>
-              {" "}
-              · scene {frame.scene + 1} of {chapter.scenes.length}
-            </span>
-          </h3>
-          <p className={styles.say}>{rich(step.say)}</p>
-          {step.checks && (
-            <ol className={styles.checks} aria-label="What the action checks">
-              {step.checks.map((c) => (
-                <li key={c.label} data-state={c.state}>
-                  <span>{c.state === "ok" ? "✓" : c.state === "fail" ? "✕" : c.state === "skip" ? "–" : "·"}</span>
-                  {c.label}
-                </li>
-              ))}
-            </ol>
-          )}
-        </section>
-
-        <section className={styles.reference}>
-          {code && (
-            <div className={styles.code}>
-              <CodeBlock language="ts">{code}</CodeBlock>
+          <div className={styles.stageCol}>
+            <div className={styles.nowNext} aria-live="polite">
+              <p className={styles.now} key={`now-${index}`}>
+                <span className={styles.tag}>Now</span>
+                <span>{rich(step.now)}</span>
+              </p>
+              <p className={styles.next}>
+                <span className={styles.tag}>Next</span>
+                <span>{rich(next)}</span>
+              </p>
             </div>
-          )}
-          <div className={styles.links}>
-            {scene.api && (
-              <p className={styles.api}>
-                {scene.api.map((a) => (
-                  <code key={a}>{a}</code>
-                ))}
-              </p>
-            )}
-            {scene.doc && (
-              <p>
-                Read: <Link to={scene.doc.href}>{scene.doc.label}</Link>
-              </p>
-            )}
-            {scene.test && (
-              <p>
-                Proven by: <Link href={scene.test.href}>{scene.test.label}</Link>
-              </p>
-            )}
-            <p className={styles.hint}>Tip: click an event in the log to see its metadata. Arrow keys step, space plays.</p>
+
+            <ol className={styles.pipe} aria-label={pipe ? `${pipe.name} stages` : undefined} data-empty={!pipe || undefined}>
+              {pipe ? (
+                <>
+                  <li className={styles.pipeName}>{pipe.name}</li>
+                  {spec.pipelines[pipe.name]!.map((stage, i) => {
+                    const state =
+                      i < pipe.at ? "done" : i === pipe.at ? (pipe.fail ? "fail" : "active") : pipe.fail ? "skip" : "todo";
+                    return (
+                      <li key={stage} data-state={state}>
+                        <span>{state === "done" ? "✓" : state === "fail" ? "✕" : i + 1}</span>
+                        {stage}
+                      </li>
+                    );
+                  })}
+                </>
+              ) : (
+                <li className={styles.pipeName}>one operation</li>
+              )}
+            </ol>
+
+            <div className={styles.stageWrap}>
+              <Stage
+                lay={lay}
+                frame={frame}
+                colors={colors}
+                moves={moves}
+                run={run}
+                reduce={reduce}
+                enter={reduce ? 0 : total}
+                focus={focus}
+                lit={lit}
+                selected={sel?.uid}
+                onSelect={(uid) => setSelected((s) => (s === uid ? undefined : uid))}
+              />
+              {sel && <Inspector cell={sel} onClose={() => setSelected(undefined)} />}
+            </div>
+
+            <div className={styles.controls}>
+              <button type="button" onClick={() => go(index - 1)} disabled={atStart} aria-label="Previous step">
+                ‹
+              </button>
+              <button type="button" className={styles.play} onClick={() => setPlaying((p) => !p)}>
+                {playing ? "Pause" : "Play"}
+              </button>
+              <button type="button" onClick={() => go(index + 1)} disabled={atEnd} aria-label="Next step">
+                ›
+              </button>
+              <span className={styles.count}>
+                step {index - frame.chapter_start + 1} of {chapterFrames.length} · scene {frame.scene + 1} of{" "}
+                {chapter.scenes.length}
+              </span>
+            </div>
           </div>
-        </section>
-        </div>
+
+          <div className={styles.side}>
+            <section className={styles.narration}>
+              <h3>{scene.title}</h3>
+              <p className={styles.say}>{rich(step.say)}</p>
+            </section>
+
+            <section className={styles.stepsBox}>
+              <h4>Steps in this scene</h4>
+              <ol className={styles.steps}>
+                {scene.steps.map((s, i) => {
+                  const state = i < frame.step ? "done" : i === frame.step ? "now" : "todo";
+                  return (
+                    <li key={i} data-state={state}>
+                      <button
+                        type="button"
+                        onClick={() => go(frame.scene_start + i)}
+                        aria-current={state === "now" ? "step" : undefined}
+                      >
+                        <span className={styles.stepMark}>{state === "done" ? "✓" : i + 1}</span>
+                        <span>{rich(s.now)}</span>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ol>
+            </section>
+
+            <section className={styles.feedBox}>
+              {mode === "narrow" ? (
+                <details>
+                  <summary>What happened so far ({feed.length})</summary>
+                  {feedList}
+                </details>
+              ) : (
+                <>
+                  <h4>What happened so far</h4>
+                  {feedList}
+                </>
+              )}
+            </section>
+
+            <section className={styles.reference}>
+              {code && (
+                <div className={styles.code}>
+                  <CodeBlock language="ts">{code}</CodeBlock>
+                </div>
+              )}
+              <div className={styles.links}>
+                {scene.api && (
+                  <p className={styles.api}>
+                    {scene.api.map((a) => (
+                      <code key={a}>{a}</code>
+                    ))}
+                  </p>
+                )}
+                {scene.doc && (
+                  <p>
+                    Read: <Link to={scene.doc.href}>{scene.doc.label}</Link>
+                  </p>
+                )}
+                {scene.test && (
+                  <p>
+                    Proven by: <Link href={scene.test.href}>{scene.test.label}</Link>
+                  </p>
+                )}
+                <p className={styles.hint}>
+                  Tip: click an event in the log to see its metadata. Arrow keys step, space plays.
+                </p>
+              </div>
+            </section>
+          </div>
         </div>
       </div>
     </div>

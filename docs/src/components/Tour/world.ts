@@ -89,6 +89,8 @@ export type World = {
   next_uid: number;
   next_corr: number;
   next_commit: number;
+  /** what this step did, one line per operation, for the activity feed */
+  feed: string[];
 };
 
 export type Frame = {
@@ -119,6 +121,7 @@ function empty(spec: TourSpec): World {
     next_uid: 0,
     next_corr: 0,
     next_commit: 0,
+    feed: [],
   };
 }
 
@@ -134,6 +137,7 @@ function settle(w: World) {
   }
   for (const t of w.targets) delete t.fresh;
   for (const t of w.tables) t.fresh = [];
+  w.feed = [];
   for (const k of Object.keys(w.states)) delete w.states[k]!.fresh;
 }
 
@@ -528,6 +532,118 @@ function apply(w: World, op: Op) {
   }
 }
 
+const at_id = (w: World, ref: string) => {
+  const c = find_cell(w, ref)?.cell;
+  return c ? `#${c.id}` : "?";
+};
+const cell_line = (c: Cell) =>
+  `#${c.id} \`${c.name}\` · ${c.stream} v${c.version}`;
+
+/** One feed line per operation, from the world just after it ran. */
+function narrate(w: World, op: Op) {
+  const say = (line: string) => w.feed.push(line);
+  switch (op.op) {
+    case "commit": {
+      const store = store_of(w, op.store);
+      const cells = store.cells.slice(-op.events.length);
+      const one = cells.length > 1 ? " (one commit)" : "";
+      for (const c of cells) say(`${cell_line(c)} committed${one}`);
+      return;
+    }
+    case "snapshot":
+    case "truncate": {
+      const c = store_of(w, op.store).cells.at(-1);
+      if (op.op === "truncate") say(`${op.stream}: events deleted`);
+      if (c)
+        say(`${cell_line(c)} ${op.op === "truncate" ? "seeded" : "committed"}`);
+      return;
+    }
+    case "refuse":
+      return say(
+        `refused: \`${op.error}\` · ${op.name} on ${op.stream}, nothing stored`
+      );
+    case "target":
+      return say(
+        `target \`${op.id}\` subscribed${op.lane ? ` on lane ${op.lane}` : ""}${op.priority !== undefined ? `, priority ${op.priority}` : ""}`
+      );
+    case "untarget":
+      return say(`target \`${op.id}\` done`);
+    case "checkpoint":
+      return say(`correlate checkpoint → ${at_id(w, op.at)}`);
+    case "mark":
+      return say(`work marked on \`${op.target}\` up to ${at_id(w, op.at)}`);
+    case "lease":
+      return say(`\`${op.target}\` leased by ${op.by}`);
+    case "release":
+      return say(`lease on \`${op.target}\` released`);
+    case "ack":
+      return say(
+        `\`${op.target}\` acked at ${at_id(w, op.at)}, lease released`
+      );
+    case "retry":
+      return say(
+        `\`${op.target}\` failed: retry ${op.retry}${op.due ? `, due in ${op.due}` : ""}`
+      );
+    case "defer":
+      return say(`\`${op.target}\` deferred until ${op.due}`);
+    case "block":
+      return say(`\`${op.target}\` blocked: ${op.error}`);
+    case "unblock":
+      return say(`\`${op.target}\` unblocked`);
+    case "reset":
+      return say(`\`${op.target}\` reset: watermark −1`);
+    case "prune": {
+      const n = store_of(w, op.store).cells.filter(
+        (c) => c.leaving && c.stream === op.stream
+      ).length;
+      return say(
+        `${op.stream}: ${n} events pruned below ${at_id(w, op.below)}`
+      );
+    }
+    case "forget": {
+      const n = store_of(w, op.store).cells.filter(
+        (c) => c.stream === op.stream && c.shredded
+      ).length;
+      return say(`${op.stream}: pii wiped on ${n} event${n === 1 ? "" : "s"}`);
+    }
+    case "restore": {
+      const sink = store_of(w, op.store);
+      const n = sink.cells.filter((c) => !c.leaving).length;
+      return say(
+        `restored ${n} events into ${sink.label}, ids #0 to #${n - 1}`
+      );
+    }
+    case "store":
+      return say(op.remove ? `store ${op.name} removed` : `store: ${op.label}`);
+    case "status":
+      return op.text
+        ? say(`${store_of(w, op.store).label}: ${op.text}`)
+        : undefined;
+    case "table":
+      return op.clear
+        ? say(`${op.name} emptied`)
+        : op.remove
+          ? undefined
+          : say(`read model ${op.title ?? op.name}`);
+    case "row": {
+      // rows flushed together read as one line
+      const last = w.feed.length - 1;
+      const head = `${op.table}: `;
+      if (
+        w.feed[last]?.startsWith(head) &&
+        w.feed[last]!.endsWith(" written")
+      ) {
+        const n = w.feed[last]!.match(/(\d+) rows? written$/)?.[1] ?? "1";
+        w.feed[last] = `${head}${Number(n) + 1} rows written`;
+        return;
+      }
+      return say(`${head}1 row written`);
+    }
+    default:
+      return;
+  }
+}
+
 /** Every step of the tour, in order, with the world after it. */
 export function frames(spec: TourSpec): Frame[] {
   const out: Frame[] = [];
@@ -553,7 +669,10 @@ export function frames(spec: TourSpec): Frame[] {
       scene.steps.forEach((step: Step, ti) => {
         w = clone(w);
         settle(w);
-        for (const op of step.ops ?? []) apply(w, op);
+        for (const op of step.ops ?? []) {
+          apply(w, op);
+          narrate(w, op);
+        }
         out.push({
           chapter: ci,
           scene: si,

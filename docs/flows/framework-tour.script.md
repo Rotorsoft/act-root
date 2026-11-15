@@ -9,6 +9,17 @@ Every claim below was checked against `libs/act/src/` and the guarantee table in
 `docs/docs/architecture/behavior-contracts.md`. **Doc** is a page under `docs/docs/`.
 **Test** is a spec under `libs/act/test/` unless it names another package.
 
+## What the viewer can always answer
+
+Every step in the spec carries a short `now` line (who does what to which target, with the
+API in mono). The player shows it in a Now/Next bar above the stage, with the next step's
+line (or the next scene or chapter) dimmed beside it. A pipeline strip lights the active
+stage of a multi-stage operation (an action: payload, load, preconditions, handler, fold,
+state check, commit; a reaction: correlate, claim, fetch, handle, ack; a close: probe,
+guard, archive, truncate, seed) and stops red where a refusal stops it. The stage dims what
+the step doesn't touch. A step list per scene and an activity feed, generated from the
+step's operations on the log, show what is done and what is coming.
+
 ## The picture that never leaves the screen
 
 The middle of the stage is **the event store**: one global log, the "all" stream. Every

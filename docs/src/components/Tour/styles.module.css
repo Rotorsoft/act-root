@@ -550,33 +550,6 @@
   font-size: 0.9rem;
   font-weight: 600;
 }
-.progress {
-  display: flex;
-  flex: 1;
-  flex-wrap: wrap;
-  gap: 3px;
-  align-items: center;
-  min-width: 0;
-}
-.progress button {
-  flex: 1 1 8px;
-  max-width: 26px;
-  height: 6px;
-  padding: 0;
-  border: 0;
-  border-radius: 3px;
-  background: var(--act-border-strong, var(--ifm-color-emphasis-300));
-  cursor: pointer;
-}
-.progress button.sceneStart {
-  margin-left: 6px;
-}
-.progress button.past {
-  background: color-mix(in srgb, var(--dg-action) 45%, transparent);
-}
-.progress button.on {
-  background: var(--dg-action);
-}
 .count {
   font-size: 0.8rem;
   color: var(--act-text-muted, var(--ifm-color-emphasis-600));
@@ -597,36 +570,6 @@
   margin: 0 0 8px;
   font-size: 1.02rem;
   line-height: 1.5;
-}
-.checks {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  list-style: none;
-  margin: 0 0 10px;
-  padding: 0;
-}
-.checks li {
-  display: flex;
-  gap: 5px;
-  align-items: center;
-  padding: 2px 9px;
-  border: 1px solid var(--act-border-strong, var(--ifm-color-emphasis-300));
-  border-radius: 99px;
-  font-size: 0.8rem;
-}
-.checks li[data-state="ok"] {
-  border-color: var(--dg-good);
-  color: var(--dg-good);
-}
-.checks li[data-state="fail"] {
-  border-color: var(--dg-bad);
-  background: color-mix(in srgb, var(--dg-bad) 10%, transparent);
-  color: var(--dg-bad);
-  font-weight: 600;
-}
-.checks li[data-state="skip"] {
-  opacity: 0.45;
 }
 
 .reference {
@@ -718,6 +661,19 @@
 .body {
   display: block;
 }
+.side {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 6px 18px;
+  align-items: start;
+}
+.side > .narration,
+.side > .reference {
+  grid-column: 1 / -1;
+}
+.tour[data-mode="narrow"] .side {
+  grid-template-columns: minmax(0, 1fr);
+}
 .tour[data-mode="xl"] .body {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 440px;
@@ -725,14 +681,285 @@
   align-items: start;
 }
 .tour[data-mode="xl"] .side {
+  grid-template-columns: minmax(0, 1fr);
   position: sticky;
   top: calc(var(--ifm-navbar-height) + 12px);
   max-height: calc(100vh - var(--ifm-navbar-height) - 24px);
   overflow-y: auto;
+  padding-right: 4px;
 }
 .tour[data-mode="xl"] .reference {
   grid-template-columns: minmax(0, 1fr);
 }
-.tour[data-mode="xl"] .narration h3 {
-  margin-top: 0;
+.narration h3 {
+  margin: 0 0 4px;
+}
+
+/* Now / Next */
+.nowNext {
+  margin-bottom: 8px;
+  padding: 10px 14px;
+  border: 1px solid color-mix(in srgb, var(--dg-action) 45%, transparent);
+  border-left: 5px solid var(--dg-action);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--dg-action) 7%, var(--act-surface-1, transparent));
+}
+.nowNext p {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  margin: 0;
+}
+.now {
+  font-size: 1.12rem;
+  font-weight: 600;
+  line-height: 1.4;
+  animation: nowIn 0.45s var(--t-ease);
+}
+.next {
+  margin-top: 4px !important;
+  font-size: 0.9rem;
+  color: var(--act-text-muted, var(--ifm-color-emphasis-600));
+}
+.tag {
+  flex: none;
+  min-width: 42px;
+  padding: 1px 7px;
+  border-radius: 99px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-align: center;
+  text-transform: uppercase;
+}
+.now .tag {
+  background: var(--dg-action);
+  color: #fff;
+}
+.next .tag {
+  border: 1px solid var(--act-border-strong, var(--ifm-color-emphasis-300));
+}
+@keyframes nowIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+/* the pipeline strip */
+.pipe {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+  min-height: 30px;
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+}
+.pipe[data-empty] {
+  opacity: 0.45;
+}
+.pipe li {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+  padding: 2px 10px;
+  border: 1px solid var(--act-border-strong, var(--ifm-color-emphasis-300));
+  border-radius: 99px;
+  font-size: 0.8rem;
+  color: var(--act-text-muted, var(--ifm-color-emphasis-600));
+  transition: background 0.3s, color 0.3s, border-color 0.3s;
+}
+.pipe li + li:not(.pipeName) {
+  position: relative;
+  margin-left: 14px;
+}
+.pipe li + li:not(.pipeName)::before {
+  content: "→";
+  position: absolute;
+  left: -15px;
+  color: var(--act-text-muted, var(--ifm-color-emphasis-500));
+  font-weight: 400;
+  text-decoration: none;
+}
+.pipe li span {
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+.pipe .pipeName {
+  border: 0;
+  padding-left: 0;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.pipe li[data-state="done"] {
+  border-color: var(--dg-good);
+  color: var(--dg-good);
+}
+.pipe li[data-state="active"] {
+  border-color: var(--dg-action);
+  background: var(--dg-action);
+  color: #fff;
+  font-weight: 600;
+  animation: stagePulse 1.6s ease-in-out infinite;
+}
+.pipe li[data-state="fail"] {
+  border-color: var(--dg-bad);
+  background: var(--dg-bad);
+  color: #fff;
+  font-weight: 600;
+}
+.pipe li[data-state="skip"] {
+  opacity: 0.4;
+  text-decoration: line-through;
+}
+@keyframes stagePulse {
+  50% {
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--dg-action) 25%, transparent);
+  }
+}
+
+/* the step list and the activity feed */
+.stepsBox h4,
+.feedBox h4,
+.feedBox summary {
+  margin: 8px 0 6px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--act-text-muted, var(--ifm-color-emphasis-600));
+  cursor: default;
+}
+.feedBox summary {
+  cursor: pointer;
+}
+.steps,
+.feed {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.steps li button,
+.feed li button {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  width: 100%;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: 0.85rem;
+  line-height: 1.35;
+  text-align: left;
+  cursor: pointer;
+}
+.steps li button:hover,
+.feed li button:hover {
+  background: var(--act-surface-2, rgba(127, 127, 127, 0.1));
+}
+.stepMark {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 1.5px solid var(--act-border-strong, var(--ifm-color-emphasis-400));
+  font-size: 0.7rem;
+  font-weight: 700;
+  line-height: 17px;
+  text-align: center;
+}
+.steps li[data-state="done"] {
+  color: var(--act-text-muted, var(--ifm-color-emphasis-600));
+}
+.steps li[data-state="done"] .stepMark {
+  border-color: var(--dg-good);
+  background: var(--dg-good);
+  color: #fff;
+}
+.steps li[data-state="now"] button {
+  background: color-mix(in srgb, var(--dg-action) 12%, transparent);
+  font-weight: 600;
+}
+.steps li[data-state="now"] .stepMark {
+  border-color: var(--dg-action);
+  background: var(--dg-action);
+  color: #fff;
+}
+.steps li[data-state="todo"] {
+  opacity: 0.5;
+}
+.feed {
+  max-height: 260px;
+  overflow-y: auto;
+}
+.tour[data-mode="xl"] .feed {
+  max-height: 220px;
+}
+.feed li button {
+  font-size: 0.8rem;
+  padding: 2px 8px;
+}
+.feedStep {
+  flex: none;
+  min-width: 18px;
+  color: var(--act-text-muted, var(--ifm-color-emphasis-500));
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.feedNow button {
+  background: color-mix(in srgb, var(--dg-action) 10%, transparent);
+  font-weight: 600;
+}
+
+/* the spotlight */
+.off {
+  opacity: 0.28;
+  transition: opacity 0.35s;
+}
+.fresh > rect:first-child,
+.targetRow.fresh .rowBg {
+  animation: landPulse 0.9s ease-out calc(var(--enter, 0ms) + 450ms) 2;
+}
+@keyframes landPulse {
+  50% {
+    stroke: var(--dg-action);
+    stroke-width: 3.5;
+  }
+}
+.targetRow[data-state="blocked"].fresh .rowBg {
+  animation-name: blockPulse;
+}
+@keyframes blockPulse {
+  50% {
+    fill: color-mix(in srgb, var(--dg-bad) 40%, transparent);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .now,
+  .pipe li[data-state="active"],
+  .fresh > rect:first-child,
+  .targetRow.fresh .rowBg {
+    animation: none;
+  }
+}
+
+.tour[data-mode="narrow"] .now {
+  font-size: 1rem;
+}
+.tour[data-mode="narrow"] .pipe li {
+  font-size: 0.74rem;
+  padding: 1px 8px;
+}
+.pipe li.pipeName + li:not(.pipeName) {
+  margin-left: 0;
+}
+.pipe li.pipeName + li:not(.pipeName)::before {
+  content: none;
 }
