@@ -1,3 +1,5 @@
+# [@rotorsoft/act-http-v2.1.5](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-http-v2.1.4...@rotorsoft/act-http-v2.1.5) (2026-11-15)
+
 # [@rotorsoft/act-http-v2.1.4](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-http-v2.1.3...@rotorsoft/act-http-v2.1.4) (2026-11-15)
 
 # [@rotorsoft/act-http-v2.1.3](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-http-v2.1.2...@rotorsoft/act-http-v2.1.3) (2026-11-15)
