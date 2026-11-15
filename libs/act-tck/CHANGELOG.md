@@ -1,3 +1,10 @@
+# [@rotorsoft/act-tck-v2.1.3](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-tck-v2.1.2...@rotorsoft/act-tck-v2.1.3) (2026-11-15)
+
+
+### Bug Fixes
+
+* **act:** sensitive fields from the registry, no accidental exports ([#2537](https://github.com/Rotorsoft/act-root/issues/2537)) ([2996eba](https://github.com/Rotorsoft/act-root/commit/2996eba34eb16d581abe830a0ed8e19766325679))
+
 # [@rotorsoft/act-tck-v2.1.2](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-tck-v2.1.1...@rotorsoft/act-tck-v2.1.2) (2026-11-12)
 
 
