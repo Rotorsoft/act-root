@@ -1157,6 +1157,14 @@ export class Act<
     this._settle.stop();
   }
 
+  // Drop every fold cache before a replay, or a warm cache would re-flush
+  // stale rows. Cleared for all targets: resolving a filter costs a query,
+  // and an extra clear costs one head load per stream.
+  private _reset_folds(): void {
+    for (const handler of this._batch_handlers.values())
+      (handler as ResettableBatchHandler<TEvents>)[FOLD_RESET]?.();
+  }
+
   /**
    * Reset reaction stream watermarks and settle them, replaying their
    * events through their reactions.
@@ -1185,11 +1193,7 @@ export class Act<
   async reset(input: string[] | StreamFilter): Promise<number> {
     return this._scoped(async () => {
       const count = await store().reset(input);
-      // Drop every fold cache before the replay, or a warm cache would
-      // re-flush stale rows. Cleared for all targets: resolving `input`
-      // costs a query, and an extra clear costs one head load per stream.
-      for (const handler of this._batch_handlers.values())
-        (handler as ResettableBatchHandler<TEvents>)[FOLD_RESET]?.();
+      this._reset_folds();
       if (count > 0) {
         this._wake();
       }
@@ -1308,6 +1312,8 @@ export class Act<
         // Restoring into this app's own store replaces its log (new ids, no
         // subscription rows): restart correlation from cold and arm the drain.
         await this._correlate.restart(run);
+        // The fold caches hold the old log's states and frontiers.
+        this._reset_folds();
         this._wake();
       }
       return { kept, migrated, dropped, duration_ms: Date.now() - started };
