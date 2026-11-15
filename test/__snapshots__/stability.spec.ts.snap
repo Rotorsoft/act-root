@@ -1941,9 +1941,11 @@ export interface ActBuilder<TSchemaReg extends SchemaRegister<TActions>, TEvents
      * Registers a state definition with the builder.
      *
      * State names, action names, and event names must be unique across the
-     * application (partial states with the same name are merged automatically).
+     * application (partial states with the same name are merged automatically),
+     * and no action may share an event's name.
      *
-     * @throws {Error} If duplicate action or event names are detected
+     * @throws {Error} If duplicate action or event names are detected, or an
+     *   action and an event share a name
      */
     withState: <TNewState extends Schema, TNewEvents extends Schemas, TNewActions extends Schemas, TNewName extends string = string>(state: State<TNewState, TNewEvents, TNewActions, TNewName>) => ActBuilder<TSchemaReg & {
         [K in keyof TNewActions]: TNewState;
@@ -1955,9 +1957,11 @@ export interface ActBuilder<TSchemaReg extends SchemaRegister<TActions>, TEvents
      *
      * Merges all the slice's states and reactions into the application.
      * State names, action names, and event names must be unique across the
-     * application (partial states with the same name are merged automatically).
+     * application (partial states with the same name are merged automatically),
+     * and no action may share an event's name.
      *
-     * @throws {Error} If duplicate action or event names are detected
+     * @throws {Error} If duplicate action or event names are detected, or an
+     *   action and an event share a name
      */
     withSlice: <TNewSchemaReg extends SchemaRegister<TNewActions>, TNewEvents extends Schemas, TNewActions extends Schemas, TNewMap extends Record<string, Schema>, TNewLanes extends string>(slice: Slice<TNewSchemaReg, TNewEvents, TNewActions, TNewMap, Actor, TNewLanes>) => ActBuilder<TSchemaReg & TNewSchemaReg, TEvents & TNewEvents, TActions & TNewActions, TStateMap & TNewMap, TActor, TLanes | TNewLanes>;
     /**
@@ -2840,6 +2844,16 @@ export declare const default_scope: typeof unscoped_ports;
 export declare const extend: <S extends Record<string, unknown>, T extends Record<string, unknown>>(source: Readonly<S>, schema: ZodType<S>, target?: Readonly<T>) => Readonly<S & T>;
 /** @deprecated No replacement: events revive their own \`z.date()\` fields. */
 export declare const dateReviver: (_key: string, value: unknown) => unknown;
+/**
+ * The top-level field names of a schema marked with \`sensitive()\`; \`[]\` for
+ * a schema with none.
+ *
+ * @deprecated Use \`app.registry.sensitive_fields(name)\`, which answers for
+ * every action and event the app registers. Removed in 3.0.
+ */
+export declare function sensitiveFields(schema: ZodType): readonly string[];
+/** @deprecated Use \`app.registry.sensitive_fields(name)\`. Removed in 3.0. */
+export declare const pii_fields: typeof sensitiveFields;
 //# sourceMappingURL=deprecated.d.ts.map
 // === errors.d.ts ===
 import type { Actor, DeferWhen, Message, Schema, Schemas, Snapshot, Target } from "./action.js";
@@ -3274,11 +3288,10 @@ export { ConsoleLogger, InMemoryCache, InMemoryStore, } from "./adapters/index.j
 export { act, projection, slice, state } from "./builders/index.js";
 export { config } from "./config.js";
 export { CsvFile } from "./csv.js";
-export { ActorSchema, CausationEventSchema, CommittedMetaSchema, check_appends, concurrency_error, DEFAULT_LANE, DEFAULT_MAX_SUBSCRIBED_STREAMS, DEFAULT_QUERY_STREAMS_LIMIT, DEFAULT_SETTLE_DEBOUNCE_MS, dateReviver, default_scope, Environments, EventMetaSchema, ExitCodes, extend, fair_slots, is_literal_source, LogLevels, notification_of, PackageSchema, QuerySchema, seed_event, TargetSchema, throw_if_stale, } from "./deprecated.js";
+export { ActorSchema, CausationEventSchema, CommittedMetaSchema, check_appends, concurrency_error, DEFAULT_LANE, DEFAULT_MAX_SUBSCRIBED_STREAMS, DEFAULT_QUERY_STREAMS_LIMIT, DEFAULT_SETTLE_DEBOUNCE_MS, dateReviver, default_scope, Environments, EventMetaSchema, ExitCodes, extend, fair_slots, is_literal_source, LogLevels, notification_of, PackageSchema, pii_fields, QuerySchema, seed_event, sensitiveFields, TargetSchema, throw_if_stale, } from "./deprecated.js";
 export { cache, dispose, disposeAndExit, log, port, store, } from "./ports.js";
-export { pii_fields } from "./sensitive.js";
 export type * from "./types/index.js";
-export { ConcurrencyError, DeferSignal, Errors, NonRetryableError, PreconditionError, REDACTED, SHREDDED, SNAP_EVENT, StoreError, StreamClosedError, sensitive, sensitiveFields, TOMBSTONE_EVENT, ValidationError, ZodEmpty, } from "./types/index.js";
+export { ConcurrencyError, DeferSignal, Errors, NonRetryableError, PreconditionError, REDACTED, SHREDDED, SNAP_EVENT, StoreError, StreamClosedError, sensitive, TOMBSTONE_EVENT, ValidationError, ZodEmpty, } from "./types/index.js";
 export { sleep, validate } from "./utils.js";
 //# sourceMappingURL=index.d.ts.map
 // === index.d.ts ===
@@ -5321,9 +5334,12 @@ export type SchemaRegister<TSchemaReg> = {
  *   references like \`Registry<any, any, any>\` keep working.
  * @property actions - Map of action names to state definitions.
  * @property events - Map of event names to event registration info.
- * @property sensitive_fields - Lookup of \`sensitive(...)\`-marked fields per
- *   event name. Derived once at build time. Returns the empty array for
- *   unknown events.
+ * @property sensitive_fields - Lookup of the top-level \`sensitive(...)\`-marked
+ *   fields of an action or an event, by name (the two never share one).
+ *   Typed to the app's action and event names. Derived once at build time.
+ *   Returns the empty array for a name with none. The framework splits and
+ *   gates an event's fields; an action's are reported for tooling that
+ *   describes its input.
  * @property query_gate - Prebuilt per-event reader for the actor-less read
  *   surfaces (\`query\` / \`query_array\`). Types the payload from its declared
  *   schema (a \`z.date()\` comes back a \`Date\` from the string JSON forced it
@@ -5355,7 +5371,7 @@ export type Registry<TSchemaReg extends SchemaRegister<TActions>, TEvents extend
         [TKey in keyof TActions]: State<TSchemaReg[TKey], TEvents, TActions>;
     };
     readonly events: EventRegister<TEvents>;
-    readonly sensitive_fields: (event_name: string) => readonly string[];
+    readonly sensitive_fields: (name: (keyof TActions | keyof TEvents) & string) => readonly string[];
     readonly query_gate: (event_name: string) => (event: Committed<TEvents, keyof TEvents>) => Committed<TEvents, keyof TEvents>;
     readonly disclosure_predicate: (state_name: TStateNames) => ((event: Committed<TEvents, keyof TEvents & string>, actor: Actor) => boolean) | null;
     readonly deprecated_events: (state_name: TStateNames) => ReadonlySet<string>;
@@ -5635,7 +5651,6 @@ import { type ZodObject, type ZodRawShape, z } from "zod";
  * An empty Zod schema (no properties).
  */
 export declare const ZodEmpty: z.ZodRecord<z.ZodString, z.ZodNever>;
-export { pii_fields, sensitiveFields } from "../sensitive.js";
 /**
  * Sentinel placed in \`event.data[field]\` when the caller isn't authorized to
  * see the sensitive field — either \`.discloses(predicate)\` returned \`false\`,
@@ -5784,34 +5799,6 @@ export declare const QuerySchema: z.ZodReadonly<ZodObject<{
     stream_exact: z.ZodOptional<z.ZodBoolean>;
 }, z.core.$strip>>;
 //# sourceMappingURL=schemas.d.ts.map
-// === sensitive.d.ts ===
-/**
- * The sensitive-data marker: the symbol \`sensitive(zodType)\` stamps on a
- * schema's definition, and the lookups that read it. The public
- * \`sensitive()\` and the two sentinels live in \`types/schemas.ts\`, which
- * re-exports \`sensitiveFields\` from here. The marker and its lookups live in
- * \`internal/sensitive.ts\`; the transforms that apply it at commit, load and
- * dispatch live in \`internal/pii.ts\`.
- */
-import type { z } from "zod";
-/**
- * Stamp the def-level marker. Called by the public \`sensitive()\`. Throws on a
- * schema with no Zod 4 definition: marking nothing would store the field in
- * plain text.
- */
-export declare function _mark_sensitive(schema: z.ZodType): void;
-/**
- * The top-level field names of a schema marked with \`sensitive()\`. Adapters
- * and tooling use it to reflect sensitivity on their own wire surface (the
- * act-http OpenAPI emitter marks these fields \`writeOnly\`). Returns \`[]\`
- * for a schema with no sensitive fields.
- */
-export declare function sensitiveFields(schema: z.ZodType): readonly string[];
-/**
- * @deprecated Use {@link sensitiveFields}. Removed in 3.0.
- */
-export declare const pii_fields: typeof sensitiveFields;
-//# sourceMappingURL=sensitive.d.ts.map
 // === slice-builder.d.ts ===
 /**
  * @module slice-builder

@@ -34,7 +34,7 @@ Benchmarks run weekly in the conformance workflow (and on demand), not per PR: P
 
 ## Sensitive-data foundation (#855)
 
-The sensitive-data slices (#855) add machinery to every event that flows through the orchestrator — a `pii_fields(name)` registry lookup, `fields.length === 0` early-exit branches in `pii_merge`/`pii_gate`/`pii_strip`, and the gating path in `action()`'s post-commit snapshot builder. Events without `sensitive(...)` markers should pay nothing, but "should" needed measurement.
+The sensitive-data slices (#855) add machinery to every event that flows through the orchestrator — a `registry.sensitive_fields(name)` lookup, `fields.length === 0` early-exit branches in `pii_merge`/`pii_gate`/`pii_strip`, and the gating path in `action()`'s post-commit snapshot builder. Events without `sensitive(...)` markers should pay nothing, but "should" needed measurement.
 
 `libs/act/bench/sensitive.micro.bench.ts` exercises the orchestrator's hot paths on a plain non-sensitive Counter — no `sensitive` markers, no `.discloses`, no `actor` arg on load. Ran the same bench on master (pre-#855) and on the merged #855 branch:
 

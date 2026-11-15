@@ -482,6 +482,22 @@ describe("sse_state_names", () => {
     expect(sse_state_names(app, "hono")).toEqual(["Ticket", "Calculator"]);
   });
 
+  it("treats a bare surface without the sensitive lookup as having none", () => {
+    const app = {
+      do: async () => [],
+      registry: {
+        actions: {
+          open: {
+            name: "Ticket",
+            actions: {},
+            events: { Opened: z.object({}) },
+          },
+        },
+      },
+    };
+    expect(sse_state_names(app, "trpc")).toEqual(["Ticket"]);
+  });
+
   describe("a state only reached through .loads", () => {
     const Taken = z.object({ who: z.string() });
     const loading = (loaded: State<any, any, any, string>, event: string) =>

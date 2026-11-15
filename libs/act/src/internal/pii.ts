@@ -1,5 +1,5 @@
 /**
- * The transforms that apply the sensitive-data marker (`../sensitive.ts`):
+ * The transforms that apply the sensitive-data marker (`sensitive.ts`):
  * split sensitive fields out at commit, gate them on read, and strip them
  * before projection and reaction handlers.
  */

@@ -57,7 +57,7 @@
  * mount points on the same Act instance; the OpenAPI doc covers
  * the REST half only.
  */
-import { REDACTED, SHREDDED, sensitiveFields } from "@rotorsoft/act";
+import { REDACTED, SHREDDED } from "@rotorsoft/act";
 import { z } from "zod";
 import type { ActSurface } from "../api/dispatch.js";
 
@@ -358,13 +358,12 @@ function strip_json_schema_meta(
  * Annotate the emitted request-body schema's sensitive properties so
  * codegen / Swagger UI treat them as secrets rather than echoing them
  * freely. `z.toJSONSchema` has no knowledge of the sensitive marker
- * (`sensitive()` stamps a symbol on the schema's definition), so we walk the
- * action's declared sensitive fields — via `sensitiveFields`, the same lookup
- * the orchestrator uses — and mark each matching property `writeOnly:
- * true` + `format: password`. Non-object schemas and actions with no
+ * (`sensitive()` stamps a symbol on the schema's definition), so we take the
+ * action's sensitive fields from `registry.sensitive_fields` and mark each
+ * matching property `writeOnly: true` + `format: password`. Actions with no
  * sensitive fields pass through untouched (the zero-cost common path).
  *
- * `sensitiveFields` only reports top-level keys of a `z.object`, and Zod's
+ * The registry only reports top-level keys of a `z.object`, and Zod's
  * JSON Schema emit always renders those as members of `properties` — so
  * once `fields` is non-empty, `body_schema.properties[field]` is
  * guaranteed present. No defensive fallback needed.
@@ -373,9 +372,8 @@ function strip_json_schema_meta(
  */
 function mark_sensitive_fields(
   body_schema: Record<string, unknown>,
-  zod_schema: z.ZodType
+  fields: readonly string[]
 ): Record<string, unknown> {
-  const fields = sensitiveFields(zod_schema);
   if (fields.length === 0) return body_schema;
   return at_root(body_schema, (root) => {
     const properties = root.properties as Record<
@@ -539,11 +537,12 @@ function allow_root_markers(
  */
 function state_snapshots(
   state: z.ZodType,
-  events: Readonly<Record<string, z.ZodType>>
+  events: Readonly<Record<string, z.ZodType>>,
+  sensitive_of: (name: string) => readonly string[]
 ): Record<string, unknown> {
   const sensitive = new Set<string>();
   const variants = Object.entries(events).map(([name, data]) => {
-    const fields = sensitiveFields(data);
+    const fields = sensitive_of(name);
     for (const f of fields) sensitive.add(f);
     return {
       type: "object",
@@ -678,6 +677,8 @@ export function openapi<TApp extends Pick<ActSurface, "registry">>(
   const base_path = options.basePath ?? DEFAULT_BASE_PATH;
   const paths: Record<string, OpenAPIPathItem> = {};
   const state_schemas: Record<string, Record<string, unknown>> = {};
+  const sensitive_of = (name: string) =>
+    app.registry.sensitive_fields?.(name) ?? [];
 
   for (const [action_name, state] of Object.entries(app.registry.actions)) {
     const zod_schema = state.actions[action_name] as z.ZodType;
@@ -686,11 +687,15 @@ export function openapi<TApp extends Pick<ActSurface, "registry">>(
     // `.pipe()`/`.transform()` documents its input type.
     const body_schema = mark_sensitive_fields(
       json_schema(zod_schema, "input"),
-      zod_schema
+      sensitive_of(action_name)
     );
     const snapshots = `${state.name}Snapshots`;
     if (state.state && state.events && !state_schemas[snapshots])
-      state_schemas[snapshots] = state_snapshots(state.state, state.events);
+      state_schemas[snapshots] = state_snapshots(
+        state.state,
+        state.events,
+        sensitive_of
+      );
     const response_ref = state_schemas[snapshots]
       ? `#/components/schemas/${snapshots}`
       : "#/components/schemas/SnapshotArray";

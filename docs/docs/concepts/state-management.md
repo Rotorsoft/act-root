@@ -70,6 +70,8 @@ const TicketOperations = state({ Ticket: z.object({ status: z.string() }) })
 
 **Actions belong to one partial:** two partials that declare the same action throw at build (`Duplicate action`), even when they share its schema. Each partial brings its own handler and rules, and merging them would pair one partial's rules with the other's handler. Re-registering the same partial through a second slice is fine.
 
+**Actions and events never share a name:** an action named like any event in the app, in its own state or another, throws at build (`Action and event share the name "…"`). The registry answers questions by name for both, such as which fields are sensitive, so one name has to mean one schema. Commands and facts read differently anyway: `RegisterUser` and `UserRegistered`.
+
 **Patch merge priority:** When partials are merged and both declare the same event:
 - One custom, one passthrough → keep the custom one (order doesn't matter)
 - Same function reference → re-registration from another slice, allowed

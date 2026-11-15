@@ -1,6 +1,6 @@
 // The sensitive-data marker `sensitive()` stamps on a schema, and the lookups
-// that read it. The public `sensitive()` and `sensitiveFields` are in
-// `../sensitive.ts`.
+// that read it. The public `sensitive()` is in `../types/schemas.ts`; an app's
+// sensitive fields are `registry.sensitive_fields`.
 import type { z } from "zod";
 import { some_layer } from "./zod.js";
 
@@ -12,7 +12,7 @@ import { some_layer } from "./zod.js";
  * `z.preprocess()`, `z.lazy()`, …) build a new schema around the marked one;
  * `is_pii` looks through them.
  */
-export const SENSITIVE = Symbol.for("act.sensitive");
+const SENSITIVE = Symbol.for("act.sensitive");
 
 /**
  * True when the schema, or any schema it wraps, was marked via

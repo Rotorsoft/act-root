@@ -108,6 +108,15 @@ export function register_state(
 }
 
 /**
+ * An action and an event may not share a name: the registry answers
+ * name-keyed questions, like which fields are sensitive, for both.
+ */
+const shared_name = (name: string) =>
+  new Error(
+    `Action and event share the name "${name}" — action and event names must be unique across the application. Rename one of them.`
+  );
+
+/**
  * Registers a state for the first time. All action/event names must be unique
  * across the registry; collisions throw.
  */
@@ -120,10 +129,12 @@ function register_new_state(
   states.set(state.name, state);
   for (const name of Object.keys(state.actions)) {
     if (actions[name]) throw new Error(`Duplicate action "${name}"`);
+    if (events[name]) throw shared_name(name);
     actions[name] = state;
   }
   for (const name of Object.keys(state.events)) {
     if (events[name]) throw new Error(`Duplicate event "${name}"`);
+    if (actions[name]) throw shared_name(name);
     events[name] = { schema: state.events[name], reactions: new Map() };
   }
 }
@@ -204,6 +215,7 @@ function merge_into_existing(
     // rules with the other's handler.
     if (existing.on[name] === state.on[name]) continue;
     if (actions[name]) throw new Error(`Duplicate action "${name}"`);
+    if (events[name] || state.events[name]) throw shared_name(name);
   }
   for (const name of Object.keys(state.events)) {
     // Same schema reference means the same partial re-registered via another slice
@@ -223,6 +235,7 @@ function merge_into_existing(
       );
     }
     if (events[name]) throw new Error(`Duplicate event "${name}"`);
+    if (actions[name]) throw shared_name(name);
   }
 
   // 2. Merge patches with custom-vs-passthrough resolution

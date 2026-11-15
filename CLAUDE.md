@@ -102,7 +102,7 @@ Easy to get subtly wrong. Read the linked doc before editing related code.
 - `libs/act/src/internal/correlate-cycle.ts`, `drain-cycle.ts`, `reaction-dispatch.ts`, `settle.ts` — reaction pipeline; `close-cycle.ts` — close-the-books
 - `libs/act/src/ports.ts` + `libs/act/src/adapters/` — port singletons and in-memory defaults
 - `libs/act-pg/src/postgres-store.ts`, `libs/act-sqlite/src/sqlite-store.ts` — production adapters
-- **Three layers, by audience:** `types/` declares every public type and contract value (errors and signals, schemas, sentinels, defaults); the public runtime modules (`act.ts`, `builders/`, `adapters/`, `adapter.ts`, `ports.ts`, `config.ts`, `csv.ts`, `utils.ts`, `sensitive.ts`, `test/`) implement them and declare no public types; `internal/` is private, never re-exported and never imported by `types/`. The root `index.ts` lists every runtime name it exports, and `adapter.ts` (`@rotorsoft/act/adapter`, the rules a store calls) imports only from `types/`. `architecture.spec.ts` enforces all of it.
+- **Three layers, by audience:** `types/` declares every public type and contract value (errors and signals, schemas, sentinels, defaults); the public runtime modules (`act.ts`, `builders/`, `adapters/`, `adapter.ts`, `ports.ts`, `config.ts`, `csv.ts`, `utils.ts`, `deprecated.ts`, `test/`) implement them and declare no public types; `internal/` is private, never re-exported and never imported by `types/`. The root `index.ts` lists every runtime name it exports, and `adapter.ts` (`@rotorsoft/act/adapter`, the rules a store calls) imports only from `types/`. `architecture.spec.ts` enforces all of it.
 
 ## Development Workflow
 

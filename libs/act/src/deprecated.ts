@@ -1,5 +1,5 @@
 // 2.x names kept as aliases of their replacements. 3.0 removes this file,
-// its block in index.ts, and `pii_fields` in sensitive.ts.
+// and its block in index.ts.
 import type { ZodType } from "zod";
 import {
   checkAppends,
@@ -11,6 +11,7 @@ import {
   seedEvent,
 } from "./adapter.js";
 import { package_schema } from "./config.js";
+import { pii_schemas } from "./internal/sensitive.js";
 import { unscoped_ports } from "./ports.js";
 import {
   ActorSchema as actor_schema,
@@ -98,3 +99,16 @@ const ISO_8601 =
 /** @deprecated No replacement: events revive their own `z.date()` fields. */
 export const dateReviver = (_key: string, value: unknown): unknown =>
   typeof value === "string" && ISO_8601.test(value) ? new Date(value) : value;
+
+/**
+ * The top-level field names of a schema marked with `sensitive()`; `[]` for
+ * a schema with none.
+ *
+ * @deprecated Use `app.registry.sensitive_fields(name)`, which answers for
+ * every action and event the app registers. Removed in 3.0.
+ */
+export function sensitiveFields(schema: ZodType): readonly string[] {
+  return Object.keys(pii_schemas(schema));
+}
+/** @deprecated Use `app.registry.sensitive_fields(name)`. Removed in 3.0. */
+export const pii_fields: typeof sensitiveFields = sensitiveFields;

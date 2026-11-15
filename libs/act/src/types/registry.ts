@@ -64,9 +64,12 @@ export type SchemaRegister<TSchemaReg> = {
  *   references like `Registry<any, any, any>` keep working.
  * @property actions - Map of action names to state definitions.
  * @property events - Map of event names to event registration info.
- * @property sensitive_fields - Lookup of `sensitive(...)`-marked fields per
- *   event name. Derived once at build time. Returns the empty array for
- *   unknown events.
+ * @property sensitive_fields - Lookup of the top-level `sensitive(...)`-marked
+ *   fields of an action or an event, by name (the two never share one).
+ *   Typed to the app's action and event names. Derived once at build time.
+ *   Returns the empty array for a name with none. The framework splits and
+ *   gates an event's fields; an action's are reported for tooling that
+ *   describes its input.
  * @property query_gate - Prebuilt per-event reader for the actor-less read
  *   surfaces (`query` / `query_array`). Types the payload from its declared
  *   schema (a `z.date()` comes back a `Date` from the string JSON forced it
@@ -103,7 +106,9 @@ export type Registry<
     [TKey in keyof TActions]: State<TSchemaReg[TKey], TEvents, TActions>;
   };
   readonly events: EventRegister<TEvents>;
-  readonly sensitive_fields: (event_name: string) => readonly string[];
+  readonly sensitive_fields: (
+    name: (keyof TActions | keyof TEvents) & string
+  ) => readonly string[];
   readonly query_gate: (
     event_name: string
   ) => (

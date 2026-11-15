@@ -5,7 +5,7 @@
  * Everything `act().build()` derives from the registered events.
  *
  * This is the build-time half of the event lifecycle. The other two halves
- * are the `sensitive(...)` marker (`sensitive.ts`) and the runtime
+ * are the `sensitive(...)` marker (`internal/sensitive.ts`) and the runtime
  * transforms (`pii_gate`, `pii_strip`, `pii_split`, in `internal/pii.ts`)
  * that a reader is composed from. Nothing here runs per event at runtime; everything here runs
  * once, at build, and hands the orchestrator a prebuilt function.
@@ -68,7 +68,7 @@ export type EventTags = {
  * Resolve an event's schema in a single pass.
  *
  * Sensitive markers are read at the top level only — the documented carve-out
- * (`sensitive.ts`), since the write path splits whole top-level keys. A union
+ * (`internal/sensitive.ts`), since the write path splits whole top-level keys. A union
  * event has no top-level shape, so its variants are walked and unioned: a key
  * sensitive in any variant must be split, because the stored payload could be
  * that variant.
@@ -76,7 +76,7 @@ export type EventTags = {
  * @internal
  */
 export function event_tags(schema: z.ZodType): EventTags {
-  // Which fields are sensitive is `sensitive.ts`'s question and where the
+  // Which fields are sensitive is `internal/sensitive.ts`'s question and where the
   // dates are is `date-reviver.ts`'s; this composes the two answers. The
   // sidecar holds the split-out fields alone, so a date among them needs its
   // own reviver — without it a disclosed `sensitive(z.date())` arrives as text
@@ -180,7 +180,11 @@ function make_event_reader(
  * @internal
  */
 export type BuiltEvents = {
-  /** Backs `registry.sensitive_fields`. */
+  /**
+   * Backs `registry.sensitive_fields`: the sensitive fields of every action
+   * and event that has any, by name. One map serves both because an action
+   * and an event never share a name (`merge.ts` refuses it).
+   */
   readonly sensitive: Map<string, readonly string[]>;
   /**
    * The sensitive-type advisory, naming each sensitive `Event.field`, and
@@ -351,6 +355,14 @@ export function build_events(
     if (readers.size === 0) continue;
     state.view = (event: { name: string }, actor: Actor) =>
       (readers.get(event.name) ?? IDENTITY_GATE)(event as never, actor);
+  }
+
+  // Actions get nothing else from their marks: the framework splits and
+  // gates events only. The lookup is for tooling that describes the input,
+  // like act-http's OpenAPI request bodies.
+  for (const [action_name, state] of Object.entries(registry.actions)) {
+    const fields = Object.keys(pii_schemas(state.actions[action_name]));
+    if (fields.length > 0) sensitive.set(action_name, fields);
   }
 
   const advisory =

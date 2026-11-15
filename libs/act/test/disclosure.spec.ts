@@ -88,8 +88,17 @@ describe("registry.sensitive_fields", () => {
     expect(app.registry.sensitive_fields("Pinged")).toEqual([]);
   });
 
-  it("returns an empty array for unknown event names — safe lookup", () => {
+  it("returns the marked keys of an action's payload", () => {
+    const app = act().withState(User).build();
+    expect([...app.registry.sensitive_fields("register")]).toEqual([
+      "email",
+      "name",
+    ]);
+  });
+
+  it("takes only the app's action and event names", () => {
     const app = act().withState(Plain).build();
+    // @ts-expect-error not an action or event of this app
     expect(app.registry.sensitive_fields("NeverDeclared")).toEqual([]);
   });
 

@@ -1,4 +1,3 @@
-import { sensitiveFields } from "@rotorsoft/act";
 import type { ZodType } from "zod";
 import type { ActSurface } from "./dispatch.js";
 
@@ -19,12 +18,12 @@ export function sse_state_names(app: ActSurface, transport: string): string[] {
       for (const { state } of loads ?? []) names.set(state.name, state.events);
   }
   for (const [name, events] of names) {
-    const sensitive = Object.entries(events).filter(
-      ([, schema]) => sensitiveFields(schema).length > 0
+    const sensitive = Object.keys(events).filter(
+      (event) => (app.registry.sensitive_fields?.(event) ?? []).length > 0
     );
     if (sensitive.length)
       throw new Error(
-        `${transport}: state "${name}" can't be served over SSE: its events ${sensitive.map(([e]) => `"${e}"`).join(", ")} declare sensitive fields, and the broadcast would send one actor's view of them to every subscriber. Generate the API without \`sse\`, or move the sensitive fields to a state that isn't broadcast.`
+        `${transport}: state "${name}" can't be served over SSE: its events ${sensitive.map((e) => `"${e}"`).join(", ")} declare sensitive fields, and the broadcast would send one actor's view of them to every subscriber. Generate the API without \`sse\`, or move the sensitive fields to a state that isn't broadcast.`
       );
   }
   return [...names.keys()];

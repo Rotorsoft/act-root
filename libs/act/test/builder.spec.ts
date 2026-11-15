@@ -63,6 +63,75 @@ describe("Builder", () => {
     expect(() => builder.withState(A3)).toThrow('Duplicate event "Event1"');
   });
 
+  describe("an action and an event sharing a name", () => {
+    const shared = (name: string) =>
+      `Action and event share the name "${name}"`;
+    const Echo = state({ Echo: ZodEmpty })
+      .init(() => ({}))
+      .emits({ Ping: ZodEmpty })
+      .patch({ Ping: () => ({}) })
+      .on({ Ping: ZodEmpty })
+      .emit("Ping")
+      .build();
+    const with_action = (action: string) =>
+      state({ Other: ZodEmpty })
+        .init(() => ({}))
+        .emits({ Done: ZodEmpty })
+        .patch({ Done: () => ({}) })
+        .on({ [action]: ZodEmpty })
+        .emit(() => ["Done", {}])
+        .build();
+    const with_event = (event: string) =>
+      state({ Other: ZodEmpty })
+        .init(() => ({}))
+        .emits({ [event]: ZodEmpty })
+        .patch({ [event]: () => ({}) })
+        .on({ DoOther: ZodEmpty })
+        .emit(() => [event, {}])
+        .build();
+    const partial = (action: string, event: string) =>
+      state({ A1: z.object({}) })
+        .init(() => ({}))
+        .emits({ [event]: ZodEmpty })
+        .patch({ [event]: () => ({}) })
+        .on({ [action]: ZodEmpty })
+        .emit(() => [event, {}])
+        .build();
+
+    it("refuses one in the same state", () => {
+      expect(() => act().withState(Echo)).toThrow(shared("Ping"));
+    });
+
+    it("refuses an action named like a registered event", () => {
+      const builder = act().withState(A1);
+      expect(() => builder.withState(with_action("Event1"))).toThrow(
+        shared("Event1")
+      );
+    });
+
+    it("refuses an event named like a registered action", () => {
+      const builder = act().withState(A1);
+      expect(() => builder.withState(with_event("Act1"))).toThrow(
+        shared("Act1")
+      );
+    });
+
+    it("refuses one across partials of a state", () => {
+      expect(() =>
+        act().withState(A1).withState(partial("Event2", "Fresh"))
+      ).toThrow(shared("Event2"));
+      expect(() =>
+        act().withState(A1).withState(partial("Fresh", "Act2"))
+      ).toThrow(shared("Act2"));
+    });
+
+    it("refuses one inside an incoming partial", () => {
+      expect(() =>
+        act().withState(A1).withState(partial("Fresh", "Fresh"))
+      ).toThrow(shared("Fresh"));
+    });
+  });
+
   it("should throw on duplicate action or event", () => {
     const builder = act();
     // Use two different state objects with the same action name

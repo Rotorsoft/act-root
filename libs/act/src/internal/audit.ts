@@ -5,7 +5,6 @@
  * the public `Store`, never orchestration internals.
  */
 
-import { sensitiveFields } from "../sensitive.js";
 import type {
   AuditCategory,
   AuditFinding,
@@ -30,6 +29,8 @@ export type AuditDeps = {
   readonly store: () => Store;
   /** event-name → state that registers it (for schema validation). */
   readonly event_to_state: ReadonlyMap<string, State<any, any, any>>;
+  /** `registry.sensitive_fields`, to leave the `pii` sidecar out of a parse. */
+  readonly sensitive_fields: (event_name: string) => readonly string[];
   /** Declared drain lanes (for routing-health unknown-lane). */
   readonly declared_lanes: ReadonlySet<string>;
   /** Event names with at least one reaction (routing-health `unrouted`). */
@@ -218,7 +219,7 @@ const make_schema_pass: PassFactory = (deps) => {
       }
       const schema = state.events[name];
       // `sensitive()` keys live in the pii sidecar, so omit them from the parse.
-      const sensitive = sensitiveFields(schema);
+      const sensitive = deps.sensitive_fields(name);
       let parse_schema = schema;
       if (sensitive.length > 0) {
         const omitter = (

@@ -1,5 +1,4 @@
 import { type ZodObject, type ZodRawShape, z } from "zod";
-import { _mark_sensitive } from "../sensitive.js";
 
 /**
  * @packageDocumentation
@@ -12,8 +11,6 @@ import { _mark_sensitive } from "../sensitive.js";
  * An empty Zod schema (no properties).
  */
 export const ZodEmpty = z.record(z.string(), z.never());
-
-export { pii_fields, sensitiveFields } from "../sensitive.js";
 
 /**
  * Sentinel placed in `event.data[field]` when the caller isn't authorized to
@@ -29,6 +26,10 @@ export const REDACTED = "[REDACTED]" as const;
  * and the original plaintext is gone forever. Irrecoverable.
  */
 export const SHREDDED = "[SHREDDED]" as const;
+
+// The marker key on a schema's def. A registered symbol, so
+// `internal/sensitive.ts` reads the same key without importing this module.
+const SENSITIVE = Symbol.for("act.sensitive");
 
 /**
  * Mark a Zod schema as sensitive. Returns the same schema instance — the
@@ -61,7 +62,13 @@ export function sensitive<T extends z.ZodType>(schema: T): T {
   // The marker lives on the def, so it survives the clone Zod produces for
   // any refinement chained after this call (`sensitive(z.string()).min(1)`);
   // without it the field would be written as plaintext into `events.data`.
-  _mark_sensitive(schema);
+  // A schema with no Zod 4 definition throws: marking nothing would store
+  // the field in plain text.
+  const def = (schema as { def?: object }).def as
+    | Record<symbol, unknown>
+    | undefined;
+  if (!def) throw new Error("sensitive() takes a Zod 4 schema");
+  def[SENSITIVE] = true;
   return schema;
 }
 
