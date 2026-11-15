@@ -1,3 +1,12 @@
+# [@rotorsoft/act-v2.1.12](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v2.1.11...@rotorsoft/act-v2.1.12) (2026-11-15)
+
+
+### Bug Fixes
+
+* **act:** a crash caught by act's handlers exits with code 1 ([#2532](https://github.com/Rotorsoft/act-root/issues/2532)) ([024f9c7](https://github.com/Rotorsoft/act-root/commit/024f9c71fb4ae2498cfccf69cdd575083abdc7ad))
+* **act:** drop the state projections' fold caches when a restore replaces the app's log ([#2531](https://github.com/Rotorsoft/act-root/issues/2531)) ([af93db0](https://github.com/Rotorsoft/act-root/commit/af93db0fe1d69418597bb542ba5b4ba1f0df869b))
+* **act:** keep function and class names in the bundle, so ports log their real names ([#2533](https://github.com/Rotorsoft/act-root/issues/2533)) ([b9aee81](https://github.com/Rotorsoft/act-root/commit/b9aee8148f39a545b9491952075de33e3e1d1ac7))
+
 # [@rotorsoft/act-v2.1.11](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v2.1.10...@rotorsoft/act-v2.1.11) (2026-11-15)
 
 # [@rotorsoft/act-v2.1.10](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v2.1.9...@rotorsoft/act-v2.1.10) (2026-11-15)
