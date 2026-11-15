@@ -1,3 +1,5 @@
+# [@rotorsoft/act-otel-v0.3.1](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-otel-v0.3.0...@rotorsoft/act-otel-v0.3.1) (2026-11-15)
+
 # [@rotorsoft/act-otel-v0.3.0](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-otel-v0.2.2...@rotorsoft/act-otel-v0.3.0) (2026-11-07)
 
 
