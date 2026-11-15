@@ -74,11 +74,11 @@ import {
 import {
   type ActorExtractor,
   runSseSubscription,
-  SseConnectionCounter,
   type SseOptions,
   type SseSubscriptionFrame,
   toApiError,
 } from "../api/index.js";
+import { SseConnectionCounter } from "../api/sse-counter.js";
 import { SseOptionsSchema } from "../api/sse-options.js";
 import { sse_state_names } from "../api/sse-states.js";
 

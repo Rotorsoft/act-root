@@ -65,12 +65,11 @@ import {
 import {
   type ActorExtractor,
   type ApiError,
-  fireAndForget,
   runSseSubscription,
-  SseConnectionCounter,
   type SseOptions,
   toApiError,
 } from "../api/index.js";
+import { fire_and_forget, SseConnectionCounter } from "../api/sse-counter.js";
 import { SseOptionsSchema } from "../api/sse-options.js";
 import { sse_state_names } from "../api/sse-states.js";
 
@@ -309,7 +308,7 @@ export function hono<TApp extends ActSurface>(
         return streamSSE(c, async (sse_stream) => {
           sse_stream.onAbort(() => controller.abort());
           const heartbeat = setInterval(() => {
-            fireAndForget(() =>
+            fire_and_forget(() =>
               sse_stream.writeSSE({ event: "ping", data: "" })
             );
           }, sse_config.heartbeatMs);

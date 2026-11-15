@@ -165,6 +165,7 @@ A few internal names were exported by mistake. They are gone without a deprecati
 
 - `resolveAutocloseConfig` from `@rotorsoft/act`: `act().build()` checks the autoclose window.
 - `resolveSseConfig` and its `SseConfig` return type from `@rotorsoft/act-http/api`: `trpc(...)` and `hono(...)` check their `sse` options.
+- `fireAndForget` and `SseConnectionCounter` from `@rotorsoft/act-http/api`: `trpc(...)` and `hono(...)` cap connections themselves; a custom transport passes its own `SseAccounting` to `runSseSubscription`.
 - The `PassthroughPatchHandler` type from `@rotorsoft/act`: it marked the default reducer inside the state builder.
 - `streamPatternToGlob` from `@rotorsoft/act-sqlite`: the store translates stream filters itself.
 

@@ -1,15 +1,17 @@
 import { act, type State, sensitive, state } from "@rotorsoft/act";
 import { describe, expect, it } from "vitest";
 import { ZodError, z } from "zod";
+import {
+  fire_and_forget,
+  SseConnectionCounter,
+} from "../../src/api/sse-counter.js";
 import { SseOptionsSchema } from "../../src/api/sse-options.js";
 import { sse_state_names } from "../../src/api/sse-states.js";
 import {
   DEFAULT_SSE_HEARTBEAT_MS,
   DEFAULT_SSE_MAX_CONNECTIONS,
   DEFAULT_SSE_MAX_PENDING_PER_CONNECTION,
-  fireAndForget,
   runSseSubscription,
-  SseConnectionCounter,
   type SseSubscriptionFrame,
 } from "../../src/api/sse-wiring.js";
 import { BroadcastChannel } from "../../src/sse/index.js";
@@ -165,21 +167,23 @@ describe("SseConnectionCounter", () => {
   });
 });
 
-describe("fireAndForget", () => {
+describe("fire_and_forget", () => {
   it("resolves to the op's value on success", async () => {
-    const out = await fireAndForget(() => Promise.resolve(42));
+    const out = await fire_and_forget(() => Promise.resolve(42));
     expect(out).toBe(42);
   });
 
   it("swallows rejection and resolves to undefined", async () => {
-    const out = await fireAndForget(() => Promise.reject(new Error("closed")));
+    const out = await fire_and_forget(() =>
+      Promise.reject(new Error("closed"))
+    );
     expect(out).toBeUndefined();
   });
 
   it("doesn't leak an unhandled rejection when the caller drops the result", async () => {
-    // Intentionally do not await — fireAndForget should still
+    // Intentionally do not await — fire_and_forget should still
     // attach the .catch so Node's unhandled-rejection hook stays quiet.
-    fireAndForget(() => Promise.reject(new Error("dropped")));
+    fire_and_forget(() => Promise.reject(new Error("dropped")));
     // Give microtasks a chance to settle.
     await new Promise((r) => setTimeout(r, 0));
   });
