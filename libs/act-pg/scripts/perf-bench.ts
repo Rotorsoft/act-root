@@ -455,4 +455,8 @@ async function main() {
   process.stdout.write(JSON.stringify({ results }, null, 2) + "\n");
 }
 
-void main();
+// Print the error and fail: LOG_LEVEL=fatal hides act's own crash log.
+main().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});

@@ -110,10 +110,18 @@ for (const r of result.results) {
   );
 }
 
+// A scenario the bench didn't report means it stopped early.
+for (const b of baseline.results)
+  if (!result.results.some((r) => r.name === b.name)) {
+    failed = true;
+    console.log(b.name.padEnd(42) + "  MISSING (the bench stopped before it)");
+  }
+
 console.log();
 if (failed) {
   console.error(
-    "Perf regression detected on act-pg. Either fix the regression, or —\n" +
+    "Perf check failed on act-pg: a scenario is MISSING (the bench stopped; its\n" +
+      "error is above) or a REGRESSION. Fix the bench or the regression, or —\n" +
       "if the slowdown is intentional — refresh the baseline in a PR labeled\n" +
       "`perf-baseline-update` and document the rationale in PERFORMANCE.md."
   );

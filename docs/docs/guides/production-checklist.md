@@ -165,7 +165,7 @@ afterAll(async () => {
 });
 ```
 
-In production, `disposeAndExit("ERROR")` from an uncaught promise is deliberately suppressed (logged as a warning, process kept alive) so a transient failure in a non-critical path doesn't kill the service. SIGINT/SIGTERM still exit cleanly.
+In production, `disposeAndExit("ERROR")` from an uncaught promise is deliberately suppressed (logged as a warning, process kept alive) so a transient failure in a non-critical path doesn't kill the service. SIGINT/SIGTERM still exit cleanly. Either crash handler sets `process.exitCode = 1`, so a one-shot job or script that throws, and then runs out of work, exits 1 instead of reporting success.
 
 ## 7. Logging
 

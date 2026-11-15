@@ -11,11 +11,15 @@ process.once("SIGTERM", async (arg?: any) => {
   log().info(arg, "SIGTERM");
   await disposeAndExit("EXIT");
 });
+// A crash reported here no longer crashes the process, so it sets the exit
+// code: a script that ends anyway (or skips `process.exit` in test) exits 1.
 process.once("uncaughtException", async (arg?: any) => {
+  process.exitCode = 1;
   log().error(arg, "Uncaught Exception");
   await disposeAndExit("ERROR");
 });
 process.once("unhandledRejection", async (arg?: any) => {
+  process.exitCode = 1;
   log().error(arg, "Unhandled Rejection");
   await disposeAndExit("ERROR");
 });

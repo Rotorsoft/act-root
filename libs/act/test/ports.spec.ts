@@ -31,14 +31,18 @@ describe("exit signal handlers", () => {
     expect(disposeAndExitSpy).toHaveBeenCalledWith("EXIT");
   });
 
-  it("should exit on uncaughtException", () => {
+  it("should exit on uncaughtException, with exit code 1", () => {
     process.emit("uncaughtException", new Error("boom"));
     expect(disposeAndExitSpy).toHaveBeenCalledWith("ERROR");
+    expect(process.exitCode).toBe(1);
+    process.exitCode = undefined;
   });
 
-  it("should exit on unhandledRejection", () => {
+  it("should exit on unhandledRejection, with exit code 1", () => {
     process.emit("unhandledRejection", new Error("boom"), Promise.resolve());
     expect(disposeAndExitSpy).toHaveBeenCalledWith("ERROR");
+    expect(process.exitCode).toBe(1);
+    process.exitCode = undefined;
   });
 
   it("should not exit in production on error", async () => {
