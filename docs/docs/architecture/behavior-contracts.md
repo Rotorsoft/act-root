@@ -225,6 +225,7 @@ Pinned in the TCK unless the citation names an adapter.
 | The loser of a commit race leaves nothing on any of its streams, and every event of every append is stored whole | [TCK conformance](../guides/tck-conformance.md#what-20-adds) | `store-tck.ts` → commit across streams : "leaves nothing of the commit that lost a race, on any of its streams", "stores every event of every append, whole" |
 | An adapter built from its defaults either refuses to construct or keeps what it commits | `StoreTckOptions.default_factory` doc | `store-tck.ts` → "either refuses to construct or round-trips a commit" |
 | `SqliteStore` needs a `url` and maps every in-memory spelling to a shared cache | act-sqlite README | act-sqlite `store.error.spec.ts` → "rejects a blank or non-string url: %o", "normalizes the in-memory url %s to shared cache" |
+| Outside `NODE_ENV=test`, `InMemoryStore` waits `SLEEP_MS` (100 ms by default) before each call; tests wait 0 | [Configuration](../concepts/configuration.md#store) | `config.spec.ts` → "waits 100 ms per in-memory store call outside tests, unless SLEEP_MS says otherwise", "should handle test environment", "should handle SLEEP_MS" |
 
 ## PostgresStore notify
 

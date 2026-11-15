@@ -28,6 +28,13 @@ describe("config", () => {
     expect(config.logLevel).toBe("trace");
   });
 
+  it("waits 100 ms per in-memory store call outside tests, unless SLEEP_MS says otherwise", async () => {
+    delete process.env.NODE_ENV;
+    delete process.env.SLEEP_MS;
+    const { config: loadConfig } = await import("../src/config.js");
+    expect(loadConfig().sleepMs).toBe(100);
+  });
+
   it("should handle test environment", async () => {
     process.env.NODE_ENV = "test";
     const { config: loadConfig } = await import("../src/config.js");
