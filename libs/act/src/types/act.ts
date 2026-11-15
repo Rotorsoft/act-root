@@ -95,10 +95,11 @@ export type ActLifecycleEvents<
    */
   forgotten: { stream: string; at: Date; eventCount: number };
   /**
-   * A store operation failed during the drain loop. Fires on
-   * every failed drain cycle — typically a {@link StoreError} from a
+   * A store operation failed in one of the orchestrator's loops (drain,
+   * settle, autoclose), which share one circuit breaker. Fires on every
+   * such failure — typically a {@link StoreError} from a
    * degraded backend — carrying the orchestrator circuit breaker's state
-   * after the failure (`open` means the drain loop has backed off and will
+   * after the failure (`open` means the loops have backed off and will
    * retry after the cooldown). Listen to alert on a degraded store; the
    * framework logs the same error regardless. Emitted only when a listener
    * is registered (Node's `EventEmitter` throws on an unhandled `"error"`).

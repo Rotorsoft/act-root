@@ -58,7 +58,7 @@ The events emitted by the orchestrator on the public event bus (`ActLifecycleEve
 - `closed` — a close-the-books cycle completed (`CloseResult`)
 - `notified` — a different process committed to the same backing store (`StoreNotification`); fires only when `Store.notify` is implemented and at least one reaction is registered
 - `forgotten` — a stream's sensitive-data payload was wiped via `app.forget(stream)` (`{stream, at, eventCount}`); fires once per successful call, never on idempotent re-forget
-- `error` — a store operation failed during the drain loop (`{ error, circuit }`), carrying the circuit breaker's state after the failure; emitted only when a listener is registered
+- `error` — a store operation failed in one of the orchestrator's loops (drain, settle, autoclose) (`{ error, circuit }`), carrying the circuit breaker's state after the failure; emitted only when a listener is registered
 
 Their names and payload shapes are stable. Adding new optional fields to a payload is not breaking; renaming or removing fields is. Adding new lifecycle event names is not breaking.
 
