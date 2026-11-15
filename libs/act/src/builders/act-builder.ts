@@ -6,7 +6,6 @@
  */
 import { Act } from "../act.js";
 import { synthesize_autoclose_reactions } from "../internal/autoclose-reaction.js";
-import { check } from "../internal/config.js";
 import {
   current_version_of,
   deprecated_event_names,
@@ -322,10 +321,6 @@ export function act<
         return reaction_on(event, registry.events, builder) as never;
       },
       build: (options?: ActOptions) => {
-        // Validate the top-level scalar knobs at build (the nested autoclose /
-        // circuitBreaker bags are validated by their own resolvers). A bad
-        // maxSubscribedStreams / settleDebounceMs throws ZodError here.
-        check("act", options ?? {});
         // Finalize once: repeated builds (per tenant) share the registry.
         if (!_built) {
           for (const proj of pending_projections) add_projection(proj);
