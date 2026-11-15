@@ -198,11 +198,8 @@ const DEFAULT_SCOPE: Scoped = {
 // Disposal
 // ---------------------------------------------------------------------------
 
-/**
- * Registered cleanup functions live in `disposers.ts`, which holds
- * lifetime-bound entries weakly so registering never pins its target for the
- * process lifetime. The public surface here is unchanged.
- */
+// Registered cleanup functions live in `disposers.ts`, which holds
+// lifetime-bound entries weakly so registering never pins its target.
 
 /**
  * Disposes all registered adapters and disposers, then exits the process.

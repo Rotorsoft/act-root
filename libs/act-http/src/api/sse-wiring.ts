@@ -22,8 +22,7 @@ import {
  * hundreds of human viewers per process). Both numeric knobs are
  * validated at transport-function construction; out-of-range values
  * throw `ZodError` immediately so misconfiguration surfaces at startup
- * instead of at first connection (the framework-wide convention for
- * config bags — see .claude/rules/config-validation.md).
+ * instead of at first connection.
  */
 export type SseOptions = {
   /**
