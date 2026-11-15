@@ -13,17 +13,11 @@
  */
 
 import {
-  check_target,
+  check,
   DEFAULT_BLOCK_ON_ERROR,
   DEFAULT_MAX_RETRIES,
-  resolveLaneConfig,
-  resolveReactionConfig,
 } from "../internal/config.js";
-import {
-  assert_defer_when,
-  type DeferSchedule,
-  make_deferred,
-} from "../internal/defer-config.js";
+import { type DeferSchedule, make_deferred } from "../internal/defer-config.js";
 import type {
   Committed,
   EventRegister,
@@ -48,7 +42,7 @@ import { _this_ } from "./merge.js";
  * @internal
  */
 export function register_lane(config: LaneConfig, lanes: LaneConfig[]): void {
-  resolveLaneConfig(config);
+  check("lane", config);
   if (config.name === DEFAULT_LANE)
     throw new Error(`Lane "${DEFAULT_LANE}" is reserved`);
   const existing = lanes.find((l) => l.name === config.name);
@@ -98,7 +92,7 @@ export function add_reaction<
   events[event].reactions.set(name, reaction);
   return Object.assign(builder, {
     to(resolver: ReactionResolver<TEvents, TKey> | string) {
-      if (typeof resolver === "object") check_target(resolver);
+      if (typeof resolver === "object") check("target", resolver);
       reaction.resolver =
         typeof resolver === "string" ? { target: resolver } : resolver;
       return builder;
@@ -137,14 +131,14 @@ export function reaction_on<
         // Fail fast on a bad literal schedule; the function form is checked
         // when it runs (no event to resolve against at build time).
         if (schedule && typeof schedule !== "function")
-          assert_defer_when(schedule);
+          check("defer", schedule);
         return {
           handler: schedule ? make_deferred(handler, schedule) : handler,
           resolver: _this_,
           // Validate the whole bag at the declaration site so a bad
           // `maxRetries`/`backoff`/`blockOnError` throws ZodError at build,
           // not a NaN gate on the first retry.
-          options: resolveReactionConfig({
+          options: check("reaction", {
             blockOnError: options?.blockOnError ?? DEFAULT_BLOCK_ON_ERROR,
             maxRetries: options?.maxRetries ?? DEFAULT_MAX_RETRIES,
             backoff: options?.backoff,

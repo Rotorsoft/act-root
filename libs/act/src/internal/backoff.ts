@@ -34,7 +34,7 @@ export function compute_backoff_delay(
       if (opts.maxMs !== undefined) delay = Math.min(delay, opts.maxMs);
       break;
     default: {
-      // Unreachable once options pass `resolveBackoffConfig` at their
+      // Unreachable once options pass `check` at their
       // declaration site. Defensive so the pure function is total and can
       // never emit `NaN` from an unvalidated strategy — throw instead.
       const _never: never = opts.strategy;

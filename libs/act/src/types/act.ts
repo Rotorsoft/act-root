@@ -1,8 +1,8 @@
 /**
  * Public contracts of the orchestrator: the options `act().build()` takes,
  * the lifecycle events an `Act` emits, and the public defaults behind them.
- * The `Act` class implements them in `../act.ts`; their Zod schemas and
- * resolvers live in `../internal/config.ts`.
+ * The `Act` class implements them in `../act.ts`; their Zod schemas live
+ * in `../internal/config.ts`.
  */
 import type {
   CloseResult,

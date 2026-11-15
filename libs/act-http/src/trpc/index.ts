@@ -73,13 +73,13 @@ import {
 } from "../api/dispatch.js";
 import {
   type ActorExtractor,
-  resolveSseConfig,
   runSseSubscription,
   SseConnectionCounter,
   type SseOptions,
   type SseSubscriptionFrame,
   toApiError,
 } from "../api/index.js";
+import { SseOptionsSchema } from "../api/sse-options.js";
 import { sse_state_names } from "../api/sse-states.js";
 
 /**
@@ -431,7 +431,10 @@ export function trpc<Ctx extends object, TApp extends ActSurface>(
       throw new Error(
         'trpc: an action named "subscribe" collides with the SSE subscription router (router.subscribe.<stateName>); rename the action or generate the router without `sse`.'
       );
-    const sse_config = resolveSseConfig(options.sse);
+    const sse_config = {
+      channel: options.sse.channel,
+      ...SseOptionsSchema.parse(options.sse),
+    };
     const sse_counter = new SseConnectionCounter(sse_config.maxConnections);
     const state_names = sse_state_names(app, "trpc");
     const sse_handlers: Record<string, unknown> = {};

@@ -38,7 +38,6 @@ export {
   notification_of,
   PackageSchema,
   QuerySchema,
-  resolveAutocloseConfig,
   seed_event,
   TargetSchema,
   throw_if_stale,

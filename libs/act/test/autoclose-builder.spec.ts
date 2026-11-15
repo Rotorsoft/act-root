@@ -16,7 +16,7 @@ import {
   in_autoclose_window,
   next_window_open,
 } from "../src/internal/autoclose-window.js";
-import { resolveAutocloseConfig } from "../src/internal/config.js";
+import { check } from "../src/internal/config.js";
 
 const make_ticket = () =>
   state({
@@ -258,20 +258,20 @@ describe("registry.autoclose_archiver(state_name) — lookup", () => {
   });
 });
 
-describe("resolveAutocloseConfig — defaults + validation", () => {
+describe("the autoclose window bag — defaults + validation", () => {
   it("defaults autocloseWindow to undefined", () => {
-    expect(resolveAutocloseConfig({}).autocloseWindow).toBeUndefined();
+    expect(check("autoclose", {}).autocloseWindow).toBeUndefined();
   });
 
   it("defaults autocloseWindow.timeZone to UTC", () => {
-    const cfg = resolveAutocloseConfig({
+    const cfg = check("autoclose", {
       autocloseWindow: { start: 1, end: 5 },
     });
     expect(cfg.autocloseWindow).toEqual({ start: 1, end: 5, timeZone: "UTC" });
   });
 
   it("preserves a caller-supplied window timeZone", () => {
-    const cfg = resolveAutocloseConfig({
+    const cfg = check("autoclose", {
       autocloseWindow: { start: 22, end: 6, timeZone: "America/New_York" },
     });
     expect(cfg.autocloseWindow?.timeZone).toBe("America/New_York");
@@ -279,22 +279,22 @@ describe("resolveAutocloseConfig — defaults + validation", () => {
 
   it("rejects window hours outside [0, 23]", () => {
     expect(() =>
-      resolveAutocloseConfig({ autocloseWindow: { start: -1, end: 5 } })
+      check("autoclose", { autocloseWindow: { start: -1, end: 5 } })
     ).toThrow();
     expect(() =>
-      resolveAutocloseConfig({ autocloseWindow: { start: 1, end: 24 } })
+      check("autoclose", { autocloseWindow: { start: 1, end: 24 } })
     ).toThrow();
   });
 
   it("rejects a window where start equals end", () => {
     expect(() =>
-      resolveAutocloseConfig({ autocloseWindow: { start: 3, end: 3 } })
+      check("autoclose", { autocloseWindow: { start: 3, end: 3 } })
     ).toThrow();
   });
 
   it("rejects an invalid window timeZone", () => {
     expect(() =>
-      resolveAutocloseConfig({
+      check("autoclose", {
         autocloseWindow: { start: 1, end: 5, timeZone: "Not/AZone" },
       })
     ).toThrow();

@@ -50,7 +50,7 @@
 import type { MiddlewareHandler } from "hono";
 import { type CheckWebhookOptions, checkWebhook } from "../check.js";
 import { make_idempotency } from "../finalize.js";
-import { check_options } from "../options.js";
+import { ReceiverOptionsSchema } from "../options.js";
 
 /**
  * Variables this middleware contributes to the Hono context. The
@@ -80,7 +80,7 @@ export type WebhookVariables = {
 export function webhookMiddleware(
   options: CheckWebhookOptions
 ): MiddlewareHandler<{ Variables: WebhookVariables }> {
-  check_options(options);
+  ReceiverOptionsSchema.parse(options);
   return async function check(c, next) {
     const headers = headers_bag(c.req.raw.headers);
     const rawBody = await c.req.text();

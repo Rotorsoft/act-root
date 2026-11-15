@@ -13,17 +13,9 @@ import {
   run_close_cycle,
 } from "./internal/close-cycle.js";
 import {
-  check_audit_options,
-  check_scan_options,
-  check_store,
-  check_target,
+  check,
   DEFAULT_LEASE_MILLIS,
   MAX_SHUTDOWN_GRACE_MS,
-  resolveAutocloseConfig,
-  resolveCircuitBreakerConfig,
-  resolveDrainConfig,
-  resolveSettleConfig,
-  resolveShutdownConfig,
 } from "./internal/config.js";
 import {
   CorrelateCycle,
@@ -104,20 +96,6 @@ import type {
   StreamPosition,
   Target,
 } from "./types/index.js";
-
-/** Reject `onlyLanes` entries that reference undeclared lanes. */
-function validate_only_lanes(
-  only: ReadonlyArray<string> | undefined,
-  declared: ReadonlyArray<string>
-): void {
-  const unknown = (only ?? []).filter((l) => !declared.includes(l));
-  if (unknown.length > 0)
-    throw new Error(
-      `ActOptions.onlyLanes references undeclared lane(s): ${unknown
-        .map((l) => `"${l}"`)
-        .join(", ")}`
-    );
-}
 
 /**
  * @category Orchestrator
@@ -349,11 +327,23 @@ export class Act<
     this._states = states;
     this._batch_handlers = batch_handlers;
     this._lanes = lanes;
-    this._declared_lanes = ["default", ...lanes.map((l) => l.name)];
-    validate_only_lanes(options.onlyLanes, this._declared_lanes);
+    // A local, not `this._declared_lanes`, in the filter: an arrow that reads
+    // `this` here shares its scope with the closures the constructor hands
+    // the dispose registry, and keeps every Act reachable.
+    const declared = ["default", ...lanes.map((l) => l.name)];
+    this._declared_lanes = declared;
+    const undeclared = (options.onlyLanes ?? []).filter(
+      (l) => !declared.includes(l)
+    );
+    if (undeclared.length > 0)
+      throw new Error(
+        `ActOptions.onlyLanes references undeclared lane(s): ${undeclared
+          .map((l) => `"${l}"`)
+          .join(", ")}`
+      );
     // Every Act runs in its own ports frame (the singletons when unscoped),
     // so a shared Act never inherits its caller's frame.
-    if (options.scoped) check_store(options.scoped.store);
+    if (options.scoped) check("store", options.scoped.store);
     this._ports = options.scoped ?? unscoped_ports();
     const ports = this._ports;
     this._scoped = make_run_scoped({
@@ -366,7 +356,7 @@ export class Act<
         return ports.cache;
       },
       // Parsed per build, so a bad window throws on every build.
-      autoclose_window: resolveAutocloseConfig(options).autocloseWindow,
+      autoclose_window: check("autoclose", options).autocloseWindow,
     });
     this._correlator = options.correlator ?? default_correlator;
     this._es = build_es(this._logger, this._correlator, patch_fn);
@@ -420,7 +410,7 @@ export class Act<
   // Shared by drain, settle and autoclose; bad knobs throw at build.
   private _build_breaker(options: ActOptions): CircuitBreaker {
     return new CircuitBreaker(
-      resolveCircuitBreakerConfig(options.circuitBreaker),
+      check("circuit_breaker", options.circuitBreaker ?? {}),
       {
         on_error: (error, circuit) => this._emit_error(error, circuit),
         // When the cooldown elapses, settle once: its scan or claim is the
@@ -593,7 +583,7 @@ export class Act<
    */
   shutdown(options?: ShutdownOptions): Promise<void> {
     if (!this._shutdown_promise) {
-      resolveShutdownConfig(options);
+      check("shutdown", options ?? {});
       this._shutdown_promise = (async () => {
         // Stop every scheduler before awaiting anything slow, so nothing
         // starts while the notify subscription comes down.
@@ -985,7 +975,7 @@ export class Act<
   async drain(options: DrainOptions = {}): Promise<Drain<TEvents>> {
     // Validate the runtime knobs before anything runs (a bad leaseMillis /
     // streamLimit / eventLimit throws ZodError here, not on the first cycle).
-    resolveDrainConfig(options);
+    check("drain", options);
     // Writer-only instances run no reactions.
     if (!this._drain)
       return { fetched: [], leased: [], acked: [], blocked: [] };
@@ -1287,7 +1277,7 @@ export class Act<
     opts: ScanOptions = {},
     sink?: EventSink
   ): Promise<ScanResult> {
-    check_scan_options(opts);
+    check("scan", opts);
     return this._scoped(async () => {
       const started = Date.now();
       // Dry-run: count what a restore would land, touching no sink.
@@ -1382,7 +1372,7 @@ export class Act<
     categories?: AuditCategory[],
     options?: AuditOptions
   ): AsyncIterable<AuditFinding> {
-    check_audit_options(options);
+    check("audit", options ?? {});
     // Step the generator inside `_scoped`: its body runs lazily in the
     // consumer's frame, which would otherwise resolve the wrong store.
     const it = audit(this._audit_deps, categories, options)[
@@ -1415,7 +1405,7 @@ export class Act<
    * @see {@link Store.prioritize} for the underlying primitive
    */
   async prioritize(filter: StreamFilter, priority: number): Promise<number> {
-    check_target({ priority });
+    check("target", { priority });
     return this._scoped(() => store().prioritize(filter, priority));
   }
 
@@ -1504,7 +1494,7 @@ export class Act<
   settle(options?: SettleOptions): void {
     // Validate the runtime knobs before anything runs (a bad debounceMs /
     // leaseMillis / maxPasses throws ZodError here, not on the first pass).
-    resolveSettleConfig(options ?? {});
+    check("settle", options ?? {});
     this._schedule(options);
   }
 }

@@ -2,17 +2,17 @@
  * Compiles the declarative `.autocloses({...})` policy into a predicate.
  * Top-level `after` / `is` / `reaches` combine with AND; an `or: {...}`
  * block adds an alternative path. Validated with
- * {@link AutoclosePolicySchema} when the app builds, so a bad policy throws
+ * the `autoclose_policy` bag in `config.ts` when the app builds, so a bad policy throws
  * then, not on the first cycle. Semantics and examples:
  * docs/docs/guides/close-policies.md.
  */
 
-import { z } from "zod";
 import type {
   AutoclosePolicy,
   AutoclosePredicate,
   Schemas,
 } from "../types/action.js";
+import { check } from "./config.js";
 
 /**
  * One day in epoch milliseconds. The close surface is day-denominated
@@ -24,21 +24,6 @@ import type {
  */
 const DAY_MS = 86_400_000;
 
-/**
- * Lower bound on a resolved `after` window: one minute, expressed in
- * days. Sub-minute cooldowns are almost always misconfiguration.
- * Rejecting at build keeps the failure mode noisy.
- */
-const MIN_AFTER_DAYS = 1 / 1440;
-
-/**
- * Lower bound on a resolved `keep` window: one full day. The close
- * cycle is low-cadence, non-priority housekeeping — a rolling window
- * shorter than a day signals misconfiguration. Real retention
- * contracts (180 days, 7 years) are days and up.
- */
-const MIN_KEEP_DAYS = 1;
-
 /** The `Date` that lies `days` after `date`. */
 export function days_after(date: Date, days: number): Date {
   return new Date(date.getTime() + days * DAY_MS);
@@ -48,97 +33,6 @@ export function days_after(date: Date, days: number): Date {
 export function days_before_now(days: number): Date {
   return new Date(Date.now() - days * DAY_MS);
 }
-
-/**
- * Day-denominated window shared by `after` (terminate cooldown) and
- * `keep` (rolling retention). Fractional days accepted; windows below
- * the field's floor reject at build.
- */
-const window_schema = (
-  field: "after" | "keep",
-  min_days: number,
-  floor: string
-) =>
-  z
-    .object({
-      days: z
-        .number({ message: `autocloses: ${field}.days must be a number` })
-        .positive(`autocloses: ${field}.days must be > 0`),
-    })
-    .refine((o) => o.days >= min_days, {
-      message: `autocloses: ${field} resolves to < ${floor}, which is too short to be a meaningful retention window`,
-    });
-
-const AfterSchema = window_schema("after", MIN_AFTER_DAYS, "one minute");
-
-const KeepSchema = window_schema("keep", MIN_KEEP_DAYS, "one day");
-
-const IsSchema = z.union([
-  z.string().min(1, "autocloses: is must be a non-empty event name"),
-  z
-    .array(
-      z.string().min(1, "autocloses: is entries must be non-empty event names")
-    )
-    .min(1, "autocloses: is must include at least one event name")
-    .readonly(),
-]);
-
-const ReachesSchema = z
-  .number({ message: "autocloses: reaches must be a number" })
-  .int("autocloses: reaches must be an integer")
-  .min(1, "autocloses: reaches must be >= 1");
-
-/**
- * Schema for the `or: {...}` block — the OR-shaped alternative path.
- * Same field set as the top-level policy minus `or` itself (so nested
- * `or` inside `or` rejects via `.strict()` instead of recursing). At
- * least one field required; empty `{}` is a misconfiguration.
- */
-const OrBlockSchema = z
-  .object({
-    after: AfterSchema.optional(),
-    is: IsSchema.optional(),
-    reaches: ReachesSchema.optional(),
-  })
-  .strict()
-  .refine(
-    (o) =>
-      o.after !== undefined || o.is !== undefined || o.reaches !== undefined,
-    {
-      message:
-        "autocloses: `or` block must include at least one of after / is / reaches",
-    }
-  );
-
-/**
- * Zod schema for the declarative {@link AutoclosePolicy} bag.
- * Internal `const` per the config-validation standard
- * (`.claude/rules/config-validation.md`) — the public surface is the inferred
- * {@link AutoclosePolicy} type and the `.autocloses({...})` overload,
- * never this schema. `.strict()` rejects unknown keys so typos surface
- * at build instead of being silently ignored.
- */
-const AutoclosePolicySchema = z
-  .object({
-    after: AfterSchema.optional(),
-    is: IsSchema.optional(),
-    reaches: ReachesSchema.optional(),
-    or: OrBlockSchema.optional(),
-    keep: KeepSchema.optional(),
-  })
-  .strict()
-  .refine(
-    (o) =>
-      o.after !== undefined ||
-      o.is !== undefined ||
-      o.reaches !== undefined ||
-      o.or !== undefined ||
-      o.keep !== undefined,
-    {
-      message:
-        "autocloses: at least one of after / is / reaches / or / keep must be specified — empty `{}` is a misconfiguration",
-    }
-  ) satisfies z.ZodType<AutoclosePolicy>;
 
 /** Compile a single `after` field into its predicate slice. */
 function compile_after(
@@ -168,7 +62,7 @@ function compile_reaches(
  * an earlier one has passed.
  */
 export function policy_after_windows(options: AutoclosePolicy): number[] {
-  const parsed = AutoclosePolicySchema.parse(options);
+  const parsed = check("autoclose_policy", options);
   return [parsed.after, parsed.or?.after].flatMap((w) => (w ? [w.days] : []));
 }
 
@@ -181,7 +75,7 @@ export function policy_after_windows(options: AutoclosePolicy): number[] {
  * surviving domain event can age out of the window.
  */
 export function policy_keep_days(options: AutoclosePolicy): number | undefined {
-  const parsed = AutoclosePolicySchema.parse(options);
+  const parsed = check("autoclose_policy", options);
   return parsed.keep?.days;
 }
 
@@ -214,7 +108,7 @@ export function policy_keep_days(options: AutoclosePolicy): number | undefined {
 export function compile_autoclose_policy(
   options: AutoclosePolicy
 ): AutoclosePredicate<Schemas> {
-  const parsed = AutoclosePolicySchema.parse(options);
+  const parsed = check("autoclose_policy", options);
 
   // Top-level AND group — only the non-`or` fields.
   const and_preds: AutoclosePredicate<Schemas>[] = [];

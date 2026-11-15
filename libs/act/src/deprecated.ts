@@ -11,7 +11,6 @@ import {
   seedEvent,
 } from "./adapter.js";
 import { package_schema } from "./config.js";
-import { resolveAutocloseConfig as resolve_autoclose } from "./internal/config.js";
 import { unscoped_ports } from "./ports.js";
 import {
   ActorSchema as actor_schema,
@@ -81,9 +80,6 @@ export const DEFAULT_SETTLE_DEBOUNCE_MS: typeof default_settle_debounce_ms =
 export const PackageSchema: typeof package_schema = package_schema;
 /** @deprecated No replacement: call `store()`, `cache()` or `log()`. */
 export const default_scope: typeof unscoped_ports = unscoped_ports;
-/** @deprecated No replacement: `act().build()` validates these options. */
-export const resolveAutocloseConfig: typeof resolve_autoclose =
-  resolve_autoclose;
 /** @deprecated No replacement: parse with the schema, spread the defaults. */
 export const extend = <
   S extends Record<string, unknown>,

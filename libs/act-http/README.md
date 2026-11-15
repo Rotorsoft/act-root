@@ -241,7 +241,7 @@ Each framework adapter exports a single function `webhookMiddleware(options)` th
 
 ### `/api`, `/trpc`, `/hono`, `/openapi` subpaths
 
-- **`/api`** — what every transport shares: `ActorExtractor`, the `ApiError` envelope, `ERROR_MAP` and `toApiError(err)`, `withIdempotency(store, key, handler)`, and the SSE wiring (`SseOptions`, `resolveSseConfig`, `runSseSubscription`). Bad SSE options throw `ZodError` when the transport is built.
+- **`/api`** — what every transport shares: `ActorExtractor`, the `ApiError` envelope, `ERROR_MAP` and `toApiError(err)`, `withIdempotency(store, key, handler)`, and the SSE wiring (`SseOptions`, `runSseSubscription`). Bad SSE options throw `ZodError` when the transport is built.
 - **`/trpc`** — `trpc(app, options)`, the `authenticated(extractor)` middleware, and `TrpcOptions`.
 - **`/hono`** — `hono(app, options)`, the `authenticated(extractor)` middleware, `HonoOptions` and `ActMiddlewareVariables`. A body that fails its action's schema returns `422` with the `ApiError` envelope.
 - **`/openapi`** — `openapi(app, options)`, which returns an OpenAPI 3.1 document describing the `hono` routes, plus `OpenAPIOptions` and the document types.

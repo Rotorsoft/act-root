@@ -66,12 +66,12 @@ import {
   type ActorExtractor,
   type ApiError,
   fireAndForget,
-  resolveSseConfig,
   runSseSubscription,
   SseConnectionCounter,
   type SseOptions,
   toApiError,
 } from "../api/index.js";
+import { SseOptionsSchema } from "../api/sse-options.js";
 import { sse_state_names } from "../api/sse-states.js";
 
 /**
@@ -275,7 +275,10 @@ export function hono<TApp extends ActSurface>(
   // instance so a noisy room on one state doesn't get a free pass
   // on another.
   if (options.sse) {
-    const sse_config = resolveSseConfig(options.sse);
+    const sse_config = {
+      channel: options.sse.channel,
+      ...SseOptionsSchema.parse(options.sse),
+    };
     const sse_counter = new SseConnectionCounter(sse_config.maxConnections);
     const state_names = sse_state_names(app, "hono");
     for (const state_name of state_names) {

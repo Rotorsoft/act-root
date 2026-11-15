@@ -1,7 +1,7 @@
 import {
+  check,
   DEFAULT_BLOCK_ON_ERROR,
   DEFAULT_MAX_RETRIES,
-  resolveFoldConfig,
 } from "../internal/config.js";
 import type {
   EventEntry,
@@ -125,7 +125,7 @@ function _projection<
               `Projection "${target}" .of() partials must share one state name — got "${name}" and "${partial.name}"`
             );
         // Misconfiguration surfaces here, at startup — not on first drain.
-        const config = resolveFoldConfig(options);
+        const config = check("fold", options);
         // The partials' own schema instances register the events, so the
         // same-name declarations in slices pass the identity check in
         // merge_event_register. The named no-op reaction routes fetches

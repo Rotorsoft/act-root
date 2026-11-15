@@ -1,10 +1,7 @@
 import { z } from "zod";
 import { act, dispose, sleep, state, store, ZodEmpty } from "../src/index.js";
 import { compute_backoff_delay } from "../src/internal/backoff.js";
-import {
-  DEFAULT_BACKOFF,
-  resolveBackoffConfig,
-} from "../src/internal/config.js";
+import { check, DEFAULT_BACKOFF } from "../src/internal/config.js";
 import type { BackoffOptions } from "../src/types/index.js";
 
 describe("compute_backoff_delay", () => {
@@ -82,11 +79,7 @@ describe("compute_backoff_delay", () => {
   });
 });
 
-describe("resolveBackoffConfig", () => {
-  it("passes undefined through untouched", () => {
-    expect(resolveBackoffConfig(undefined)).toBeUndefined();
-  });
-
+describe("the backoff bag", () => {
   it("returns the validated config for a good bag", () => {
     const ok: BackoffOptions = {
       strategy: "exponential",
@@ -94,9 +87,11 @@ describe("resolveBackoffConfig", () => {
       maxMs: 200,
       jitter: true,
     };
-    expect(resolveBackoffConfig(ok)).toEqual(ok);
+    expect(check("action", { backoff: ok }).backoff).toEqual(ok);
     // baseMs: 0 is legal (means no delay).
-    expect(resolveBackoffConfig({ strategy: "fixed", baseMs: 0 })).toEqual({
+    expect(
+      check("action", { backoff: { strategy: "fixed", baseMs: 0 } }).backoff
+    ).toEqual({
       strategy: "fixed",
       baseMs: 0,
     });
@@ -111,7 +106,8 @@ describe("resolveBackoffConfig", () => {
       { strategy: "exponential", baseMs: 10, maxMs: 0 },
       { strategy: "exponential", baseMs: 10, maxMs: Number.NaN },
     ];
-    for (const b of bad) expect(() => resolveBackoffConfig(b)).toThrow();
+    for (const b of bad)
+      expect(() => check("action", { backoff: b })).toThrow();
   });
 });
 

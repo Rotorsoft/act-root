@@ -48,7 +48,6 @@ export {
   DEFAULT_SSE_MAX_PENDING_PER_CONNECTION,
   fireAndForget,
   type RunSseOptions,
-  resolveSseConfig,
   runSseSubscription,
   type SseAccounting,
   type SseConfig,
