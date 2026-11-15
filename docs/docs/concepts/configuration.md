@@ -340,6 +340,8 @@ import { SqliteStore } from "@rotorsoft/act-sqlite";
 store(new SqliteStore({ url: "file:myapp.db" }));
 ```
 
+The in-memory store waits `SLEEP_MS` milliseconds before each call, to simulate a real store's latency: 100 ms by default, 0 when `NODE_ENV=test`. Set `SLEEP_MS=0` to turn it off in development. Postgres and SQLite don't read it.
+
 ### Cache
 
 Cache is always-on with `InMemoryCache` (LRU, maxSize 1000) as the default:

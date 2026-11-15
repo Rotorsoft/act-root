@@ -22,7 +22,7 @@ pnpm add @rotorsoft/act zod
 
 The examples use top-level `await`, which needs ESM (`"type": "module"`). CommonJS works too (`require`); a CommonJS TypeScript project needs `"module": "nodenext"`, since the packages ship ESM type declarations that `"module": "node16"` refuses to load from CommonJS (TS1479).
 
-For production, also install one of the durable stores: [`@rotorsoft/act-pg`](https://www.npmjs.com/package/@rotorsoft/act-pg) (Postgres) or [`@rotorsoft/act-sqlite`](https://www.npmjs.com/package/@rotorsoft/act-sqlite) (SQLite). The bundled `InMemoryStore` is used by default and is intended for development and tests.
+For production, also install one of the durable stores: [`@rotorsoft/act-pg`](https://www.npmjs.com/package/@rotorsoft/act-pg) (Postgres) or [`@rotorsoft/act-sqlite`](https://www.npmjs.com/package/@rotorsoft/act-sqlite) (SQLite). The bundled `InMemoryStore` is used by default and is intended for development and tests. Outside tests it waits 100 ms before each call to simulate a real store; set `SLEEP_MS=0` to turn that off.
 
 ## Quick start
 
