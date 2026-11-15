@@ -1,0 +1,715 @@
+/* The framework tour. Concept colors are the shared --dg-* tokens; the stream
+   palette below only tells streams apart inside the log. */
+
+.tour {
+  --t-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --t-s0: #2f6fdf;
+  --t-s1: #0f9a8a;
+  --t-s2: #c2389a;
+  --t-s3: #7a8a14;
+  --t-s4: #6a4fd6;
+  --t-s5: #b8611f;
+  --t-s6: #1f8fc4;
+  --t-s7: #c23a3a;
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 18px;
+  margin: 1rem 0 2rem;
+  outline: none;
+}
+[data-theme="dark"] .tour {
+  --t-s0: #6e9cff;
+  --t-s1: #3fd0bd;
+  --t-s2: #f07ccc;
+  --t-s3: #c3d55a;
+  --t-s4: #a995ff;
+  --t-s5: #f2a05d;
+  --t-s6: #5ec4f2;
+  --t-s7: #ff7b7b;
+}
+.tour[data-mode="narrow"] {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+}
+.tour:fullscreen {
+  overflow: auto;
+  padding: 18px;
+  background: var(--ifm-background-color);
+}
+
+/* chapter rail */
+.chapters ol {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  position: sticky;
+  top: calc(var(--ifm-navbar-height) + 12px);
+  max-height: calc(100vh - var(--ifm-navbar-height) - 24px);
+  overflow-y: auto;
+}
+.chapters li {
+  margin: 0 0 2px;
+}
+.chapters li button {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--ifm-font-color-base);
+  font: inherit;
+  font-size: 0.82rem;
+  line-height: 1.25;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.chapters li button:hover {
+  background: var(--act-surface-2, rgba(127, 127, 127, 0.1));
+}
+.chapters li button.current {
+  background: color-mix(in srgb, var(--dg-action) 14%, transparent);
+  font-weight: 600;
+}
+.chapters small {
+  display: block;
+  font-weight: 400;
+  color: var(--act-text-muted, var(--ifm-color-emphasis-600));
+  font-size: 0.72rem;
+}
+.num {
+  flex: none;
+  width: 1.5em;
+  color: var(--act-text-muted, var(--ifm-color-emphasis-600));
+  font-variant-numeric: tabular-nums;
+}
+.chapters select {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--act-border-strong, var(--ifm-color-emphasis-300));
+  border-radius: 8px;
+  background: var(--act-surface-1, var(--ifm-background-surface-color));
+  color: var(--ifm-font-color-base);
+  font: inherit;
+}
+
+.main {
+  min-width: 0;
+}
+
+.head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.head h2 {
+  margin: 2px 0 4px;
+  font-size: 1.35rem;
+}
+.head p {
+  margin: 0;
+  color: var(--act-text-muted, var(--ifm-color-emphasis-700));
+  font-size: 0.92rem;
+}
+.audience {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 99px;
+  background: color-mix(in srgb, var(--dg-reaction) 14%, transparent);
+  color: var(--dg-reaction);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+.full {
+  flex: none;
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--act-border-strong, var(--ifm-color-emphasis-300));
+  border-radius: 8px;
+  background: none;
+  color: var(--ifm-font-color-base);
+  cursor: pointer;
+}
+
+/* the stage */
+.stageWrap {
+  position: relative;
+  border: 1px solid var(--act-border-strong, var(--ifm-color-emphasis-300));
+  border-radius: 14px;
+  background: var(--act-surface-1, var(--ifm-background-surface-color));
+  overflow: hidden;
+}
+.svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  font-family: var(--ifm-font-family-base);
+  font-size: 12px;
+  fill: var(--ifm-font-color-base);
+}
+.svg text {
+  fill: var(--ifm-font-color-base);
+}
+.bandLabel,
+.sectionTitle {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  fill: var(--act-text-muted, #6b7486) !important;
+}
+.bandLabel {
+  opacity: 0.6;
+}
+
+.node[data-kind="actor"] { --k: var(--dg-actor); }
+.node[data-kind="action"] { --k: var(--dg-action); }
+.node[data-kind="state"] { --k: var(--dg-state); }
+.node[data-kind="reaction"] { --k: var(--dg-reaction); }
+.node[data-kind="projection"] { --k: var(--dg-projection); }
+.node[data-kind="external"] { --k: var(--dg-external); }
+.node[data-kind="worker"] { --k: var(--dg-reaction); }
+.node[data-kind="store"] { --k: var(--dg-store); }
+.node > rect {
+  fill: color-mix(in srgb, var(--k) 13%, var(--act-surface-1, #fff));
+  stroke: var(--k);
+  stroke-width: 1.5;
+  transition: stroke-width 0.3s, filter 0.3s;
+}
+.node[data-kind="worker"] > rect {
+  stroke-dasharray: 5 3;
+}
+.node.focus > rect {
+  stroke-width: 3;
+  filter: drop-shadow(0 0 6px color-mix(in srgb, var(--k) 55%, transparent));
+}
+.nodeLabel {
+  font-size: 13px;
+  font-weight: 650;
+  text-anchor: middle;
+}
+.nodeSub {
+  font-size: 10.5px;
+  text-anchor: middle;
+  fill: var(--act-text-muted, #6b7486) !important;
+  font-family: var(--ifm-font-family-monospace);
+}
+.stateCard rect {
+  fill: color-mix(in srgb, var(--dg-state) 7%, var(--act-surface-1, #fff));
+  stroke: color-mix(in srgb, var(--dg-state) 50%, transparent);
+  stroke-dasharray: 3 3;
+}
+.stateCard text {
+  font-family: var(--ifm-font-family-monospace);
+  font-size: 10.5px;
+}
+.stateVer {
+  text-anchor: end;
+  fill: var(--dg-state) !important;
+  font-weight: 700;
+}
+
+/* the store */
+.storeBox {
+  fill: color-mix(in srgb, var(--dg-store) 6%, transparent);
+  stroke: color-mix(in srgb, var(--dg-store) 55%, transparent);
+  stroke-width: 1.5;
+  transition: stroke 0.3s, fill 0.3s;
+}
+.store[data-tone="bad"] .storeBox {
+  stroke: var(--dg-bad);
+  fill: color-mix(in srgb, var(--dg-bad) 7%, transparent);
+}
+.storeTitle {
+  font-size: 12.5px;
+  font-weight: 700;
+  fill: var(--dg-store) !important;
+}
+.storeSub {
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+  fill: var(--act-text-muted, #6b7486);
+}
+.storeStatus {
+  text-anchor: end;
+  font-size: 11.5px;
+  font-weight: 600;
+}
+.storeStatus[data-tone="bad"] { fill: var(--dg-bad) !important; }
+.storeStatus[data-tone="good"] { fill: var(--dg-good) !important; }
+.storeStatus[data-tone="warn"] { fill: var(--dg-state) !important; }
+.empty,
+.muted {
+  fill: var(--act-text-muted, #6b7486) !important;
+  font-style: italic;
+}
+
+.cellPos {
+  transition: transform 0.6s var(--t-ease);
+}
+.cell {
+  cursor: pointer;
+  transform-box: fill-box;
+  transform-origin: center;
+  outline: none;
+}
+.cell[data-color="0"] { --s: var(--t-s0); }
+.cell[data-color="1"] { --s: var(--t-s1); }
+.cell[data-color="2"] { --s: var(--t-s2); }
+.cell[data-color="3"] { --s: var(--t-s3); }
+.cell[data-color="4"] { --s: var(--t-s4); }
+.cell[data-color="5"] { --s: var(--t-s5); }
+.cell[data-color="6"] { --s: var(--t-s6); }
+.cell[data-color="7"] { --s: var(--t-s7); }
+.cell > rect:first-child {
+  fill: color-mix(in srgb, var(--dg-event) 10%, var(--act-surface-1, #fff));
+  stroke: color-mix(in srgb, var(--dg-event) 70%, transparent);
+  stroke-width: 1.2;
+  transition: fill 0.4s, opacity 0.4s;
+}
+.cell[data-kind="snapshot"] > rect:first-child {
+  fill: color-mix(in srgb, var(--dg-state) 16%, var(--act-surface-1, #fff));
+  stroke: var(--dg-state);
+  stroke-dasharray: 4 2;
+}
+.cell[data-kind="tombstone"] > rect:first-child {
+  fill: color-mix(in srgb, var(--dg-line) 22%, var(--act-surface-1, #fff));
+  stroke: var(--dg-line);
+}
+.cell:hover > rect:first-child,
+.cell:focus-visible > rect:first-child,
+.cell.selected > rect:first-child {
+  stroke-width: 2.4;
+}
+.cell.selected > rect:first-child {
+  stroke: var(--dg-action);
+}
+.stripe {
+  fill: var(--s);
+}
+.cellId {
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.cellVer {
+  font-size: 11px;
+  font-weight: 700;
+  text-anchor: end;
+  fill: var(--s) !important;
+}
+.cellName {
+  font-size: 10px;
+  letter-spacing: -0.01em;
+  font-weight: 600;
+}
+.cellStream {
+  font-size: 9.5px;
+  fill: var(--s) !important;
+  font-family: var(--ifm-font-family-monospace);
+}
+.pii {
+  font-size: 9px;
+  text-anchor: end;
+  fill: var(--dg-external) !important;
+  font-weight: 700;
+}
+.pii.shredded {
+  fill: var(--dg-bad) !important;
+}
+.dim {
+  opacity: 0.25;
+  transition: opacity 0.4s;
+}
+
+.ghost rect {
+  fill: color-mix(in srgb, var(--dg-bad) 8%, transparent);
+  stroke: var(--dg-bad);
+  stroke-dasharray: 5 3;
+  stroke-width: 1.4;
+}
+.ghost text {
+  fill: var(--dg-bad) !important;
+}
+.ghostError {
+  font-size: 9.5px;
+  font-weight: 700;
+}
+
+.bracket rect {
+  fill: none;
+  stroke: var(--dg-action);
+  stroke-width: 1.6;
+  stroke-dasharray: 6 3;
+}
+.bracket text {
+  font-size: 10px;
+  font-weight: 700;
+  fill: var(--dg-action) !important;
+}
+
+.checkpoint {
+  transition: transform 0.6s var(--t-ease);
+}
+.checkpoint line {
+  stroke: var(--dg-reaction);
+  stroke-width: 2;
+}
+.checkpoint text {
+  font-size: 9.5px;
+  font-weight: 700;
+  text-anchor: end;
+  fill: var(--dg-reaction) !important;
+}
+.tick {
+  transition: transform 0.6s var(--t-ease);
+}
+.tick path {
+  fill: var(--dg-reaction);
+}
+.tick text {
+  font-size: 9px;
+  text-anchor: end;
+  fill: var(--dg-reaction) !important;
+}
+
+.flag rect {
+  fill: var(--dg-action);
+}
+.flag[data-tone="bad"] rect { fill: var(--dg-bad); }
+.flag[data-tone="good"] rect { fill: var(--dg-good); }
+.flag[data-tone="warn"] rect { fill: var(--dg-state); }
+.flag text {
+  font-size: 9.5px;
+  font-weight: 700;
+  fill: #fff !important;
+}
+.flagText {
+  font-weight: 700;
+  fill: var(--dg-action) !important;
+}
+
+/* streams and targets */
+.streamRow[data-color="0"] { --s: var(--t-s0); }
+.streamRow[data-color="1"] { --s: var(--t-s1); }
+.streamRow[data-color="2"] { --s: var(--t-s2); }
+.streamRow[data-color="3"] { --s: var(--t-s3); }
+.streamRow[data-color="4"] { --s: var(--t-s4); }
+.streamRow[data-color="5"] { --s: var(--t-s5); }
+.streamRow[data-color="6"] { --s: var(--t-s6); }
+.streamRow[data-color="7"] { --s: var(--t-s7); }
+.streamRow text {
+  font-family: var(--ifm-font-family-monospace);
+  font-size: 11px;
+}
+.dot {
+  fill: var(--s);
+}
+.right {
+  text-anchor: end;
+}
+.targetRow text {
+  font-family: var(--ifm-font-family-monospace);
+  font-size: 11px;
+}
+.rowBg {
+  fill: transparent;
+  transition: fill 0.4s;
+}
+.targetRow[data-state="leased"] .rowBg {
+  fill: color-mix(in srgb, var(--dg-reaction) 12%, transparent);
+}
+.targetRow[data-state="due"] .rowBg {
+  fill: color-mix(in srgb, var(--dg-state) 14%, transparent);
+}
+.targetRow[data-state="blocked"] .rowBg {
+  fill: color-mix(in srgb, var(--dg-bad) 15%, transparent);
+}
+.targetRow[data-state="blocked"] .status {
+  fill: var(--dg-bad) !important;
+  font-weight: 700;
+}
+.targetRow.focus .rowBg {
+  stroke: var(--dg-reaction);
+  stroke-width: 1.5;
+}
+.lane {
+  fill: var(--dg-reaction) !important;
+}
+.status {
+  fill: var(--dg-reaction) !important;
+}
+
+.table > rect {
+  fill: color-mix(in srgb, var(--dg-projection) 7%, transparent);
+  stroke: color-mix(in srgb, var(--dg-projection) 60%, transparent);
+}
+.table .sectionTitle {
+  fill: var(--dg-projection) !important;
+}
+.table text {
+  font-family: var(--ifm-font-family-monospace);
+  font-size: 10.5px;
+}
+.rowKey {
+  font-weight: 700;
+  fill: var(--dg-projection) !important;
+}
+
+/* tokens */
+.token circle {
+  fill: var(--dg-action);
+  stroke: var(--act-surface-1, #fff);
+  stroke-width: 2;
+  filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.35));
+}
+.token[data-tone="good"] circle { fill: var(--dg-good); }
+.token[data-tone="bad"] circle { fill: var(--dg-bad); }
+.token[data-tone="warn"] circle { fill: var(--dg-state); }
+.token[data-tone="muted"] circle { fill: var(--dg-line); }
+.token text {
+  font-size: 10.5px;
+  font-weight: 700;
+  paint-order: stroke;
+  stroke: var(--act-surface-1, #fff);
+  stroke-width: 3px;
+  fill: var(--ifm-font-color-base) !important;
+}
+
+/* what changed in this step */
+.fresh {
+  animation: enter 0.55s var(--t-ease) var(--enter, 0ms) backwards;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.leaving {
+  animation: leave 0.7s ease-in var(--enter, 0ms) forwards;
+}
+.moved > rect:first-child {
+  animation: flash 1s ease var(--enter, 0ms);
+}
+@keyframes enter {
+  from {
+    opacity: 0;
+    transform: translateY(-12px) scale(0.9);
+  }
+}
+@keyframes leave {
+  0% {
+    opacity: 1;
+  }
+  40% {
+    opacity: 0.8;
+    filter: saturate(0) brightness(0.9);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(0.7) translateY(8px);
+  }
+}
+@keyframes flash {
+  30% {
+    fill: color-mix(in srgb, var(--dg-action) 35%, var(--act-surface-1, #fff));
+  }
+}
+
+/* controls */
+.controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0 6px;
+}
+.controls > button {
+  min-width: 38px;
+  height: 34px;
+  border: 1px solid var(--act-border-strong, var(--ifm-color-emphasis-300));
+  border-radius: 8px;
+  background: var(--act-surface-1, var(--ifm-background-surface-color));
+  color: var(--ifm-font-color-base);
+  font: inherit;
+  font-size: 1.1rem;
+  cursor: pointer;
+}
+.controls > button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.controls > .play {
+  min-width: 78px;
+  background: var(--dg-action);
+  border-color: var(--dg-action);
+  color: #fff;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+.progress {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  gap: 3px;
+  align-items: center;
+  min-width: 0;
+}
+.progress button {
+  flex: 1 1 8px;
+  max-width: 26px;
+  height: 6px;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  background: var(--act-border-strong, var(--ifm-color-emphasis-300));
+  cursor: pointer;
+}
+.progress button.sceneStart {
+  margin-left: 6px;
+}
+.progress button.past {
+  background: color-mix(in srgb, var(--dg-action) 45%, transparent);
+}
+.progress button.on {
+  background: var(--dg-action);
+}
+.count {
+  font-size: 0.8rem;
+  color: var(--act-text-muted, var(--ifm-color-emphasis-600));
+  font-variant-numeric: tabular-nums;
+}
+
+.narration h3 {
+  margin: 6px 0 4px;
+  font-size: 1rem;
+}
+.narration h3 span {
+  font-weight: 400;
+  color: var(--act-text-muted, var(--ifm-color-emphasis-600));
+  font-size: 0.85rem;
+}
+.say {
+  min-height: 3.2em;
+  margin: 0 0 8px;
+  font-size: 1.02rem;
+  line-height: 1.5;
+}
+.checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  list-style: none;
+  margin: 0 0 10px;
+  padding: 0;
+}
+.checks li {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+  padding: 2px 9px;
+  border: 1px solid var(--act-border-strong, var(--ifm-color-emphasis-300));
+  border-radius: 99px;
+  font-size: 0.8rem;
+}
+.checks li[data-state="ok"] {
+  border-color: var(--dg-good);
+  color: var(--dg-good);
+}
+.checks li[data-state="fail"] {
+  border-color: var(--dg-bad);
+  background: color-mix(in srgb, var(--dg-bad) 10%, transparent);
+  color: var(--dg-bad);
+  font-weight: 600;
+}
+.checks li[data-state="skip"] {
+  opacity: 0.45;
+}
+
+.reference {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+}
+.tour[data-mode="narrow"] .reference {
+  grid-template-columns: minmax(0, 1fr);
+}
+.code :global(.theme-code-block) {
+  margin: 0;
+  font-size: 0.78rem;
+}
+.links p {
+  margin: 0 0 6px;
+  font-size: 0.86rem;
+}
+.api {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.api code {
+  font-size: 0.75rem;
+}
+.hint {
+  color: var(--act-text-muted, var(--ifm-color-emphasis-600));
+  font-size: 0.76rem !important;
+}
+
+.inspector {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  max-width: min(420px, calc(100% - 20px));
+  padding: 10px 12px;
+  border: 1px solid var(--dg-action);
+  border-radius: 10px;
+  background: var(--act-surface-1, var(--ifm-background-surface-color));
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18);
+  font-size: 0.8rem;
+}
+.inspectorHead {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  margin-bottom: 6px;
+}
+.inspectorHead button {
+  margin-left: auto;
+  border: 0;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+}
+.inspector dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 10px;
+  margin: 0;
+}
+.inspector dt {
+  color: var(--act-text-muted, var(--ifm-color-emphasis-600));
+}
+.inspector dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fresh,
+  .leaving,
+  .moved > rect:first-child {
+    animation: none;
+  }
+  .leaving {
+    opacity: 0.2;
+  }
+  .cellPos,
+  .checkpoint,
+  .tick {
+    transition: none;
+  }
+}

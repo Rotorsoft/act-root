@@ -23,6 +23,8 @@ Most business apps can be modeled with just three primitives: **Actions → \{St
 
 ## See it move
 
+New to Act? Take the [framework tour](./tour.mdx): every capability, from a first action to closing the books, animated as what it does to the event store.
+
 Every Act app can be drawn and played from its own builders: who invokes each action, how the state checks it, which events commit, and which reactions and timers follow. Watch the [WolfDesk ticket flows](pathname:///flows/wolfdesk.html), browse [all animations](pathname:///flows/index.html), or [make one for your app](./guides/flow-animations.md).
 
 ## Quick Start
