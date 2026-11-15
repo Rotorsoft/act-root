@@ -12,9 +12,8 @@
  * same due-time, which is what makes a defer correct across restarts and
  * competing workers.
  *
- * Validation follows the config-schema standard
- * (`.claude/rules/config-validation.md`): an internal `*OptionsSchema`
- * const, a public inferred type, and a resolver.
+ * The `when` bag's schema lives in `internal/config.ts`, checked with
+ * `check("defer", when)`.
  */
 
 import { DeferSignal } from "../types/errors.js";
