@@ -1,3 +1,10 @@
+# [@rotorsoft/act-pg-v2.1.4](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-pg-v2.1.3...@rotorsoft/act-pg-v2.1.4) (2026-11-15)
+
+
+### Bug Fixes
+
+* **act:** a crash caught by act's handlers exits with code 1 ([#2532](https://github.com/Rotorsoft/act-root/issues/2532)) ([024f9c7](https://github.com/Rotorsoft/act-root/commit/024f9c71fb4ae2498cfccf69cdd575083abdc7ad))
+
 # [@rotorsoft/act-pg-v2.1.3](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-pg-v2.1.2...@rotorsoft/act-pg-v2.1.3) (2026-11-15)
 
 # [@rotorsoft/act-pg-v2.1.2](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-pg-v2.1.1...@rotorsoft/act-pg-v2.1.2) (2026-11-13)
