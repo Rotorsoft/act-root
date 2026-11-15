@@ -5,7 +5,7 @@ title: Error Handling
 
 # Error Handling
 
-Act defines four primary error types. Each signals a different class of problem with a distinct resolution strategy.
+Each of Act's error types signals a different class of problem, with its own way to resolve it.
 
 ## ValidationError
 
