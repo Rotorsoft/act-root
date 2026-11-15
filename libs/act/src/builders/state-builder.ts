@@ -10,7 +10,7 @@ import {
   policy_after_windows,
   policy_keep_days,
 } from "../internal/autoclose-policy.js";
-import { resolveActionConfig } from "../internal/config.js";
+import { check } from "../internal/config.js";
 import type {
   ActionBuilder,
   ActionEntry,
@@ -172,7 +172,7 @@ function action_builder<
       if (options) {
         // Validate the whole action bag at declaration so a bad
         // `maxRetries`/`backoff` throws ZodError at build, not a NaN gate.
-        resolveActionConfig(options);
+        check("action", options);
         internal.options ??= {};
         (internal.options as Record<string, ActionOptions>)[action] = options;
       }

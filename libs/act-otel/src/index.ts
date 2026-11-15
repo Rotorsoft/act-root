@@ -127,12 +127,6 @@ const InstrumentOptionsSchema = z.object({
     .default(DEFAULT_BLOCKED_STREAMS_LIMIT),
 });
 
-type InstrumentConfig = z.infer<typeof InstrumentOptionsSchema>;
-
-function resolveInstrumentConfig(options: InstrumentOptions): InstrumentConfig {
-  return InstrumentOptionsSchema.parse(options);
-}
-
 /**
  * Subscribe to a built Act's lifecycle events and maintain this Prometheus
  * metric set:
@@ -208,7 +202,7 @@ export function instrument(
   app: ActSurface,
   options: InstrumentOptions = {}
 ): Disposer {
-  const config = resolveInstrumentConfig(options);
+  const config = InstrumentOptionsSchema.parse(options);
   const registry = config.registry ?? register;
   const p = config.prefix;
   const registers = [registry];

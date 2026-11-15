@@ -184,34 +184,22 @@ const to_committed = <E extends Schemas>(
     meta: row[`${prefix}meta`],
   }) as Committed<E, keyof E>;
 
-function assert_safe_identifier(value: string, label: string) {
-  if (!SAFE_IDENTIFIER.test(value))
-    throw new Error(`Unsafe SQL identifier for ${label}: "${value}"`);
-}
+// Schema and table names go into SQL unquoted. The pool numbers are
+// defaulted: an env var parsed with `Number()` gives NaN, which pg reads as
+// "no limit", so a typo would silently turn a timeout off.
+const identifier = (label: string) =>
+  z.string().regex(SAFE_IDENTIFIER, {
+    error: (issue) => `Unsafe SQL identifier for ${label}: "${issue.input}"`,
+  });
 
-// The defaulted pool numbers. An env var parsed with `Number()` gives NaN,
-// which pg reads as "no limit", so a typo would silently turn a timeout off.
-const PoolOptionsSchema = z.object({
+const PostgresOptionsSchema = z.object({
+  schema: identifier("schema"),
+  table: identifier("table"),
   max: z.number().min(0),
   connectionTimeoutMillis: z.number().min(0),
   idleTimeoutMillis: z.number().min(0).nullable(),
   statement_timeout: z.union([z.number().min(0), z.literal(false)]),
 });
-
-/**
- * Merge caller config over the defaults, ignoring keys set to `undefined`
- * (an unset env var), and validate it. Throws `ZodError` on a bad number.
- */
-function resolve_config(config: Partial<Config>): Config {
-  const defined = Object.fromEntries(
-    Object.entries(config).filter(([, value]) => value !== undefined)
-  );
-  const merged = { ...DEFAULT_CONFIG, ...defined } as Config;
-  PoolOptionsSchema.parse(merged);
-  assert_safe_identifier(merged.schema, "schema");
-  assert_safe_identifier(merged.table, "table");
-  return merged;
-}
 
 const DEFAULT_CONFIG: Config = {
   host: "localhost",
@@ -393,7 +381,12 @@ export class PostgresStore implements Store {
   private readonly _resolve_pii_key: (() => Promise<Buffer>) | undefined;
 
   constructor(config: Partial<Config> = {}) {
-    this.config = resolve_config(config);
+    // A key set to `undefined` (an unset env var) keeps its default.
+    const defined = Object.fromEntries(
+      Object.entries(config).filter(([, value]) => value !== undefined)
+    );
+    this.config = { ...DEFAULT_CONFIG, ...defined } as Config;
+    PostgresOptionsSchema.parse(this.config);
     const {
       schema: _,
       table: __,

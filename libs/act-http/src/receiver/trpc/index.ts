@@ -48,7 +48,7 @@
 import { TRPCError } from "@trpc/server";
 import { type CheckWebhookOptions, checkWebhook } from "../check.js";
 import { make_idempotency } from "../finalize.js";
-import { check_options } from "../options.js";
+import { ReceiverOptionsSchema } from "../options.js";
 
 /**
  * Build a tRPC middleware that verifies the request signature (when
@@ -65,7 +65,7 @@ import { check_options } from "../options.js";
  */
 // `any`: tRPC's internal middleware shape
 export function webhookMiddleware(options: CheckWebhookOptions): any {
-  check_options(options);
+  ReceiverOptionsSchema.parse(options);
   return async function check(opts: {
     ctx: {
       headers: Record<string, string | string[] | undefined>;

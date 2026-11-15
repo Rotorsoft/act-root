@@ -628,7 +628,7 @@ describe("autoclose as a synthesized reaction", () => {
     it("validates a window on every build, not only the first", () => {
       const builder = act().withState(ticket({ is: "Resolved" }));
       builder.build();
-      // `resolveAutocloseConfig` is what parses the window, so a build that
+      // `check("autoclose", …)` is what parses the window, so a build that
       // skipped it would accept nonsense and fail on the first cycle tick
       // instead of at startup.
       expect(() =>

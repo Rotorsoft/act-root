@@ -2,7 +2,7 @@ import { z } from "zod";
 import * as adapter from "../src/adapter.js";
 import { package_schema } from "../src/config.js";
 import * as root from "../src/index.js";
-import { resolveAutocloseConfig } from "../src/internal/config.js";
+import { check } from "../src/internal/config.js";
 import { unscoped_ports } from "../src/ports.js";
 import { sensitiveFields } from "../src/sensitive.js";
 import * as types from "../src/types/index.js";
@@ -48,8 +48,9 @@ describe("deprecated root names (removed in 3.0)", () => {
   it("resolveAutocloseConfig still validates like act().build()", () => {
     const options = { autocloseWindow: { start: 1, end: 5 } };
     expect(root.resolveAutocloseConfig(options)).toEqual(
-      resolveAutocloseConfig(options)
+      check("autoclose", options)
     );
+    expect(root.resolveAutocloseConfig(undefined)).toEqual({});
     expect(() =>
       root.resolveAutocloseConfig({ autocloseWindow: { start: -1, end: 5 } })
     ).toThrow();

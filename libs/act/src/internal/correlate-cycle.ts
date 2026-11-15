@@ -17,7 +17,7 @@ import type {
   SubscribeInput,
 } from "../types/index.js";
 import { DEFAULT_LANE } from "../types/index.js";
-import { is_valid_target } from "./config.js";
+import { check } from "./config.js";
 import type { DrainOps } from "./drain-ops.js";
 import { LruMap } from "./lru-map.js";
 import { report_once } from "./report-once.js";
@@ -399,7 +399,9 @@ export class CorrelateCycle<
               return;
             }
             if (!resolved) continue;
-            if (!is_valid_target(resolved)) {
+            try {
+              check("target", resolved);
+            } catch {
               report_bad_priority(
                 this._reported,
                 reaction.handler.name,

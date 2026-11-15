@@ -44,6 +44,8 @@ If a Store/Cache/Logger port method changed in `libs/act/src/types/ports.ts`:
 
 Apply `.claude/rules/naming.md`: anything reachable from a package's `index.ts` is camelCase (fields, options, exported functions), internal identifiers are short snake_case, types are PascalCase. Match existing analogs over inventing new patterns: if the project already names something `app.reset(input)`, a new sibling should be `app.unblock(input)`, not `app.recoverStreams(...)`.
 
+Apply `.claude/rules/config-validation.md`: run `git diff master -- 'libs/*/src' | grep -E '^\+.*function (resolve[A-Z]\w*Config|check_|assert_|validate_|is_valid_)'` and flag every hit that isn't a public export. Core validates with `check("<kind>", options)` and a row in `internal/config.ts`'s `SCHEMAS`; a satellite calls its schema's `.parse` inline.
+
 ## 5. Doc debt
 
 - Touching `libs/act/src/types/ports.ts` → check whether `docs/docs/architecture/extension-points.md` needs an update.

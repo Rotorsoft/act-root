@@ -17,40 +17,9 @@
  * const, a public inferred type, and a resolver.
  */
 
-import { z } from "zod";
 import { DeferSignal } from "../types/errors.js";
 import type { Committed, DeferWhen, Schemas } from "../types/index.js";
-
-/**
- * A relative span, measured from the triggering event's `created` time. At
- * least one field is required; fields are additive (`{ hours: 1, minutes: 30 }`
- * is 90 minutes).
- */
-const DeferDurationSchema = z
-  .object({
-    days: z.number().positive().optional(),
-    hours: z.number().positive().optional(),
-    minutes: z.number().positive().optional(),
-  })
-  .strict()
-  .refine((d) => d.days != null || d.hours != null || d.minutes != null, {
-    message: "defer: a duration needs at least one of days, hours, or minutes",
-  });
-
-/**
- * Zod schema for the `defer(when)` options bag. Exactly one of `after` / `at`;
- * `at` is an absolute `Date`. Internal per the config standard; the public
- * surface is {@link DeferWhen} and {@link resolve_defer_at}.
- */
-const DeferWhenSchema = z
-  .object({
-    after: DeferDurationSchema.optional(),
-    at: z.date().optional(),
-  })
-  .strict()
-  .refine((w) => (w.after === undefined) !== (w.at === undefined), {
-    message: "defer: specify exactly one of `after` or `at`",
-  });
+import { check } from "./config.js";
 
 /** Sum a duration bag to milliseconds. */
 function duration_ms(d: {
@@ -67,8 +36,8 @@ function duration_ms(d: {
 
 /**
  * Resolve `when` to an absolute due-time (ms since epoch) for a given
- * triggering event. Validates via {@link DeferWhenSchema} (throws `ZodError`
- * on a bad shape), then derives the time: `after` from `event.created`, `at`
+ * triggering event. Checks the `defer` bag (throws `ZodError` on a bad
+ * shape), then derives the time: `after` from `event.created`, `at`
  * from its absolute `Date`. Never reads `Date.now()`, so the result is stable
  * across re-delivery.
  */
@@ -76,7 +45,7 @@ export function resolve_defer_at<E extends Schemas>(
   when: DeferWhen,
   event: Committed<E, keyof E>
 ): number {
-  const parsed = DeferWhenSchema.parse(when);
+  const parsed = check("defer", when);
   if (parsed.after) return event.created.getTime() + duration_ms(parsed.after);
   return parsed.at!.getTime();
 }
@@ -87,16 +56,6 @@ export function resolve_defer_at<E extends Schemas>(
  * triggering event (read the payload to choose the schedule).
  */
 export type DeferSchedule<TEvent> = DeferWhen | ((event: TEvent) => DeferWhen);
-
-/**
- * Validate a literal `when` at build time (fail fast, per the config-schema
- * standard) — throws `ZodError` on a bad shape (both/neither of `after`/`at`,
- * an empty or non-positive duration). The function form of a `.defer` schedule
- * can only be checked when it runs, so builders pass just the literal here.
- */
-export function assert_defer_when(when: DeferWhen): void {
-  DeferWhenSchema.parse(when);
-}
 
 /**
  * Wrap a reaction handler so it holds until its schedule is due, then runs.

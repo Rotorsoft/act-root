@@ -300,7 +300,7 @@ const error_response = (description: string): OpenAPIResponse => ({
  *
  * @internal
  */
-function is_valid_server_url(url: string): boolean {
+function is_server_url(url: string): boolean {
   try {
     new URL(url.replace(/\{[^{}]+\}/g, "x"));
     return true;
@@ -337,20 +337,13 @@ const OpenAPIOptionsSchema = z.object({
   servers: z
     .array(
       z.object({
-        url: z.string().refine(is_valid_server_url, {
+        url: z.string().refine(is_server_url, {
           message: "openapi: invalid server url",
         }),
       })
     )
     .optional(),
 });
-
-function check_options(options: OpenAPIOptions): void {
-  OpenAPIOptionsSchema.parse({
-    info: { title: options.info?.title, version: options.info?.version },
-    servers: options.servers,
-  });
-}
 
 function strip_json_schema_meta(
   schema: Record<string, unknown>
@@ -678,7 +671,10 @@ export function openapi<TApp extends Pick<ActSurface, "registry">>(
   app: TApp,
   options: OpenAPIOptions
 ): OpenAPIDocument {
-  check_options(options);
+  OpenAPIOptionsSchema.parse({
+    info: { title: options.info?.title, version: options.info?.version },
+    servers: options.servers,
+  });
   const base_path = options.basePath ?? DEFAULT_BASE_PATH;
   const paths: Record<string, OpenAPIPathItem> = {};
   const state_schemas: Record<string, Record<string, unknown>> = {};

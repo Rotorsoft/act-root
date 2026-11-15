@@ -1,40 +1,19 @@
 /**
- * The single home for every builder-facing config bag in act-core: one
- * section per bag, each with its `DEFAULT_*` constants, an internal
- * `<Type>OptionsSchema`, the inferred `<Type>Config` and a
- * `resolve<Type>Config`, so misconfiguration throws a `ZodError` at the
- * entry point. Validation rejects only what is broken (`NaN`, `±Infinity`,
- * nonsensical negatives) and never newly rejects a value that works. The
- * rules are in .claude/rules/config-validation.md.
+ * Every option bag act-core accepts, checked in one place. Each bag has an
+ * internal schema below; `check(kind, options)` parses it, throws `ZodError`
+ * on a bad value and returns the parsed, defaulted bag, which a caller that
+ * only needs the throw ignores. Validation refuses only what is broken
+ * (`NaN`, `±Infinity`, nonsensical negatives) and never newly refuses a
+ * value that works. The rules are in .claude/rules/config-validation.md.
  */
 
 import { z } from "zod";
-import type {
-  ActOptions,
-  AutocloseConfig,
-  CircuitBreakerOptions,
-} from "../types/act.js";
-import type {
-  ActionOptions,
-  BackoffOptions,
-  DrainOptions,
-  FoldOptions,
-  LaneConfig,
-  ReactionOptions,
-  SettleOptions,
-  ShutdownOptions,
-} from "../types/index.js";
+import type { AutocloseConfig, CircuitBreakerOptions } from "../types/act.js";
+import type { AutoclosePolicy, BackoffOptions } from "../types/index.js";
 
-// Backoff — retry pacing. Nested inside the reaction/action bags below; also
-// resolvable on its own (`resolveBackoffConfig`) for direct callers.
-
-/**
- * Rejects an off-union `strategy`, a non-finite/negative `baseMs`, or a
- * non-finite/non-positive `maxMs`. Zod 4's `z.number()` rejects
- * `NaN`/`±Infinity` by default, so `.min(0)` / `.gt(0)` also close the
- * non-finite gap. No `maxMs >= baseMs` constraint — a sub-`baseMs` cap on
- * `exponential` is documented behavior, not an error.
- */
+// Backoff — retry pacing, nested in the reaction and action bags. No
+// `maxMs >= baseMs` constraint: a cap below `baseMs` on `exponential` is
+// documented behavior.
 const BackoffOptionsSchema = z.object({
   strategy: z.enum(["fixed", "linear", "exponential"]),
   baseMs: z.number().min(0),
@@ -52,18 +31,9 @@ export const DEFAULT_BACKOFF: BackoffOptions = {
   baseMs: 10_000,
 };
 
-/** Validate a backoff bag, or pass `undefined` through. Throws `ZodError`. */
-export function resolveBackoffConfig(
-  options: BackoffOptions | undefined
-): BackoffOptions | undefined {
-  return options === undefined
-    ? undefined
-    : BackoffOptionsSchema.parse(options);
-}
-
-// Reaction — `.do(handler, options)`. `maxRetries` gates the poison-quarantine
-// decision (`retry >= maxRetries`), so a `NaN` here silently disables
-// `blockOnError` (a poison message retries forever). Validate the whole bag.
+// Reaction — `.do(handler, options)`, fully defaulted by the builder.
+// `maxRetries` gates the block decision, so a `NaN` would retry a poison
+// message forever.
 
 /** Retries a reaction gets before it blocks, unless `.do()` says otherwise. */
 export const DEFAULT_MAX_RETRIES = 3;
@@ -76,85 +46,40 @@ const ReactionOptionsSchema = z.object({
   backoff: BackoffOptionsSchema.optional(),
 });
 
-/** Resolved reaction options. */
-export type ReactionConfig = z.infer<typeof ReactionOptionsSchema>;
-
-/** Validate a fully-defaulted reaction options bag. Throws `ZodError`. */
-export function resolveReactionConfig(
-  options: ReactionOptions
-): ReactionConfig {
-  return ReactionOptionsSchema.parse(options);
-}
-
-// Target — `.to({ target, priority })` and `app.prioritize`. Postgres stores
-// `priority` as a 32-bit `int`, so a fraction or a larger value would fail
-// every subscribe.
-
-const TargetOptionsSchema = z.object({ priority: z.int32().optional() });
-
-/** Validate a reaction target's options. Throws `ZodError`. */
-export function check_target(options: { priority?: number }): void {
-  TargetOptionsSchema.parse(options);
-}
-
-/** Whether a resolved target's options pass {@link check_target}. */
-export function is_valid_target(options: { priority?: number }): boolean {
-  return TargetOptionsSchema.safeParse(options).success;
-}
-
-// Restore — `app.restore(source, options)`. The stores read a falsy limit as
-// "no limit" and stop at `count >= limit`, so a NaN or 0 page reads the whole
-// source at once and a negative or fractional one ends the scan early, after
-// the sink has already been wiped.
-const ScanOptionsSchema = z.object({
-  batch_size: z.number().int().min(1).optional(),
-});
-
-/** Validate a restore's options. Throws `ZodError`. */
-export function check_scan_options(options: { batch_size?: number }): void {
-  ScanOptionsSchema.parse({ batch_size: options.batch_size });
-}
-
-// Audit — `app.audit(categories, options)`. Each threshold is a cutoff, and
-// every comparison with NaN is false, so a NaN threshold reports a clean
-// store.
-const AuditOptionsSchema = z.object({
-  idle_days: z.number().min(0).optional(),
-  restart_min: z.number().min(0).optional(),
-  stuck_minutes: z.number().min(0).optional(),
-  near_block: z.number().min(0).optional(),
-  deprecated_min: z.number().min(0).optional(),
-  drift_min: z.number().min(0).optional(),
-});
-
-/** Validate an audit's thresholds. Throws `ZodError`. */
-export function check_audit_options(options?: {
-  thresholds?: Record<string, unknown>;
-}): void {
-  AuditOptionsSchema.parse(options?.thresholds ?? {});
-}
-
-// Action — `.on(entry, options)`. `maxRetries` gates the command retry loop's
-// exit (`attempt >= maxRetries`), so a `NaN` here can spin the loop forever on
-// a contended stream. All fields optional (the argument itself is optional).
-
+// Action — `.on(entry, options)`. `maxRetries` ends the command retry loop,
+// so a `NaN` could spin it forever on a contended stream.
 const ActionOptionsSchema = z.object({
   maxRetries: z.number().int().min(0).optional(),
   backoff: BackoffOptionsSchema.optional(),
 });
 
-/** Resolved action options. */
-export type ActionConfig = z.infer<typeof ActionOptionsSchema>;
+// Target — `.to({ target, priority })`, a resolver's result and
+// `app.prioritize`. Postgres stores `priority` as a 32-bit `int`.
+const TargetOptionsSchema = z.object({ priority: z.int32().optional() });
 
-/** Validate an action options bag. Throws `ZodError`. */
-export function resolveActionConfig(options: ActionOptions): ActionConfig {
-  return ActionOptionsSchema.parse(options);
-}
+// Restore — `app.restore(source, options)`. The stores read a falsy limit as
+// "no limit", so a NaN or 0 page reads the whole source at once, and a
+// negative or fractional one ends the scan early, after the sink was wiped.
+const ScanOptionsSchema = z.object({
+  batch_size: z.number().int().min(1).optional(),
+});
 
-// Lane — `.withLane({...})`. Per-lane overrides of the drain budget. Time
-// knobs (`leaseMillis` / `cycleMs`) accept any non-negative ms; `streamLimit`
-// is an integer count. Reject NaN/Infinity/negative; allow 0 (as today).
+// Audit — `app.audit(categories, options)`. A NaN cutoff fails every
+// comparison, so it would report a clean store.
+const AuditOptionsSchema = z.object({
+  thresholds: z
+    .object({
+      idle_days: z.number().min(0).optional(),
+      restart_min: z.number().min(0).optional(),
+      stuck_minutes: z.number().min(0).optional(),
+      near_block: z.number().min(0).optional(),
+      deprecated_min: z.number().min(0).optional(),
+      drift_min: z.number().min(0).optional(),
+    })
+    .optional(),
+});
 
+// Lane — `.withLane({...})`, per-lane overrides of the drain budget.
 const LaneConfigSchema = z.object({
   name: z.string().min(1),
   leaseMillis: z.number().min(0).optional(),
@@ -162,17 +87,8 @@ const LaneConfigSchema = z.object({
   cycleMs: z.number().min(0).optional(),
 });
 
-/** Validate a lane config. Throws `ZodError`. Returns the input shape. */
-export function resolveLaneConfig<TName extends string>(
-  options: LaneConfig<TName>
-): LaneConfig<TName> {
-  LaneConfigSchema.parse(options);
-  return options;
-}
-
-// Drain / Settle — runtime knobs for `drain(...)` / `settle(...)`. Parsed once
-// per call (cheap). Reject NaN/Infinity/negative; allow 0. `correlate` is a
-// pass-through query filter (validated by the store), so it is not reshaped.
+// Drain / Settle — the knobs of `app.drain(...)` and `app.settle(...)`.
+// `correlate` is a query filter the store validates.
 
 /** Streams a drain claims per cycle. */
 export const DEFAULT_STREAM_LIMIT = 10;
@@ -187,102 +103,42 @@ const DrainOptionsSchema = z.object({
   leaseMillis: z.number().min(0).optional(),
 });
 
-/** Validate drain options, or pass `undefined` through. Throws `ZodError`. */
-export function resolveDrainConfig(
-  options: DrainOptions | undefined
-): DrainOptions | undefined {
-  if (options === undefined) return undefined;
-  DrainOptionsSchema.parse(options);
-  return options;
-}
-
 const SettleOptionsSchema = DrainOptionsSchema.extend({
   debounceMs: z.number().min(0).optional(),
-  // `maxPasses` defaults to Infinity (no cap) when omitted; a present value is
-  // a non-negative integer — `0` is legal and means "run no passes".
-  //
-  // `Infinity` is accepted explicitly. It is the documented default
-  // (`Act.settle`'s doc-comment and `SettleOptions.maxPasses` both name it),
-  // and `settle.ts` destructures `maxPasses = Infinity`, so the one value the
-  // docs advertise was the one value `z.number().int()` refused — Zod 4
-  // rejects `±Infinity`, and an integer check cannot pass it either. Wrapper
-  // code normalizing an optional cap (`maxPasses: opts.maxPasses ?? Infinity`)
-  // is the natural way to hit it. Accepting it also honors this module's own
-  // rule that a value which works today is never newly rejected.
+  // `0` runs no passes; `Infinity` is the documented default (no cap), which
+  // an integer check alone would refuse.
   maxPasses: z
     .union([z.number().int().min(0), z.literal(Number.POSITIVE_INFINITY)])
     .optional(),
-}).loose();
+});
 
-/** Validate settle options, or pass `undefined` through. Throws `ZodError`. */
-export function resolveSettleConfig(
-  options: SettleOptions | undefined
-): SettleOptions | undefined {
-  if (options === undefined) return undefined;
-  SettleOptionsSchema.parse(options);
-  return options;
-}
-
-// Shutdown — the grace budget `shutdown(...)` gives in-flight drain cycles.
+// Shutdown — the grace budget `app.shutdown(...)` gives in-flight cycles.
 
 /**
- * Ceiling on the derived shutdown grace budget. Without a cap, a lane
- * configured with a long lease (minutes, for a genuinely slow integration)
- * would let one parked handler hold a rolling deploy open for that whole
- * lease. 30s is the longest `leaseMillis` the production checklist
- * recommends, so it is the point past which "graceful" stops being the
- * operator's intent.
+ * Ceiling on the derived shutdown grace budget, so one parked handler on a
+ * long-lease lane can't hold a rolling deploy open for that whole lease. 30s
+ * is the longest `leaseMillis` the production checklist recommends.
  */
 export const MAX_SHUTDOWN_GRACE_MS = 30_000;
 
-const ShutdownOptionsSchema = z
-  .object({
-    // `0` is legal and is exactly today's behavior: stop scheduling and
-    // return without waiting.
-    graceMs: z.number().min(0).optional(),
-  })
-  .loose();
+// `0` stops scheduling and returns without waiting.
+const ShutdownOptionsSchema = z.object({
+  graceMs: z.number().min(0).optional(),
+});
 
-/** Validate shutdown options, or pass `undefined` through. Throws `ZodError`. */
-export function resolveShutdownConfig(
-  options: ShutdownOptions | undefined
-): ShutdownOptions | undefined {
-  if (options === undefined) return undefined;
-  ShutdownOptionsSchema.parse(options);
-  return options;
-}
+// Act — the scalar knobs of `act().build(options)`. The autoclose window and
+// the circuit breaker are their own bags below.
+const ActOptionsSchema = z.object({
+  maxSubscribedStreams: z.number().int().min(1).optional(),
+  settleDebounceMs: z.number().int().min(0).optional(),
+  autoSettle: z.boolean().optional(),
+});
 
-// Act — the top-level `act().build(options)` scalar knobs. The nested bags
-// (`autocloseWindow`, `circuitBreaker`) are resolved by their own resolvers
-// below; the `scoped`/`correlator` fields are objects/functions passed
-// through untouched (`.loose()`), so only the scalar knobs are checked here.
-
-const ActOptionsSchema = z
-  .object({
-    maxSubscribedStreams: z.number().int().min(1).optional(),
-    settleDebounceMs: z.number().int().min(0).optional(),
-    autoSettle: z.boolean().optional(),
-  })
-  .loose();
-
-/** Validate the scalar `ActOptions` knobs at build. Throws `ZodError`. */
-export function resolveActConfig(
-  options: ActOptions | undefined
-): ActOptions | undefined {
-  if (options === undefined) return undefined;
-  ActOptionsSchema.parse(options);
-  return options;
-}
-
-// Autoclose — the off-hours window on `ActOptions`.
-// The window *logic* (DST, hour math) stays in `autoclose-window.ts`; only
-// the schema, defaults, and resolver live here.
-
-/** Default IANA zone for `autocloseWindow` when the operator omits one. */
-const DEFAULT_AUTOCLOSE_WINDOW_TZ = "UTC";
+// Autoclose window — `ActOptions.autocloseWindow`, the off-hours window. The
+// hour math stays in `autoclose-window.ts`.
 
 /** True when `tz` is a zone the runtime's `Intl` accepts. */
-function is_valid_time_zone(tz: string): boolean {
+function is_time_zone(tz: string): boolean {
   try {
     new Intl.DateTimeFormat("en-US", { timeZone: tz });
     return true;
@@ -291,98 +147,191 @@ function is_valid_time_zone(tz: string): boolean {
   }
 }
 
-const AutocloseWindowSchema = z
-  .object({
-    start: z
-      .number()
-      .int()
-      .min(0)
-      .max(23, { message: "autocloseWindow.start must be an hour in [0, 23]" }),
-    end: z
-      .number()
-      .int()
-      .min(0)
-      .max(23, { message: "autocloseWindow.end must be an hour in [0, 23]" }),
-    timeZone: z
-      .string()
-      .refine(is_valid_time_zone, {
-        message: "autocloseWindow.timeZone must be a valid IANA time zone",
-      })
-      .default(DEFAULT_AUTOCLOSE_WINDOW_TZ),
-  })
-  .refine((w) => w.start !== w.end, {
-    message:
-      "autocloseWindow.start and end must differ — an empty window disables autoclose",
-  });
+const hour = (field: string) =>
+  z
+    .number()
+    .int()
+    .min(0)
+    .max(23, {
+      message: `autocloseWindow.${field} must be an hour in [0, 23]`,
+    });
 
 const AutocloseOptionsSchema = z.object({
-  autocloseWindow: AutocloseWindowSchema.optional(),
+  autocloseWindow: z
+    .object({
+      start: hour("start"),
+      end: hour("end"),
+      timeZone: z
+        .string()
+        .refine(is_time_zone, {
+          message: "autocloseWindow.timeZone must be a valid IANA time zone",
+        })
+        .default("UTC"),
+    })
+    .refine((w) => w.start !== w.end, {
+      message:
+        "autocloseWindow.start and end must differ — an empty window disables autoclose",
+    })
+    .optional(),
 }) satisfies z.ZodType<AutocloseConfig>;
 
-/** Validate + default the autoclose knobs on `ActOptions`. Throws `ZodError`. */
-export function resolveAutocloseConfig(
-  options: ActOptions | undefined
-): AutocloseConfig {
-  return AutocloseOptionsSchema.parse({
-    autocloseWindow: options?.autocloseWindow,
-  });
-}
-
-// CircuitBreaker — the store-op breaker on `ActOptions`. The `CircuitBreaker`
-// state machine stays in `circuit-breaker.ts` and imports the resolved type.
-
-const DEFAULT_CIRCUIT_FAILURE_THRESHOLD = 5;
-const DEFAULT_CIRCUIT_COOLDOWN_MS = 30_000;
-
+// Circuit breaker — `ActOptions.circuitBreaker`, the store-op breaker. The
+// state machine stays in `circuit-breaker.ts`.
 const CircuitBreakerOptionsSchema = z.object({
-  failureThreshold: z
-    .number()
-    .int()
-    .min(1)
-    .default(DEFAULT_CIRCUIT_FAILURE_THRESHOLD),
-  cooldownMs: z
-    .number()
-    .int()
-    .min(100)
-    .max(3_600_000)
-    .default(DEFAULT_CIRCUIT_COOLDOWN_MS),
+  failureThreshold: z.number().int().min(1).default(5),
+  cooldownMs: z.number().int().min(100).max(3_600_000).default(30_000),
 }) satisfies z.ZodType<CircuitBreakerConfig, CircuitBreakerOptions>;
 
 /** Resolved circuit-breaker configuration. */
 export type CircuitBreakerConfig = Required<CircuitBreakerOptions>;
 
-/** Parse + apply defaults. Throws `ZodError` on out-of-range values. */
-export const resolveCircuitBreakerConfig = (
-  options?: CircuitBreakerOptions
-): CircuitBreakerConfig => CircuitBreakerOptionsSchema.parse(options ?? {});
-
-// Fold — `projection(name).of(state)` batch-fold knobs.
-
-const DEFAULT_FOLD_FLUSH_EVERY = 1_000;
-const DEFAULT_MAX_CACHED_STATES = 10_000;
-
+// Fold — the batch-fold knobs of `projection(name).of(state, options)`.
 const FoldOptionsSchema = z.object({
-  flushEvery: z.number().int().min(1).default(DEFAULT_FOLD_FLUSH_EVERY),
-  maxCachedStates: z.number().int().min(1).default(DEFAULT_MAX_CACHED_STATES),
+  flushEvery: z.number().int().min(1).default(1_000),
+  maxCachedStates: z.number().int().min(1).default(10_000),
 });
 
 /** Resolved fold configuration. */
 export type FoldConfig = z.infer<typeof FoldOptionsSchema>;
 
-/** Validate + default the fold knobs. Throws `ZodError`. */
-export function resolveFoldConfig(options: FoldOptions): FoldConfig {
-  return FoldOptionsSchema.parse(options);
-}
+// Defer — the literal schedule of `.defer(when)`, checked at build; the
+// function form is checked when it runs. Exactly one of `after` / `at`; a
+// duration's fields add up (`{ hours: 1, minutes: 30 }` is 90 minutes).
+const DeferWhenSchema = z
+  .object({
+    after: z
+      .object({
+        days: z.number().positive().optional(),
+        hours: z.number().positive().optional(),
+        minutes: z.number().positive().optional(),
+      })
+      .strict()
+      .refine((d) => d.days != null || d.hours != null || d.minutes != null, {
+        message:
+          "defer: a duration needs at least one of days, hours, or minutes",
+      })
+      .optional(),
+    at: z.date().optional(),
+  })
+  .strict()
+  .refine((w) => (w.after === undefined) !== (w.at === undefined), {
+    message: "defer: specify exactly one of `after` or `at`",
+  });
 
-/**
- * Refuses a store written for `commit(stream, msgs, meta, expectedVersion)`,
- * the shape before 2.0. Left alone, a wrapper of that shape forwards its
- * arguments, so commits work, and then treats the appends as a stream name,
- * sending events and their sensitive fields wherever that name goes.
- */
-export function check_store(store: { commit: { length: number } }): void {
-  if (store.commit.length === 4)
-    throw new Error(
-      "This store's commit takes (stream, msgs, meta, expectedVersion), the shape before @rotorsoft/act 2.0. Upgrade it, and every @rotorsoft/act-* package, together: https://rotorsoft.github.io/act-root/docs/guides/migrating-to-2.x"
-    );
+// Autoclose policy — `.autocloses({...})`. Top-level fields AND together; an
+// `or` block is the alternative path, with the same fields minus `or`.
+// `.strict()` turns a typo into a build error. Windows are in days: `after`
+// is at least a minute and `keep` at least a day, since anything shorter is
+// a misconfiguration.
+const window_schema = (
+  field: "after" | "keep",
+  min_days: number,
+  floor: string
+) =>
+  z
+    .object({
+      days: z
+        .number({ message: `autocloses: ${field}.days must be a number` })
+        .positive(`autocloses: ${field}.days must be > 0`),
+    })
+    .refine((o) => o.days >= min_days, {
+      message: `autocloses: ${field} resolves to < ${floor}, which is too short to be a meaningful retention window`,
+    });
+
+const AfterSchema = window_schema("after", 1 / 1440, "one minute");
+
+const IsSchema = z.union([
+  z.string().min(1, "autocloses: is must be a non-empty event name"),
+  z
+    .array(
+      z.string().min(1, "autocloses: is entries must be non-empty event names")
+    )
+    .min(1, "autocloses: is must include at least one event name")
+    .readonly(),
+]);
+
+const ReachesSchema = z
+  .number({ message: "autocloses: reaches must be a number" })
+  .int("autocloses: reaches must be an integer")
+  .min(1, "autocloses: reaches must be >= 1");
+
+const OrBlockSchema = z
+  .object({
+    after: AfterSchema.optional(),
+    is: IsSchema.optional(),
+    reaches: ReachesSchema.optional(),
+  })
+  .strict()
+  .refine(
+    (o) =>
+      o.after !== undefined || o.is !== undefined || o.reaches !== undefined,
+    {
+      message:
+        "autocloses: `or` block must include at least one of after / is / reaches",
+    }
+  );
+
+const AutoclosePolicySchema = z
+  .object({
+    after: AfterSchema.optional(),
+    is: IsSchema.optional(),
+    reaches: ReachesSchema.optional(),
+    or: OrBlockSchema.optional(),
+    keep: window_schema("keep", 1, "one day").optional(),
+  })
+  .strict()
+  .refine(
+    (o) =>
+      o.after !== undefined ||
+      o.is !== undefined ||
+      o.reaches !== undefined ||
+      o.or !== undefined ||
+      o.keep !== undefined,
+    {
+      message:
+        "autocloses: at least one of after / is / reaches / or / keep must be specified — empty `{}` is a misconfiguration",
+    }
+  ) satisfies z.ZodType<AutoclosePolicy>;
+
+// Store — `store(adapter)` and `ActOptions.scoped.store`. A store written for
+// `commit(stream, msgs, meta, expectedVersion)`, the shape before 2.0, would
+// forward its arguments and treat the appends as a stream name, sending
+// events and their sensitive fields wherever that name goes.
+const StoreSchema = z.object({
+  commit: z.custom<(...args: never[]) => unknown>(
+    (commit) => typeof commit === "function" && commit.length !== 4,
+    {
+      message:
+        "This store's commit takes (stream, msgs, meta, expectedVersion), the shape before @rotorsoft/act 2.0. Upgrade it, and every @rotorsoft/act-* package, together: https://rotorsoft.github.io/act-root/docs/guides/migrating-to-2.x",
+    }
+  ),
+});
+
+const SCHEMAS = {
+  act: ActOptionsSchema,
+  action: ActionOptionsSchema,
+  audit: AuditOptionsSchema,
+  autoclose: AutocloseOptionsSchema,
+  autoclose_policy: AutoclosePolicySchema,
+  circuit_breaker: CircuitBreakerOptionsSchema,
+  defer: DeferWhenSchema,
+  drain: DrainOptionsSchema,
+  fold: FoldOptionsSchema,
+  lane: LaneConfigSchema,
+  reaction: ReactionOptionsSchema,
+  scan: ScanOptionsSchema,
+  settle: SettleOptionsSchema,
+  shutdown: ShutdownOptionsSchema,
+  store: StoreSchema,
+  target: TargetOptionsSchema,
+};
+
+type Schemas = typeof SCHEMAS;
+
+/** Parse an option bag with its schema. Throws `ZodError` on a bad value. */
+export function check<K extends keyof Schemas>(
+  kind: K,
+  options: z.input<Schemas[K]>
+): z.output<Schemas[K]> {
+  return SCHEMAS[kind].parse(options) as z.output<Schemas[K]>;
 }

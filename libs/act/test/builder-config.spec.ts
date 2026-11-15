@@ -1,14 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { act, slice, state, ZodEmpty } from "../src/index.js";
-import {
-  resolveActConfig,
-  resolveActionConfig,
-  resolveDrainConfig,
-  resolveLaneConfig,
-  resolveReactionConfig,
-  resolveSettleConfig,
-} from "../src/internal/config.js";
+import { check } from "../src/internal/config.js";
 import { sandbox } from "../src/test/index.js";
 
 /** Minimal state for the call-site assertions below. */
@@ -21,38 +14,39 @@ const S_cfg = state({ Cfg: z.object({ n: z.number() }) })
   .build();
 
 // The single config module (`internal/config.ts`) owns validation for every
-// builder-facing bag. These pin the resolvers directly (unit) and at their
+// builder-facing bag. These pin `check` directly (unit) and at the
 // declaration/runtime sites (throw), with the `maxRetries` NaN holes — the
 // sibling of the backoff bug — as the headline regressions.
 
-describe("resolveReactionConfig", () => {
+describe("check reaction", () => {
   it("accepts a valid bag", () => {
-    expect(
-      resolveReactionConfig({ blockOnError: true, maxRetries: 3 })
-    ).toEqual({ blockOnError: true, maxRetries: 3 });
+    expect(check("reaction", { blockOnError: true, maxRetries: 3 })).toEqual({
+      blockOnError: true,
+      maxRetries: 3,
+    });
   });
 
   it("rejects a NaN maxRetries — the poison-quarantine gate (`retry >= NaN`) would never fire", () => {
     expect(() =>
-      resolveReactionConfig({ blockOnError: true, maxRetries: Number.NaN })
+      check("reaction", { blockOnError: true, maxRetries: Number.NaN })
     ).toThrow();
   });
 
   it("rejects a negative/fractional maxRetries and a non-boolean blockOnError", () => {
     expect(() =>
-      resolveReactionConfig({ blockOnError: true, maxRetries: -1 })
+      check("reaction", { blockOnError: true, maxRetries: -1 })
     ).toThrow();
     expect(() =>
-      resolveReactionConfig({ blockOnError: true, maxRetries: 2.5 })
+      check("reaction", { blockOnError: true, maxRetries: 2.5 })
     ).toThrow();
     expect(() =>
-      resolveReactionConfig({ blockOnError: "yes" as never, maxRetries: 3 })
+      check("reaction", { blockOnError: "yes" as never, maxRetries: 3 })
     ).toThrow();
   });
 
   it("rejects a bad nested backoff", () => {
     expect(() =>
-      resolveReactionConfig({
+      check("reaction", {
         blockOnError: true,
         maxRetries: 3,
         backoff: { strategy: "nope" as never, baseMs: 1 },
@@ -61,32 +55,32 @@ describe("resolveReactionConfig", () => {
   });
 });
 
-describe("resolveActionConfig", () => {
+describe("check action", () => {
   it("accepts a valid or empty bag", () => {
-    expect(resolveActionConfig({})).toEqual({});
-    expect(resolveActionConfig({ maxRetries: 2 })).toEqual({ maxRetries: 2 });
+    expect(check("action", {})).toEqual({});
+    expect(check("action", { maxRetries: 2 })).toEqual({ maxRetries: 2 });
   });
 
   it("rejects a NaN/Infinity maxRetries — the command retry loop (`attempt >= NaN`) would spin forever", () => {
-    expect(() => resolveActionConfig({ maxRetries: Number.NaN })).toThrow();
+    expect(() => check("action", { maxRetries: Number.NaN })).toThrow();
     expect(() =>
-      resolveActionConfig({ maxRetries: Number.POSITIVE_INFINITY })
+      check("action", { maxRetries: Number.POSITIVE_INFINITY })
     ).toThrow();
   });
 });
 
-describe("resolveLaneConfig", () => {
-  it("accepts a valid lane and returns it", () => {
+describe("check lane", () => {
+  it("accepts a valid lane", () => {
     const cfg = { name: "slow", leaseMillis: 30_000, streamLimit: 5 };
-    expect(resolveLaneConfig(cfg)).toBe(cfg);
+    expect(check("lane", cfg)).toEqual(cfg);
   });
 
   it("rejects an empty name, NaN leaseMillis, or negative streamLimit", () => {
-    expect(() => resolveLaneConfig({ name: "" })).toThrow();
+    expect(() => check("lane", { name: "" })).toThrow();
     expect(() =>
-      resolveLaneConfig({ name: "x", leaseMillis: Number.NaN })
+      check("lane", { name: "x", leaseMillis: Number.NaN })
     ).toThrow();
-    expect(() => resolveLaneConfig({ name: "x", streamLimit: -1 })).toThrow();
+    expect(() => check("lane", { name: "x", streamLimit: -1 })).toThrow();
   });
 
   /**
@@ -138,24 +132,19 @@ describe("resolveLaneConfig", () => {
   });
 });
 
-describe("resolveDrainConfig / resolveSettleConfig", () => {
-  it("pass undefined through", () => {
-    expect(resolveDrainConfig(undefined)).toBeUndefined();
-    expect(resolveSettleConfig(undefined)).toBeUndefined();
-  });
-
-  it("accept valid knobs (0 allowed) and return the input", () => {
+describe("check drain / settle", () => {
+  it("accept valid knobs (0 allowed)", () => {
     const d = { streamLimit: 10, eventLimit: 100, leaseMillis: 0 };
-    expect(resolveDrainConfig(d)).toBe(d);
+    expect(check("drain", d)).toEqual(d);
     const s = { debounceMs: 0, maxPasses: 3, leaseMillis: 5 };
-    expect(resolveSettleConfig(s)).toBe(s);
+    expect(check("settle", s)).toEqual(s);
   });
 
   it("reject NaN/negative knobs", () => {
-    expect(() => resolveDrainConfig({ leaseMillis: Number.NaN })).toThrow();
-    expect(() => resolveDrainConfig({ streamLimit: -1 })).toThrow();
-    expect(() => resolveSettleConfig({ debounceMs: Number.NaN })).toThrow();
-    expect(() => resolveSettleConfig({ maxPasses: -1 })).toThrow();
+    expect(() => check("drain", { leaseMillis: Number.NaN })).toThrow();
+    expect(() => check("drain", { streamLimit: -1 })).toThrow();
+    expect(() => check("settle", { debounceMs: Number.NaN })).toThrow();
+    expect(() => check("settle", { maxPasses: -1 })).toThrow();
   });
 
   /**
@@ -166,17 +155,17 @@ describe("resolveDrainConfig / resolveSettleConfig", () => {
    */
   it("accepts maxPasses: Infinity, the documented default", () => {
     const s = { maxPasses: Number.POSITIVE_INFINITY };
-    expect(resolveSettleConfig(s)).toBe(s);
+    expect(check("settle", s)).toEqual(s);
   });
 
   it("still rejects -Infinity and NaN for maxPasses", () => {
     // Accepting the documented "no cap" value must not open the gate to
     // nonsense — the union admits one literal, not every non-finite number.
     expect(() =>
-      resolveSettleConfig({ maxPasses: Number.NEGATIVE_INFINITY })
+      check("settle", { maxPasses: Number.NEGATIVE_INFINITY })
     ).toThrow();
-    expect(() => resolveSettleConfig({ maxPasses: Number.NaN })).toThrow();
-    expect(() => resolveSettleConfig({ maxPasses: 1.5 })).toThrow();
+    expect(() => check("settle", { maxPasses: Number.NaN })).toThrow();
+    expect(() => check("settle", { maxPasses: 1.5 })).toThrow();
   });
 
   it("settle({ maxPasses: Infinity }) does not throw at the call site", async () => {
@@ -184,7 +173,7 @@ describe("resolveDrainConfig / resolveSettleConfig", () => {
       actOptions: { autoSettle: false },
     });
     try {
-      // Throws a ZodError at `resolveSettleConfig` before this fix.
+      // The integer check alone refused the documented default.
       await ctx.app.settle({ maxPasses: Number.POSITIVE_INFINITY });
     } finally {
       await ctx.dispose();
@@ -192,16 +181,15 @@ describe("resolveDrainConfig / resolveSettleConfig", () => {
   });
 });
 
-describe("resolveActConfig", () => {
-  it("passes undefined through and returns a valid bag", () => {
-    expect(resolveActConfig(undefined)).toBeUndefined();
+describe("check act", () => {
+  it("returns a valid bag", () => {
     const o = { maxSubscribedStreams: 100, settleDebounceMs: 10 };
-    expect(resolveActConfig(o)).toBe(o);
+    expect(check("act", o)).toEqual(o);
   });
 
   it("rejects NaN/out-of-range scalar knobs", () => {
-    expect(() => resolveActConfig({ maxSubscribedStreams: 0 })).toThrow();
-    expect(() => resolveActConfig({ settleDebounceMs: Number.NaN })).toThrow();
+    expect(() => check("act", { maxSubscribedStreams: 0 })).toThrow();
+    expect(() => check("act", { settleDebounceMs: Number.NaN })).toThrow();
   });
 });
 

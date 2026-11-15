@@ -594,8 +594,8 @@ export declare class Act<TSchemaReg extends SchemaRegister<TActions>, TEvents ex
 /**
  * Public contracts of the orchestrator: the options \`act().build()\` takes,
  * the lifecycle events an \`Act\` emits, and the public defaults behind them.
- * The \`Act\` class implements them in \`../act.ts\`; their Zod schemas and
- * resolvers live in \`../internal/config.ts\`.
+ * The \`Act\` class implements them in \`../act.ts\`; their Zod schemas live
+ * in \`../internal/config.ts\`.
  */
 import type { CloseResult, Correlator, Schema, Schemas, Snapshot } from "./action.js";
 import type { Cache, Store, StoreNotification } from "./ports.js";
@@ -2803,8 +2803,8 @@ export declare class CsvFile implements EventSource, EventSink {
 import type { ZodType } from "zod";
 import { checkAppends, checkVersion, concurrencyError, fairSlots, isStreamName, parseNotification, seedEvent } from "./adapter.js";
 import { package_schema } from "./config.js";
-import { resolveAutocloseConfig as resolve_autoclose } from "./internal/config.js";
 import { unscoped_ports } from "./ports.js";
+import type { ActOptions, AutocloseConfig } from "./types/act.js";
 import { ActorSchema as actor_schema, CausationEventSchema as causation_event_schema, CommittedMetaSchema as committed_meta_schema, DEFAULT_LANE as default_lane, DEFAULT_MAX_SUBSCRIBED_STREAMS as default_max_subscribed_streams, DEFAULT_QUERY_STREAMS_LIMIT as default_query_streams_limit, DEFAULT_SETTLE_DEBOUNCE_MS as default_settle_debounce_ms, Environments as environments, EventMetaSchema as event_meta_schema, ExitCodes as exit_codes, LogLevels as log_levels, QuerySchema as query_schema, TargetSchema as target_schema } from "./types/index.js";
 /** @deprecated Use \`checkAppends\` from \`@rotorsoft/act/adapter\`. */
 export declare const check_appends: typeof checkAppends;
@@ -2851,7 +2851,7 @@ export declare const PackageSchema: typeof package_schema;
 /** @deprecated No replacement: call \`store()\`, \`cache()\` or \`log()\`. */
 export declare const default_scope: typeof unscoped_ports;
 /** @deprecated No replacement: \`act().build()\` validates these options. */
-export declare const resolveAutocloseConfig: typeof resolve_autoclose;
+export declare const resolveAutocloseConfig: (options: ActOptions | undefined) => AutocloseConfig;
 /** @deprecated No replacement: parse with the schema, spread the defaults. */
 export declare const extend: <S extends Record<string, unknown>, T extends Record<string, unknown>>(source: Readonly<S>, schema: ZodType<S>, target?: Readonly<T>) => Readonly<S & T>;
 /** @deprecated No replacement: events revive their own \`z.date()\` fields. */
