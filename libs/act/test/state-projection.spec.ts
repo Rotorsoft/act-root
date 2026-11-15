@@ -866,6 +866,39 @@ describe("fold across workers", () => {
       expect(rows_a.get("c1")?.count).toBe(3);
       expect(rows_b.get("c1")?.count).toBe(3);
     });
+
+    it("restore into the app's own store clears the fold caches", async () => {
+      store(new InMemoryStore());
+      await store().seed();
+      const rows = new Map<string, { count: number }>();
+      const p = projection("counters")
+        .of(Counter)
+        .flush(async (batch) => {
+          for (const r of batch) rows.set(r.stream, r.state as never);
+        })
+        .build();
+      const app = act()
+        .withState(Counter)
+        .withProjection(p)
+        .build({ autoSettle: false });
+
+      await bump(app as never, 3);
+      await drain(app as never);
+      expect(rows.get("c1")?.count).toBe(3);
+
+      // A log where c1 has one increment of 100.
+      const source = new InMemoryStore();
+      await source.seed();
+      await source.commit(
+        [{ stream: "c1", msgs: [{ name: "Incremented", data: { by: 100 } }] }],
+        { correlation: "r", causation: {} }
+      );
+      await app.restore(source);
+      await cache().clear();
+      await drain(app as never);
+
+      expect(rows.get("c1")?.count).toBe(100);
+    });
   });
 });
 

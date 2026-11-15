@@ -377,6 +377,7 @@ export declare class Act<TSchemaReg extends SchemaRegister<TActions>, TEvents ex
      * @see {@link settle}
      */
     stop_settling(): void;
+    private _reset_folds;
     /**
      * Reset reaction stream watermarks and settle them, replaying their
      * events through their reactions.

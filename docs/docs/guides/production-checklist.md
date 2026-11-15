@@ -231,9 +231,9 @@ Operator-side guardrails:
 - **Dry-run before destructive.** `app.restore(source, { dry_run: true })` runs the same validator, counts the same kept/dropped, but never opens the sink's transaction. Pre-flight every restore the first time you run it against a new source. The inspector's transfer dialog does this automatically via the "Preview" button.
 - **Inspector writes gated.** The inspector's transfer dialog runs the destructive path only when `ACT_INSPECTOR_WRITE=1`. Default-deny; flip it on for the duration of the migration, then flip it off.
 - **Audit the run.** The inspector audit log records every destructive transfer with `kept`, `duration_ms`, and the adapter pair. Application code calling `app.restore` directly should log the result the same way.
-- **Reactions resubscribe.** After restore, the orchestrator's next settle picks up the rewritten event log, and `subscribe()` UPSERTs every stream's watermark. No manual intervention.
+- **Reactions resubscribe.** After restore, the orchestrator's next settle picks up the rewritten event log, and `subscribe()` UPSERTs every stream's watermark. Projections are the exception: see the next paragraph.
 
-When a restore is genuinely the right tool — for example, "migrate the wolfdesk app from Postgres to a partitioned SQLite cluster" — the path is: stop writes to the source, run `app.restore(pgStore, {}, sqliteStore)`, flip the connection string, run `cache().clear()`, run `app.reset` against any DB-backed projections, restart. The framework owns the cross-adapter shape so the operation is the same regardless of which adapters sit on either end.
+When a restore is genuinely the right tool — for example, "migrate the wolfdesk app from Postgres to a partitioned SQLite cluster" — the path is: stop writes to the source, run `app.restore(pgStore, {}, sqliteStore)`, flip the connection string, run `cache().clear()`, empty the DB-backed projection tables (restored ids are renumbered, so a monotonic upsert would refuse the rebuilt rows), run `app.reset` against those projections, restart. The framework owns the cross-adapter shape so the operation is the same regardless of which adapters sit on either end.
 
 See [Concepts → Restoring a store](../concepts/event-sourcing.md#restoring-a-store) for the primitive itself and how it compares with `reset` / `truncate` / `close`.
 
