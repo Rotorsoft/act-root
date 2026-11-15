@@ -7,7 +7,9 @@ import type { Patch, Schema } from "./types.js";
  * returns a deterministic result for the same inputs.
  *
  * **Merging rules:**
- * - Plain objects: Deep merge recursively
+ * - Plain objects: Deep merge recursively into a plain-object original; an
+ *   original that isn't one (a primitive, an array, a `Date`, …) is replaced
+ *   by the patch, with its `null`s dropped
  * - Arrays, Dates, RegExp, Maps, Sets, TypedArrays: Replace entirely
  * - `undefined` or `null` values: Delete the property
  * - Primitives: Replace with patch value
@@ -22,6 +24,12 @@ import type { Patch, Schema } from "./types.js";
  * @param patches - The patches to apply (recursive partial of the state shape)
  * @returns A new state object with patches applied, sharing unpatched subtree references
  */
+const is_plain = (value: unknown): boolean => {
+  if (typeof value !== "object" || value === null) return false;
+  const ctor = value.constructor;
+  return ctor === Object || ctor === undefined;
+};
+
 export const patch = <S extends Schema>(
   original: Readonly<S>,
   patches: Readonly<Patch<S>> | null | undefined
@@ -59,11 +67,12 @@ export const patch = <S extends Schema>(
       copy[key] = patched_value;
       continue;
     }
-    const ctor = (patched_value as object).constructor;
-    if (ctor === Object || ctor === undefined) {
+    if (is_plain(patched_value)) {
+      // Merge only into a plain object; anything else is replaced, or its
+      // characters and elements would leak into the patch as numeric keys.
       const original_value = original[key as keyof S];
       copy[key] = patch(
-        (original_value || {}) as Schema,
+        (is_plain(original_value) ? original_value : {}) as Schema,
         patched_value as Patch<Schema>
       );
     } else {
