@@ -73,13 +73,21 @@ export function short(v: unknown): string {
   return String(v);
 }
 
-export function layout(mode: Mode, nodes: Node[], world: World): Layout {
-  const width = mode === "wide" ? 1000 : 420;
+export function layout(
+  mode: Mode,
+  nodes: Node[],
+  world: World,
+  units = 1000
+): Layout {
+  const width = mode === "wide" ? units : 420;
   const inner = width - PAD * 2;
   let y = 8;
 
   // app band: the scene's nodes, in order
-  const per_line = mode === "wide" ? Math.max(1, Math.min(nodes.length, 6)) : 3;
+  const per_line =
+    mode === "wide"
+      ? Math.max(1, Math.min(nodes.length, width >= 1300 ? 7 : 6))
+      : 3;
   const gap = mode === "wide" ? 14 : 8;
   const node_w = Math.min(
     mode === "wide" ? 176 : 132,
@@ -115,7 +123,8 @@ export function layout(mode: Mode, nodes: Node[], world: World): Layout {
   const stores: StoreBox[] = world.stores.map((store) => {
     const top = y;
     y += STORE_HEAD;
-    const slots = store.cells.length + 1; // the tail slot, for a ghost or the next commit
+    // a row for the refused ghost only when there is one; the tail slot is still placed, for tokens
+    const slots = Math.max(1, store.cells.length + (store.ghost ? 1 : 0));
     const rows = Math.ceil(slots / per_row);
     const place = (i: number): Box => ({
       x: PAD + (i % per_row) * (cell.w + cgap),

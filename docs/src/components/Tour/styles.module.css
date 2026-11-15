@@ -713,3 +713,26 @@
     transition: none;
   }
 }
+
+/* the stage and the narration: stacked, or side by side when there is room */
+.body {
+  display: block;
+}
+.tour[data-mode="xl"] .body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 440px;
+  gap: 18px;
+  align-items: start;
+}
+.tour[data-mode="xl"] .side {
+  position: sticky;
+  top: calc(var(--ifm-navbar-height) + 12px);
+  max-height: calc(100vh - var(--ifm-navbar-height) - 24px);
+  overflow-y: auto;
+}
+.tour[data-mode="xl"] .reference {
+  grid-template-columns: minmax(0, 1fr);
+}
+.tour[data-mode="xl"] .narration h3 {
+  margin-top: 0;
+}

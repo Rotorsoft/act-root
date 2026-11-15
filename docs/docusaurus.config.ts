@@ -204,6 +204,7 @@ const config: Config = {
           position: "left",
           label: "Docs",
         },
+        { to: "/tour", position: "left", label: "Tour" },
         {
           to: "/docs/examples/calculator",
           position: "left",

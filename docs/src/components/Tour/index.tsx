@@ -61,18 +61,34 @@ function schedule(moves: Move[]): { starts: number[]; total: number } {
 
 const dwell = (step: Step, total: number) => total + Math.max(2600, Math.min(7000, step.say.length * 42));
 
-function useMode(ref: React.RefObject<HTMLElement | null>): Mode {
-  const [mode, setMode] = useState<Mode>("wide");
+/** How wide the player is: narrow (a phone), wide, or xl (the narration moves beside the stage). */
+type Fit = { mode: "narrow" | "wide" | "xl"; px: number };
+
+function useFit(ref: React.RefObject<HTMLElement | null>): Fit {
+  const [fit, setFit] = useState<Fit>({ mode: "wide", px: 1000 });
   useBrowserLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
-    const measure = () => setMode(el.clientWidth < 640 ? "narrow" : "wide");
+    const measure = () => {
+      const px = el.clientWidth;
+      setFit({ mode: px < 640 ? "narrow" : px >= 1500 ? "xl" : "wide", px });
+    };
     measure();
     const ro = new ResizeObserver(measure);
     ro.observe(el);
     return () => ro.disconnect();
   }, [ref]);
-  return mode;
+  return fit;
+}
+
+// the stage's width in SVG units: one unit per pixel when there is room, so a
+// wider screen shows more of the log at the same text size
+const RAIL = 238;
+const SIDE = 458;
+function stage_units(fit: Fit): number {
+  if (fit.mode === "narrow") return 420;
+  const px = fit.px - RAIL - (fit.mode === "xl" ? SIDE : 0) - 4;
+  return Math.max(960, Math.min(1700, px));
 }
 
 function Tokens({ moves, lay, run, reduce }: { moves: Move[]; lay: Layout; run: number; reduce: boolean }) {
@@ -555,7 +571,9 @@ export default function Tour({ spec }: { spec: TourSpec }) {
   const [reduce, setReduce] = useState(true);
   const [selected, setSelected] = useState<number | undefined>();
   const box = useRef<HTMLDivElement>(null);
-  const mode = useMode(box);
+  const fit = useFit(box);
+  const mode: Mode = fit.mode === "narrow" ? "narrow" : "wide";
+  const units = stage_units(fit);
 
   const frame = all[index]!;
   const chapter = spec.chapters[frame.chapter]!;
@@ -563,7 +581,7 @@ export default function Tour({ spec }: { spec: TourSpec }) {
   const step = scene.steps[frame.step]!;
   const moves = step.moves ?? [];
   const { total } = schedule(moves);
-  const lay = useMemo(() => layout(mode, scene.nodes, frame.world), [mode, scene.nodes, frame.world]);
+  const lay = useMemo(() => layout(mode, scene.nodes, frame.world, units), [mode, scene.nodes, frame.world, units]);
   const code = useMemo(() => {
     let c = scene.code;
     for (let i = 0; i <= frame.step; i++) c = scene.steps[i]!.code ?? c;
@@ -630,13 +648,13 @@ export default function Tour({ spec }: { spec: TourSpec }) {
     <div
       ref={box}
       className={styles.tour}
-      data-mode={mode}
+      data-mode={fit.mode}
       onKeyDown={onKey}
       // the stage takes the arrow keys and space when it has focus
       tabIndex={-1}
     >
       <nav className={styles.chapters} aria-label="Chapters">
-        {mode === "wide" ? (
+        {mode !== "narrow" ? (
           <ol>
             {spec.chapters.map((c, i) => (
               <li key={c.id}>
@@ -684,6 +702,8 @@ export default function Tour({ spec }: { spec: TourSpec }) {
           </button>
         </header>
 
+        <div className={styles.body}>
+        <div className={styles.stageCol}>
         <div className={styles.stageWrap}>
           <Stage
             lay={lay}
@@ -728,7 +748,9 @@ export default function Tour({ spec }: { spec: TourSpec }) {
             {index - frame.chapter_start + 1} / {chapterFrames.length}
           </span>
         </div>
+        </div>
 
+        <div className={styles.side}>
         <section className={styles.narration} aria-live="polite">
           <h3>
             {scene.title}
@@ -777,6 +799,8 @@ export default function Tour({ spec }: { spec: TourSpec }) {
             <p className={styles.hint}>Tip: click an event in the log to see its metadata. Arrow keys step, space plays.</p>
           </div>
         </section>
+        </div>
+        </div>
       </div>
     </div>
   );

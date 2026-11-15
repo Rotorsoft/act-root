@@ -1,0 +1,17 @@
+.page {
+  width: 100%;
+  padding: 18px clamp(12px, 2vw, 32px) 32px;
+  background: var(--ifm-background-color);
+}
+.intro {
+  max-width: 980px;
+  margin-bottom: 8px;
+}
+.intro h1 {
+  margin: 0 0 6px;
+  font-size: clamp(1.6rem, 2.4vw, 2.2rem);
+}
+.intro p {
+  margin: 0;
+  color: var(--act-text-muted, var(--ifm-color-emphasis-700));
+}

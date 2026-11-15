@@ -1,7 +1,7 @@
 # Act framework tour: the script
 
 The storyboard behind the animated tour (`docs/src/tours/framework-tour.ts`, played by
-`docs/src/components/Tour`, hosted at `docs/docs/tour.mdx`). The subject is the framework:
+`docs/src/components/Tour`, hosted by the standalone page `docs/src/pages/tour.tsx`, at `/act-root/tour`). The subject is the framework:
 what each capability does, shown as what it does to the event store. The domain is a thin
 backdrop, mostly a small ticket desk cut down from `packages/wolfdesk`.
 
