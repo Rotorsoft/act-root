@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v2.1.13](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v2.1.12...@rotorsoft/act-v2.1.13) (2026-11-15)
+
+
+### Bug Fixes
+
+* **act:** check the poll frequency and every query limit where they enter ([#2541](https://github.com/Rotorsoft/act-root/issues/2541)) ([7837a18](https://github.com/Rotorsoft/act-root/commit/7837a181503a85242895e998670ceaf191901b0c))
+
 # [@rotorsoft/act-v2.1.12](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v2.1.11...@rotorsoft/act-v2.1.12) (2026-11-15)
 
 
