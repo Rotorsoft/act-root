@@ -1,4 +1,3 @@
-import { z } from "zod";
 import type { BroadcastChannel } from "../sse/broadcast.js";
 import {
   type BroadcastState,
@@ -116,57 +115,6 @@ export const DEFAULT_SSE_HEARTBEAT_MS = 30_000;
  * `_resync` rather than being dropped silently.
  */
 export const DEFAULT_SSE_MAX_PENDING_PER_CONNECTION = 256;
-
-/**
- * Zod schema for the numeric knobs on {@link SseOptions}. Defaults,
- * ranges, and (eventual) integer constraints live in one place — same
- * declarative-validation pattern the rest of the framework uses for
- * configuration shapes.
- *
- * @internal
- */
-const SseOptionsSchema = z.object({
-  maxConnections: z
-    .number()
-    .int()
-    .min(1)
-    .max(10_000)
-    .default(DEFAULT_SSE_MAX_CONNECTIONS),
-  heartbeatMs: z
-    .number()
-    .int()
-    .min(15_000)
-    .max(300_000)
-    .default(DEFAULT_SSE_HEARTBEAT_MS),
-  maxPendingPerConnection: z
-    .number()
-    .int()
-    .min(1)
-    .max(100_000)
-    .default(DEFAULT_SSE_MAX_PENDING_PER_CONNECTION),
-});
-
-/**
- * Validate and apply defaults to host-supplied {@link SseOptions}.
- *
- * Out-of-range values throw at the call site — each transport calls
- * this once at the start of `hono(...)` / `trpc(...)` so
- * misconfiguration surfaces at construction, not at first
- * connection.
- */
-export function resolveSseConfig(options: SseOptions): SseConfig {
-  const parsed = SseOptionsSchema.parse({
-    maxConnections: options.maxConnections,
-    heartbeatMs: options.heartbeatMs,
-    maxPendingPerConnection: options.maxPendingPerConnection,
-  });
-  return {
-    channel: options.channel,
-    maxConnections: parsed.maxConnections,
-    heartbeatMs: parsed.heartbeatMs,
-    maxPendingPerConnection: parsed.maxPendingPerConnection,
-  };
-}
 
 /**
  * Per-generator concurrent-open counter. Constructed once inside

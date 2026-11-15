@@ -17,4 +17,3 @@ Every input a caller hands in, in core or a satellite, is checked where it enter
 - **Types:** where a schema's output is a public type in `types/`, end it in `satisfies z.ZodType<…>` and add a field to both together. Schemas are never exported from an entry point.
 - **Defaults:** a shared or public default is a `DEFAULT_*` constant used in `.default(...)`; a public one lives in `types/act.ts`. A default only one schema uses may be a literal there.
 - Override Zod's message only where callers read the wording.
-- Public functions that predate this rule (`resolveAutocloseConfig`, act-http's `resolveSseConfig`) stay for semver. Nothing internal calls them.

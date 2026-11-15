@@ -1,31 +1,30 @@
 import { act, type State, sensitive, state } from "@rotorsoft/act";
 import { describe, expect, it } from "vitest";
 import { ZodError, z } from "zod";
+import { SseOptionsSchema } from "../../src/api/sse-options.js";
 import { sse_state_names } from "../../src/api/sse-states.js";
 import {
   DEFAULT_SSE_HEARTBEAT_MS,
   DEFAULT_SSE_MAX_CONNECTIONS,
   DEFAULT_SSE_MAX_PENDING_PER_CONNECTION,
   fireAndForget,
-  resolveSseConfig,
   runSseSubscription,
   SseConnectionCounter,
   type SseSubscriptionFrame,
 } from "../../src/api/sse-wiring.js";
 import { BroadcastChannel } from "../../src/sse/index.js";
 
-describe("resolveSseConfig", () => {
+describe("SseOptionsSchema", () => {
   const channel = new BroadcastChannel();
 
   it("applies defaults when knobs are omitted", () => {
-    const cfg = resolveSseConfig({ channel });
-    expect(cfg.channel).toBe(channel);
+    const cfg = SseOptionsSchema.parse({ channel });
     expect(cfg.maxConnections).toBe(DEFAULT_SSE_MAX_CONNECTIONS);
     expect(cfg.heartbeatMs).toBe(DEFAULT_SSE_HEARTBEAT_MS);
   });
 
   it("preserves caller-supplied knobs", () => {
-    const cfg = resolveSseConfig({
+    const cfg = SseOptionsSchema.parse({
       channel,
       maxConnections: 100,
       heartbeatMs: 60_000,
@@ -40,93 +39,102 @@ describe("resolveSseConfig", () => {
   // false: the backlog silently becomes unbounded again, which is the OOM
   // the knob exists to prevent.
   it("applies the maxPendingPerConnection default", () => {
-    expect(resolveSseConfig({ channel }).maxPendingPerConnection).toBe(
+    expect(SseOptionsSchema.parse({ channel }).maxPendingPerConnection).toBe(
       DEFAULT_SSE_MAX_PENDING_PER_CONNECTION
     );
   });
 
   it("preserves a caller-supplied maxPendingPerConnection", () => {
     expect(
-      resolveSseConfig({ channel, maxPendingPerConnection: 32 })
+      SseOptionsSchema.parse({ channel, maxPendingPerConnection: 32 })
         .maxPendingPerConnection
     ).toBe(32);
   });
 
   it("rejects maxPendingPerConnection below the floor", () => {
     expect(() =>
-      resolveSseConfig({ channel, maxPendingPerConnection: 0 })
+      SseOptionsSchema.parse({ channel, maxPendingPerConnection: 0 })
     ).toThrow(ZodError);
   });
 
   it("rejects maxPendingPerConnection above the ceiling", () => {
     expect(() =>
-      resolveSseConfig({ channel, maxPendingPerConnection: 100_001 })
+      SseOptionsSchema.parse({ channel, maxPendingPerConnection: 100_001 })
     ).toThrow(ZodError);
   });
 
   it("rejects a non-finite or fractional maxPendingPerConnection", () => {
     expect(() =>
-      resolveSseConfig({ channel, maxPendingPerConnection: Number.NaN })
+      SseOptionsSchema.parse({ channel, maxPendingPerConnection: Number.NaN })
     ).toThrow(ZodError);
     expect(() =>
-      resolveSseConfig({ channel, maxPendingPerConnection: 1.5 })
+      SseOptionsSchema.parse({ channel, maxPendingPerConnection: 1.5 })
     ).toThrow(ZodError);
   });
 
   // The docs promised `RangeError`; the code throws `ZodError`, which is the
   // framework-wide convention. Pinned so the two cannot drift again.
   it("throws ZodError, the documented type, for every out-of-range knob", () => {
-    expect(() => resolveSseConfig({ channel, maxConnections: 0 })).toThrow(
-      ZodError
-    );
-    expect(() => resolveSseConfig({ channel, heartbeatMs: 1 })).toThrow(
+    expect(() =>
+      SseOptionsSchema.parse({ channel, maxConnections: 0 })
+    ).toThrow(ZodError);
+    expect(() => SseOptionsSchema.parse({ channel, heartbeatMs: 1 })).toThrow(
       ZodError
     );
   });
 
   it("rejects maxConnections below the floor", () => {
-    expect(() => resolveSseConfig({ channel, maxConnections: 0 })).toThrow();
+    expect(() =>
+      SseOptionsSchema.parse({ channel, maxConnections: 0 })
+    ).toThrow();
   });
 
   it("rejects maxConnections above the ceiling", () => {
     expect(() =>
-      resolveSseConfig({ channel, maxConnections: 10_001 })
+      SseOptionsSchema.parse({ channel, maxConnections: 10_001 })
     ).toThrow();
   });
 
   it("rejects non-finite maxConnections (NaN/Infinity)", () => {
     expect(() =>
-      resolveSseConfig({ channel, maxConnections: Number.NaN })
+      SseOptionsSchema.parse({ channel, maxConnections: Number.NaN })
     ).toThrow();
     expect(() =>
-      resolveSseConfig({ channel, maxConnections: Number.POSITIVE_INFINITY })
+      SseOptionsSchema.parse({
+        channel,
+        maxConnections: Number.POSITIVE_INFINITY,
+      })
     ).toThrow();
   });
 
   it("rejects heartbeatMs below the floor", () => {
-    expect(() => resolveSseConfig({ channel, heartbeatMs: 14_999 })).toThrow();
+    expect(() =>
+      SseOptionsSchema.parse({ channel, heartbeatMs: 14_999 })
+    ).toThrow();
   });
 
   it("rejects heartbeatMs above the ceiling", () => {
-    expect(() => resolveSseConfig({ channel, heartbeatMs: 300_001 })).toThrow();
+    expect(() =>
+      SseOptionsSchema.parse({ channel, heartbeatMs: 300_001 })
+    ).toThrow();
   });
 
   it("rejects non-finite heartbeatMs", () => {
     expect(() =>
-      resolveSseConfig({ channel, heartbeatMs: Number.NaN })
+      SseOptionsSchema.parse({ channel, heartbeatMs: Number.NaN })
     ).toThrow();
   });
 
   it("rejects fractional maxConnections", () => {
     // 500.5 would let the counter admit 501 for a '500' cap.
     expect(() =>
-      resolveSseConfig({ channel, maxConnections: 500.5 })
+      SseOptionsSchema.parse({ channel, maxConnections: 500.5 })
     ).toThrow();
   });
 
   it("rejects fractional heartbeatMs", () => {
     expect(() =>
-      resolveSseConfig({ channel, heartbeatMs: 30_000.5 })
+      SseOptionsSchema.parse({ channel, heartbeatMs: 30_000.5 })
     ).toThrow();
   });
 });
