@@ -1,3 +1,10 @@
+# [@rotorsoft/act-sqlite-v2.1.2](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-sqlite-v2.1.1...@rotorsoft/act-sqlite-v2.1.2) (2026-11-15)
+
+
+### Bug Fixes
+
+* **act:** a crash caught by act's handlers exits with code 1 ([#2532](https://github.com/Rotorsoft/act-root/issues/2532)) ([024f9c7](https://github.com/Rotorsoft/act-root/commit/024f9c71fb4ae2498cfccf69cdd575083abdc7ad))
+
 # [@rotorsoft/act-sqlite-v2.1.1](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-sqlite-v2.1.0...@rotorsoft/act-sqlite-v2.1.1) (2026-11-15)
 
 # [@rotorsoft/act-sqlite-v2.1.0](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-sqlite-v2.0.2...@rotorsoft/act-sqlite-v2.1.0) (2026-11-12)
