@@ -1,3 +1,11 @@
+# [@rotorsoft/act-patch-v1.2.14](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-patch-v1.2.13...@rotorsoft/act-patch-v1.2.14) (2026-11-15)
+
+
+### Bug Fixes
+
+* **act-patch:** replace a non-object value instead of merging into it ([#2544](https://github.com/Rotorsoft/act-root/issues/2544)) ([39bc0d8](https://github.com/Rotorsoft/act-root/commit/39bc0d858cc570c150645dd7d045e8daa971d818)), closes [#2542](https://github.com/Rotorsoft/act-root/issues/2542)
+* **act-patch:** restore patch's docs; fold the option-refusal rows ([#2545](https://github.com/Rotorsoft/act-root/issues/2545)) ([f89a6e1](https://github.com/Rotorsoft/act-root/commit/f89a6e1c3102f8369dfb1105045b00e2f235dc64)), closes [#2544](https://github.com/Rotorsoft/act-root/issues/2544) [#2514](https://github.com/Rotorsoft/act-root/issues/2514) [#2519](https://github.com/Rotorsoft/act-root/issues/2519)
+
 # [@rotorsoft/act-patch-v1.2.13](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-patch-v1.2.12...@rotorsoft/act-patch-v1.2.13) (2026-11-07)
 
 
