@@ -1,3 +1,10 @@
+# [@rotorsoft/act-http-v2.1.6](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-http-v2.1.5...@rotorsoft/act-http-v2.1.6) (2026-11-15)
+
+
+### Bug Fixes
+
+* **act:** sensitive fields from the registry, no accidental exports ([#2537](https://github.com/Rotorsoft/act-root/issues/2537)) ([2996eba](https://github.com/Rotorsoft/act-root/commit/2996eba34eb16d581abe830a0ed8e19766325679))
+
 # [@rotorsoft/act-http-v2.1.5](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-http-v2.1.4...@rotorsoft/act-http-v2.1.5) (2026-11-15)
 
 # [@rotorsoft/act-http-v2.1.4](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-http-v2.1.3...@rotorsoft/act-http-v2.1.4) (2026-11-15)
