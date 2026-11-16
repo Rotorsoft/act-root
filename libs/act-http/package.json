@@ -95,13 +95,13 @@
     "build": "pnpm clean && tsup && pnpm types"
   },
   "peerDependencies": {
-    "@hono/node-server": "^2.1.6",
+    "@hono/node-server": "^2.1.8",
     "@rotorsoft/act": "workspace:^",
     "@rotorsoft/act-ops": "workspace:^",
     "@trpc/server": ">=11.24.0",
     "express": "^5.3.0",
     "fastify": "^5.12.8",
-    "hono": "^4.13.16"
+    "hono": "^4.13.18"
   },
   "peerDependenciesMeta": {
     "@rotorsoft/act-ops": {
@@ -127,14 +127,14 @@
     "@rotorsoft/act-patch": "workspace:^"
   },
   "devDependencies": {
-    "@hono/node-server": "^2.1.6",
+    "@hono/node-server": "^2.1.8",
     "@hono/zod-validator": "^0.9.1",
     "@rotorsoft/act-ops": "workspace:^",
     "@trpc/server": "^11.24.0",
     "@types/express": "^5.0.6",
     "express": "^5.3.0",
     "fastify": "^5.12.8",
-    "hono": "^4.13.16",
+    "hono": "^4.13.18",
     "zod": "^4.6.7"
   }
 }
