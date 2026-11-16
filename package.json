@@ -60,7 +60,7 @@
     "@rotorsoft/act": "workspace:^"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.6.5",
+    "@biomejs/biome": "^2.6.7",
     "@commitlint/cli": "^21.2.4",
     "@commitlint/config-conventional": "^21.2.4",
     "@fast-check/vitest": "^0.5.0",
@@ -69,14 +69,14 @@
     "@semantic-release/commit-analyzer": "^13.0.1",
     "@semantic-release/exec": "^7.1.0",
     "@semantic-release/git": "^11.0.1",
-    "@semantic-release/github": "^12.0.10",
+    "@semantic-release/github": "^12.0.11",
     "@semantic-release/npm": "^13.2.0",
     "@semantic-release/release-notes-generator": "^14.1.1",
     "@types/chance": "^1.1.8",
     "@types/node": "^22.20.5",
     "@vitest/coverage-v8": "^5.1.0",
     "chance": "^1.1.13",
-    "concurrently": "^10.0.6",
+    "concurrently": "^10.0.7",
     "fast-check": "^4.10.2",
     "lint-staged": "^17.6.0",
     "semantic-release": "^25.0.9",
@@ -85,7 +85,7 @@
     "tsup": "^9.0.0",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",
-    "vite": "^8.3.6",
+    "vite": "^8.3.8",
     "vitest": "^5.1.0"
   },
   "simple-git-hooks": {
