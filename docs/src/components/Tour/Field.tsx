@@ -124,7 +124,7 @@ export default function Field({
     const W = size.w - G - 6;
     const H = size.h - 8;
     // the largest pitch that fits every id in the box, kept small so it reads as one log
-    let pitch = Math.min(9, Math.sqrt((W * H) / n));
+    let pitch = Math.min(18, Math.sqrt((W * H) / n));
     let cols = Math.max(1, Math.floor(W / pitch));
     while (Math.ceil(n / cols) * pitch > H && pitch > 2) {
       pitch -= 0.25;

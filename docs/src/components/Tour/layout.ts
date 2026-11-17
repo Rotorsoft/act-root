@@ -78,6 +78,10 @@ export type StoreBox = {
   field: Box;
   legend: Box;
   cells: { cell: Cell; box: Box }[];
+  /** where the lens skips ids: a marker between two cells that aren't adjacent */
+  gaps: { box: Box; from: number; to: number }[];
+  /** the cells' scale: few cells grow to use the room */
+  scale: number;
   tail: Box;
   per_row: number;
   /** the global-id axis every subscription track shares */
@@ -266,7 +270,8 @@ function app_layout(
           h: CHIP_H,
         },
       });
-    layer_h = 20 + CHIP_H + 8;
+    // a row of its own for a refusal note, under the stages
+    layer_h = 20 + CHIP_H + 8 + 20;
   }
   const layer_box: Box = {
     x: x + pad - 4,
@@ -519,7 +524,9 @@ export function layout(
   world: World,
   app: AppSpec,
   layer: string[],
-  units = 1000
+  units = 1000,
+  /** the stage's height in units on a wide screen: the app and the store fill it */
+  room = 0
 ): Layout {
   const narrow = mode === "narrow";
   const width = narrow ? 420 : units;
@@ -530,7 +537,7 @@ export function layout(
   const L = narrow ? width - pad * 2 : 84;
   const A = narrow
     ? width - pad * 2
-    : Math.round((width - pad * 2 - L - gap * 2) * 0.44);
+    : Math.round((width - pad * 2 - L - gap * 2) * 0.4);
   const S = narrow ? width - pad * 2 : width - pad * 2 - L - A - gap * 2;
   const lx = pad;
   const ax = narrow ? pad : lx + L + gap;
@@ -586,99 +593,177 @@ export function layout(
       ty += h + 10;
     }
 
-  // the stores
-  let sy = narrow ? appl.box.y + appl.box.h + 16 : 8;
-  const stores: StoreBox[] = world.stores.map((store) => {
-    const top = sy;
-    sy += narrow ? 42 : 28;
-    // a commit the version guard turned back gets a row of its own at the store's entry edge
-    let bounce_row: Box | undefined;
-    if (store.ghost && !narrow) {
-      bounce_row = { x: sx, y: sy, w: Math.min(S, 400), h: 18 };
-      sy += 24;
-    }
-    // a small store gets only a strip; the room goes to the cells
-    const field_h =
-      store.next_id < 300
-        ? 24
-        : view === "macro"
-          ? Math.round(Math.max(140, Math.min(300, S * 0.34)))
-          : 48;
-    const field: Box = { x: sx, y: sy, w: S, h: field_h };
-    sy += field_h + 4;
-    const legend: Box = { x: sx, y: sy, w: S, h: 0 };
-    sy += 6;
-
-    // the detailed cells: the lens on the field; at scale only the newest row
-    const cell = { w: 84, h: 46 };
-    const cg = 6;
-    const per_row = Math.max(1, Math.floor((S + cg) / (cell.w + cg)));
-    const shown = view === "macro" ? store.cells.slice(-per_row) : store.cells;
-    const slots = shown.length;
-    const place = (i: number): Box => ({
-      x: sx + (i % per_row) * (cell.w + cg),
-      y: sy + 12 + Math.floor(i / per_row) * (cell.h + 20),
-      w: cell.w,
-      h: cell.h,
-    });
-    const cells = shown.map((c, i) => ({ cell: c, box: place(i) }));
-    const tail = place(shown.length);
-    if (slots) sy += Math.ceil(slots / per_row) * (cell.h + 20) + 4;
-
-    // subscriptions: grouped by lane, a header row, each with a track on the id axis
-    const axis = { x: sx, w: S, max: Math.max(1, store.next_id - 1) };
-    const own = world.targets.filter((t) => t.store === store.name);
-    const lanes: LaneGroup[] = [];
-    let checkpoint: Box | undefined;
-    let subs_head: Box | undefined;
-    let cols: Box | undefined;
-    if (own.length) {
-      // minimal: the correlate checkpoint, then one labelled track per subscription
-      checkpoint = { x: sx, y: sy, w: S, h: 18 };
-      sy += 22;
-      for (const lane of [...new Set(own.map((t) => t.lane))]) {
-        const head: Box = { x: sx, y: sy, w: S, h: 0 };
-        const rows: SubRow[] = [];
-        const rh = 13;
-        for (const target of own.filter((t) => t.lane === lane)) {
-          rows.push({
-            target,
-            box: { x: sx, y: sy, w: S, h: rh },
-            track: { x: sx, y: sy + rh, w: S, h: TRACK },
-          });
-          sy += rh + TRACK + 5;
-        }
-        lanes.push({
-          lane,
-          budget: app.lanes?.find((l) => l.name === lane)?.budget,
-          head,
-          rows,
-        });
+  // the stores; on a wide stage a single store fills the height, its content centered
+  const build = (off: number, extra: number, cells_room = 0) => {
+    let sy = narrow ? appl.box.y + appl.box.h + 16 : 8;
+    const stores: StoreBox[] = world.stores.map((store) => {
+      const top = sy;
+      sy += narrow ? 42 : 28;
+      sy += off;
+      // a commit the version guard turned back gets a row of its own at the store's entry edge
+      let bounce_row: Box | undefined;
+      if (store.ghost && !narrow) {
+        bounce_row = { x: sx, y: sy, w: Math.min(S, 400), h: 18 };
+        sy += 24;
       }
-      sy += 2;
+      // a small store gets only a strip; the room goes to the cells
+      const field_h =
+        store.next_id < 300
+          ? 24
+          : view === "macro"
+            ? Math.round(Math.max(140, Math.min(300, S * 0.34))) + extra
+            : 48;
+      const field: Box = { x: sx, y: sy, w: S, h: field_h };
+      sy += field_h + 4;
+      const legend: Box = { x: sx, y: sy, w: S, h: 0 };
+      sy += 6;
+
+      // the detailed cells: the lens on the field; at scale only the newest row.
+      // A gap marker stands between two cells whose ids are not adjacent.
+      const base_w = 84;
+      const cg = 6;
+      const base_row = Math.max(1, Math.floor((S + cg) / (base_w + cg)));
+      const pick =
+        view === "macro"
+          ? store.cells.slice(-Math.max(1, base_row - 1))
+          : store.cells;
+      const seq: ({ cell: Cell } | { gap: [number, number] })[] = [];
+      for (const [i, c] of pick.entries()) {
+        const prev = pick[i - 1];
+        if (prev && !prev.leaving && !c.leaving && c.id > prev.id + 1)
+          seq.push({ gap: [prev.id + 1, c.id - 1] });
+        seq.push({ cell: c });
+      }
+      if (view === "macro" && seq.length >= base_row)
+        seq.splice(0, seq.length - base_row + 1);
+      // few cells grow into the stage's spare room: the largest scale whose rows still fit
+      let k = 1;
+      if (!narrow && view !== "macro" && cells_room > 0)
+        for (let t = 1.6; t > 1.01; t -= 0.1) {
+          const pr = Math.max(1, Math.floor((S + cg) / (base_w * t + cg)));
+          if (Math.ceil((seq.length + 1) / pr) * (46 * t + 20) <= cells_room) {
+            k = t;
+            break;
+          }
+        }
+      const cell = { w: base_w * k, h: 46 * k };
+      const per_row = Math.max(1, Math.floor((S + cg) / (cell.w + cg)));
+      const slots = seq.length;
+      const place = (i: number): Box => ({
+        x: sx + (i % per_row) * (cell.w + cg),
+        y: sy + 12 + Math.floor(i / per_row) * (cell.h + 20),
+        w: cell.w,
+        h: cell.h,
+      });
+      const cells: StoreBox["cells"] = [];
+      const gaps: StoreBox["gaps"] = [];
+      for (const [i, e] of seq.entries()) {
+        if ("cell" in e) cells.push({ cell: e.cell, box: place(i) });
+        else gaps.push({ box: place(i), from: e.gap[0], to: e.gap[1] });
+      }
+      const tail = place(slots);
+      if (slots) sy += Math.ceil((slots + 1) / per_row) * (cell.h + 20) + 4;
+
+      // subscriptions: grouped by lane, a header row, each with a track on the id axis
+      const axis = { x: sx, w: S, max: Math.max(1, store.next_id - 1) };
+      const own = world.targets.filter((t) => t.store === store.name);
+      const lanes: LaneGroup[] = [];
+      let checkpoint: Box | undefined;
+      let subs_head: Box | undefined;
+      let cols: Box | undefined;
+      if (own.length) {
+        // minimal: the correlate checkpoint, then one labelled track per subscription
+        checkpoint = { x: sx, y: sy, w: S, h: 18 };
+        sy += 22;
+        for (const lane of [...new Set(own.map((t) => t.lane))]) {
+          const head: Box = { x: sx, y: sy, w: S, h: 0 };
+          const rows: SubRow[] = [];
+          const rh = 13;
+          for (const target of own.filter((t) => t.lane === lane)) {
+            rows.push({
+              target,
+              box: { x: sx, y: sy, w: S, h: rh },
+              track: { x: sx, y: sy + rh, w: S, h: TRACK },
+            });
+            sy += rh + TRACK + 5;
+          }
+          lanes.push({
+            lane,
+            budget: app.lanes?.find((l) => l.name === lane)?.budget,
+            head,
+            rows,
+          });
+        }
+        sy += 2;
+      }
+      const box: Box = { x: sx - 8, y: top, w: S + 16, h: sy - top + off };
+      sy += 12 + off;
+      return {
+        store,
+        box,
+        field,
+        legend,
+        cells,
+        gaps,
+        scale: k,
+        tail,
+        per_row,
+        axis,
+        checkpoint,
+        lanes,
+        subs_head,
+        cols,
+        ...(store.ghost && {
+          bounce: narrow
+            ? { x: sx + S - 132, y: top + 4, w: 132, h: 46 }
+            : bounce_row!,
+        }),
+      };
+    });
+    return { stores, sy };
+  };
+  let { stores, sy } = build(0, 0);
+  const natural = Math.max(sy, appl.box.y + appl.box.h + 12, ty, ly);
+  if (!narrow && room > natural) {
+    const spare = room - natural;
+    if (world.stores.length === 1) {
+      const macro = view === "macro" && (world.stores[0]?.next_id ?? 0) >= 300;
+      if (macro) ({ stores, sy } = build(0, Math.floor(spare)));
+      else {
+        // the cells grow into the spare room, then what is left centers the content
+        const sb = stores[0]!;
+        const rows = Math.ceil(
+          (sb.cells.length + sb.gaps.length + 1) / sb.per_row
+        );
+        ({ stores, sy } = build(0, 0, rows * 66 + spare * 0.85));
+        const left = Math.max(0, room - 12 - sy);
+        ({ stores, sy } = build(
+          Math.floor(left / 2),
+          0,
+          rows * 66 + spare * 0.85
+        ));
+      }
     }
-    const box: Box = { x: sx - 8, y: top, w: S + 16, h: sy - top };
-    sy += 12;
-    return {
-      store,
-      box,
-      field,
-      legend,
-      cells,
-      tail,
-      per_row,
-      axis,
-      checkpoint,
-      lanes,
-      subs_head,
-      cols,
-      ...(store.ghost && {
-        bounce: narrow
-          ? { x: sx + S - 132, y: top + 4, w: 132, h: 46 }
-          : bounce_row!,
-      }),
-    };
-  });
+    // both centers run the stage's full height
+    const bottom = room - 12;
+    for (const sb of stores.length === 1 ? stores : [])
+      sb.box.h = bottom - sb.box.y;
+    const app_spare = bottom - (appl.box.y + appl.box.h);
+    if (app_spare > 40) {
+      const moved = app_layout(
+        app,
+        nodes,
+        world,
+        ax,
+        8 + Math.floor(app_spare / 2),
+        A,
+        layer,
+        narrow
+      );
+      Object.assign(appl, moved);
+      appl.box = { ...moved.box, y: 8, h: bottom - 8 };
+    } else appl.box.h = Math.max(appl.box.h, bottom - appl.box.y);
+  }
 
   if (narrow)
     for (const table of world.tables) {
@@ -687,8 +772,9 @@ export function layout(
       sy += h + 10;
     }
 
-  // room at the bottom for the captions
-  const height = Math.max(sy, appl.box.y + appl.box.h, ty, ly) + 104;
+  const height = narrow
+    ? Math.max(sy, appl.box.y + appl.box.h, ty, ly) + 8
+    : Math.max(room, natural, sy);
 
   const center = (b: Box): Pt => ({ x: b.x + b.w / 2, y: b.y + b.h / 2 });
   const chip = (kind: Chip["kind"], name: string) =>
@@ -788,30 +874,183 @@ export function layout(
   const pipe_start = () => center(appl.layer[0]!.box);
   const pipe_end = () => center(appl.layer[appl.layer.length - 1]!.box);
 
-  // the token's path: in at `app.do`, along the action layer, out through the commit port
+  // the box an anchor sits in, so a path can meet it at an edge
+  const box_of = (a: Anchor): Box | undefined => {
+    if (a === "gate") return appl.gate;
+    if (a.startsWith("cell:")) {
+      const uid = world.refs[a.slice(5)];
+      for (const s of stores) {
+        const c = s.cells.find((x) => x.cell.uid === uid);
+        if (c) return c.box;
+      }
+      return stores[0]?.cells.length ? stores[0].tail : undefined;
+    }
+    if (a === "log" || a.startsWith("log:")) {
+      const s =
+        a === "log"
+          ? stores[0]
+          : stores.find((x) => x.store.name === a.slice(4));
+      return s?.cells.length ? s.tail : undefined;
+    }
+    if (a.startsWith("table:"))
+      return tables.find((x) => x.table.name === a.slice(6))?.box;
+    const caller = callers.find((c) => c.node.id === a);
+    if (caller) return caller.box;
+    const node = nodes.find((n) => n.id === a);
+    if (!node) return undefined;
+    if (node.kind === "state")
+      return (
+        appl.cards.find((c) => c.node.id === a)?.box ?? state_box(node)?.box
+      );
+    const c = chip_of(a);
+    return c && "box" in c ? (c as Chip).box : undefined;
+  };
+
+  // the token's path follows the drawing and never cuts across it: into the app at
+  // app.do, along the action layer, out through the commit port, along the link,
+  // in at the store's entry edge, then down its inner margin to where it lands
   const route = (from: Anchor, to: Anchor): Pt[] => {
     const a = anchor(from);
     const b = anchor(to);
     if (!a || !b) return [];
     const ra = region(from);
     const rb = region(to);
-    const out: Pt[] = [a];
+    const ab = box_of(from);
+    const bb = box_of(to);
     const has_layer = appl.layer.length > 0;
-    if (ra === "left" && rb === "app" && (is_action(to) || is_state(to)))
-      out.push(center(appl.gate));
-    if (ra === "left" && rb === "store")
-      out.push({ x: appl.box.x, y: a.y }, appl.port);
-    // a commit leaves along the pipe: through every stage, then the port
-    if (ra === "app" && rb === "store") {
-      if (has_layer && (is_action(from) || is_state(from)))
-        out.push(pipe_start(), pipe_end());
-      out.push(appl.port);
+    const sb =
+      stores.find((x) => x.box.x <= b.x && b.x <= x.box.x + x.box.w) ??
+      stores.find((x) => x.box.x <= a.x && a.x <= x.box.x + x.box.w) ??
+      stores[0];
+    const gx = appl.box.x - gap / 2; // the lane between the actors and the app
+    const lx2 = appl.box.x + 3; // the app's left inner lane
+    const rx = appl.box.x + appl.box.w - 3; // the app's right inner lane
+    const sxm = sb ? sb.box.x + 4 : appl.box.x + appl.box.w + gap; // the store's inner margin
+    const top_lane = 3;
+    const port = appl.port;
+    const out: Pt[] = [];
+    // into the store: at the entry edge, down the inner margin, then over the row it lands in
+    const into_store = (bx: Box | undefined, y_in: number) => {
+      out.push({ x: sxm, y: y_in });
+      if (bx) {
+        const lane_y = bx.y - 7;
+        out.push(
+          { x: sxm, y: lane_y },
+          { x: bx.x + bx.w / 2, y: lane_y },
+          { x: bx.x + bx.w / 2, y: bx.y }
+        );
+      } else out.push({ x: sxm, y: b.y }, b);
+    };
+    // out of the store: up its inner margin to the link
+    const out_of_store = (y_out: number) => {
+      if (ab) {
+        const lane_y = ab.y - 7;
+        out.push(
+          { x: ab.x + ab.w / 2, y: ab.y },
+          { x: ab.x + ab.w / 2, y: lane_y },
+          { x: sxm, y: lane_y }
+        );
+      } else out.push(a, { x: sxm, y: a.y });
+      out.push({ x: sxm, y: y_out });
+    };
+    // an app element reached from its left lane, or left from below
+    const app_in = (bx: Box | undefined, p: Pt) => {
+      if (!bx) return out.push({ x: lx2, y: p.y }, p);
+      const lane_y = bx.y + bx.h + 4;
+      out.push(
+        { x: lx2, y: lane_y },
+        { x: bx.x + Math.min(14, bx.w / 2), y: lane_y },
+        { x: bx.x + Math.min(14, bx.w / 2), y: bx.y + bx.h }
+      );
+    };
+    const app_out_right = (bx: Box | undefined, p: Pt) => {
+      const lane_y = bx ? bx.y + bx.h + 4 : p.y;
+      if (bx)
+        out.push(
+          { x: bx.x + Math.min(14, bx.w / 2), y: bx.y + bx.h },
+          { x: bx.x + Math.min(14, bx.w / 2), y: lane_y }
+        );
+      else out.push(p);
+      out.push({ x: rx, y: lane_y });
+    };
+    const from_pipe =
+      from === "gate" ||
+      from === "port" ||
+      from.startsWith("layer:") ||
+      is_action(from) ||
+      is_state(from);
+
+    if (ra === "left" && rb === "app") {
+      out.push(
+        a,
+        { x: gx, y: a.y },
+        { x: gx, y: center(appl.gate).y },
+        { x: appl.gate.x, y: center(appl.gate).y }
+      );
+      if (to !== "gate") {
+        out.push({ x: lx2, y: center(appl.gate).y });
+        if (to.startsWith("layer:") || to === "port")
+          out.push({ x: lx2, y: pipe_start().y }, pipe_start(), b);
+        else app_in(bb, b);
+      }
+    } else if (ra === "app" && rb === "store") {
+      if (from_pipe && has_layer) out.push(pipe_start(), pipe_end(), port);
+      else {
+        app_out_right(ab, a);
+        out.push({ x: rx, y: port.y }, port);
+      }
+      out.push({ x: sb ? sb.box.x : port.x + gap, y: port.y - 5 });
+      into_store(bb, port.y - 5);
+    } else if (ra === "store" && rb === "app") {
+      out_of_store(port.y + 6);
+      out.push({ x: port.x, y: port.y + 6 }, { x: rx, y: port.y + 6 });
+      if (bb) {
+        const lane_y = bb.y + bb.h + 4;
+        out.push(
+          { x: rx, y: lane_y },
+          { x: bb.x + Math.min(14, bb.w / 2), y: lane_y },
+          { x: bb.x + Math.min(14, bb.w / 2), y: bb.y + bb.h }
+        );
+      } else out.push({ x: rx, y: b.y }, b);
+    } else if (ra === "left" && rb === "store") {
+      // around the app, over its top
+      out.push(
+        a,
+        { x: gx, y: a.y },
+        { x: gx, y: top_lane },
+        { x: sxm, y: top_lane }
+      );
+      into_store(bb, top_lane);
+    } else if (ra === "store" && rb === "left") {
+      out_of_store(top_lane);
+      out.push({ x: gx, y: top_lane }, { x: gx, y: b.y }, b);
+    } else if (ra === "app" && rb === "left") {
+      const lane_y = ab ? ab.y + ab.h + 4 : a.y;
+      if (ab)
+        out.push(
+          { x: ab.x + Math.min(14, ab.w / 2), y: ab.y + ab.h },
+          { x: ab.x + Math.min(14, ab.w / 2), y: lane_y }
+        );
+      else out.push(a);
+      out.push(
+        { x: lx2, y: lane_y },
+        { x: gx, y: lane_y },
+        { x: gx, y: b.y },
+        b
+      );
+    } else {
+      // within one region: an elbow, never a diagonal
+      out.push(a);
+      if (Math.abs(a.y - b.y) > 2 && Math.abs(a.x - b.x) > 2) {
+        const mx = (a.x + b.x) / 2;
+        out.push({ x: mx, y: a.y }, { x: mx, y: b.y });
+      }
+      out.push(b);
     }
-    if (ra === "store" && rb === "app") out.push(appl.port);
-    if (ra === "store" && rb === "left")
-      out.push(appl.port, { x: appl.box.x, y: b.y });
-    out.push(b);
-    return out;
+    // drop repeated points
+    return out.filter(
+      (p, i) => i === 0 || p.x !== out[i - 1]!.x || p.y !== out[i - 1]!.y
+    );
   };
 
   const chip_of = (id: string) => {

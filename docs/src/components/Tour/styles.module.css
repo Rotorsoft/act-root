@@ -1411,35 +1411,28 @@
   letter-spacing: 0;
 }
 
-/* captions: large, centered at the bottom of the stage, on a translucent band */
+/* captions: a band of their own under the stage, two lines at most, plain words */
 .captions {
-  position: absolute;
-  z-index: 8;
-  left: 50%;
-  bottom: 14px;
-  transform: translateX(-50%);
-  width: min(92%, 980px);
-  pointer-events: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 76px;
+  padding: 4px 16px;
+  border-top: 1px solid var(--act-border, var(--ifm-color-emphasis-200));
+  background: color-mix(in srgb, var(--act-surface-2, #f3f4f7) 70%, transparent);
   text-align: center;
 }
 .captions p {
-  display: inline;
   margin: 0;
-  padding: 6px 14px;
-  border-radius: 10px;
-  background: rgba(10, 14, 22, 0.78);
-  color: #f4f6fa;
-  font-size: clamp(0.95rem, 1.25vw, 1.22rem);
+  max-width: 1200px;
+  font-size: clamp(1rem, 1.3vw, 1.3rem);
   font-weight: 500;
-  line-height: 1.75;
-  box-decoration-break: clone;
-  -webkit-box-decoration-break: clone;
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
   animation: captionIn 0.35s var(--t-ease);
-}
-.captions code {
-  background: rgba(255, 255, 255, 0.14);
-  color: inherit;
-  border: 0;
 }
 @keyframes captionIn {
   from {
@@ -1619,4 +1612,21 @@
 .cell.active,
 .cell.selected {
   --s: var(--dg-action) !important;
+}
+
+/* where the lens skips ids */
+.gap rect {
+  fill: none;
+  stroke: var(--dg-line);
+  stroke-dasharray: 3 3;
+  opacity: 0.6;
+}
+.gap text {
+  text-anchor: middle;
+  font-size: 13px;
+  fill: var(--act-text-muted, #6b7486) !important;
+}
+.gap .gapIds {
+  font-family: var(--ifm-font-family-monospace);
+  font-size: 9.5px;
 }

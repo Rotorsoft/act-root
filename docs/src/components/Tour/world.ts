@@ -1197,8 +1197,30 @@ export function sentences(text: string): string[] {
     }
   }
   out.push(text.slice(start).trim());
-  return out.filter(Boolean);
+  // a long sentence splits at the clause nearest its middle, so a caption keeps to two lines
+  const fit = (t: string): string[] => {
+    if (t.length <= MAX_CAPTION) return [t];
+    let at = -1;
+    for (const m of t.matchAll(/[;:,] /g)) {
+      const i = m.index ?? -1;
+      const in_code = (t.slice(0, i).match(/`/g)?.length ?? 0) % 2 === 1;
+      if (
+        !in_code &&
+        i > 30 &&
+        t.length - i > 30 &&
+        (at < 0 || Math.abs(i - t.length / 2) < Math.abs(at - t.length / 2))
+      )
+        at = i;
+    }
+    return at < 0
+      ? [t]
+      : [...fit(t.slice(0, at + 1).trim()), ...fit(t.slice(at + 2).trim())];
+  };
+  return out.filter(Boolean).flatMap(fit);
 }
+
+/** The longest caption, in characters, that keeps to two lines on the band. */
+export const MAX_CAPTION = 170;
 
 /**
  * The words to say for a caption: no symbols read aloud. An id is "event

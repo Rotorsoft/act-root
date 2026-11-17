@@ -34,6 +34,11 @@ export type { TourSpec } from "./types";
 
 const MOVE_MS = 820;
 const TRAIL = [1, 2, 3];
+const NAVBAR_PX = 60;
+const CAPTION_PX = 76;
+const BAR_PX = 50;
+/** every `</>` icon sits this far in from its element's top-right corner */
+const TIP = 10;
 
 // the stage names a narrow pill shows; the full name is its title
 const SHORT: Record<string, string> = { preconditions: "rules", "state check": "check" };
@@ -46,6 +51,18 @@ const useBrowserLayoutEffect = typeof window === "undefined" ? useEffect : useLa
 function rich(text: string): ReactNode[] {
   return text.split(/(`[^`]+`|\*\*[^*]+\*\*)/).map((part, i) => {
     if (part.startsWith("`")) return <code key={i}>{part.slice(1, -1)}</code>;
+    if (part.startsWith("**")) return <b key={i}>{part.slice(2, -2)}</b>;
+    return part;
+  });
+}
+
+/** A caption in plain words: code spans lose their chips (a call keeps its name), bold stays. */
+function plain(text: string): ReactNode[] {
+  return text.split(/(`[^`]+`|\*\*[^*]+\*\*)/).map((part, i) => {
+    if (part.startsWith("`")) {
+      const code = part.slice(1, -1);
+      return code.includes("(") ? code.slice(0, code.indexOf("(")) : code;
+    }
     if (part.startsWith("**")) return <b key={i}>{part.slice(2, -2)}</b>;
     return part;
   });
@@ -65,32 +82,34 @@ function schedule(moves: Move[]): { starts: number[]; total: number } {
 }
 
 
-type Fit = { mode: Mode; px: number };
+type Fit = { mode: Mode; px: number; vh: number };
 function useFit(ref: React.RefObject<HTMLElement | null>): Fit {
-  const [fit, setFit] = useState<Fit>({ mode: "wide", px: 1280 });
+  const [fit, setFit] = useState<Fit>({ mode: "wide", px: 1280, vh: 800 });
   useBrowserLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
-    const measure = () => setFit({ mode: el.clientWidth < 760 ? "narrow" : "wide", px: el.clientWidth });
+    const measure = () => setFit({ mode: el.clientWidth < 760 ? "narrow" : "wide", px: el.clientWidth, vh: window.innerHeight });
     measure();
     const ro = new ResizeObserver(measure);
     ro.observe(el);
-    return () => ro.disconnect();
+    window.addEventListener("resize", measure);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", measure);
+    };
   }, [ref]);
   return fit;
 }
 
-/** The token's path, sampled with soft bows so it reads as one route. */
+/** The token's path, sampled along its straight legs. */
 function path_frames(points: { x: number; y: number }[]): Keyframe[] {
   const pts: { x: number; y: number }[] = [];
   for (let i = 0; i < points.length - 1; i++) {
     const a = points[i]!;
     const b = points[i + 1]!;
-    const len = Math.hypot(b.x - a.x, b.y - a.y) || 1;
     for (let k = 0; k < 10; k++) {
       const t = k / 10;
-      const bow = Math.min(26, len * 0.1) * Math.sin(Math.PI * t);
-      pts.push({ x: a.x + (b.x - a.x) * t - ((b.y - a.y) / len) * bow, y: a.y + (b.y - a.y) * t + ((b.x - a.x) / len) * bow });
+      pts.push({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
     }
   }
   pts.push(points[points.length - 1]!);
@@ -203,6 +222,7 @@ function SvgTip({ x, y, id, content, open }: { x: number; y: number; id: string;
 function CellView({
   cell,
   box,
+  scale = 1,
   color,
   flag,
   dim,
@@ -213,6 +233,7 @@ function CellView({
 }: {
   cell: Cell;
   box: Box;
+  scale?: number;
   color: number;
   flag?: { text: string; tone?: string };
   dim: boolean;
@@ -224,7 +245,7 @@ function CellView({
   const state = cell.leaving ? styles.leaving : cell.fresh ? styles.fresh : cell.moved ? styles.moved : "";
   const label = cell.kind === "event" ? cell.name : cell.kind === "snapshot" ? "◆ snapshot" : "⊘ tombstone";
   return (
-    <g className={styles.cellPos} style={{ transform: `translate(${box.x}px, ${box.y}px)` }}>
+    <g className={styles.cellPos} style={{ transform: `translate(${box.x}px, ${box.y}px) scale(${scale})` }}>
       {/* biome-ignore lint/a11y/useSemanticElements: an SVG cell cannot be a <button> */}
       <g
         className={`${styles.cell} ${state} ${dim ? styles.dim : ""} ${selected ? styles.selected : ""} ${active ? styles.active : ""} ${off ? styles.off : ""}`}
@@ -423,7 +444,7 @@ function Stage({
         <text x={a.box.x + 12} y={a.box.y + 20} className={styles.appTitle}>
           Act app
         </text>
-        <SvgTip x={a.box.x + 80} y={a.box.y + 15} id="app" content={{ title: "How the app is built", code: a.title }} open={tip} />
+        <SvgTip x={a.box.x + a.box.w - TIP} y={a.box.y + TIP} id="app" content={{ title: "How the app is built", code: a.title }} open={tip} />
 
         {/* the action layer: one ordered pipe, then the commit port */}
         <g className={area(layer_on)}>
@@ -479,8 +500,8 @@ function Stage({
             const x = Math.min(s.box.x, a.layer_box.x + a.layer_box.w - tw);
             return (
               <g className={`${styles.stopNote} ${styles.fresh}`}>
-                <rect x={x} y={a.layer_box.y + a.layer_box.h + 3} width={tw} height={16} rx={8} />
-                <text x={x + 8} y={a.layer_box.y + a.layer_box.h + 14}>
+                <rect x={x} y={a.layer_box.y + a.layer_box.h - 20} width={tw} height={16} rx={8} />
+                <text x={x + 8} y={a.layer_box.y + a.layer_box.h - 9}>
                   {text}
                 </text>
               </g>
@@ -504,7 +525,7 @@ function Stage({
               slice · {s.name}
             </text>
             {s.code && (
-              <SvgTip x={s.box.x + s.box.w - 12} y={s.box.y + 10} id={`slice:${s.name}`} content={{ title: `slice ${s.name}`, code: s.code }} open={tip} />
+              <SvgTip x={s.box.x + s.box.w - TIP} y={s.box.y + TIP} id={`slice:${s.name}`} content={{ title: `slice ${s.name}`, code: s.code }} open={tip} />
             )}
           </g>
         ))}
@@ -527,16 +548,24 @@ function Stage({
           return (
             <g key={`${st.name}-${st.box.y}`} className={`${styles.stateBox} ${on ? styles.focus : ""} ${fresh ? styles.fresh : ""} ${lit && !on ? styles.soft : ""}`}>
               <rect x={st.box.x} y={st.box.y} width={st.box.w} height={st.box.h} rx={8} />
-              <text x={st.box.x + 8} y={st.box.y + 15} className={styles.cardTitle}>
-                {st.title ?? st.name}
-                {st.sub && <tspan className={styles.appSub}> {trim(st.sub, Math.max(4, Math.floor(st.box.w / 6.4) - st.name.length - 8))}</tspan>}
-              </text>
+              {(() => {
+                // the title shares its line with the version and the code icon, never wraps under them
+                const room = Math.floor((st.box.w - 16 - (st.code ? TIP * 2 + 4 : 0) - (st.version !== undefined ? 24 : 0)) / 6.6);
+                const title = trim(st.title ?? st.name, room);
+                const left = room - title.length - 1;
+                return (
+                  <text x={st.box.x + 8} y={st.box.y + 15} className={styles.cardTitle}>
+                    {title}
+                    {st.sub && left > 3 && <tspan className={styles.appSub}> {trim(st.sub, left)}</tspan>}
+                  </text>
+                );
+              })()}
               {st.version !== undefined && (
-                <text x={st.box.x + st.box.w - (st.code ? 22 : 8)} y={st.box.y + 15} className={styles.stateVer}>
+                <text x={st.box.x + st.box.w - (st.code ? TIP * 2 + 4 : 8)} y={st.box.y + 15} className={styles.stateVer}>
                   v{st.version}
                 </text>
               )}
-              {st.code && <SvgTip x={st.box.x + st.box.w - 10} y={st.box.y + 11} id={`state:${st.name}`} content={{ title: st.name, code: st.code }} open={tip} />}
+              {st.code && <SvgTip x={st.box.x + st.box.w - TIP} y={st.box.y + TIP} id={`state:${st.name}`} content={{ title: st.name, code: st.code }} open={tip} />}
               {st.lines.map((l, i) => (
                 <text key={i} x={st.box.x + 8} y={st.box.y + 30 + i * 13} className={st.node ? styles.cardLine : styles.fieldLine}>
                   {trim(l, Math.floor((st.box.w - 14) / 6.1))}
@@ -561,7 +590,7 @@ function Stage({
               <text x={c.box.x + 7} y={c.box.y + 13}>
                 {trim(c.label, Math.floor((c.box.w - (c.code ? 22 : 10)) / 6.3))}
               </text>
-              {c.code && <SvgTip x={c.box.x + c.box.w - 10} y={c.box.y + c.box.h / 2} id={key} content={{ title: c.name, code: c.code }} open={tip} />}
+              {c.code && <SvgTip x={c.box.x + c.box.w - TIP} y={c.box.y + c.box.h / 2} id={key} content={{ title: c.name, code: c.code }} open={tip} />}
             </g>
           );
         })}
@@ -642,7 +671,8 @@ function Stage({
               <CellView
                 key={cell.uid}
                 cell={cell}
-                box={box}
+                box={{ ...box, w: box.w / sb.scale, h: box.h / sb.scale }}
+                scale={sb.scale}
                 color={colors.get(cell.stream) ?? 0}
                 flag={cell.ref && w.refs[cell.ref] === cell.uid ? w.flags[`cell:${cell.ref}`] : undefined}
                 dim={(s.dim_from !== undefined && cell.id >= s.dim_from) || (s.only !== undefined && cell.stream !== s.only)}
@@ -651,6 +681,17 @@ function Stage({
                 active={!!lit?.cells.has(cell.uid) || hover === cell.stream || (!!cell.fresh && !cell.leaving)}
                 onSelect={onSelect}
               />
+            ))}
+            {sb.gaps.map((g) => (
+              <g key={`gap-${g.from}`} className={styles.gap}>
+                <rect x={g.box.x} y={g.box.y} width={g.box.w} height={g.box.h} rx={7} />
+                <text x={g.box.x + g.box.w / 2} y={g.box.y + g.box.h / 2 - 2}>
+                  ⋯
+                </text>
+                <text x={g.box.x + g.box.w / 2} y={g.box.y + g.box.h / 2 + 11} className={styles.gapIds}>
+                  {g.from === g.to ? `#${fmt(g.from)}` : `#${fmt(g.from)}–#${fmt(g.to)}`}
+                </text>
+              </g>
             ))}
             {s.ghost && sb.bounce && lay.mode === "wide" && (
               <g className={styles.ghost}>
@@ -889,6 +930,8 @@ export default function Tour({ spec }: { spec: TourSpec }) {
   const box = useRef<HTMLDivElement>(null);
   const fit = useFit(box);
   const units = fit.mode === "narrow" ? 420 : Math.max(1100, Math.min(2200, fit.px - 4));
+  // the stage fills the viewport under the navbar, above the caption band and the control bar
+  const room = Math.max(480, (fit.vh - NAVBAR_PX - CAPTION_PX - BAR_PX - 20) * (units / Math.max(1, fit.px)));
 
   const frame = all[index]!;
   const chapter = spec.chapters[frame.chapter]!;
@@ -900,8 +943,8 @@ export default function Tour({ spec }: { spec: TourSpec }) {
   const moves = step.moves ?? [];
   const { total } = schedule(moves);
   const lay = useMemo(
-    () => layout(fit.mode, view, scene.nodes, frame.world, app, layer, units),
-    [fit.mode, view, scene.nodes, frame.world, app, layer, units]
+    () => layout(fit.mode, view, scene.nodes, frame.world, app, layer, units, room),
+    [fit.mode, view, scene.nodes, frame.world, app, layer, units, room]
   );
   const code = useMemo(() => {
     let c = scene.code;
@@ -946,28 +989,27 @@ export default function Tour({ spec }: { spec: TourSpec }) {
 
   // the pacing: the token travels, then each sentence is spoken (or shown for its length), then the next step
   useEffect(() => {
-    if (!playing) {
-      if (voice) window.speechSynthesis.cancel();
-      return;
-    }
+    // stepping still runs the step's captions once, without a voice and without moving on
+    if (!playing && voice) window.speechSynthesis.cancel();
     let cancelled = false;
     const timers: ReturnType<typeof setTimeout>[] = [];
     const last = index >= all.length - 1 || all[index + 1]!.chapter !== frame.chapter;
     const advance = () => {
-      if (cancelled) return;
+      if (cancelled || !playing) return;
       if (last) setPlaying(false);
       else go(index + 1, true);
     };
-    const talk = voice && sound && !muted;
+    const talk = playing && voice && sound && !muted;
+    const beats = speech.length;
     const show = (i: number) => {
       if (cancelled) return;
-      if (i >= lines.length) {
+      if (i >= beats) {
         timers.push(setTimeout(advance, 450));
         return;
       }
       setCue(i);
       if (talk) {
-        const text = speech[i] ?? spoken(lines[i]!);
+        const text = speech[i]!;
         const u = new SpeechSynthesisUtterance(text);
         u.rate = speed;
         u.lang = "en-US";
@@ -982,7 +1024,7 @@ export default function Tour({ spec }: { spec: TourSpec }) {
         u.onerror = next;
         timers.push(setTimeout(next, (3000 + text.length * 110) / speed));
         window.speechSynthesis.speak(u);
-      } else timers.push(setTimeout(() => show(i + 1), Math.max(1800, lines[i]!.length * 52) / speed));
+      } else timers.push(setTimeout(() => show(i + 1), Math.max(1800, speech[i]!.length * 55) / speed));
     };
     timers.push(setTimeout(() => show(0), (reduce ? 0 : total + LAND_MS) / speed));
     return () => {
@@ -1041,7 +1083,8 @@ export default function Tour({ spec }: { spec: TourSpec }) {
   const step_tip: TipContent = { title: scene.title, code, api: scene.api, doc: scene.doc, test: scene.test };
   const root_w = box.current?.clientWidth ?? 800;
   const tip_w = Math.min(600, root_w - 16);
-  const caption = playing && cue >= 0 ? lines[cue] : lines.join(" ");
+  // a beat of speech shows the caption sentence it belongs to
+  const caption = lines[Math.min(lines.length - 1, Math.floor((Math.max(0, cue) * lines.length) / Math.max(1, speech.length)))];
   const ui = (key: string) => (pointing.has(key) ? styles.pointing : "");
 
   return (
@@ -1090,11 +1133,6 @@ export default function Tour({ spec }: { spec: TourSpec }) {
           </div>
         ))}
         {sel && <Inspector cell={sel} onClose={() => setSelected(undefined)} />}
-        {cc && caption && (
-          <div className={styles.captions} aria-live="polite">
-            <p key={`${index}-${cue}`}>{rich(caption)}</p>
-          </div>
-        )}
         {transcript && (
           <aside className={styles.transcript} aria-label="Transcript of this chapter">
             <div className={styles.transcriptHead}>
@@ -1121,6 +1159,10 @@ export default function Tour({ spec }: { spec: TourSpec }) {
             </ol>
           </aside>
         )}
+      </div>
+
+      <div className={styles.captions} aria-live="polite">
+        {cc && caption && <p key={`${index}-${caption}`}>{plain(caption)}</p>}
       </div>
 
       <div className={styles.bar}>

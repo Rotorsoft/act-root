@@ -606,7 +606,7 @@ const all = await app.query_array({});
         steps: [
           {
             now: "The store holds {events} events on {streams} streams, in one global log",
-            say: "This is a ticket desk's **event store**, at scale: every dot is one event, in global `id` order, wrapping like text. Every dot has the same tone, whatever its stream: a ring is a snapshot, a square a tombstone, a hollow center an event with sensitive fields. Hover a dot to see its stream. The history is generated from a fixed seed, so it's the same every time.",
+            say: "This is a ticket desk's **event store**, at scale: every dot is one event, in global `id` order, wrapping like text. Every dot has the same tone, whatever its stream: a ring is a snapshot, a square a tombstone, a hollow center an event with sensitive fields. The history is generated from a fixed seed, so it's the same every time.",
             focus: ["field:main"],
           },
           {
@@ -624,7 +624,7 @@ const all = await app.query_array({});
           },
           {
             now: "ticket-4821 holds v0 ({#t21-open}) and v1 ({#t21-m1}); other streams sit between them",
-            say: "Each event also belongs to one **stream** and takes that stream's next **version**. The dashed lens marks the events of this scene; the cells under the field zoom in on them. Ticket 4821 holds v0 and v1, with other streams' events between them. Hover one of its dots to light the whole stream.",
+            say: "Each event also belongs to one **stream** and takes that stream's next **version**. The dashed lens marks the events of this scene; the cells under the field zoom in on them. Ticket 4821 holds v0 and v1, with other streams' events between them.",
             ops: [
               { op: "unflag" },
               { op: "flag", on: "cell:t21-open", text: "ticket-4821 v0" },
@@ -634,14 +634,14 @@ const all = await app.query_array({});
           },
           {
             now: '`app.query_array({ stream: "ticket-4821", stream_exact: true })` reads one stream',
-            say: "Reading one stream is a query over the same log: `stream_exact` picks one stream's events, in version order. Hover a dot and its stream lights up across the whole log.",
+            say: "Reading one stream is a query over the same log: `stream_exact` picks one stream's events, in version order. The cells under the field show those events in detail.",
             code: `const ticket = await app.query_array({ stream: "ticket-4821", stream_exact: true });
 // [ v0 TicketOpened, v1 MessageAdded ]`,
             ops: [{ op: "unflag" }, { op: "dim", only: "ticket-4821" }],
           },
           {
             now: "Every event carries `meta.correlation` and `meta.causation`",
-            say: "Every event carries who caused it: `meta.causation` names the action and its actor, and `meta.correlation` is an id that a whole workflow shares. **Click any event** to see it.",
+            say: "Every event carries who caused it: `meta.causation` names the action and its actor, and `meta.correlation` is an id that a whole workflow shares.",
             ops: [
               { op: "dim" },
               { op: "flag", on: "cell:t21-m1", text: "click me" },
@@ -1390,7 +1390,7 @@ const all = await app.query_array({});
           {
             now: "`assign` runs `AssignTicket`: {#t31-asg} `TicketAssigned` · ticket-4831 v1",
             pipe: { name: "reaction", at: 3 },
-            say: "The handler calls `app.do`. That action **inherits** the event that woke it (`reactingTo` is injected): the same correlation, and `TicketOpened` as its cause. Click {#t31-asg} to see it.",
+            say: "The handler calls `app.do`. That action **inherits** the event that woke it (`reactingTo` is injected): the same correlation, and `TicketOpened` as its cause.",
             moves: [
               { from: "assign", to: "AssignTicket", label: "app.do" },
               {
