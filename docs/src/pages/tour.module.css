@@ -1,6 +1,6 @@
 .page {
   width: 100%;
-  padding: 12px clamp(8px, 1.2vw, 20px) 28px;
+  padding: 0;
   background: var(--ifm-background-color);
 }
 /* the page's name, for screen readers and search; the tour says the rest */

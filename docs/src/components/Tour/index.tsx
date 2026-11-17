@@ -35,8 +35,8 @@ export type { TourSpec } from "./types";
 const MOVE_MS = 820;
 const TRAIL = [1, 2, 3];
 const NAVBAR_PX = 60;
-const CAPTION_PX = 76;
-const BAR_PX = 50;
+const CAPTION_PX = 84;
+const BAR_PX = 46;
 /** every `</>` icon sits this far in from its element's top-right corner */
 const TIP = 10;
 
@@ -82,20 +82,23 @@ function schedule(moves: Move[]): { starts: number[]; total: number } {
 }
 
 
-type Fit = { mode: Mode; px: number; vh: number };
+type Fit = { mode: Mode; px: number; vh: number; full: boolean };
 function useFit(ref: React.RefObject<HTMLElement | null>): Fit {
-  const [fit, setFit] = useState<Fit>({ mode: "wide", px: 1280, vh: 800 });
+  const [fit, setFit] = useState<Fit>({ mode: "wide", px: 1280, vh: 800, full: false });
   useBrowserLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
-    const measure = () => setFit({ mode: el.clientWidth < 760 ? "narrow" : "wide", px: el.clientWidth, vh: window.innerHeight });
+    const measure = () =>
+      setFit({ mode: el.clientWidth < 760 ? "narrow" : "wide", px: el.clientWidth, vh: window.innerHeight, full: document.fullscreenElement === el });
     measure();
     const ro = new ResizeObserver(measure);
     ro.observe(el);
     window.addEventListener("resize", measure);
+    document.addEventListener("fullscreenchange", measure);
     return () => {
       ro.disconnect();
       window.removeEventListener("resize", measure);
+      document.removeEventListener("fullscreenchange", measure);
     };
   }, [ref]);
   return fit;
@@ -931,7 +934,10 @@ export default function Tour({ spec }: { spec: TourSpec }) {
   const fit = useFit(box);
   const units = fit.mode === "narrow" ? 420 : Math.max(1100, Math.min(2200, fit.px - 4));
   // the stage fills the viewport under the navbar, above the caption band and the control bar
-  const room = Math.max(480, (fit.vh - NAVBAR_PX - CAPTION_PX - BAR_PX - 20) * (units / Math.max(1, fit.px)));
+  // the stage takes the whole height but the control row; its bottom strip is kept for the subtitles
+  const per_px = units / Math.max(1, fit.px);
+  const cap_u = CAPTION_PX * per_px;
+  const room = Math.max(420, (fit.vh - (fit.full ? 0 : NAVBAR_PX) - BAR_PX) * per_px - cap_u);
 
   const frame = all[index]!;
   const chapter = spec.chapters[frame.chapter]!;
@@ -943,8 +949,11 @@ export default function Tour({ spec }: { spec: TourSpec }) {
   const moves = step.moves ?? [];
   const { total } = schedule(moves);
   const lay = useMemo(
-    () => layout(fit.mode, view, scene.nodes, frame.world, app, layer, units, room),
-    [fit.mode, view, scene.nodes, frame.world, app, layer, units, room]
+    () => {
+      const l = layout(fit.mode, view, scene.nodes, frame.world, app, layer, units, room);
+      return { ...l, height: l.height + cap_u };
+    },
+    [fit.mode, view, scene.nodes, frame.world, app, layer, units, room, cap_u]
   );
   const code = useMemo(() => {
     let c = scene.code;
@@ -1133,6 +1142,9 @@ export default function Tour({ spec }: { spec: TourSpec }) {
           </div>
         ))}
         {sel && <Inspector cell={sel} onClose={() => setSelected(undefined)} />}
+        <div className={styles.captions} aria-live="polite">
+          {cc && caption && <p key={`${index}-${caption}`}>{plain(caption)}</p>}
+        </div>
         {transcript && (
           <aside className={styles.transcript} aria-label="Transcript of this chapter">
             <div className={styles.transcriptHead}>
@@ -1159,10 +1171,6 @@ export default function Tour({ spec }: { spec: TourSpec }) {
             </ol>
           </aside>
         )}
-      </div>
-
-      <div className={styles.captions} aria-live="polite">
-        {cc && caption && <p key={`${index}-${caption}`}>{plain(caption)}</p>}
       </div>
 
       <div className={styles.bar}>

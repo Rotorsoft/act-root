@@ -24,10 +24,16 @@
   --t-s6: #5ec4f2;
   --t-s7: #ff7b7b;
 }
-.tour:fullscreen {
-  overflow: auto;
-  padding: 14px;
-  background: var(--ifm-background-color);
+/* full screen: the stage and the control row fill the display */
+.tour:fullscreen,
+.tour:-webkit-full-screen {
+  width: 100vw;
+  height: 100vh;
+  max-width: none;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  background: var(--act-surface-1, var(--ifm-background-color));
 }
 
 /* the top bar */
@@ -296,8 +302,6 @@
 /* the stage */
 .stageWrap {
   position: relative;
-  border: 1px solid var(--act-border-strong, var(--ifm-color-emphasis-300));
-  border-radius: 14px;
   background: var(--act-surface-1, var(--ifm-background-surface-color));
   overflow: hidden;
 }
@@ -1411,21 +1415,27 @@
   letter-spacing: 0;
 }
 
-/* captions: a band of their own under the stage, two lines at most, plain words */
+/* captions: subtitles inside the stage, over the strip the layout keeps free */
 .captions {
+  position: absolute;
+  z-index: 8;
+  left: 0;
+  right: 0;
+  bottom: 10px;
   display: flex;
-  align-items: center;
   justify-content: center;
-  height: 76px;
-  padding: 4px 16px;
-  border-top: 1px solid var(--act-border, var(--ifm-color-emphasis-200));
-  background: color-mix(in srgb, var(--act-surface-2, #f3f4f7) 70%, transparent);
+  padding: 0 16px;
+  pointer-events: none;
   text-align: center;
 }
 .captions p {
   margin: 0;
-  max-width: 1200px;
-  font-size: clamp(1rem, 1.3vw, 1.3rem);
+  max-width: min(1200px, 94%);
+  padding: 6px 16px;
+  border-radius: 10px;
+  background: rgba(10, 14, 22, 0.8);
+  color: #f4f6fa;
+  font-size: clamp(1rem, 1.35vw, 1.4rem);
   font-weight: 500;
   line-height: 1.4;
   display: -webkit-box;
@@ -1434,6 +1444,9 @@
   overflow: hidden;
   animation: captionIn 0.35s var(--t-ease);
 }
+.captions p b {
+  color: #fff;
+}
 @keyframes captionIn {
   from {
     opacity: 0;
@@ -1441,12 +1454,16 @@
 }
 
 /* the one slim control bar */
+/* the one control row under the stage */
 .bar {
   display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
+  flex-wrap: nowrap;
+  gap: 8px;
   align-items: center;
-  margin-top: 8px;
+  height: 46px;
+  padding: 0 10px;
+  border-top: 1px solid var(--act-border, var(--ifm-color-emphasis-200));
+  background: var(--act-surface-1, var(--ifm-background-surface-color));
 }
 .bar button,
 .bar select {
