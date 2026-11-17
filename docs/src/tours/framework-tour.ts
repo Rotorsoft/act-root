@@ -432,6 +432,122 @@ const LEDGER_KINDS: StreamKind[] = [
 ];
 
 const chapters: Chapter[] = [
+  // ───────────────────────────────────────────────────────────── 0
+  {
+    id: "intro",
+    app: APP_PROJ,
+    view: "micro",
+    title: "How to read this tour",
+    audience: "everyone",
+    blurb: "A short walk around the screen before the first chapter.",
+    seed: [
+      {
+        stream: "ticket-101",
+        name: "TicketOpened",
+        data: { title: "No sound" },
+        ref: "i-open",
+      },
+      {
+        stream: "agent-ana",
+        name: "AgentAdded",
+        data: { name: "Ana" },
+        ref: "i-ana",
+      },
+      {
+        stream: "ticket-101",
+        name: "MessageAdded",
+        data: { body: "Since today" },
+        ref: "i-m1",
+      },
+    ],
+    scenes: [
+      {
+        title: "The screen, part by part",
+        nodes: [
+          actor("maya", "Maya", "customer"),
+          worker("drain", "drain", "this process"),
+          st("ticket", "Ticket"),
+          action("OpenTicket"),
+          reaction("assign", "assign", "on TicketOpened"),
+          projection("proj", "tickets", "projection"),
+        ],
+        api: ["act().withSlice(...).build()", "app.do"],
+        doc: doc("Getting started", "guides/getting-started"),
+        code: `const app = act()
+  .withSlice(TicketSlice) // states, reactions, projections
+  .withSlice(AgentSlice)
+  .build();`,
+        steps: [
+          {
+            now: "Actors at the edge: people and automations",
+            say: "At the left edge are the actors: people, like Maya, and automations, like the drain.",
+            focus: ["maya", "drain"],
+          },
+          {
+            now: "The running Act app and its action layer",
+            say: "In the middle, the running Act app: every action enters at `app.do` and walks the action layer.",
+            focus: ["layer:"],
+          },
+          {
+            now: "Slices: states, reactions and projections",
+            say: "Below it, the slices: states with their actions and events, plus the reactions and projections that answer them.",
+            focus: ["ticket", "assign", "proj"],
+          },
+          {
+            now: "The event store: one log, a dot per event",
+            say: "On the right is the event store: one log, a dot per event, in commit order.",
+            focus: ["store:"],
+          },
+          {
+            now: "A highlighted stream",
+            say: "The stream a scene is about lights up in the accent color. Hover any dot to light its own.",
+            focus: ["cell:i-open", "cell:i-m1"],
+          },
+          {
+            now: "Data flows along the link",
+            pipe: { name: "action", at: 7 },
+            say: "Data flows along the link: Maya opens a ticket, and its event lands at the tail of the log.",
+            moves: [
+              {
+                from: "maya",
+                to: "cell:i-new",
+                label: "OpenTicket",
+                tone: "good",
+              },
+            ],
+            ops: [
+              {
+                op: "commit",
+                events: [
+                  {
+                    stream: "ticket-102",
+                    name: "TicketOpened",
+                    data: { title: "Login fails" },
+                    ref: "i-new",
+                  },
+                ],
+              },
+            ],
+          },
+          {
+            now: "The code icon",
+            say: "A code icon shows how anything is written, and where to read more.",
+            ui: ["tip"],
+          },
+          {
+            now: "Captions and sound",
+            say: "Captions follow the narration. CC and the speaker button turn them off.",
+            ui: ["cc", "sound"],
+          },
+          {
+            now: "Step, play, and pick a chapter",
+            say: "Play runs a chapter, the arrows step, and the menu jumps anywhere. Let's begin.",
+            ui: ["play", "menu"],
+          },
+        ],
+      },
+    ],
+  },
   // ───────────────────────────────────────────────────────────── 1
   {
     id: "log",

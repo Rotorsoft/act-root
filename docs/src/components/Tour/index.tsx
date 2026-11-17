@@ -282,7 +282,7 @@ function status_of(t: Target, w: World) {
   return { key: "idle", label: "idle", at, mark };
 }
 
-type Lit = { nodes: Set<string>; cells: Set<number>; targets: Set<string>; streams: Set<string>; tables: Set<string> };
+type Lit = { nodes: Set<string>; cells: Set<number>; targets: Set<string>; streams: Set<string>; tables: Set<string>; areas: Set<string> };
 
 function Stage({
   lay,
@@ -348,12 +348,13 @@ function Stage({
   // the areas this step works in glow; the rest fades back
   const touches = (x: string) => /^(log|store:|field:|cell:|stream:|port)/.test(x);
   const routed = moves.some((m) => lay.route(m.from, m.to).length > 2);
-  const layer_on = pipe?.name === "action" || routed;
+  const layer_on = pipe?.name === "action" || routed || !!lit?.areas.has("layer");
   const store_on =
     moves.some((m) => touches(m.from) || touches(m.to)) ||
     !!lit?.cells.size ||
     !!lit?.streams.size ||
     !!lit?.targets.size ||
+    !!lit?.areas.has("store") ||
     (step.ops ?? []).some((o) => o.op !== "state" && o.op !== "dim");
   const area = (on: boolean) => (on ? styles.glow : lit ? styles.off : "");
 
@@ -787,7 +788,7 @@ function Inspector({ cell, onClose }: { cell: Cell; onClose: () => void }) {
 }
 
 function spotlight(step: Step, w: World): Lit | undefined {
-  const lit: Lit = { nodes: new Set(), cells: new Set(), targets: new Set(), streams: new Set(), tables: new Set() };
+  const lit: Lit = { nodes: new Set(), cells: new Set(), targets: new Set(), streams: new Set(), tables: new Set(), areas: new Set() };
   const mark = (a: string) => {
     if (a.startsWith("cell:")) {
       const uid = w.refs[a.slice(5)];
@@ -795,6 +796,7 @@ function spotlight(step: Step, w: World): Lit | undefined {
     } else if (a.startsWith("target:")) lit.targets.add(a.slice(7));
     else if (a.startsWith("table:")) lit.tables.add(a.slice(6));
     else if (a.startsWith("stream:")) lit.streams.add(a.slice(7));
+    else if (a === "layer:" || a === "store:") lit.areas.add(a.slice(0, -1));
     else if (!/^(log|store:|field:|gate|port|layer:)/.test(a)) lit.nodes.add(a);
   };
   for (const m of step.moves ?? []) {
@@ -811,7 +813,7 @@ function spotlight(step: Step, w: World): Lit | undefined {
   for (const t of w.tables) if (t.fresh.length) lit.tables.add(t.name);
   for (const [id, st] of Object.entries(w.states)) if (st.fresh) lit.nodes.add(id);
   for (const s of w.stores) for (const c of s.cells) if (lit.cells.has(c.uid)) lit.streams.add(c.stream);
-  const any = lit.nodes.size + lit.cells.size + lit.targets.size + lit.streams.size + lit.tables.size;
+  const any = lit.nodes.size + lit.cells.size + lit.targets.size + lit.streams.size + lit.tables.size + lit.areas.size;
   return any ? lit : undefined;
 }
 
@@ -1032,6 +1034,8 @@ export default function Tour({ spec }: { spec: TourSpec }) {
   };
 
   const chapterFrames = all.filter((f) => f.chapter === frame.chapter);
+  // an intro chapter is chapter 0
+  const first = spec.chapters[0]?.id === "intro" ? 0 : 1;
   const atStart = index === 0;
   const atEnd = index === all.length - 1;
   const step_tip: TipContent = { title: scene.title, code, api: scene.api, doc: scene.doc, test: scene.test };
@@ -1095,7 +1099,7 @@ export default function Tour({ spec }: { spec: TourSpec }) {
           <aside className={styles.transcript} aria-label="Transcript of this chapter">
             <div className={styles.transcriptHead}>
               <b>
-                {frame.chapter + 1}. {chapter.title}
+                {frame.chapter + first}. {chapter.title}
               </b>
               <button type="button" onClick={() => setTranscript(false)} aria-label="Close the transcript">
                 ✕
@@ -1122,7 +1126,7 @@ export default function Tour({ spec }: { spec: TourSpec }) {
       <div className={styles.bar}>
         <div className={styles.menuWrap}>
           <button type="button" className={`${styles.menuButton} ${ui("menu")}`} onClick={() => setMenu((m) => !m)} aria-expanded={menu}>
-            ☰ {frame.chapter + 1}. {chapter.title}
+            ☰ {frame.chapter + first}. {chapter.title}
           </button>
           {menu && (
             <ol className={styles.menu}>
@@ -1134,7 +1138,7 @@ export default function Tour({ spec }: { spec: TourSpec }) {
                     aria-current={i === frame.chapter ? "step" : undefined}
                     onClick={() => go(all.findIndex((f) => f.chapter === i))}
                   >
-                    <span className={styles.num}>{i + 1}</span>
+                    <span className={styles.num}>{i + first}</span>
                     <span>
                       {c.title}
                       <small>{c.audience}</small>
