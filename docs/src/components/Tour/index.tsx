@@ -25,7 +25,7 @@ import {
   useState,
 } from "react";
 import Field from "./Field";
-import { type Box, type Chip, data_lines, type Layout, layout, type Mode, short, type View } from "./layout";
+import { type Box, type Chip, data_lines, type Layout, layout, type Mode, SUB_COLS, short, type View } from "./layout";
 import styles from "./styles.module.css";
 import type { AppSpec, Link as DocLink, Move, Step, TourSpec } from "./types";
 import { type Cell, census, type Frame, type Frames, fill, fmt, frames as fold, type Target, type World } from "./world";
@@ -329,6 +329,11 @@ function Stage({
       role="img"
       aria-label="The stage: the callers, the running Act app, and the event store"
     >
+      <defs>
+        <marker id="tour-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M0,0 L8,4 L0,8 z" className={styles.arrowHead} />
+        </marker>
+      </defs>
       {/* the callers */}
       {lay.mode === "wide" && lay.callers.length > 0 && (
         <text x={lay.callers[0]!.box.x} y={18} className={styles.bandLabel}>
@@ -358,22 +363,48 @@ function Stage({
         <rect x={a.box.x} y={a.box.y} width={a.box.w} height={a.box.h} rx={16} className={styles.appBox} />
         <text x={a.box.x + 12} y={a.box.y + 20} className={styles.appTitle}>
           Act app
-          <tspan className={styles.appSub}> · {trim(a.title, Math.floor(a.box.w / 7) - 10)}</tspan>
         </text>
+        <SvgTip x={a.box.x + 80} y={a.box.y + 15} id="app" content={{ title: "How the app is built", code: a.title }} open={tip} />
+
+        {/* the action layer: one ordered pipe, then the commit port */}
         <rect x={a.layer_box.x} y={a.layer_box.y} width={a.layer_box.w} height={a.layer_box.h} rx={10} className={styles.layerBox} />
-        <text x={a.layer_box.x + 8} y={a.layer_box.y + 16} className={styles.layerLabel}>
+        <text x={a.layer_box.x + 8} y={a.layer_box.y + 14} className={styles.layerLabel}>
           action layer
           {lay.mode === "wide" && <tspan className={styles.appSub}> · every refusal but ConcurrencyError happens here</tspan>}
         </text>
+        {a.layer.map(({ stage, box }, i) => {
+          const next = a.layer[i + 1]?.box;
+          return next ? (
+            <line
+              key={`pipe-${stage}`}
+              className={styles.pipeLink}
+              x1={a.vertical ? box.x + 14 : box.x + box.w}
+              y1={a.vertical ? box.y + box.h : box.y + box.h / 2}
+              x2={a.vertical ? next.x + 14 : next.x}
+              y2={a.vertical ? next.y : next.y + next.h / 2}
+              markerEnd="url(#tour-arrow)"
+            />
+          ) : (
+            <line
+              key="pipe-port"
+              className={styles.pipeLink}
+              x1={box.x + box.w}
+              y1={box.y + box.h / 2}
+              x2={a.port.x - 8}
+              y2={a.port.y}
+              markerEnd="url(#tour-arrow)"
+            />
+          );
+        })}
         {a.layer.map(({ stage, box }, i) => {
           const stop = w.stop?.stage === stage;
           const state = stop ? "fail" : layer_state(i);
           return (
             <g key={stage} className={styles.stage} data-state={state}>
-              <rect x={box.x} y={box.y} width={box.w} height={box.h} rx={10} />
-              <text x={box.x + box.w / 2} y={box.y + 14}>
+              <rect x={box.x} y={box.y} width={box.w} height={box.h} rx={9} />
+              <text x={box.x + box.w / 2} y={box.y + 13}>
                 {state === "done" ? "✓ " : state === "fail" ? "✕ " : ""}
-                {trim(stage, Math.floor(box.w / 6.4))}
+                {trim(stage, Math.floor(box.w / 5.9) - (state === "done" || state === "fail" ? 2 : 0))}
               </text>
             </g>
           );
@@ -383,22 +414,27 @@ function Stage({
             const s = a.layer.find((l) => l.stage === w.stop!.stage);
             if (!s) return null;
             const text = `${w.stop.error} · nothing sent to the store`;
+            const tw = text.length * 5.9 + 16;
+            const x = Math.min(s.box.x, a.layer_box.x + a.layer_box.w - tw);
             return (
               <g className={`${styles.stopNote} ${styles.fresh}`}>
-                <rect x={s.box.x} y={s.box.y + s.box.h + 3} width={text.length * 6 + 16} height={16} rx={8} />
-                <text x={s.box.x + 8} y={s.box.y + s.box.h + 14}>
+                <rect x={x} y={a.layer_box.y + a.layer_box.h + 3} width={tw} height={16} rx={8} />
+                <text x={x + 8} y={a.layer_box.y + a.layer_box.h + 14}>
                   {text}
                 </text>
               </g>
             );
           })()}
-        {/* the store port: commits leave here, and only the version guard can turn one back */}
+        {/* the commit port: commits leave here, and only the version guard can turn one back */}
         <g className={styles.port} data-state={commit_state}>
           <circle cx={a.port.x} cy={a.port.y} r={7} />
-          <text x={a.port.x + 9} y={a.port.y - 9} className={styles.portLabel}>
-            commit
-          </text>
+          {!a.vertical && (
+            <text x={a.port.x + 10} y={a.port.y + 4} className={styles.portLabel}>
+              commit
+            </text>
+          )}
         </g>
+
         {a.slices.map((s) => (
           <g key={s.name} className={styles.slice}>
             <rect x={s.box.x} y={s.box.y} width={s.box.w} height={s.box.h} rx={10} />
@@ -410,6 +446,43 @@ function Stage({
             )}
           </g>
         ))}
+        {a.links.map((l, i) => (
+          <path
+            key={`link-${i}`}
+            className={styles.link}
+            data-kind={l.kind}
+            d={
+              l.kind === "listen"
+                ? `M${l.a.x},${l.a.y} C${l.a.x},${(l.a.y + l.b.y) / 2} ${l.b.x},${(l.a.y + l.b.y) / 2} ${l.b.x},${l.b.y - 2}`
+                : `M${l.a.x},${l.a.y} C${(l.a.x + l.b.x) / 2},${l.a.y} ${(l.a.x + l.b.x) / 2},${l.b.y} ${l.b.x - 2},${l.b.y}`
+            }
+            markerEnd="url(#tour-arrow)"
+          />
+        ))}
+        {a.states.map((st) => {
+          const on = lit_chip.has(`state:${st.name}`);
+          const fresh = st.node ? w.states[st.node]?.fresh : false;
+          return (
+            <g key={st.name} className={`${styles.stateBox} ${on ? styles.focus : ""} ${fresh ? styles.fresh : ""} ${lit && !on ? styles.soft : ""}`}>
+              <rect x={st.box.x} y={st.box.y} width={st.box.w} height={st.box.h} rx={8} />
+              <text x={st.box.x + 8} y={st.box.y + 15} className={styles.cardTitle}>
+                {st.name}
+                {st.sub && <tspan className={styles.appSub}> {trim(st.sub, Math.max(4, Math.floor(st.box.w / 6.4) - st.name.length - 8))}</tspan>}
+              </text>
+              {st.version !== undefined && (
+                <text x={st.box.x + st.box.w - (st.code ? 22 : 8)} y={st.box.y + 15} className={styles.stateVer}>
+                  v{st.version}
+                </text>
+              )}
+              {st.code && <SvgTip x={st.box.x + st.box.w - 10} y={st.box.y + 11} id={`state:${st.name}`} content={{ title: st.name, code: st.code }} open={tip} />}
+              {st.lines.map((l, i) => (
+                <text key={i} x={st.box.x + 8} y={st.box.y + 30 + i * 13} className={st.node ? styles.cardLine : styles.fieldLine}>
+                  {trim(l, Math.floor((st.box.w - 14) / 6.1))}
+                </text>
+              ))}
+            </g>
+          );
+        })}
         {a.chips.map((c: Chip) => {
           const key = `${c.kind}:${c.name}`;
           const on = lit_chip.has(key) || hoverRx === c.name;
@@ -422,9 +495,9 @@ function Stage({
               onMouseEnter={() => (c.kind === "reaction" || c.kind === "projection") && setHoverRx(c.name)}
               onMouseLeave={() => setHoverRx(undefined)}
             >
-              <rect x={c.box.x} y={c.box.y} width={c.box.w} height={c.box.h} rx={c.kind === "event" ? 4 : 10} />
-              <text x={c.box.x + 7} y={c.box.y + 14}>
-                {trim(c.label, Math.floor((c.box.w - (c.code ? 24 : 10)) / 6.6))}
+              <rect x={c.box.x} y={c.box.y} width={c.box.w} height={c.box.h} rx={c.kind === "event" ? 4 : 9} />
+              <text x={c.box.x + 7} y={c.box.y + 13}>
+                {trim(c.label, Math.floor((c.box.w - (c.code ? 22 : 10)) / 6.3))}
               </text>
               {c.code && <SvgTip x={c.box.x + c.box.w - 10} y={c.box.y + c.box.h / 2} id={key} content={{ title: c.name, code: c.code }} open={tip} />}
             </g>
@@ -446,8 +519,8 @@ function Stage({
                 </text>
               )}
               {lines.map((l, i) => (
-                <text key={i} x={box.x + 8} y={box.y + 32 + i * 14} className={styles.cardLine}>
-                  {trim(l, Math.floor((box.w - 14) / 6.2))}
+                <text key={i} x={box.x + 8} y={box.y + 30 + i * 13} className={styles.cardLine}>
+                  {trim(l, Math.floor((box.w - 14) / 6.1))}
                 </text>
               ))}
             </g>
@@ -503,6 +576,36 @@ function Stage({
               {fmt(n.events)} events · {fmt(n.streams)} streams · {fmt(n.closed)} closed · {fmt(n.snapshots)} snapshots
             </text>
             <rect x={sb.field.x} y={sb.field.y} width={sb.field.w} height={sb.field.h} rx={8} className={styles.fieldBox} />
+            <g className={styles.legend} transform={`translate(${sb.legend.x + 40}, ${sb.legend.y + 10})`}>
+              {(
+                [
+                  ["k0", "tickets"],
+                  ["k1", "agents"],
+                  ["k2", "users"],
+                  ["k3", "ledgers"],
+                  ["snap", "snapshot"],
+                  ["pii", "sensitive (pii)"],
+                  ["tomb", "tombstone"],
+                ] as const
+              ).map(([k, label], i) => (
+                <g key={k} transform={`translate(${i * (lay.mode === "narrow" ? 54 : Math.min(100, (sb.legend.w - 60) / 7))}, 0)`} data-k={k}>
+                  {k === "snap" ? (
+                    <circle r={3.6} className={styles.legendRing} />
+                  ) : k === "tomb" ? (
+                    <rect x={-3.5} y={-3.5} width={7} height={7} className={styles.legendTomb} />
+                  ) : (
+                    <circle r={3.4} className={styles.legendDot} />
+                  )}
+                  {k === "pii" && <circle r={1.5} className={styles.legendPii} />}
+                  {lay.mode === "wide" && <text x={7} y={3.5}>{label}</text>}
+                </g>
+              ))}
+              {view === "micro" && lay.mode === "wide" && (
+                <text x={sb.legend.w - 46} y={3.5} className={styles.fieldHint}>
+                  the whole store, zoomed out · dashed lens: the cells below
+                </text>
+              )}
+            </g>
             {sb.cells.map(({ cell, box }) => (
               <CellView
                 key={cell.uid}
@@ -533,26 +636,51 @@ function Stage({
 
             {/* subscriptions, on the store's id axis */}
             {sb.subs_head && (
-              <text x={sb.subs_head.x} y={sb.subs_head.y + 15} className={styles.sectionTitle}>
-                Subscriptions{" "}
-                <tspan className={styles.storeSub}>· ● watermark ◇ work mark, on the id axis #0 to #{fmt(sb.axis.max)}</tspan>
-              </text>
+              <g className={styles.subHead}>
+                <text x={sb.subs_head.x} y={sb.subs_head.y + 12} className={styles.sectionTitle}>
+                  Subscriptions{" "}
+                  <tspan className={styles.storeSub}>· ● watermark ◇ work mark, on the store's id axis</tspan>
+                </text>
+                {lay.mode === "wide" &&
+                  (
+                    [
+                      ["target", SUB_COLS.target],
+                      ["source", SUB_COLS.source],
+                      ["lane", SUB_COLS.lane],
+                      ["status", SUB_COLS.status],
+                      ["lease", SUB_COLS.lease],
+                      ["retries", SUB_COLS.retries],
+                    ] as const
+                  ).map(([label, f]) => (
+                    <text key={label} x={sb.subs_head!.x + sb.subs_head!.w * f} y={sb.subs_head!.y + 27} className={styles.colHead}>
+                      {label}
+                    </text>
+                  ))}
+                {lay.mode === "wide" && (
+                  <text x={sb.subs_head.x + sb.subs_head.w} y={sb.subs_head.y + 27} className={`${styles.colHead} ${styles.right}`}>
+                    watermark · mark
+                  </text>
+                )}
+              </g>
             )}
             {sb.checkpoint && (
               <g className={styles.checkTrack}>
                 <text x={sb.checkpoint.x} y={sb.checkpoint.y + 8} className={styles.trackLabel}>
                   correlate checkpoint {cp >= 0 ? `#${fmt(cp)}` : "—"}
                 </text>
-                <line x1={sb.axis.x} x2={sb.axis.x + sb.axis.w} y1={sb.checkpoint.y + 16} y2={sb.checkpoint.y + 16} />
-                <rect x={sb.axis.x} y={sb.checkpoint.y + 14} width={Math.max(0, ax(cp) - sb.axis.x)} height={4} rx={2} className={styles.checkFill} />
-                <g className={styles.marker} style={{ transform: `translate(${ax(cp)}px, ${sb.checkpoint.y + 16}px)` }}>
+                <text x={sb.checkpoint.x + sb.checkpoint.w} y={sb.checkpoint.y + 8} className={`${styles.trackLabel} ${styles.right}`}>
+                  #0 … #{fmt(sb.axis.max)}
+                </text>
+                <line x1={sb.axis.x} x2={sb.axis.x + sb.axis.w} y1={sb.checkpoint.y + 15} y2={sb.checkpoint.y + 15} />
+                <rect x={sb.axis.x} y={sb.checkpoint.y + 13} width={Math.max(0, ax(cp) - sb.axis.x)} height={4} rx={2} className={styles.checkFill} />
+                <g className={styles.marker} style={{ transform: `translate(${ax(cp)}px, ${sb.checkpoint.y + 15}px)` }}>
                   <path d="M0,-6 L5,0 L0,6 L-5,0 z" />
                 </g>
               </g>
             )}
             {sb.lanes.map((g) => (
               <g key={g.lane}>
-                <text x={g.head.x} y={g.head.y + 13} className={styles.laneHead}>
+                <text x={g.head.x} y={g.head.y + 12} className={styles.laneHead}>
                   lane {g.lane}
                   <tspan className={styles.storeSub}>{g.budget ? ` · ${g.budget}` : g.lane === "default" ? " · leaseMillis 10 s" : ""}</tspan>
                 </text>
@@ -561,9 +689,11 @@ function Stage({
                   const on = !!lit?.targets.has(t.id) || (hoverRx !== undefined && t.reaction === hoverRx);
                   const narrow = lay.mode === "narrow";
                   const col = (f: number) => box.x + box.w * f;
-                  const y1 = box.y + 15;
-                  const y2 = narrow ? box.y + 32 : y1;
-                  const bx = narrow ? col(0.5) : col(0.5);
+                  const span = (f1: number, f2: number) => Math.floor((box.w * (f2 - f1)) / 6.3) - 1;
+                  const y1 = box.y + 14;
+                  const y2 = narrow ? box.y + 30 : y1;
+                  const bx = narrow ? col(0.55) : col(SUB_COLS.status);
+                  const bw = narrow ? box.w * 0.45 : box.w * (SUB_COLS.lease - SUB_COLS.status) - 6;
                   return (
                     // biome-ignore lint/a11y/noStaticElementInteractions: hover links a subscription to its reaction
                     <g
@@ -573,35 +703,55 @@ function Stage({
                       onMouseEnter={() => t.reaction && setHoverRx(t.reaction)}
                       onMouseLeave={() => setHoverRx(undefined)}
                     >
-                      <rect x={box.x - 4} y={box.y} width={box.w + 8} height={box.h + track.h + 4} rx={6} className={styles.rowBg} />
+                      <rect x={box.x - 4} y={box.y - 1} width={box.w + 8} height={box.h + track.h + 4} rx={6} className={styles.rowBg} />
                       <text x={col(0)} y={y1} className={styles.subName}>
-                        {trim(t.id, narrow ? 30 : Math.floor((box.w * 0.29) / 6.6))}
+                        {trim(t.id, narrow ? 30 : span(0, SUB_COLS.source))}
                       </text>
-                      <text x={narrow ? col(0) : col(0.3)} y={y2} className={styles.subCol}>
-                        {trim(t.source ? `← ${t.source}` : "← all streams", narrow ? 20 : Math.floor((box.w * 0.15) / 6.4))}
-                        {t.priority !== undefined ? ` · p${t.priority}` : ""}
+                      <text x={narrow ? col(0) : col(SUB_COLS.source)} y={y2} className={styles.subCol}>
+                        {trim(t.source ?? "all streams", narrow ? 18 : span(SUB_COLS.source, SUB_COLS.lane))}
                       </text>
+                      {!narrow && (
+                        <g className={styles.laneChip}>
+                          <rect x={col(SUB_COLS.lane)} y={y1 - 11} width={Math.min(box.w * 0.095, t.lane.length * 6 + 12)} height={14} rx={7} />
+                          <text x={col(SUB_COLS.lane) + 6} y={y1 - 1}>
+                            {trim(t.lane, span(SUB_COLS.lane, SUB_COLS.status) - 1)}
+                            {t.priority !== undefined ? ` p${t.priority}` : ""}
+                          </text>
+                        </g>
+                      )}
                       <g className={styles.badge} data-state={st.key}>
-                        <rect x={bx} y={y1 - 12} width={Math.min(box.w * (narrow ? 0.5 : 0.28), st.label.length * 6.2 + 14)} height={16} rx={8} />
+                        <rect x={bx} y={y1 - 11} width={Math.min(bw, st.label.length * 5.9 + 14)} height={15} rx={7.5} />
                         <text x={bx + 7} y={y1}>
-                          {trim(st.label, Math.floor((box.w * (narrow ? 0.5 : 0.28) - 14) / 6.2))}
+                          {trim(st.label, Math.floor((bw - 14) / 5.9))}
                         </text>
                       </g>
-                      {t.lease && <rect x={bx} y={y1 + 6} width={box.w * 0.12} height={3} rx={1.5} className={styles.leaseBar} />}
+                      {!narrow && t.lease && (
+                        <g>
+                          <text x={col(SUB_COLS.lease)} y={y1} className={styles.subCol}>
+                            {trim(t.lease, span(SUB_COLS.lease, SUB_COLS.retries))}
+                          </text>
+                          <rect x={col(SUB_COLS.lease)} y={y1 + 3} width={box.w * 0.09} height={3} rx={1.5} className={styles.leaseBar} />
+                        </g>
+                      )}
+                      {!narrow && (
+                        <text x={col(SUB_COLS.retries)} y={y1} className={styles.subCol}>
+                          {t.retry ? `${t.retry}${t.due ? ` · ${trim(t.due, 10)}` : ""}` : "—"}
+                        </text>
+                      )}
                       <text x={box.x + box.w} y={y2} className={`${styles.subCol} ${styles.right}`}>
-                        at {st.at < 0 ? "−1" : `#${fmt(st.at)}`} · mark {st.mark < 0 ? "—" : `#${fmt(st.mark)}`}
+                        {st.at < 0 ? "−1" : `#${fmt(st.at)}`} · {st.mark < 0 ? "—" : `#${fmt(st.mark)}`}
                       </text>
-                      <line x1={track.x} x2={track.x + track.w} y1={track.y + 5} y2={track.y + 5} className={styles.trackLine} />
+                      <line x1={track.x} x2={track.x + track.w} y1={track.y + 4} y2={track.y + 4} className={styles.trackLine} />
                       {st.mark > st.at && (
-                        <rect x={ax(st.at)} y={track.y + 2} width={Math.max(2, ax(st.mark) - ax(st.at))} height={6} rx={3} className={styles.backlog} />
+                        <rect x={ax(st.at)} y={track.y + 1} width={Math.max(2, ax(st.mark) - ax(st.at))} height={6} rx={3} className={styles.backlog} />
                       )}
                       {st.mark >= 0 && (
-                        <g className={styles.marker} style={{ transform: `translate(${ax(st.mark)}px, ${track.y + 5}px)` }}>
+                        <g className={styles.marker} style={{ transform: `translate(${ax(st.mark)}px, ${track.y + 4}px)` }}>
                           <path d="M0,-5 L4,0 L0,5 L-4,0 z" className={styles.markHollow} />
                         </g>
                       )}
-                      <g className={`${styles.marker} ${styles.watermark}`} style={{ transform: `translate(${ax(st.at)}px, ${track.y + 5}px)` }}>
-                        <circle r={4.5} />
+                      <g className={`${styles.marker} ${styles.watermark}`} style={{ transform: `translate(${ax(st.at)}px, ${track.y + 4}px)` }}>
+                        <circle r={4} />
                       </g>
                     </g>
                   );
@@ -612,42 +762,23 @@ function Stage({
         );
       })}
 
-      {/* the streams the scene works on */}
-      {lay.streams.rows.length > 0 && (
-        <g className={styles.section}>
-          <text x={lay.streams.box.x} y={lay.streams.box.y + 15} className={styles.sectionTitle}>
-            Streams in this scene <tspan className={styles.storeSub}>· head version · hover to light its dots</tspan>
-          </text>
-          {lay.streams.rows.map((r) => {
-            const on = !!lit?.streams.has(r.stream) || hover === r.stream;
-            return (
-              // biome-ignore lint/a11y/noStaticElementInteractions: hover lights the stream across the field
-              <g
-                key={`${r.store}-${r.stream}`}
-                className={`${styles.streamRow} ${off(on)}`}
-                data-color={colors.get(r.stream) ?? 0}
-                onMouseEnter={() => setHover(r.stream)}
-                onMouseLeave={() => setHover(undefined)}
-              >
-                <rect className={styles.dot} x={r.box.x} y={r.box.y + 4} width={10} height={10} rx={3} />
-                <text x={r.box.x + 16} y={r.box.y + 13}>
-                  {trim(r.stream, 24)}
-                  {lay.stores.length > 1 && <tspan className={styles.muted}> ({r.store})</tspan>}
-                </text>
-                <text x={r.box.x + r.box.w} y={r.box.y + 13} className={styles.right}>
-                  v{r.head} · {r.count} event{r.count > 1 ? "s" : ""}
-                </text>
-              </g>
-            );
-          })}
-        </g>
-      )}
-      {view === "micro" &&
-        lay.stores.map((sb) => (
-          <text key={`hint-${sb.store.name}`} x={sb.field.x + sb.field.w} y={sb.field.y + sb.field.h + 12} className={styles.fieldHint}>
-            the whole store, zoomed out · dashed: the cells below
-          </text>
-        ))}
+      {/* the route the step's tokens take, lit while the step is on screen */}
+      {!reduce &&
+        moves.map((m, i) => {
+          const pts = lay.route(m.from, m.to);
+          if (pts.length < 2) return null;
+          const { starts } = schedule(moves);
+          return (
+            <polyline
+              key={`route-${run}-${i}`}
+              className={styles.route}
+              data-tone={m.tone}
+              points={pts.map((p) => `${p.x},${p.y}`).join(" ")}
+              pathLength={1}
+              style={{ animationDelay: `${starts[i]}ms` } as CSSProperties}
+            />
+          );
+        })}
 
       <Tokens moves={moves} lay={lay} run={run} reduce={reduce} />
     </svg>
@@ -825,6 +956,21 @@ export default function Tour({ spec }: { spec: TourSpec }) {
   const say = fill(step.say, frame.world, all.base);
   const next = next_line(spec, all, index);
   const pipe = step.pipe && spec.pipelines[step.pipe.name] ? step.pipe : undefined;
+  // the streams the scene works on; the field holds the rest
+  const scene_streams = useMemo(() => {
+    const rows = new Map<string, { stream: string; head: number; count: number; color: number }>();
+    for (const st of frame.world.stores)
+      for (const c of st.cells) {
+        if (c.leaving) continue;
+        const key = frame.world.stores.length > 1 ? `${c.stream} (${st.name})` : c.stream;
+        const r = rows.get(key);
+        if (r) {
+          r.head = Math.max(r.head, c.version);
+          r.count++;
+        } else rows.set(key, { stream: key, head: c.version, count: 1, color: colors.get(c.stream) ?? 0 });
+      }
+    return [...rows.values()];
+  }, [frame.world, colors]);
   const feed = useMemo(() => {
     const lines: { at: number; text: string }[] = [];
     for (let i = frame.chapter_start; i <= index; i++) for (const text of all[i]!.world.feed) lines.push({ at: i, text });
@@ -1074,6 +1220,26 @@ export default function Tour({ spec }: { spec: TourSpec }) {
                   </li>
                 );
               })}
+            </ol>
+          </section>
+          <section className={styles.streamsBox}>
+            <h4>Streams in this scene</h4>
+            <ol className={styles.streamList}>
+              {scene_streams.map((r) => (
+                // biome-ignore lint/a11y/noNoninteractiveElementInteractions: hover lights the stream's dots in the field
+                <li
+                  key={r.stream}
+                  data-color={r.color}
+                  onMouseEnter={() => setHover(r.stream.split(" ")[0])}
+                  onMouseLeave={() => setHover(undefined)}
+                >
+                  <span className={styles.swatch} />
+                  <code>{r.stream}</code>
+                  <span className={styles.streamMeta}>
+                    v{r.head} · {r.count} event{r.count > 1 ? "s" : ""}
+                  </span>
+                </li>
+              ))}
             </ol>
           </section>
           <section className={styles.feedBox}>

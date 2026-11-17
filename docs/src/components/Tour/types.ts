@@ -92,7 +92,13 @@ export type AppSpec = {
   title?: string;
   slices: {
     name: string;
-    states: { name: string; actions: string[]; events: string[] }[];
+    /** each state with its actions (inputs), its fields, and the events it emits (outputs) */
+    states: {
+      name: string;
+      actions: string[];
+      events: string[];
+      fields?: string[];
+    }[];
     reactions?: string[];
     /** a projection, its target, and what it folds or listens to */
     projections?: {
@@ -104,6 +110,8 @@ export type AppSpec = {
   }[];
   /** drain lanes beyond the default, with their budgets */
   lanes?: { name: string; budget: string }[];
+  /** the event each reaction listens to, for the arrow from that event */
+  listens?: Record<string, string>;
   /** the ports it is wired to: `store: PostgresStore`, … */
   ports?: string[];
   /** operator entry points: app.close, app.restore, … */

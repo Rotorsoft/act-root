@@ -176,6 +176,13 @@ const CODE: Record<string, string> = {
   "app.audit": `for await (const f of app.audit(["close-candidate", "reaction-health"])) console.log(f);`,
 };
 
+const LISTENS: Record<string, string> = {
+  assign: "TicketOpened",
+  "escalation webhook": "TicketEscalated",
+  autoEscalate: "TicketAssigned",
+  autoclose: "TicketClosed",
+};
+
 const TICKET_EVENTS = ["TicketOpened", "MessageAdded", "TicketClosed"];
 const tickets = (
   actions: string[],
@@ -183,7 +190,14 @@ const tickets = (
   extra: Partial<AppSpec["slices"][number]> = {}
 ) => ({
   name: "Tickets",
-  states: [{ name: "Ticket", actions, events }],
+  states: [
+    {
+      name: "Ticket",
+      actions,
+      events,
+      fields: ["title", "status", "messages"],
+    },
+  ],
   ...extra,
 });
 const agents = {
@@ -191,6 +205,7 @@ const agents = {
   states: [
     {
       name: "Agent",
+      fields: ["name", "open (at most 5)"],
       actions: ["AddAgent"],
       events: ["AgentAdded", "TicketTaken", "TicketDropped"],
     },
@@ -205,6 +220,7 @@ const APP_DESK: AppSpec = {
   ],
   ports: PORTS,
   code: CODE,
+  listens: LISTENS,
 };
 const APP_ONE: AppSpec = {
   title: "act().withState(Ticket).build()",
@@ -213,6 +229,7 @@ const APP_ONE: AppSpec = {
   ],
   ports: PORTS,
   code: CODE,
+  listens: LISTENS,
 };
 const APP_RULES: AppSpec = {
   ...APP_ONE,
@@ -229,6 +246,7 @@ const APP_REACT: AppSpec = {
   ],
   ports: PORTS,
   code: CODE,
+  listens: LISTENS,
 };
 const APP_LANES: AppSpec = {
   ...APP_REACT,
@@ -272,6 +290,7 @@ const APP_PROJ: AppSpec = {
   ports: PORTS,
   ops: ["app.reset"],
   code: CODE,
+  listens: LISTENS,
 };
 const APP_LOADS: AppSpec = {
   title: "act().withSlice(TicketSlice).withSlice(AgentSlice).build()",
@@ -284,6 +303,7 @@ const APP_LOADS: AppSpec = {
   ],
   ports: PORTS,
   code: CODE,
+  listens: LISTENS,
 };
 const APP_USERS: AppSpec = {
   title: "act().withState(User).build()",
@@ -293,6 +313,7 @@ const APP_USERS: AppSpec = {
       states: [
         {
           name: "User",
+          fields: ["plan", "email (sensitive)"],
           actions: ["register"],
           events: ["UserRegistered", "PlanChanged"],
         },
@@ -302,6 +323,7 @@ const APP_USERS: AppSpec = {
   ports: PORTS,
   ops: ["app.forget"],
   code: CODE,
+  listens: LISTENS,
 };
 const APP_CLOSE: AppSpec = {
   ...APP_DESK,
@@ -321,13 +343,21 @@ const APP_POLICIES: AppSpec = {
     }),
     {
       name: "Ledgers",
-      states: [{ name: "Ledger", actions: ["post"], events: ["Posted"] }],
+      states: [
+        {
+          name: "Ledger",
+          actions: ["post"],
+          events: ["Posted"],
+          fields: ["balance"],
+        },
+      ],
       reactions: ["autoclose"],
     },
   ],
   ports: PORTS,
   ops: ["app.close"],
   code: CODE,
+  listens: LISTENS,
 };
 const APP_OPS: AppSpec = {
   ...APP_POLICIES,

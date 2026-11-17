@@ -1,9 +1,9 @@
 /**
  * Places everything the stage draws, in SVG units. Three regions share the
- * width: the callers (and the read models the app writes) on the left, the
- * running Act app in the middle, the event store on the right. On a phone they
- * stack. The layout reads only the world, the scene's nodes and the app's
- * declared anatomy, so it has no domain knowledge.
+ * width: the callers (and the read models the app writes) in a narrow left
+ * column, the running Act app in the middle, the event store on the right. On
+ * a phone they stack. The layout reads only the world, the scene's nodes and
+ * the app's declared anatomy, so it has no domain knowledge.
  */
 import type { Anchor, AppSpec, Node } from "./types";
 import type { Cell, Store, Table, Target, World } from "./world";
@@ -16,18 +16,21 @@ export type Pt = { x: number; y: number };
 
 /** An element of the app: an action, an event, a reaction, … with its code, if any. */
 export type Chip = {
-  kind:
-    | "action"
-    | "event"
-    | "reaction"
-    | "projection"
-    | "state"
-    | "lane"
-    | "op"
-    | "port";
+  kind: "action" | "event" | "reaction" | "projection" | "lane" | "op" | "port";
   name: string;
   label: string;
   box: Box;
+  code?: string;
+};
+
+/** A state inside its slice: its actions flow in on the left, its events out on the right. */
+export type StateBox = {
+  name: string;
+  box: Box;
+  lines: string[];
+  sub?: string;
+  version?: number;
+  node?: string;
   code?: string;
 };
 
@@ -35,10 +38,15 @@ export type AppLayout = {
   box: Box;
   title: string;
   gate: Box;
+  /** the action layer: one ordered pipe of stages, ending at the commit port */
   layer: { stage: string; box: Box }[];
   layer_box: Box;
+  vertical: boolean;
   chips: Chip[];
+  states: StateBox[];
   slices: { name: string; box: Box; code?: string }[];
+  /** arrows: action → state, state → event, event → reaction or projection */
+  links: { a: Pt; b: Pt; kind: "in" | "out" | "listen" }[];
   cards: { node: Node; box: Box; lines: string[] }[];
   port: Pt;
 };
@@ -51,10 +59,22 @@ export type LaneGroup = {
   rows: SubRow[];
 };
 
+/** Where each subscription column starts, as a share of the row's width. */
+export const SUB_COLS = {
+  target: 0,
+  source: 0.22,
+  lane: 0.38,
+  status: 0.47,
+  lease: 0.64,
+  retries: 0.74,
+  at: 1,
+};
+
 export type StoreBox = {
   store: Store;
   box: Box;
   field: Box;
+  legend: Box;
   cells: { cell: Cell; box: Box }[];
   tail: Box;
   per_row: number;
@@ -65,13 +85,6 @@ export type StoreBox = {
   subs_head?: Box;
 };
 
-export type StreamRow = {
-  stream: string;
-  store: string;
-  head: number;
-  count: number;
-  box: Box;
-};
 export type TableBox = { table: Table; box: Box };
 
 export type Layout = {
@@ -81,20 +94,19 @@ export type Layout = {
   callers: { node: Node; box: Box }[];
   app: AppLayout;
   stores: StoreBox[];
-  streams: { box: Box; rows: StreamRow[] };
   tables: TableBox[];
   anchor: (a: Anchor) => Pt | undefined;
   route: (from: Anchor, to: Anchor) => Pt[];
   /** the app element a scene node names, for the spotlight */
-  chip_of: (id: string) => Chip | undefined;
+  chip_of: (id: string) => { kind: string; name: string } | undefined;
 };
 
-const CALLER_H = 42;
-const CHIP_H = 20;
-const LINE = 14;
-const TRACK = 10;
+const CALLER_H = 38;
+const CHIP_H = 19;
+const LINE = 13;
+const TRACK = 8;
 
-export const text_w = (s: string, px = 11) => s.length * px * 0.6 + 14;
+export const text_w = (s: string, px = 10.5) => s.length * px * 0.6 + 12;
 
 /** One line per field, `key: value`, values kept short. */
 export function data_lines(
@@ -133,7 +145,7 @@ function flow(
   let cx = x + indent;
   let cy = y;
   for (const it of items) {
-    const cw = Math.min(w - indent, text_w(it.label) + (it.code ? 18 : 0));
+    const cw = Math.min(w - indent, text_w(it.label) + (it.code ? 16 : 0));
     if (cx + cw > x + w && cx > x + indent) {
       cx = x + indent;
       cy += CHIP_H + 4;
@@ -142,6 +154,19 @@ function flow(
     cx += cw + 5;
   }
   return items.length ? cy + CHIP_H - y : 0;
+}
+
+/** Stacks chips in a column; returns the height used. */
+function column(
+  chips: Chip[],
+  items: Omit<Chip, "box">[],
+  x: number,
+  y: number,
+  w: number
+): number {
+  for (const [i, it] of items.entries())
+    chips.push({ ...it, box: { x, y: y + i * (CHIP_H + 4), w, h: CHIP_H } });
+  return items.length ? items.length * (CHIP_H + 4) - 4 : 0;
 }
 
 function app_layout(
@@ -156,9 +181,10 @@ function app_layout(
 ): AppLayout {
   const code = app.code ?? {};
   const chips: Chip[] = [];
+  const links: AppLayout["links"] = [];
   const pad = 10;
   const iw = w - pad * 2;
-  let cy = y + 30;
+  let cy = y + 28;
 
   // the ports it's wired to
   const ports = [...(app.ports ?? [])];
@@ -177,7 +203,7 @@ function app_layout(
       x + pad,
       cy,
       iw
-    ) + 8;
+    ) + 7;
 
   // the gate every action enters by, then the operator entry points
   const declared = new Set(
@@ -200,83 +226,191 @@ function app_layout(
         iw,
         gate.w + 6
       )
-    ) + 10;
+    ) + 8;
 
-  // the action layer: every stage an action passes before the store
-  const per = narrow
-    ? 3
-    : Math.max(3, Math.min(layer.length, Math.floor((iw - 16) / 84)));
-  const sw = (iw - 16 - (per - 1) * 6) / per;
+  // the action layer: one ordered pipe, across on a wide stage, down on a phone
   const layer_top = cy;
-  const stages = layer.map((stage, i) => ({
-    stage,
-    box: {
-      x: x + pad + 4 + (i % per) * (sw + 6),
-      y: cy + 24 + Math.floor(i / per) * (CHIP_H + 6),
-      w: sw,
-      h: CHIP_H,
-    },
-  }));
-  const layer_h = Math.ceil(layer.length / per) * (CHIP_H + 6) + 28;
+  const vertical = narrow;
+  const arrow = 12;
+  const stages: AppLayout["layer"] = [];
+  let layer_h: number;
+  if (vertical) {
+    const sw = Math.min(170, iw - 20);
+    for (const [i, stage] of layer.entries())
+      stages.push({
+        stage,
+        box: {
+          x: x + pad + 6,
+          y: cy + 20 + i * (CHIP_H + 6),
+          w: sw,
+          h: CHIP_H,
+        },
+      });
+    layer_h = 20 + layer.length * (CHIP_H + 6) + 4;
+  } else {
+    const sw = (iw - 26 - arrow * (layer.length - 1)) / layer.length;
+    for (const [i, stage] of layer.entries())
+      stages.push({
+        stage,
+        box: {
+          x: x + pad + 4 + i * (sw + arrow),
+          y: cy + 20,
+          w: sw,
+          h: CHIP_H,
+        },
+      });
+    layer_h = 20 + CHIP_H + 8;
+  }
   const layer_box: Box = {
     x: x + pad - 4,
     y: layer_top - 2,
     w: iw + 8,
     h: layer_h,
   };
+  const last = stages[stages.length - 1]?.box;
+  const port: Pt = vertical
+    ? { x: x + w - 12, y: (last?.y ?? cy) + CHIP_H / 2 }
+    : { x: x + w, y: (last?.y ?? cy) + CHIP_H / 2 };
   cy += layer_h + 10;
 
-  // slices, each with its states, reactions and projections
+  // the states that scene nodes fold, by state name: their values replace the field list
+  const by_state = new Map<string, Node[]>();
+  for (const n of nodes.filter((n) => n.kind === "state")) {
+    const base = n.label.split(" ·")[0]!;
+    by_state.set(base, [...(by_state.get(base) ?? []), n]);
+  }
+
+  // slices: each state as actions → state → events, then the reactions and projections that listen
   const slices: AppLayout["slices"] = [];
+  const states: StateBox[] = [];
+  const cards: AppLayout["cards"] = [];
+  const event_at = new Map<string, Box>();
+  const state_at = new Map<string, Box>();
   for (const sl of app.slices) {
+    // a reaction's arrow comes from an event of its own slice
+    event_at.clear();
     const top = cy;
     cy += 20;
+    const inner = iw - 12;
+    const aw = narrow ? inner * 0.32 : inner * 0.3;
+    const ew = narrow ? inner * 0.32 : inner * 0.32;
+    const gap = 16;
+    const sw = inner - aw - ew - gap * 2;
     for (const st of sl.states) {
-      const items: Omit<Chip, "box">[] = [
-        { kind: "state", name: st.name, label: st.name, code: code[st.name] },
-        ...st.actions.map((a) => ({
+      const own = by_state.get(st.name) ?? [];
+      const first = own.find((n) => world.states[n.id]);
+      const values = first ? data_lines(world.states[first.id]?.data, 5) : [];
+      const lines = values.length ? values : (st.fields ?? []).map((f) => f);
+      const sx = x + pad + 6 + aw + gap;
+      const ex = sx + sw + gap;
+      const ah = column(
+        chips,
+        st.actions.map((a) => ({
           kind: "action" as const,
           name: a,
           label: a,
           code: code[a],
         })),
-        ...st.events.map((e) => ({
-          kind: "event" as const,
-          name: e,
-          label: e,
-        })),
-      ];
-      cy += flow(chips, items, x + pad + 6, cy, iw - 12) + 5;
+        x + pad + 6,
+        cy,
+        aw
+      );
+      const eh = column(
+        chips,
+        st.events.map((e) => ({ kind: "event" as const, name: e, label: e })),
+        ex,
+        cy,
+        ew
+      );
+      const sh = 22 + Math.max(1, lines.length) * LINE + 6;
+      const h = Math.max(ah, eh, sh);
+      const box: Box = {
+        x: sx,
+        y: cy,
+        w: sw,
+        h: Math.max(sh, Math.min(h, sh + 20)),
+      };
+      states.push({
+        name: st.name,
+        box,
+        lines,
+        code: code[st.name],
+        ...(first && {
+          node: first.id,
+          sub: first.sub,
+          version: world.states[first.id]?.version,
+        }),
+      });
+      state_at.set(st.name, box);
+      for (const c of chips.filter(
+        (c) =>
+          c.kind === "action" && st.actions.includes(c.name) && c.box.y >= cy
+      )) {
+        links.push({
+          a: { x: c.box.x + c.box.w, y: c.box.y + CHIP_H / 2 },
+          b: {
+            x: box.x,
+            y: box.y + Math.min(box.h / 2, c.box.y - cy + CHIP_H / 2 + 4),
+          },
+          kind: "in",
+        });
+      }
+      for (const c of chips.filter(
+        (c) => c.kind === "event" && st.events.includes(c.name) && c.box.y >= cy
+      )) {
+        event_at.set(c.name, c.box);
+        links.push({
+          a: {
+            x: box.x + box.w,
+            y: box.y + Math.min(box.h / 2, c.box.y - cy + CHIP_H / 2 + 4),
+          },
+          b: { x: c.box.x, y: c.box.y + CHIP_H / 2 },
+          kind: "out",
+        });
+      }
+      // a second scene node on the same state (two loads of one state) gets a card of its own
+      for (const n of own.filter((n) => n !== first && world.states[n.id]))
+        cards.push({
+          node: n,
+          box: { x: 0, y: 0, w: 0, h: 0 },
+          lines: data_lines(world.states[n.id]?.data, 5),
+        });
+      cy += h + 8;
     }
-    if (sl.reactions?.length)
-      cy +=
-        flow(
-          chips,
-          sl.reactions.map((r) => ({
-            kind: "reaction" as const,
-            name: r,
-            label: `↻ ${r}`,
-            code: code[r],
-          })),
-          x + pad + 6,
-          cy,
-          iw - 12
-        ) + 5;
-    if (sl.projections?.length)
-      cy +=
-        flow(
-          chips,
-          sl.projections.map((p) => ({
-            kind: "projection" as const,
-            name: p.name,
-            label: `▤ ${p.name}${p.of ? ` · .of(${p.of})` : p.on ? ` · on ${p.on.join(", ")}` : ""}`,
-            code: code[p.name],
-          })),
-          x + pad + 6,
-          cy,
-          iw - 12
-        ) + 5;
-    cy += 4;
+    const listeners: Omit<Chip, "box">[] = [
+      ...(sl.reactions ?? []).map((r) => ({
+        kind: "reaction" as const,
+        name: r,
+        label: `↻ ${r}`,
+        code: code[r],
+      })),
+      ...(sl.projections ?? []).map((p) => ({
+        kind: "projection" as const,
+        name: p.name,
+        label: `▤ ${p.name} → ${p.target}`,
+        code: code[p.name],
+      })),
+    ];
+    if (listeners.length) {
+      const before = chips.length;
+      cy += 8;
+      cy += flow(chips, listeners, x + pad + 6, cy, iw - 12) + 6;
+      for (const c of chips.slice(before)) {
+        const proj = sl.projections?.find((p) => p.name === c.name);
+        const from =
+          c.kind === "reaction"
+            ? event_at.get(app.listens?.[c.name] ?? "")
+            : proj?.of
+              ? state_at.get(proj.of)
+              : event_at.get(proj?.on?.[0] ?? "");
+        if (from)
+          links.push({
+            a: { x: from.x + from.w / 2, y: from.y + from.h },
+            b: { x: c.box.x + c.box.w / 2, y: c.box.y },
+            kind: "listen",
+          });
+      }
+    }
     slices.push({
       name: sl.name,
       box: { x: x + pad, y: top, w: iw, h: cy - top },
@@ -299,21 +433,30 @@ function app_layout(
         iw
       ) + 8;
 
-  // the states this scene folds: a card each
-  const cards: AppLayout["cards"] = [];
+  // state cards for scene nodes not shown inside a state
+  for (const n of nodes.filter(
+    (n) =>
+      n.kind === "state" &&
+      world.states[n.id] &&
+      !states.some((s) => s.node === n.id) &&
+      !cards.some((c) => c.node === n)
+  ))
+    cards.push({
+      node: n,
+      box: { x: 0, y: 0, w: 0, h: 0 },
+      lines: data_lines(world.states[n.id]?.data, 5),
+    });
   const card_w = narrow ? (iw - 8) / 2 : Math.min(200, (iw - 16) / 3);
   let cx = x + pad;
   let row_h = 0;
-  for (const node of nodes.filter((n) => n.kind === "state")) {
-    const lines = data_lines(world.states[node.id]?.data, 5);
-    if (!lines.length) continue;
-    const h = 22 + lines.length * LINE + 6;
+  for (const card of cards) {
+    const h = 22 + card.lines.length * LINE + 6;
     if (cx + card_w > x + pad + iw + 1) {
       cx = x + pad;
       cy += row_h + 6;
       row_h = 0;
     }
-    cards.push({ node, box: { x: cx, y: cy, w: card_w, h }, lines });
+    card.box = { x: cx, y: cy, w: card_w, h };
     cx += card_w + 8;
     row_h = Math.max(row_h, h);
   }
@@ -325,10 +468,13 @@ function app_layout(
     gate,
     layer: stages,
     layer_box,
+    vertical,
     chips,
+    states,
     slices,
+    links,
     cards,
-    port: { x: x + w - (narrow ? 10 : 0), y: layer_top + layer_h / 2 },
+    port,
   };
 }
 
@@ -343,14 +489,15 @@ export function layout(
 ): Layout {
   const narrow = mode === "narrow";
   const width = narrow ? 420 : units;
-  const pad = 12;
-  const gap = narrow ? 14 : 26;
+  const pad = 10;
+  const gap = narrow ? 14 : 20;
+  // callers narrow, then the app and the store sharing the rest about 40 / 48
   const L = narrow
     ? width - pad * 2
-    : Math.round(Math.max(150, Math.min(220, width * 0.13)));
+    : Math.round(Math.max(110, Math.min(190, width * 0.12)));
   const A = narrow
     ? width - pad * 2
-    : Math.round(Math.max(380, Math.min(580, width * 0.33)));
+    : Math.round((width - pad * 2 - L - gap * 2) * 0.46);
   const S = narrow ? width - pad * 2 : width - pad * 2 - L - A - gap * 2;
   const lx = pad;
   const ax = narrow ? pad : lx + L + gap;
@@ -375,10 +522,10 @@ export function layout(
     });
     ly += Math.ceil(cnodes.length / 3) * (CALLER_H + 8) + 6;
   } else {
-    ly += 22;
+    ly += 20;
     for (const node of cnodes) {
       callers.push({ node, box: { x: lx, y: ly, w: L, h: CALLER_H } });
-      ly += CALLER_H + 10;
+      ly += CALLER_H + 8;
     }
   }
 
@@ -394,14 +541,14 @@ export function layout(
     narrow
   );
 
-  // read models: below the callers on a wide stage, after the store on a phone
+  // read models: under the callers on a wide stage, after the store on a phone
   const tables: TableBox[] = [];
   const table_rows = (t: Table) =>
-    Math.min(8, t.rows.length) + (t.total !== undefined ? 1 : 0);
-  let ty = narrow ? 0 : ly + 16;
+    Math.min(6, t.rows.length) + (t.total !== undefined ? 1 : 0);
+  let ty = narrow ? 0 : ly + 14;
   if (!narrow)
     for (const table of world.tables) {
-      const h = 26 + Math.max(1, table_rows(table)) * 18 + 8;
+      const h = 24 + Math.max(1, table_rows(table)) * 16 + 8;
       tables.push({ table, box: { x: lx, y: ty, w: L, h } });
       ty += h + 10;
     }
@@ -410,51 +557,55 @@ export function layout(
   let sy = narrow ? appl.box.y + appl.box.h + 16 : 8;
   const stores: StoreBox[] = world.stores.map((store) => {
     const top = sy;
-    sy += narrow ? 44 : 30;
+    sy += narrow ? 42 : 28;
     const field_h =
-      view === "macro" ? Math.round(Math.max(150, Math.min(330, S * 0.4))) : 56;
+      view === "macro"
+        ? Math.round(Math.max(110, Math.min(210, S * 0.26)))
+        : 52;
     const field: Box = { x: sx, y: sy, w: S, h: field_h };
-    sy += field_h + 8;
+    sy += field_h + 4;
+    const legend: Box = { x: sx, y: sy, w: S, h: 14 };
+    sy += 16;
 
-    // the detailed cells: every event the scene works on, or the last row at scale
-    const cell = { w: 88, h: 50 };
-    const cg = 8;
+    // the detailed cells: the lens on the field; at scale only the newest row
+    const cell = { w: 84, h: 46 };
+    const cg = 6;
     const per_row = Math.max(1, Math.floor((S + cg) / (cell.w + cg)));
     const shown = view === "macro" ? store.cells.slice(-per_row) : store.cells;
     const slots = shown.length + (store.ghost ? 1 : 0);
     const place = (i: number): Box => ({
       x: sx + (i % per_row) * (cell.w + cg),
-      y: sy + 14 + Math.floor(i / per_row) * (cell.h + 26),
+      y: sy + 12 + Math.floor(i / per_row) * (cell.h + 22),
       w: cell.w,
       h: cell.h,
     });
     const cells = shown.map((c, i) => ({ cell: c, box: place(i) }));
     const tail = place(shown.length);
-    if (slots) sy += Math.ceil(slots / per_row) * (cell.h + 26) + 6;
+    if (slots) sy += Math.ceil(slots / per_row) * (cell.h + 22) + 4;
 
-    // subscriptions: grouped by lane, each with a track on the id axis
+    // subscriptions: grouped by lane, a header row, each with a track on the id axis
     const axis = { x: sx, w: S, max: Math.max(1, store.next_id - 1) };
     const own = world.targets.filter((t) => t.store === store.name);
     const lanes: LaneGroup[] = [];
     let checkpoint: Box | undefined;
     let subs_head: Box | undefined;
     if (own.length) {
-      subs_head = { x: sx, y: sy, w: S, h: 22 };
-      sy += 24;
-      checkpoint = { x: sx, y: sy, w: S, h: 20 };
-      sy += 26;
+      subs_head = { x: sx, y: sy, w: S, h: 30 };
+      sy += 32;
+      checkpoint = { x: sx, y: sy, w: S, h: 18 };
+      sy += 22;
       for (const lane of [...new Set(own.map((t) => t.lane))]) {
-        const head: Box = { x: sx, y: sy, w: S, h: 18 };
-        sy += 20;
+        const head: Box = { x: sx, y: sy, w: S, h: 16 };
+        sy += 18;
         const rows: SubRow[] = [];
-        const rh = narrow ? 40 : 22;
+        const rh = narrow ? 36 : 20;
         for (const target of own.filter((t) => t.lane === lane)) {
           rows.push({
             target,
             box: { x: sx, y: sy, w: S, h: rh },
             track: { x: sx, y: sy + rh, w: S, h: TRACK },
           });
-          sy += rh + TRACK + 8;
+          sy += rh + TRACK + 6;
         }
         lanes.push({
           lane,
@@ -463,7 +614,7 @@ export function layout(
           rows,
         });
       }
-      sy += 4;
+      sy += 2;
     }
     const box: Box = { x: sx - 8, y: top, w: S + 16, h: sy - top };
     sy += 12;
@@ -471,6 +622,7 @@ export function layout(
       store,
       box,
       field,
+      legend,
       cells,
       tail,
       per_row,
@@ -481,47 +633,21 @@ export function layout(
     };
   });
 
-  // the streams the scene works on (the field holds the rest)
-  const rows: StreamRow[] = [];
-  for (const s of world.stores)
-    for (const c of s.cells) {
-      if (c.leaving) continue;
-      const row = rows.find((r) => r.stream === c.stream && r.store === s.name);
-      if (row) {
-        row.head = Math.max(row.head, c.version);
-        row.count++;
-      } else
-        rows.push({
-          stream: c.stream,
-          store: s.name,
-          head: c.version,
-          count: 1,
-          box: { x: 0, y: 0, w: 0, h: 0 },
-        });
-    }
-  const streams_box: Box = { x: sx, y: sy, w: S, h: 0 };
-  if (rows.length) {
-    sy += 22;
-    for (const r of rows) {
-      r.box = { x: sx, y: sy, w: S, h: 18 };
-      sy += 18;
-    }
-    sy += 8;
-  }
-  streams_box.h = sy - streams_box.y;
-
   if (narrow)
     for (const table of world.tables) {
-      const h = 26 + Math.max(1, table_rows(table)) * 18 + 8;
+      const h = 24 + Math.max(1, table_rows(table)) * 16 + 8;
       tables.push({ table, box: { x: pad, y: sy, w: S, h } });
       sy += h + 10;
     }
 
-  const height = Math.max(sy, appl.box.y + appl.box.h, ty, ly) + 10;
+  const height = Math.max(sy, appl.box.y + appl.box.h, ty, ly) + 8;
 
   const center = (b: Box): Pt => ({ x: b.x + b.w / 2, y: b.y + b.h / 2 });
   const chip = (kind: Chip["kind"], name: string) =>
     appl.chips.find((c) => c.kind === kind && c.name === name);
+  const state_box = (node: Node) =>
+    appl.states.find((s) => s.node === node.id) ??
+    appl.states.find((s) => s.name === node.label.split(" ·")[0]);
   const tail_of = (s: StoreBox | undefined) =>
     s &&
     (s.cells.length || s.store.ghost
@@ -550,15 +676,12 @@ export function layout(
       const s = stores.find((x) => x.store.name === a.slice(6)) ?? stores[0];
       return s && center(s.field);
     }
-    if (a.startsWith("stream:")) {
-      const r = rows.find((x) => x.stream === a.slice(7));
-      return r && { x: r.box.x + 60, y: r.box.y + r.box.h / 2 };
-    }
+    if (a.startsWith("stream:")) return stores[0] && center(stores[0].field);
     if (a.startsWith("target:")) {
       for (const s of stores)
         for (const g of s.lanes) {
           const r = g.rows.find((x) => x.target.id === a.slice(7));
-          if (r) return { x: r.box.x + 70, y: r.box.y + r.box.h / 2 };
+          if (r) return { x: r.box.x + 60, y: r.box.y + r.box.h / 2 };
         }
       return undefined;
     }
@@ -570,7 +693,6 @@ export function layout(
       const s = stores.find((x) => x.store.name === a.slice(6));
       return s && { x: s.box.x + s.box.w / 2, y: s.box.y + 14 };
     }
-    // a scene node: a caller, or the element of the app it names
     const caller = callers.find((c) => c.node.id === a);
     if (caller) return center(caller.box);
     const node = nodes.find((n) => n.id === a);
@@ -578,7 +700,7 @@ export function layout(
     if (node.kind === "state") {
       const card = appl.cards.find((c) => c.node.id === a);
       if (card) return center(card.box);
-      const st = chip("state", node.label.split(" ·")[0]!);
+      const st = state_box(node);
       return st && center(st.box);
     }
     const kinds: Record<string, Chip["kind"][]> = {
@@ -607,43 +729,48 @@ export function layout(
     const node = nodes.find((n) => n.id === a);
     return node && CALLERS.has(node.kind) ? "left" : "app";
   };
-  const enters_by_gate = (a: Anchor) => {
+  const is_action = (a: Anchor) => {
     const node = nodes.find((n) => n.id === a);
-    return (
-      (node?.kind === "action" && !!chip("action", node.label)) ||
-      node?.kind === "state"
-    );
+    return node?.kind === "action" && !!chip("action", node.label);
   };
+  const is_state = (a: Anchor) =>
+    nodes.find((n) => n.id === a)?.kind === "state";
+  const pipe_start = () => center(appl.layer[0]!.box);
+  const pipe_end = () => center(appl.layer[appl.layer.length - 1]!.box);
 
-  // the token's path: into the app through `app.do`, out through the store port
+  // the token's path: in at `app.do`, along the action layer, out through the commit port
   const route = (from: Anchor, to: Anchor): Pt[] => {
     const a = anchor(from);
     const b = anchor(to);
     if (!a || !b) return [];
     const ra = region(from);
     const rb = region(to);
-    const gate = center(appl.gate);
-    const port = appl.port;
     const out: Pt[] = [a];
-    if (narrow) {
-      out.push(b);
-      return out;
-    }
-    if (ra === "left" && rb === "app" && enters_by_gate(to)) out.push(gate);
+    const has_layer = appl.layer.length > 0;
+    if (ra === "left" && rb === "app" && (is_action(to) || is_state(to)))
+      out.push(center(appl.gate));
     if (ra === "left" && rb === "store")
-      out.push({ x: appl.box.x, y: a.y }, port);
-    if (ra === "app" && rb === "store") out.push(port);
-    if (ra === "store" && rb === "app") out.push(port);
+      out.push({ x: appl.box.x, y: a.y }, appl.port);
+    // a commit leaves along the pipe: through every stage, then the port
+    if (ra === "app" && rb === "store") {
+      if (has_layer && (is_action(from) || is_state(from)))
+        out.push(pipe_start(), pipe_end());
+      out.push(appl.port);
+    }
+    if (ra === "store" && rb === "app") out.push(appl.port);
     if (ra === "store" && rb === "left")
-      out.push(port, { x: appl.box.x, y: b.y });
+      out.push(appl.port, { x: appl.box.x, y: b.y });
     out.push(b);
     return out;
   };
 
-  const chip_of = (id: string): Chip | undefined => {
+  const chip_of = (id: string) => {
     const node = nodes.find((n) => n.id === id);
     if (!node) return undefined;
-    if (node.kind === "state") return chip("state", node.label.split(" ·")[0]!);
+    if (node.kind === "state") {
+      const st = state_box(node);
+      return st && { kind: "state", name: st.name };
+    }
     if (node.kind === "action")
       return chip("action", node.label) ?? chip("op", node.label);
     if (node.kind === "reaction")
@@ -658,16 +785,15 @@ export function layout(
   };
 
   return {
-    chip_of,
     width,
     height,
     mode,
     callers,
     app: appl,
     stores,
-    streams: { box: streams_box, rows },
     tables,
     anchor,
     route,
+    chip_of,
   };
 }

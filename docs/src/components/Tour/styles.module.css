@@ -974,7 +974,7 @@
 }
 .panels {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1.3fr) minmax(0, 0.7fr) minmax(0, 1.3fr);
   gap: 16px;
 }
 .tour[data-mode="narrow"] .panels {
@@ -1190,5 +1190,155 @@
   .cellPos,
   .marker {
     transition: none;
+  }
+}
+
+/* the app's structure */
+.pipeLink,
+.link {
+  fill: none;
+  stroke: color-mix(in srgb, var(--dg-action) 55%, transparent);
+  stroke-width: 1.3;
+}
+.link[data-kind="out"] {
+  stroke: color-mix(in srgb, var(--dg-event) 60%, transparent);
+}
+.link[data-kind="listen"] {
+  stroke: color-mix(in srgb, var(--dg-reaction) 60%, transparent);
+  stroke-dasharray: 3 2;
+}
+.arrowHead {
+  fill: var(--dg-note);
+}
+.stateBox {
+  --k: var(--dg-state);
+}
+.stateBox > rect {
+  fill: color-mix(in srgb, var(--dg-state) 14%, var(--act-surface-1, #fff));
+  stroke: var(--dg-state);
+  stroke-width: 1.4;
+}
+.stateBox.focus > rect {
+  stroke-width: 3;
+  filter: drop-shadow(0 0 6px color-mix(in srgb, var(--dg-state) 55%, transparent));
+}
+.fieldLine {
+  font-family: var(--ifm-font-family-monospace);
+  font-size: 10px;
+  fill: var(--act-text-muted, #6b7486) !important;
+}
+
+/* the field's legend */
+.legend text {
+  font-size: 9.5px;
+  fill: var(--act-text-muted, #6b7486) !important;
+}
+.legend [data-k="k0"] .legendDot { fill: var(--t-s0); }
+.legend [data-k="k1"] .legendDot { fill: var(--t-s1); }
+.legend [data-k="k2"] .legendDot { fill: var(--t-s2); }
+.legend [data-k="k3"] .legendDot { fill: var(--t-s3); }
+.legend [data-k="pii"] .legendDot { fill: var(--dg-note); }
+.legendPii {
+  fill: var(--dg-external);
+}
+.legendRing {
+  fill: none;
+  stroke: var(--dg-state);
+  stroke-width: 1.4;
+}
+.legendTomb {
+  fill: var(--dg-line);
+}
+
+/* subscriptions: the column header and the lane chip */
+.colHead {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  fill: var(--act-text-muted, #6b7486) !important;
+}
+.laneChip rect {
+  fill: color-mix(in srgb, var(--dg-reaction) 12%, transparent);
+  stroke: color-mix(in srgb, var(--dg-reaction) 60%, transparent);
+}
+.laneChip text {
+  font-size: 9.5px !important;
+  font-weight: 600;
+  fill: var(--dg-reaction) !important;
+}
+
+/* the route a token takes, drawn in as it travels */
+.route {
+  fill: none;
+  stroke: var(--dg-action);
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0.45;
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: draw 0.8s cubic-bezier(0.45, 0.05, 0.35, 1) forwards;
+}
+.route[data-tone="bad"] { stroke: var(--dg-bad); }
+.route[data-tone="good"] { stroke: var(--dg-good); }
+@keyframes draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+/* the streams panel */
+.streamsBox h4 {
+  margin: 4px 0 6px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--act-text-muted, var(--ifm-color-emphasis-600));
+}
+.streamList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 190px;
+  overflow-y: auto;
+  font-size: 0.8rem;
+}
+.streamList li {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  padding: 2px 6px;
+  border-radius: 6px;
+  cursor: default;
+}
+.streamList li:hover {
+  background: var(--act-surface-2, rgba(127, 127, 127, 0.1));
+}
+.streamList li[data-color="0"] { --s: var(--t-s0); }
+.streamList li[data-color="1"] { --s: var(--t-s1); }
+.streamList li[data-color="2"] { --s: var(--t-s2); }
+.streamList li[data-color="3"] { --s: var(--t-s3); }
+.streamList li[data-color="4"] { --s: var(--t-s4); }
+.streamList li[data-color="5"] { --s: var(--t-s5); }
+.streamList li[data-color="6"] { --s: var(--t-s6); }
+.streamList li[data-color="7"] { --s: var(--t-s7); }
+.swatch {
+  flex: none;
+  width: 9px;
+  height: 9px;
+  border-radius: 3px;
+  background: var(--s);
+}
+.streamMeta {
+  margin-left: auto;
+  color: var(--act-text-muted, var(--ifm-color-emphasis-600));
+  font-variant-numeric: tabular-nums;
+}
+@media (prefers-reduced-motion: reduce) {
+  .route {
+    animation: none;
+    stroke-dashoffset: 0;
   }
 }

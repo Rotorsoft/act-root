@@ -130,17 +130,21 @@ export default function Field({
     const dots = dots_of(store, base);
     const max_id = dots.reduce((m, d) => Math.max(m, d.id, d.from ?? 0), 0);
     const n = Math.max(64, max_id + 1);
-    const W = size.w - 8;
+    // a gutter on the left for the id of each labelled row
+    const G = 40;
+    const W = size.w - G - 6;
     const H = size.h - 8;
-    // the largest pitch that fits every id in the box
-    let pitch = Math.min(14, Math.sqrt((W * H) / n));
+    // the largest pitch that fits every id in the box, kept small so it reads as one log
+    let pitch = Math.min(9, Math.sqrt((W * H) / n));
     let cols = Math.max(1, Math.floor(W / pitch));
     while (Math.ceil(n / cols) * pitch > H && pitch > 2) {
       pitch -= 0.25;
       cols = Math.max(1, Math.floor(W / pitch));
     }
-    const r = Math.max(1, pitch * 0.36);
-    const pos = (id: number) => ({ x: 4 + (id % cols) * pitch + pitch / 2, y: 4 + Math.floor(id / cols) * pitch + pitch / 2 });
+    const r = Math.max(0.9, pitch * 0.34);
+    const pos = (id: number) => ({ x: G + (id % cols) * pitch + pitch / 2, y: 4 + Math.floor(id / cols) * pitch + pitch / 2 });
+    const rows = Math.ceil(n / cols);
+    const tick_every = Math.max(1, Math.ceil(18 / pitch));
     const bin = { x: size.w - 34, y: size.h - 22 };
     geo.current = { pitch, cols, dots: new Map(dots.filter((d) => !d.leaving).map((d) => [d.id, d])) };
     const glow = new Map(store.glows.map((g) => [g.stream, g.worker]));
@@ -160,6 +164,16 @@ export default function Field({
       const st = reduce || !store.scan ? 1 : Math.max(0, Math.min(1, (now - start - delay) / scan_ms));
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.clearRect(0, 0, size.w, size.h);
+
+      // the id axis: the first id of every few rows
+      ctx.fillStyle = v("--act-text-muted", "#6b7486");
+      ctx.font = "9px ui-monospace, monospace";
+      ctx.textAlign = "right";
+      for (let row = 0; row < rows; row += tick_every) {
+        const y = 4 + row * pitch + pitch / 2 + 3;
+        ctx.fillText(`#${(row * cols).toLocaleString("en-US")}`, G - 5, y);
+      }
+      ctx.textAlign = "left";
 
       // the lens: where the detailed cells below sit in the field
       if (tour_ids.length) {
@@ -220,36 +234,32 @@ export default function Field({
           ctx.globalAlpha = alpha * dim;
         }
         if (d.kind === "snapshot") {
+          // a ring: the state, folded
           ctx.strokeStyle = snap;
-          ctx.lineWidth = Math.max(1, rr * 0.55);
+          ctx.lineWidth = Math.max(0.9, rr * 0.45);
           ctx.beginPath();
           ctx.arc(p.x, p.y, rr * 1.05, 0, Math.PI * 2);
           ctx.stroke();
         } else if (d.kind === "tombstone") {
+          // a cap: the stream is closed
           ctx.fillStyle = tomb;
-          ctx.fillRect(p.x - rr * 1.1, p.y - rr * 1.1, rr * 2.2, rr * 2.2);
-          ctx.strokeStyle = text;
-          ctx.lineWidth = Math.max(0.8, rr * 0.35);
-          ctx.beginPath();
-          ctx.moveTo(p.x - rr * 0.7, p.y - rr * 0.7);
-          ctx.lineTo(p.x + rr * 0.7, p.y + rr * 0.7);
-          ctx.moveTo(p.x + rr * 0.7, p.y - rr * 0.7);
-          ctx.lineTo(p.x - rr * 0.7, p.y + rr * 0.7);
-          ctx.stroke();
+          ctx.fillRect(p.x - rr * 1.05, p.y - rr * 1.05, rr * 2.1, rr * 2.1);
+          ctx.fillStyle = text;
+          ctx.fillRect(p.x - rr * 1.05, p.y - rr * 1.05, rr * 2.1, Math.max(0.8, rr * 0.5));
         } else {
           ctx.fillStyle = palette[kind_of(d.stream)]!;
           ctx.beginPath();
           ctx.arc(p.x, p.y, rr, 0, Math.PI * 2);
           ctx.fill();
           if (d.pii) {
-            ctx.strokeStyle = d.shredded ? bad : pink;
-            ctx.lineWidth = Math.max(0.8, rr * 0.4);
-            ctx.beginPath();
-            if (d.shredded) {
-              ctx.moveTo(p.x - rr, p.y - rr);
-              ctx.lineTo(p.x + rr, p.y + rr);
-            } else ctx.arc(p.x, p.y, rr * 1.45, 0, Math.PI * 2);
-            ctx.stroke();
+            // a small mark in the dot: its sensitive fields sit in the pii column
+            ctx.fillStyle = d.shredded ? bad : pink;
+            if (d.shredded) ctx.fillRect(p.x - rr * 0.8, p.y - rr * 0.15, rr * 1.6, Math.max(0.8, rr * 0.3));
+            else {
+              ctx.beginPath();
+              ctx.arc(p.x, p.y, rr * 0.45, 0, Math.PI * 2);
+              ctx.fill();
+            }
           }
         }
         // the dots a scan has passed brighten for a moment
@@ -307,7 +317,7 @@ export default function Field({
   const move = (e: React.MouseEvent) => {
     const rect = canvas.current!.getBoundingClientRect();
     const { pitch, cols, dots } = geo.current;
-    const col = Math.floor((e.clientX - rect.left - 4) / pitch);
+    const col = Math.floor((e.clientX - rect.left - 40) / pitch);
     const row = Math.floor((e.clientY - rect.top - 4) / pitch);
     const d = col >= 0 && col < cols ? dots.get(row * cols + col) : undefined;
     onHover(d?.stream);
