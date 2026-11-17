@@ -33,6 +33,7 @@ import { type Cell, census, type Frame, type Frames, fill, fmt, frames as fold, 
 export type { TourSpec } from "./types";
 
 const MOVE_MS = 820;
+const TRAIL = [1, 2, 3];
 
 // the stage names a narrow pill shows; the full name is its title
 const SHORT: Record<string, string> = { preconditions: "rules", "state check": "check" };
@@ -101,6 +102,7 @@ function path_frames(points: { x: number; y: number }[]): Keyframe[] {
 
 function Tokens({ moves, lay, run, reduce }: { moves: Move[]; lay: Layout; run: number; reduce: boolean }) {
   const refs = useRef<(SVGGElement | null)[]>([]);
+  const trail = useRef<(SVGCircleElement | null)[]>([]);
   useEffect(() => {
     if (reduce) return;
     const { starts } = schedule(moves);
@@ -109,13 +111,34 @@ function Tokens({ moves, lay, run, reduce }: { moves: Move[]; lay: Layout; run: 
       const el = refs.current[i];
       const pts = lay.route(m.from, m.to);
       if (!el || pts.length < 2) return;
-      anims.push(el.animate(path_frames(pts), { duration: MOVE_MS, delay: starts[i], easing: "cubic-bezier(.45,.05,.35,1)", fill: "both" }));
+      const frames = path_frames(pts);
+      const ease = "cubic-bezier(.45,.05,.35,1)";
+      anims.push(el.animate(frames, { duration: MOVE_MS, delay: starts[i], easing: ease, fill: "both" }));
+      // a short trail of data particles follows the token
+      for (const k of TRAIL) {
+        const p = trail.current[i * TRAIL.length + k - 1];
+        if (p) anims.push(p.animate(frames, { duration: MOVE_MS, delay: (starts[i] ?? 0) + k * 70, easing: ease, fill: "both" }));
+      }
     });
     return () => anims.forEach((x) => x.cancel());
   }, [run, moves, lay, reduce]);
   if (reduce) return null;
   return (
     <g className={styles.tokens} aria-hidden>
+      {moves.flatMap((m, i) =>
+        TRAIL.map((k) => (
+          <circle
+            key={`${run}-${i}-t${k}`}
+            ref={(el) => {
+              trail.current[i * TRAIL.length + k - 1] = el;
+            }}
+            r={4.2 - k * 0.8}
+            className={styles.particle}
+            data-tone={m.tone}
+            style={{ opacity: 0 }}
+          />
+        ))
+      )}
       {moves.map((m, i) => (
         <g
           key={`${run}-${i}`}
@@ -320,6 +343,17 @@ function Stage({
   };
   const commit_state = pipe?.name === "action" ? (pipe.at > 6 ? "done" : pipe.at === 6 ? (pipe.fail ? "fail" : "active") : "todo") : "idle";
   const a = lay.app;
+  // the areas this step works in glow; the rest fades back
+  const touches = (x: string) => /^(log|store:|field:|cell:|stream:|port)/.test(x);
+  const routed = moves.some((m) => lay.route(m.from, m.to).length > 2);
+  const layer_on = pipe?.name === "action" || routed;
+  const store_on =
+    moves.some((m) => touches(m.from) || touches(m.to)) ||
+    !!lit?.cells.size ||
+    !!lit?.streams.size ||
+    !!lit?.targets.size ||
+    (step.ops ?? []).some((o) => o.kind !== "state" && o.kind !== "dim");
+  const area = (on: boolean) => (on ? styles.glow : lit ? styles.off : "");
 
   return (
     <svg
@@ -374,7 +408,7 @@ function Stage({
 
       {/* the one link between the two centers: commits go in, loads and reactions read back */}
       {lay.mode === "wide" && lay.stores[0] && (
-        <g className={styles.bridge}>
+        <g className={`${styles.bridge} ${area(store_on && layer_on)}`}>
           <path d={`M${lay.app.port.x + 8},${lay.app.port.y - 5} L${lay.stores[0].box.x - 3},${lay.app.port.y - 5}`} markerEnd="url(#tour-arrow)" />
           <path d={`M${lay.stores[0].box.x - 2},${lay.app.port.y + 6} L${lay.app.port.x + 9},${lay.app.port.y + 6}`} markerEnd="url(#tour-arrow)" />
         </g>
@@ -389,6 +423,7 @@ function Stage({
         <SvgTip x={a.box.x + 80} y={a.box.y + 15} id="app" content={{ title: "How the app is built", code: a.title }} open={tip} />
 
         {/* the action layer: one ordered pipe, then the commit port */}
+        <g className={area(layer_on)}>
         <rect x={a.layer_box.x} y={a.layer_box.y} width={a.layer_box.w} height={a.layer_box.h} rx={10} className={styles.layerBox} />
         <text x={a.layer_box.x + 8} y={a.layer_box.y + 14} className={styles.layerLabel}>
           action layer
@@ -448,6 +483,7 @@ function Stage({
               </g>
             );
           })()}
+        </g>
         {/* the commit port: commits leave here, and only the version guard can turn one back */}
         <g className={styles.port} data-state={commit_state}>
           <circle cx={a.port.x} cy={a.port.y} r={7} />
@@ -584,7 +620,7 @@ function Stage({
         const ax = (id: number) => sb.axis.x + ((id + 1) / (sb.axis.max + 1)) * sb.axis.w;
         const cp = Math.max(s.cells.find((c) => c.uid === s.checkpoint)?.id ?? -1, s.scan_at);
         return (
-          <g key={s.name} className={styles.store} data-tone={s.status?.tone}>
+          <g key={s.name} className={`${styles.store} ${store_on ? styles.storeOn : lit ? styles.off : ""}`} data-tone={s.status?.tone}>
             <rect x={sb.box.x} y={sb.box.y} width={sb.box.w} height={sb.box.h} rx={14} className={styles.storeBox} />
             <text x={sb.field.x} y={sb.box.y + 19} className={styles.storeTitle}>
               Event store
