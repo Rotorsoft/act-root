@@ -1177,3 +1177,56 @@ export function frames(spec: TourSpec): Frames {
   });
   return out;
 }
+
+/** A caption's sentences, never split inside a code span. */
+export function sentences(text: string): string[] {
+  const out: string[] = [];
+  let start = 0;
+  let code = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i]!;
+    if (ch === "`") code = !code;
+    else if (
+      !code &&
+      ".!?:".includes(ch) &&
+      text[i + 1] === " " &&
+      /[A-Z`*"(@]/.test(text[i + 2] ?? "")
+    ) {
+      out.push(text.slice(start, i + 1).trim());
+      start = i + 2;
+    }
+  }
+  out.push(text.slice(start).trim());
+  return out.filter(Boolean);
+}
+
+/**
+ * The words to say for a caption: no symbols read aloud. An id is "event
+ * 1912", a version "version 2", a call "app dot do", markdown dropped.
+ */
+export function spoken(text: string): string {
+  return text
+    .replace(/\*\*/g, "")
+    .replace(/`([^`]+)`/g, (_, code: string) =>
+      code
+        .replace(/\(.*\)/g, "")
+        .replace(/(\d):(\d)/g, "$1#COLON#$2")
+        .replace(/@/g, "")
+        .replace(/[{}[\]"'<>]/g, " ")
+        .replace(/([a-z])([A-Z])/g, "$1 $2")
+        .replace(/([a-z])\.([a-z])/g, "$1 dot $2")
+        .replace(/[._:/-]+/g, " ")
+        .replace(/#COLON#/g, ":")
+    )
+    .replace(/@rotorsoft\//g, "rotorsoft ")
+    .replace(/#([\d,]+)/g, "event $1")
+    .replace(/\bv(\d+)\b/g, "version $1")
+    .replace(/→/g, " to ")
+    .replace(/−1/g, "minus 1")
+    .replace(/×/g, " times ")
+    .replace(/ \+ /g, " plus ")
+    .replace(/·/g, ",")
+    .replace(/\s+/g, " ")
+    .replace(/ ([,.:;])/g, "$1")
+    .trim();
+}

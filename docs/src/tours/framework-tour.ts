@@ -581,6 +581,8 @@ const all = await app.query_array({});
             now: "Maya runs `OpenTicket` on ticket-4830: the payload passes its schema",
             pipe: { name: "action", at: 1 },
             say: 'Maya calls `app.do("OpenTicket", { stream: "ticket-4830", actor }, { title })`. First the payload is checked against the action\'s schema.',
+            speak:
+              "Maya calls app dot do with Open Ticket, on stream ticket 4830, with her actor and a title. First the payload is checked against the action's schema.",
             moves: [{ from: "maya", to: "OpenTicket", label: "{ title }" }],
             code: `await app.do(
   "OpenTicket",
@@ -684,6 +686,8 @@ const all = await app.query_array({});
           {
             now: '`app.load(Ticket, "ticket-4830")` folds v0 and v1',
             say: '`app.load(Ticket, "ticket-4830")` rebuilds the state from the stream\'s events: each folds through its patch, in version order.',
+            speak:
+              "app dot load, of Ticket on ticket 4830, rebuilds the state from the stream's events: each folds through its patch, in version order.",
             moves: [
               { from: "cell:t30-open", to: "ticket", label: "fold v0" },
               { from: "cell:t30-m1", to: "ticket", label: "fold v1" },
@@ -2257,6 +2261,8 @@ const Agent = state({ Agent: z.object({ name: z.string(), open: z.number().min(0
             now: "Lee runs `AssignTicket` ticket-5200 → Ana: loads ticket-5200 and agent-ana",
             pipe: { name: "action", at: 3 },
             say: "A fresh store: two agents, Bo already holding five tickets, two open tickets. Lee assigns ticket 5200 to Ana. `.loads` loads every state the decision needs, at once. The ticket has no agent yet, so the `current` target returns `undefined` and that load is skipped.",
+            speak:
+              "A fresh store: two agents, Bo already holding five tickets, two open tickets. Lee assigns ticket 5200 to Ana. The action's loads list loads every state the decision needs, at once. The ticket has no agent yet, so the current target returns undefined, and that load is skipped.",
             moves: [
               { from: "lead", to: "AssignTicket", label: "{ agentId: ana }" },
               { from: "AssignTicket", to: "ticket", label: "load ticket-5200" },
@@ -2598,6 +2604,8 @@ const User = state({ User: UserSchema })
           {
             now: 'The operator runs `app.forget("user-42")`: pii wiped, reads get `[SHREDDED]`',
             say: 'Lee asks to be forgotten. `app.forget("user-42")` wipes the pii column of every event on the stream, in place. Every later read gets `[SHREDDED]`, even an authorized one. Everything else in the log stays.',
+            speak:
+              "Lee asks to be forgotten. app dot forget on user 42 wipes the pii column of every event on the stream, in place. Every later read gets shredded, even an authorized one. Everything else in the log stays.",
             code: `const { eventCount } = await app.forget("user-42"); // 1
 app.on("forgotten", ({ stream, at, eventCount }) => audit.write({ stream, at, eventCount }));`,
             moves: [
@@ -3325,6 +3333,8 @@ const app = act().withSlice(TicketSlice).build();`,
           {
             now: "Swap the wakeup channel with `withBroker`",
             say: "Notify is a hint, not a guarantee: correctness always comes from claim and drain over the store. That's why the channel can be swapped, for example to Redis with `withBroker`.",
+            speak:
+              "Notify is a hint, not a guarantee: correctness always comes from claim and drain over the store. That's why the channel can be swapped, for example to Redis, with with Broker from the act notify package.",
             code: `store(withBroker(new PostgresStore({ notify: false }), new RedisBroker({ publisher, subscriber })));`,
           },
         ],

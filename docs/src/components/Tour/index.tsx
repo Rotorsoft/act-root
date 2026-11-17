@@ -28,7 +28,7 @@ import Field from "./Field";
 import { type Box, type Chip, data_lines, type Layout, layout, type Mode, SUB_COLS, short, type View } from "./layout";
 import styles from "./styles.module.css";
 import type { AppSpec, Link as DocLink, Move, Step, TourSpec } from "./types";
-import { type Cell, census, type Frame, type Frames, fill, fmt, frames as fold, type Target, type World } from "./world";
+import { type Cell, census, type Frame, type Frames, fill, fmt, frames as fold, sentences, spoken, type Target, type World } from "./world";
 
 export type { TourSpec } from "./types";
 
@@ -63,37 +63,6 @@ function schedule(moves: Move[]): { starts: number[]; total: number } {
   return { starts, total: last };
 }
 
-/** A caption's sentences: one or two lines each. */
-export function sentences(text: string): string[] {
-  return text
-    .split(/(?<=[.!?:])\s+(?=[A-Z`*"(])/)
-    .map((t) => t.trim())
-    .filter(Boolean);
-}
-
-/**
- * The words to say for a caption: no symbols read aloud. An id is "event
- * 1912", a version "version 2", a code span its words, markdown dropped.
- */
-export function spoken(text: string): string {
-  return text
-    .replace(/\*\*/g, "")
-    .replace(/`([^`]+)`/g, (_, code: string) =>
-      code
-        .replace(/\(.*?\)/g, "")
-        .replace(/[{}[\]"'<>]/g, " ")
-        .replace(/([a-z])([A-Z])/g, "$1 $2")
-        .replace(/[._:/-]+/g, " ")
-    )
-    .replace(/#([\d,]+)/g, "event $1")
-    .replace(/\bv(\d+)\b/g, "version $1")
-    .replace(/→/g, " to ")
-    .replace(/−1/g, "minus 1")
-    .replace(/×/g, " times ")
-    .replace(/·/g, ",")
-    .replace(/\s+/g, " ")
-    .trim();
-}
 
 type Fit = { mode: Mode; px: number };
 function useFit(ref: React.RefObject<HTMLElement | null>): Fit {
@@ -957,11 +926,20 @@ export default function Tour({ spec }: { spec: TourSpec }) {
       }
       setCue(i);
       if (talk) {
-        const u = new SpeechSynthesisUtterance(speech[i] ?? spoken(lines[i]!));
+        const text = speech[i] ?? spoken(lines[i]!);
+        const u = new SpeechSynthesisUtterance(text);
         u.rate = speed;
         u.lang = "en-US";
-        u.onend = () => show(i + 1);
-        u.onerror = () => show(i + 1);
+        // the voice drives the pace; a watchdog moves on if it never reports the end
+        let done = false;
+        const next = () => {
+          if (done) return;
+          done = true;
+          show(i + 1);
+        };
+        u.onend = next;
+        u.onerror = next;
+        timers.push(setTimeout(next, (3000 + text.length * 110) / speed));
         window.speechSynthesis.speak(u);
       } else timers.push(setTimeout(() => show(i + 1), Math.max(1800, lines[i]!.length * 52) / speed));
     };
