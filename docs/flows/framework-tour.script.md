@@ -20,6 +20,26 @@ guard, archive, truncate, seed) and stops red where a refusal stops it. The stag
 the step doesn't touch. A step list per scene and an activity feed, generated from the
 step's operations on the log, show what is done and what is coming.
 
+## The stage
+
+Three regions share the full width. On the left are the **callers** (people, workers,
+outside systems) and, under them, the **read models** the app writes: the app's output for
+queries, outside the event store. In the middle is the **running Act app**, drawn from a
+per-chapter declaration of its registry: ports (store, cache, logger), the `app.do` gate and
+the operator entry points (`app.close`, `app.reset`, …), the **action layer** (payload, load,
+preconditions, handler, fold, state check), and the slices with their states, actions,
+events, reactions, projections and lanes. Every element with code behind it carries a `</>`
+icon, which opens the snippet, the API and the doc and test links in a tooltip. On the right
+is the **event store**: the whole store as a field of dots (a seeded, deterministic history of
+1,000 to 2,000 events per macro chapter), the detailed cells under a lens, a counter, and
+every subscription as a row on the store's id axis (watermark, work mark, the backlog
+between them, and the correlate checkpoint on its own track), grouped by lane.
+
+Every token routes through the app: in at `app.do`, through the action layer, out through
+the store port. Every number on screen (ids, counts like "40 tickets, 153 events
+archived") is filled in from the fold, not written by hand; example days and policies are
+marked as picked for the example.
+
 ## The picture that never leaves the screen
 
 The middle of the stage is **the event store**: one global log, the "all" stream. Every
@@ -33,7 +53,9 @@ Every operation in the tour is drawn as what it does to that log:
 | Operation | What the log shows |
 |---|---|
 | commit | new cells append at the right, one id each; several streams in one commit share a bracket |
-| refused action | a ghost cell that never lands, with the error |
+| refused in the action layer (`ValidationError`, `StreamClosedError`, `PreconditionError`, the state check) | nothing reaches the store: the token stops in red inside the app, at the stage that refused it |
+| `ConcurrencyError` | the only refusal at the store: the commit reaches the store's edge and bounces, showing the expected and the actual version; nothing is appended |
+| `StoreError` / breaker | the store itself is unavailable: its frame turns red and dashed; not a refusal |
 | snapshot | a `__snapshot__` cell, on its stream's next version |
 | correlate | the checkpoint marker moves along the log |
 | drain | a worker's lease on a target, its watermark marker moves along the target's source cells |

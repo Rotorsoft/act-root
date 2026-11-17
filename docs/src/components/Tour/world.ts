@@ -8,6 +8,7 @@
 import type {
   Chapter,
   EventIn,
+  History,
   Op,
   Scene,
   Step,
@@ -36,10 +37,13 @@ export type Cell = {
   fresh?: boolean;
   leaving?: boolean;
   moved?: boolean;
+  /** its id before a restore renumbered it, for the slide */
+  from_id?: number;
 };
 
 export type Target = {
   id: string;
+  reaction?: string;
   store: string;
   source?: string;
   lane: string;
@@ -54,7 +58,21 @@ export type Target = {
   fresh?: boolean;
 };
 
-export type Ghost = { stream: string; name: string; error: string };
+export type Ghost = {
+  stream: string;
+  name: string;
+  error: string;
+  expected?: number;
+  actual?: number;
+};
+
+/** Where the action layer stopped an action this step. */
+export type Stop = {
+  stage: string;
+  error: string;
+  name: string;
+  stream: string;
+};
 
 export type Store = {
   name: string;
@@ -67,9 +85,39 @@ export type Store = {
   /** only this stream reads at full strength (a stream query) */
   only?: string;
   ghost?: Ghost;
+  /** the generated events, at scale, drawn as the field of dots */
+  bulk: Bulk;
+  /** events archived by closes so far */
+  archived: number;
+  /** where the field's scan cursor stopped, and this step's sweep */
+  scan_at: number;
+  scan?: { from: number; to: number };
+  /** streams leased by a worker: their dots glow */
+  glows: { stream: string; worker: string; tone?: Tone }[];
 };
 
+/** One generated event; frames share these and keep only ids and flags per store. */
+export type BaseEvent = {
+  stream: string;
+  name: string;
+  kind: CellKind;
+  day: number;
+  version: number;
+  pii: boolean;
+};
+
+/** Flags on a bulk event in one store. */
+export const B_LEAVING = 1;
+export const B_ARCHIVED = 2;
+export const B_SHREDDED = 4;
+export const B_FRESH = 8;
+
+/** Per store, in id order: the base event, its id here, its flags. */
+export type Bulk = { idx: number[]; id: number[]; st: number[] };
+
 export type Table = {
+  /** rows the read model holds in all, when it holds more than the rows drawn */
+  total?: number;
   name: string;
   title: string;
   rows: [string, Record<string, unknown>][];
@@ -86,11 +134,19 @@ export type World = {
   >;
   flags: Record<string, { text: string; tone?: Tone }>;
   refs: Record<string, number>;
+  /** the last id each ref'd cell had, for lines about a cell already deleted */
+  ids: Record<string, number>;
   next_uid: number;
   next_corr: number;
   next_commit: number;
   /** what this step did, one line per operation, for the activity feed */
   feed: string[];
+  /** the head version of each generated stream, by store */
+  bulk_versions: Record<string, number>;
+  /** counts this step's operations produced, for the Now line and the feed */
+  facts: Record<string, number>;
+  /** an action the action layer refused this step */
+  stop?: Stop;
 };
 
 export type Frame = {
@@ -112,16 +168,23 @@ function empty(spec: TourSpec): World {
       cells: [],
       next_id: 0,
       checkpoint: -1,
+      bulk: { idx: [], id: [], st: [] },
+      archived: 0,
+      scan_at: -1,
+      glows: [],
     })),
     targets: [],
     tables: [],
     states: {},
     flags: {},
     refs: {},
+    ids: {},
     next_uid: 0,
     next_corr: 0,
     next_commit: 0,
     feed: [],
+    bulk_versions: {},
+    facts: {},
   };
 }
 
@@ -132,16 +195,157 @@ function settle(w: World) {
     for (const c of s.cells) {
       delete c.fresh;
       delete c.moved;
+      delete c.from_id;
     }
     delete s.ghost;
+    delete s.scan;
+    const b = s.bulk as Bulk & { from?: number[] };
+    delete b.from;
+    const keep = b.st.map((f) => !(f & B_LEAVING));
+    b.idx = b.idx.filter((_, i) => keep[i]);
+    b.id = b.id.filter((_, i) => keep[i]);
+    b.st = b.st
+      .filter((_, i) => keep[i])
+      .map((f) => f & ~B_FRESH & ~B_ARCHIVED);
   }
   for (const t of w.targets) delete t.fresh;
   for (const t of w.tables) t.fresh = [];
   w.feed = [];
+  w.facts = {};
+  delete w.stop;
   for (const k of Object.keys(w.states)) delete w.states[k]!.fresh;
 }
 
 export const DEFAULT_STORE = "main";
+
+// the generated events of the fold being built; frames refer to them by index
+let BASE: BaseEvent[] = [];
+
+/** A small seeded generator, so a history is the same on every render. */
+function rng(seed: number) {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function push_bulk(w: World, store: Store, e: BaseEvent, fresh: boolean) {
+  BASE.push(e);
+  store.bulk.idx.push(BASE.length - 1);
+  store.bulk.id.push(store.next_id++);
+  store.bulk.st.push(fresh ? B_FRESH : 0);
+  w.bulk_versions[`${store.name}/${e.stream}`] = e.version;
+}
+
+/**
+ * Generates `events` events over `days` days. Each kind's streams are born
+ * over the period and get most of their traffic while young, so old streams
+ * go quiet the way tickets do.
+ */
+function generate(
+  w: World,
+  store: Store,
+  h: Pick<History, "seed" | "events" | "days" | "kinds"> & { day0?: number },
+  fresh: boolean
+) {
+  const r = rng(h.seed);
+  const total = h.kinds.reduce((n, k) => n + k.weight, 0);
+  const day0 = h.day0 ?? 0;
+  for (let i = 0; i < h.events; i++) {
+    const f = (i + 1) / h.events;
+    let pick = r() * total;
+    const kind = h.kinds.find((k) => (pick -= k.weight) < 0) ?? h.kinds[0]!;
+    const newest = Math.max(
+      0,
+      Math.min(kind.count - 1, Math.floor(f * kind.count))
+    );
+    const window = Math.max(3, Math.round(kind.count * 0.15));
+    const j = Math.max(
+      0,
+      newest - Math.floor(r() * r() * Math.min(newest + 1, window))
+    );
+    const stream = `${kind.prefix}-${1000 + j}`;
+    const key = `${store.name}/${stream}`;
+    const v = (w.bulk_versions[key] ?? -1) + 1;
+    const cycle = Math.max(1, kind.events.length - 1);
+    const name =
+      v === 0
+        ? kind.events[0]!
+        : (kind.events[1 + ((v - 1) % cycle)] ?? kind.events[0]!);
+    const day = day0 + Math.floor(f * h.days);
+    push_bulk(
+      w,
+      store,
+      { stream, name, kind: "event", day, version: v, pii: !!kind.pii },
+      fresh
+    );
+    if (kind.snapEvery && (v + 1) % kind.snapEvery === 0)
+      push_bulk(
+        w,
+        store,
+        {
+          stream,
+          name: "__snapshot__",
+          kind: "snapshot",
+          day,
+          version: v + 1,
+          pii: false,
+        },
+        fresh
+      );
+  }
+}
+
+/** The bulk events of a store, alive, grouped by stream in id order. */
+function bulk_streams(store: Store) {
+  const by = new Map<string, number[]>();
+  const b = store.bulk;
+  b.idx.forEach((ix, i) => {
+    if (b.st[i]! & B_LEAVING) return;
+    const s = BASE[ix]!.stream;
+    const list = by.get(s);
+    if (list) list.push(i);
+    else by.set(s, [i]);
+  });
+  return by;
+}
+
+/** What a store holds right now, for the counter and the Now lines. */
+export function census(store: Store, base: BaseEvent[]) {
+  const heads = new Map<string, { id: number; kind: CellKind }>();
+  let events = 0;
+  let snapshots = 0;
+  const b = store.bulk;
+  b.idx.forEach((ix, i) => {
+    if (b.st[i]! & B_LEAVING) return;
+    const e = base[ix]!;
+    events++;
+    if (e.kind === "snapshot") snapshots++;
+    const h = heads.get(e.stream);
+    if (!h || b.id[i]! > h.id)
+      heads.set(e.stream, { id: b.id[i]!, kind: e.kind });
+  });
+  for (const c of store.cells) {
+    if (c.leaving) continue;
+    events++;
+    if (c.kind === "snapshot") snapshots++;
+    const h = heads.get(c.stream);
+    if (!h || c.id > h.id) heads.set(c.stream, { id: c.id, kind: c.kind });
+  }
+  let closed = 0;
+  for (const h of heads.values()) if (h.kind === "tombstone") closed++;
+  return {
+    events,
+    streams: heads.size,
+    closed,
+    snapshots,
+    archived: store.archived,
+  };
+}
 
 function store_of(w: World, name = w.stores[0]?.name ?? DEFAULT_STORE): Store {
   const s = w.stores.find((x) => x.name === name);
@@ -216,7 +420,10 @@ function append(
     ...(bracket && { bracket }),
     ...(fresh && { fresh: true }),
   };
-  if (e.ref) w.refs[e.ref] = cell.uid;
+  if (e.ref) {
+    w.refs[e.ref] = cell.uid;
+    w.ids[e.ref] = cell.id;
+  }
   store.cells.push(cell);
   return cell;
 }
@@ -281,6 +488,16 @@ function apply(w: World, op: Op) {
         stream: op.stream,
         name: op.name,
         error: op.error,
+        ...(op.expected !== undefined && { expected: op.expected }),
+        ...(op.actual !== undefined && { actual: op.actual }),
+      };
+      return;
+    case "reject":
+      w.stop = {
+        stage: op.stage,
+        error: op.error,
+        name: op.name,
+        stream: op.stream,
       };
       return;
     case "target": {
@@ -293,6 +510,7 @@ function apply(w: World, op: Op) {
         retry: 0,
       };
       if (op.source !== undefined) t.source = op.source;
+      if (op.reaction !== undefined) t.reaction = op.reaction;
       if (op.lane !== undefined) t.lane = op.lane;
       if (op.priority !== undefined) t.priority = op.priority;
       t.fresh = true;
@@ -401,6 +619,10 @@ function apply(w: World, op: Op) {
     }
     case "forget": {
       const store = store_of(w, op.store);
+      store.bulk.idx.forEach((ix, i) => {
+        if (BASE[ix]!.stream === op.stream && BASE[ix]!.pii)
+          store.bulk.st[i] = store.bulk.st[i]! | B_SHREDDED;
+      });
       for (const c of store.cells)
         if (c.stream === op.stream && c.pii) {
           c.shredded = true;
@@ -411,49 +633,249 @@ function apply(w: World, op: Op) {
     case "restore": {
       const sink = store_of(w, op.store);
       const source = store_of(w, op.from ?? sink.name);
-      const seen = new Set<string>();
-      const kept: Cell[] = [];
-      for (const c of source.cells) {
-        if (c.leaving) continue;
-        const first = !seen.has(c.stream);
-        seen.add(c.stream);
-        if (op.dropSnapshots && c.kind === "snapshot" && !first) continue;
-        kept.push(c);
-      }
-      const ids = new Map<number, number>();
-      const rebuilt = kept.map((c, i) => {
-        ids.set(c.id, i);
-        const name = op.rename?.[c.name] ?? c.name;
-        return {
-          ...clone(c),
-          id: i,
-          name,
-          moved: true,
-          uid: source === sink ? c.uid : w.next_uid++,
-        };
+      // bulk and cells, merged in id order, as the scan reads them
+      type Entry = {
+        id: number;
+        stream: string;
+        kind: CellKind;
+        b?: number;
+        c?: Cell;
+      };
+      const entries: Entry[] = [];
+      source.bulk.idx.forEach((ix, i) => {
+        if (source.bulk.st[i]! & B_LEAVING) return;
+        entries.push({
+          id: source.bulk.id[i]!,
+          stream: BASE[ix]!.stream,
+          kind: BASE[ix]!.kind,
+          b: i,
+        });
       });
-      for (const c of rebuilt) {
-        if (c.cause)
-          c.cause = {
-            id: ids.get(c.cause.id) ?? -1,
-            name: op.rename?.[c.cause.name] ?? c.cause.name,
+      for (const c of source.cells)
+        if (!c.leaving)
+          entries.push({ id: c.id, stream: c.stream, kind: c.kind, c });
+      entries.sort((x, y) => x.id - y.id);
+      const seen = new Set<string>();
+      const kept = entries.filter((e) => {
+        const first = !seen.has(e.stream);
+        seen.add(e.stream);
+        return !(op.dropSnapshots && e.kind === "snapshot" && !first);
+      });
+      w.facts.dropped = entries.length - kept.length;
+      w.facts.restored = kept.length;
+      const ids = new Map<number, number>(kept.map((e, i) => [e.id, i]));
+      const bulk: Bulk & { from: number[] } = {
+        idx: [],
+        id: [],
+        st: [],
+        from: [],
+      };
+      const cells: Cell[] = [];
+      kept.forEach((e, i) => {
+        if (e.b !== undefined) {
+          let ix = source.bulk.idx[e.b]!;
+          const name = op.rename?.[BASE[ix]!.name];
+          if (name) {
+            BASE.push({ ...BASE[ix]!, name });
+            ix = BASE.length - 1;
+          }
+          bulk.idx.push(ix);
+          bulk.id.push(i);
+          bulk.st.push((source.bulk.st[e.b]! & B_SHREDDED) | B_FRESH);
+          bulk.from.push(e.id);
+        } else {
+          const c = e.c!;
+          const moved: Cell = {
+            ...clone(c),
+            id: i,
+            name: op.rename?.[c.name] ?? c.name,
+            moved: true,
+            from_id: c.id,
+            uid: source === sink ? c.uid : w.next_uid++,
           };
-        if (c.ref && source !== sink) w.refs[c.ref] = c.uid;
+          if (moved.cause)
+            moved.cause = {
+              id: ids.get(moved.cause.id) ?? -1,
+              name: op.rename?.[moved.cause.name] ?? moved.cause.name,
+            };
+          if (moved.ref && source !== sink) w.refs[moved.ref] = moved.uid;
+          if (moved.ref) w.ids[moved.ref] = moved.id;
+          cells.push(source === sink ? moved : { ...moved, fresh: true });
+        }
+      });
+      for (const c of sink.cells) c.leaving = true;
+      sink.cells =
+        source === sink
+          ? cells
+          : [...sink.cells.filter((c) => c.leaving), ...cells];
+      const old = sink.bulk;
+      sink.bulk = bulk;
+      if (source !== sink) {
+        // the sink's old contents go
+        old.idx.forEach((ix, i) => {
+          bulk.idx.push(ix);
+          bulk.id.push(old.id[i]!);
+          bulk.st.push(B_LEAVING);
+          bulk.from.push(old.id[i]!);
+        });
       }
-      if (source === sink) {
-        const by_uid = new Map(rebuilt.map((c) => [c.uid, c]));
-        sink.cells = sink.cells.map(
-          (c) => by_uid.get(c.uid) ?? { ...c, leaving: true }
-        );
-      } else {
-        for (const c of sink.cells) c.leaving = true;
-        sink.cells = [
-          ...sink.cells,
-          ...rebuilt.map((c) => ({ ...c, fresh: true })),
-        ];
-      }
-      sink.next_id = rebuilt.length;
+      sink.next_id = kept.length;
       sink.checkpoint = -1;
+      sink.scan_at = -1;
+      return;
+    }
+    case "project": {
+      const store = store_of(w, op.store);
+      const t = w.tables.find((x) => x.name === op.table);
+      if (!t) throw new Error(`tour: unknown table "${op.table}"`);
+      const rows = new Set<string>();
+      let events = 0;
+      const own = (stream: string) => stream.startsWith(`${op.prefix}-`);
+      store.bulk.idx.forEach((ix, i) => {
+        const e = BASE[ix]!;
+        if (
+          store.bulk.st[i]! & B_LEAVING ||
+          !own(e.stream) ||
+          e.kind !== "event"
+        )
+          return;
+        rows.add(e.stream);
+        events++;
+      });
+      for (const c of store.cells)
+        if (!c.leaving && own(c.stream) && c.kind === "event") {
+          rows.add(c.stream);
+          events++;
+        }
+      t.total = rows.size;
+      w.facts.rows = rows.size;
+      w.facts.replayed = events;
+      return;
+    }
+    case "burst": {
+      const store = store_of(w, op.store);
+      const before = store.next_id;
+      generate(
+        w,
+        store,
+        {
+          seed: op.seed,
+          events: op.count,
+          days: 1,
+          kinds: op.kinds,
+          day0: op.day,
+        },
+        true
+      );
+      w.facts.burst = store.next_id - before;
+      return;
+    }
+    case "retire": {
+      const store = store_of(w, op.store);
+      const streams = bulk_streams(store);
+      const chosen: string[] = [];
+      for (const [stream, at] of streams) {
+        if (chosen.length >= op.count) break;
+        if (!stream.startsWith(`${op.prefix}-`)) continue;
+        const last = at[at.length - 1]!;
+        const head = BASE[store.bulk.idx[last]!]!;
+        if (head.kind === "tombstone" || head.day > op.idle) continue;
+        if (op.is && !op.is.includes(head.name)) continue;
+        chosen.push(stream);
+      }
+      let events = 0;
+      for (const stream of chosen) {
+        for (const i of streams.get(stream)!) {
+          store.bulk.st[i] =
+            store.bulk.st[i]! | B_LEAVING | (op.archive ? B_ARCHIVED : 0);
+          events++;
+        }
+        push_bulk(
+          w,
+          store,
+          {
+            stream,
+            name: "__tombstone__",
+            kind: "tombstone",
+            day: op.idle,
+            version: 0,
+            pii: false,
+          },
+          true
+        );
+      }
+      if (op.archive) store.archived += events;
+      w.facts.retired = chosen.length;
+      w.facts.retired_events = events;
+      return;
+    }
+    case "keep": {
+      const store = store_of(w, op.store);
+      let pruned = 0;
+      let streams_pruned = 0;
+      for (const [stream, at] of bulk_streams(store)) {
+        if (!stream.startsWith(`${op.prefix}-`)) continue;
+        // the closest snapshot older than the cutoff, and nothing below it survives
+        let floor = -1;
+        for (const i of at) {
+          const e = BASE[store.bulk.idx[i]!]!;
+          if (e.kind === "snapshot" && e.day < op.cutoff)
+            floor = store.bulk.id[i]!;
+        }
+        if (floor < 0) continue;
+        let n = 0;
+        for (const i of at)
+          if (store.bulk.id[i]! < floor) {
+            store.bulk.st[i] = store.bulk.st[i]! | B_LEAVING;
+            n++;
+          }
+        if (n) {
+          pruned += n;
+          streams_pruned++;
+        }
+      }
+      w.facts.pruned = pruned;
+      w.facts.pruned_streams = streams_pruned;
+      return;
+    }
+    case "scan": {
+      const store = store_of(w, op.store);
+      const tail = store.next_id - 1;
+      const from = op.from === "start" ? -1 : store.scan_at;
+      store.scan = { from, to: tail };
+      store.scan_at = tail;
+      w.facts.scanned = tail - from;
+      return;
+    }
+    case "glow": {
+      const store = store_of(w, op.store);
+      if (!op.worker) {
+        store.glows = [];
+        return;
+      }
+      // the streams named, or those with the latest activity, newest first
+      const recent: string[] = [...(op.streams ?? [])];
+      for (
+        let i = store.bulk.idx.length - 1;
+        !op.streams && i >= 0 && recent.length < (op.count ?? 6);
+        i--
+      ) {
+        const e = BASE[store.bulk.idx[i]!]!;
+        if (store.bulk.st[i]! & B_LEAVING) continue;
+        if (op.prefix && !e.stream.startsWith(`${op.prefix}-`)) continue;
+        if (
+          store.glows.some((g) => g.stream === e.stream) ||
+          recent.includes(e.stream)
+        )
+          continue;
+        recent.push(e.stream);
+      }
+      for (const stream of recent)
+        store.glows.push({
+          stream,
+          worker: op.worker,
+          ...(op.tone && { tone: op.tone }),
+        });
       return;
     }
     case "store": {
@@ -469,6 +891,10 @@ function apply(w: World, op: Op) {
           cells: [],
           next_id: 0,
           checkpoint: -1,
+          bulk: { idx: [], id: [], st: [] },
+          archived: 0,
+          scan_at: -1,
+          glows: [],
         });
       return;
     }
@@ -539,6 +965,35 @@ const at_id = (w: World, ref: string) => {
 const cell_line = (c: Cell) =>
   `#${c.id} \`${c.name}\` · ${c.stream} v${c.version}`;
 
+/** A count as people write it: 1,842. */
+export const fmt = (n: number) => n.toLocaleString("en-US");
+
+/**
+ * Fills a spec line from the world: `{#ref}` is the id of a stored cell
+ * (`{@ref}` without the `#`),
+ * `{name}` a count this step produced (`retired`, `pruned`, …) or the first
+ * store's census (`events`, `streams`, `closed`, `snapshots`, `archived`).
+ * So every number the tour shows comes from the fold.
+ */
+export function fill(text: string, w: World, base: BaseEvent[]): string {
+  return text.replace(
+    /\{([#@]?)([\w-]+)\}/g,
+    (all, hash: string, key: string) => {
+      if (hash) {
+        const id = find_cell(w, key)?.cell.id ?? w.ids[key];
+        return id !== undefined ? `${hash === "#" ? "#" : ""}${id}` : all;
+      }
+      if (key in w.facts) return fmt(w.facts[key]!);
+      const store = w.stores[0];
+      if (store) {
+        const n = census(store, base) as Record<string, number>;
+        if (key in n) return fmt(n[key]!);
+      }
+      return all;
+    }
+  );
+}
+
 /** One feed line per operation, from the world just after it ran. */
 function narrate(w: World, op: Op) {
   const say = (line: string) => w.feed.push(line);
@@ -560,7 +1015,11 @@ function narrate(w: World, op: Op) {
     }
     case "refuse":
       return say(
-        `refused: \`${op.error}\` · ${op.name} on ${op.stream}, nothing stored`
+        `bounced at the store: \`${op.error}\` · ${op.stream}${op.expected !== undefined ? ` expected v${op.expected}` : ""}${op.actual !== undefined ? `, head v${op.actual}` : ""}; nothing appended`
+      );
+    case "reject":
+      return say(
+        `refused in the action layer at ${op.stage}: \`${op.error}\`; nothing sent to the store`
       );
     case "target":
       return say(
@@ -608,11 +1067,36 @@ function narrate(w: World, op: Op) {
     }
     case "restore": {
       const sink = store_of(w, op.store);
-      const n = sink.cells.filter((c) => !c.leaving).length;
       return say(
-        `restored ${n} events into ${sink.label}, ids #0 to #${n - 1}`
+        `restored ${fmt(w.facts.restored ?? 0)} events into ${sink.label}, ids #0 to #${fmt((w.facts.restored ?? 1) - 1)}${w.facts.dropped ? `, ${fmt(w.facts.dropped)} snapshots dropped` : ""}`
       );
     }
+    case "burst":
+      return say(`traffic: ${fmt(w.facts.burst ?? 0)} events committed`);
+    case "retire":
+      return say(
+        `closed ${fmt(w.facts.retired ?? 0)} ${op.prefix} streams: ${fmt(w.facts.retired_events ?? 0)} events ${op.archive ? "archived and " : ""}deleted, one \`__tombstone__\` seed each`
+      );
+    case "keep":
+      return say(
+        `window kept: ${fmt(w.facts.pruned ?? 0)} events pruned on ${fmt(w.facts.pruned_streams ?? 0)} ${op.prefix} streams`
+      );
+    case "scan":
+      return say(
+        `${op.from === "start" ? "replay" : "correlate"} cursor swept ${fmt(w.facts.scanned ?? 0)} events`
+      );
+    case "glow":
+      return op.worker
+        ? say(
+            op.streams
+              ? `${op.streams.join(", ")} leased by ${op.worker}: its dots glow`
+              : `${op.worker} leases ${op.count ?? 6} ${op.prefix ?? ""} streams`
+          )
+        : undefined;
+    case "project":
+      return say(
+        `${op.table}: replayed ${fmt(w.facts.replayed ?? 0)} events → ${fmt(w.facts.rows ?? 0)} rows`
+      );
     case "store":
       return say(op.remove ? `store ${op.name} removed` : `store: ${op.label}`);
     case "status":
@@ -645,8 +1129,12 @@ function narrate(w: World, op: Op) {
 }
 
 /** Every step of the tour, in order, with the world after it. */
-export function frames(spec: TourSpec): Frame[] {
-  const out: Frame[] = [];
+export type Frames = Frame[] & { base: BaseEvent[] };
+
+export function frames(spec: TourSpec): Frames {
+  BASE = [];
+  const out = [] as unknown as Frames;
+  out.base = BASE;
   let w = empty(spec);
   spec.chapters.forEach((chapter: Chapter, ci) => {
     const chapter_start = out.length;
@@ -658,9 +1146,12 @@ export function frames(spec: TourSpec): Frame[] {
       delete s.status;
       delete s.dim_from;
       delete s.only;
+      s.glows = [];
     }
     if (chapter.seed) {
       w = empty(spec);
+      for (const h of chapter.history ?? [])
+        generate(w, store_of(w, h.store), h, false);
       // seeded events commit one per correlation, unless they name a cause
       for (const e of chapter.seed) commit(w, [e], undefined, false);
     }

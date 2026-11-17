@@ -63,6 +63,59 @@ export type Move = {
  */
 export type Pipe = { name: string; at: number; fail?: boolean };
 
+/** One kind of stream in a generated history: `prefix-<n>` streams, `count` of them. */
+export type StreamKind = {
+  prefix: string;
+  count: number;
+  /** relative share of the traffic */
+  weight: number;
+  /** the event names a stream of this kind cycles through (the first opens it) */
+  events: string[];
+  /** a __snapshot__ after every `snapEvery` events on a stream */
+  snapEvery?: number;
+  /** its events carry sensitive fields */
+  pii?: boolean;
+};
+
+/** A deterministic history: the same seed always generates the same events. */
+export type History = {
+  seed: number;
+  events: number;
+  days: number;
+  kinds: StreamKind[];
+  store?: string;
+};
+
+/** The running app's anatomy, as its registry would list it. */
+export type AppSpec = {
+  /** how the app was built, shown under its name */
+  title?: string;
+  slices: {
+    name: string;
+    states: { name: string; actions: string[]; events: string[] }[];
+    reactions?: string[];
+    /** a projection, its target, and what it folds or listens to */
+    projections?: {
+      name: string;
+      target: string;
+      of?: string;
+      on?: string[];
+    }[];
+  }[];
+  /** drain lanes beyond the default, with their budgets */
+  lanes?: { name: string; budget: string }[];
+  /** the ports it is wired to: `store: PostgresStore`, … */
+  ports?: string[];
+  /** operator entry points: app.close, app.restore, … */
+  ops?: string[];
+  /**
+   * The code behind an element, keyed by its name: a state, an action, a
+   * reaction, a projection, `slice:<name>`, `lane:<name>`, `app.close`, …
+   * Shown in a tooltip behind a `</>` icon.
+   */
+  code?: Record<string, string>;
+};
+
 export type Op =
   /** append events in one commit; each stream takes its next version */
   | { op: "commit"; events: EventIn[]; store?: string; bracket?: string }
@@ -74,18 +127,24 @@ export type Op =
       ref?: string;
       store?: string;
     }
-  /** an action that never lands: a ghost cell with the error */
+  /** a commit the store's version guard turns back (`ConcurrencyError`): a bounced ghost at the store's edge */
   | {
       op: "refuse";
       stream: string;
       name: string;
       error: string;
+      expected?: number;
+      actual?: number;
       store?: string;
     }
+  /** an action refused in the app's action layer, at `stage`: nothing reaches the store */
+  | { op: "reject"; stream: string; name: string; error: string; stage: string }
   /** subscribe a reaction target (a stream that reactions run on) */
   | {
       op: "target";
       id: string;
+      /** the reaction or projection that runs on it */
+      reaction?: string;
       source?: string;
       lane?: string;
       priority?: number;
@@ -149,6 +208,41 @@ export type Op =
     }
   /** dim the cells from the one named on (time travel), or every stream but `only`; with neither, undim */
   | { op: "dim"; from?: string; only?: string; store?: string }
+  /** generated traffic at scale: `count` events on streams of the history's kinds */
+  | {
+      op: "burst";
+      count: number;
+      seed: number;
+      kinds: StreamKind[];
+      day: number;
+      store?: string;
+    }
+  /** close `count` streams of a kind whose last event is before `idle` (a day): archive, delete, seed a tombstone */
+  | {
+      op: "retire";
+      prefix: string;
+      count: number;
+      idle: number;
+      is?: string[];
+      archive?: boolean;
+      store?: string;
+    }
+  /** a rolling window on every stream of a kind: delete below the closest snapshot older than `cutoff` (a day) */
+  | { op: "keep"; prefix: string; cutoff: number; store?: string }
+  /** a cursor sweeps the log: from the checkpoint (correlate) or from the start (a replay) */
+  | { op: "scan"; from: "checkpoint" | "start"; store?: string }
+  /** workers lease streams: their dots glow in the worker's color; no `worker` clears */
+  | {
+      op: "glow";
+      worker?: string;
+      prefix?: string;
+      count?: number;
+      streams?: string[];
+      tone?: Tone;
+      store?: string;
+    }
+  /** a read model folds every stream of a kind: its row count and the events replayed come from the store */
+  | { op: "project"; table: string; prefix: string; store?: string }
   /** a note pinned to a cell or a target */
   | { op: "flag"; on: string; text: string; tone?: Tone }
   | { op: "unflag"; on?: string };
@@ -188,6 +282,12 @@ export type Chapter = {
   blurb: string;
   /** start from empty stores holding these events, instead of the last chapter's */
   seed?: EventIn[];
+  /** generated history committed before the seed (a fresh store needs `seed`, even empty) */
+  history?: History[];
+  /** the app's anatomy from this chapter on */
+  app?: AppSpec;
+  /** macro: the whole store as a field of dots; micro: the detailed cells */
+  view?: "macro" | "micro";
   scenes: Scene[];
 };
 
