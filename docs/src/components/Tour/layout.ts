@@ -107,7 +107,7 @@ export type Layout = {
   chip_of: (id: string) => { kind: string; name: string } | undefined;
 };
 
-const CALLER_H = 38;
+const CALLER_H = 58;
 const CHIP_H = 19;
 const LINE = 13;
 const TRACK = 8;
@@ -193,7 +193,8 @@ function app_layout(
   let cy = y + 26;
 
   // the ports it's wired to
-  const ports = [...(app.ports ?? [])];
+  // only the ports a scene names (a cache, a second store); the app's wiring stays off screen
+  const ports: string[] = [];
   for (const n of nodes.filter((n) => n.kind === "store")) {
     const p = `${n.label}${n.sub ? `: ${n.sub}` : ""}`;
     if (!ports.some((q) => q.startsWith(n.label))) ports.push(p);
@@ -525,12 +526,11 @@ export function layout(
   const pad = 10;
   const gap = narrow ? 14 : 20;
   // callers narrow, then the app and the store sharing the rest about 40 / 48
-  const L = narrow
-    ? width - pad * 2
-    : Math.round(Math.max(110, Math.min(190, width * 0.12)));
+  // actors are icons at the edge; the app and the store are the two centers
+  const L = narrow ? width - pad * 2 : 84;
   const A = narrow
     ? width - pad * 2
-    : Math.round((width - pad * 2 - L - gap * 2) * 0.46);
+    : Math.round((width - pad * 2 - L - gap * 2) * 0.44);
   const S = narrow ? width - pad * 2 : width - pad * 2 - L - A - gap * 2;
   const lx = pad;
   const ax = narrow ? pad : lx + L + gap;
@@ -541,24 +541,24 @@ export function layout(
   let ly = 8;
   const cnodes = nodes.filter((n) => CALLERS.has(n.kind));
   if (narrow) {
-    const cw = (L - 16) / 3;
+    const cw = (L - 16) / 5;
     cnodes.forEach((node, i) => {
       callers.push({
         node,
         box: {
-          x: lx + (i % 3) * (cw + 8),
-          y: ly + Math.floor(i / 3) * (CALLER_H + 8),
+          x: lx + (i % 5) * (cw + 4),
+          y: ly + Math.floor(i / 5) * (CALLER_H + 4),
           w: cw,
           h: CALLER_H,
         },
       });
     });
-    ly += Math.ceil(cnodes.length / 3) * (CALLER_H + 8) + 6;
+    ly += Math.ceil(cnodes.length / 5) * (CALLER_H + 4) + 6;
   } else {
-    ly += 20;
+    ly += 16;
     for (const node of cnodes) {
       callers.push({ node, box: { x: lx, y: ly, w: L, h: CALLER_H } });
-      ly += CALLER_H + 8;
+      ly += CALLER_H + 14;
     }
   }
 
@@ -602,12 +602,12 @@ export function layout(
       store.next_id < 300
         ? 24
         : view === "macro"
-          ? Math.round(Math.max(110, Math.min(190, S * 0.24)))
+          ? Math.round(Math.max(140, Math.min(300, S * 0.34)))
           : 48;
     const field: Box = { x: sx, y: sy, w: S, h: field_h };
     sy += field_h + 4;
-    const legend: Box = { x: sx, y: sy, w: S, h: 14 };
-    sy += 16;
+    const legend: Box = { x: sx, y: sy, w: S, h: 0 };
+    sy += 6;
 
     // the detailed cells: the lens on the field; at scale only the newest row
     const cell = { w: 84, h: 46 };
@@ -633,24 +633,20 @@ export function layout(
     let subs_head: Box | undefined;
     let cols: Box | undefined;
     if (own.length) {
-      subs_head = { x: sx, y: sy, w: S, h: 16 };
-      sy += 18;
+      // minimal: the correlate checkpoint, then one labelled track per subscription
       checkpoint = { x: sx, y: sy, w: S, h: 18 };
       sy += 22;
-      cols = { x: sx, y: sy, w: S, h: 14 };
-      sy += 16;
       for (const lane of [...new Set(own.map((t) => t.lane))]) {
-        const head: Box = { x: sx, y: sy, w: S, h: 16 };
-        sy += 18;
+        const head: Box = { x: sx, y: sy, w: S, h: 0 };
         const rows: SubRow[] = [];
-        const rh = narrow ? 36 : 20;
+        const rh = 13;
         for (const target of own.filter((t) => t.lane === lane)) {
           rows.push({
             target,
             box: { x: sx, y: sy, w: S, h: rh },
             track: { x: sx, y: sy + rh, w: S, h: TRACK },
           });
-          sy += rh + TRACK + 6;
+          sy += rh + TRACK + 5;
         }
         lanes.push({
           lane,

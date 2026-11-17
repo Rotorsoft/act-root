@@ -1367,3 +1367,46 @@
   stroke-dasharray: 3 2;
   fill: none;
 }
+
+/* actors: icons at the edge */
+.actor { --k: var(--dg-actor); }
+.actor[data-kind="worker"] { --k: var(--dg-reaction); }
+.actor[data-kind="external"] { --k: var(--dg-external); }
+.actorDisc {
+  fill: color-mix(in srgb, var(--k) 12%, var(--act-surface-1, #fff));
+  stroke: color-mix(in srgb, var(--k) 70%, transparent);
+  stroke-width: 1.4;
+}
+.actor.focus .actorDisc {
+  stroke-width: 2.6;
+  filter: drop-shadow(0 0 7px color-mix(in srgb, var(--k) 60%, transparent));
+}
+.actorIcon > * {
+  fill: var(--k);
+}
+.gear {
+  fill: var(--k) !important;
+}
+.gearHole {
+  fill: var(--act-surface-1, #fff) !important;
+}
+.globe {
+  fill: none !important;
+  stroke: var(--k);
+  stroke-width: 1.4;
+}
+.actorLabel {
+  font-size: 11px;
+  font-weight: 600;
+  text-anchor: middle;
+}
+.bridge path {
+  fill: none;
+  stroke: color-mix(in srgb, var(--dg-store) 70%, transparent);
+  stroke-width: 2;
+}
+.trackState {
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+}

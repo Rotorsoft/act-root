@@ -337,29 +337,51 @@ function Stage({
           <path d="M0,0 L8,4 L0,8 z" className={styles.arrowHead} />
         </marker>
       </defs>
-      {/* the callers */}
-      {lay.mode === "wide" && lay.callers.length > 0 && (
-        <text x={lay.callers[0]!.box.x} y={18} className={styles.bandLabel}>
-          callers
-        </text>
-      )}
-      {lay.callers.map(({ node, box }) => (
-        <g
-          key={node.id}
-          className={`${styles.node} ${lit?.nodes.has(node.id) ? styles.focus : ""} ${off(!!lit?.nodes.has(node.id))}`}
-          data-kind={node.kind}
-        >
-          <rect x={box.x} y={box.y} width={box.w} height={box.h} rx={10} />
-          <text x={box.x + box.w / 2} y={box.y + (node.sub ? 18 : 25)} className={styles.nodeLabel}>
-            {trim(node.label, Math.floor(box.w / 7.6))}
-          </text>
-          {node.sub && (
-            <text x={box.x + box.w / 2} y={box.y + 33} className={styles.nodeSub}>
-              {trim(node.sub, Math.floor(box.w / 6.2))}
+      {/* the actors: an icon each, at the edge */}
+      {lay.callers.map(({ node, box }) => {
+        const cx = box.x + box.w / 2;
+        const cy = box.y + 18;
+        return (
+          <g
+            key={node.id}
+            className={`${styles.actor} ${lit?.nodes.has(node.id) ? styles.focus : ""} ${off(!!lit?.nodes.has(node.id))}`}
+            data-kind={node.kind}
+          >
+            <title>{node.sub ? `${node.label} · ${node.sub}` : node.label}</title>
+            <circle cx={cx} cy={cy} r={17} className={styles.actorDisc} />
+            {node.kind === "actor" ? (
+              <g className={styles.actorIcon}>
+                <circle cx={cx} cy={cy - 5} r={4.6} />
+                <path d={`M${cx - 8.5},${cy + 10} a8.5,7.5 0 0 1 17,0 z`} />
+              </g>
+            ) : node.kind === "worker" ? (
+              <g className={styles.actorIcon}>
+                <circle cx={cx} cy={cy} r={6.5} className={styles.gear} />
+                {[0, 45, 90, 135, 180, 225, 270, 315].map((d) => (
+                  <rect key={d} x={cx - 1.6} y={cy - 10.5} width={3.2} height={4} transform={`rotate(${d} ${cx} ${cy})`} />
+                ))}
+                <circle cx={cx} cy={cy} r={2.4} className={styles.gearHole} />
+              </g>
+            ) : (
+              <g className={styles.actorIcon}>
+                <circle cx={cx} cy={cy} r={8} className={styles.globe} />
+                <path d={`M${cx - 8},${cy} h16 M${cx},${cy - 8} c-5,5 -5,11 0,16 M${cx},${cy - 8} c5,5 5,11 0,16`} className={styles.globe} />
+              </g>
+            )}
+            <text x={cx} y={box.y + 50} className={styles.actorLabel}>
+              {trim(node.label, 13)}
             </text>
-          )}
+          </g>
+        );
+      })}
+
+      {/* the one link between the two centers: commits go in, loads and reactions read back */}
+      {lay.mode === "wide" && lay.stores[0] && (
+        <g className={styles.bridge}>
+          <path d={`M${lay.app.port.x + 8},${lay.app.port.y - 5} L${lay.stores[0].box.x - 3},${lay.app.port.y - 5}`} markerEnd="url(#tour-arrow)" />
+          <path d={`M${lay.stores[0].box.x - 2},${lay.app.port.y + 6} L${lay.app.port.x + 9},${lay.app.port.y + 6}`} markerEnd="url(#tour-arrow)" />
         </g>
-      ))}
+      )}
 
       {/* the running Act app */}
       <g className={styles.app}>
@@ -580,32 +602,6 @@ function Stage({
               {fmt(n.events)} events · {fmt(n.streams)} streams · {fmt(n.closed)} closed · {fmt(n.snapshots)} snapshots
             </text>
             <rect x={sb.field.x} y={sb.field.y} width={sb.field.w} height={sb.field.h} rx={8} className={styles.fieldBox} />
-            <g className={styles.legend} transform={`translate(${sb.legend.x + 40}, ${sb.legend.y + 10})`}>
-              {(
-                [
-                  ["k0", "tickets"],
-                  ["k1", "agents"],
-                  ["k2", "users"],
-                  ["k3", "ledgers"],
-                  ["snap", "snapshot"],
-                  ["pii", "sensitive (pii)"],
-                  ["tomb", "tombstone"],
-                ] as const
-              ).map(([k, label], i) => (
-                <g key={k} transform={`translate(${i * (lay.mode === "narrow" ? 54 : Math.min(100, (sb.legend.w - 60) / 7))}, 0)`} data-k={k}>
-                  {k === "snap" ? (
-                    <circle r={3.6} className={styles.legendRing} />
-                  ) : k === "tomb" ? (
-                    <rect x={-3.5} y={-3.5} width={7} height={7} className={styles.legendTomb} />
-                  ) : (
-                    <circle r={3.4} className={styles.legendDot} />
-                  )}
-                  {k === "pii" && <circle r={1.5} className={styles.legendPii} />}
-                  {lay.mode === "wide" && <text x={7} y={3.5}>{label}</text>}
-                </g>
-              ))}
-              
-            </g>
             {sb.cells.map(({ cell, box }) => (
               <CellView
                 key={cell.uid}
@@ -648,128 +644,47 @@ function Stage({
               </g>
             )}
 
-            {/* subscriptions, on the store's id axis */}
-            {sb.subs_head && (
-              <text x={sb.subs_head.x} y={sb.subs_head.y + 12} className={styles.sectionTitle}>
-                Subscriptions <tspan className={styles.storeSub}>· ● watermark ◇ work mark, on the store's id axis</tspan>
-              </text>
-            )}
-            {sb.cols && lay.mode === "wide" && (
-              <g className={styles.subHead}>
-                {(
-                  [
-                    ["target", SUB_COLS.target],
-                    ["source", SUB_COLS.source],
-                    ["lane", SUB_COLS.lane],
-                    ["status", SUB_COLS.status],
-                    ["lease", SUB_COLS.lease],
-                    ["retries", SUB_COLS.retries],
-                  ] as const
-                ).map(([label, f]) => (
-                  <text key={label} x={sb.cols!.x + sb.cols!.w * f} y={sb.cols!.y + 11} className={styles.colHead}>
-                    {label}
-                  </text>
-                ))}
-                <text x={sb.cols.x + sb.cols.w} y={sb.cols.y + 11} className={`${styles.colHead} ${styles.right}`}>
-                  watermark · mark
-                </text>
-              </g>
-            )}
+            {/* subscriptions: the correlate checkpoint, then one quiet track each */}
             {sb.checkpoint && (
               <g className={styles.checkTrack}>
                 <text x={sb.checkpoint.x} y={sb.checkpoint.y + 8} className={styles.trackLabel}>
-                  correlate checkpoint {cp >= 0 ? `#${fmt(cp)}` : "—"}
-                </text>
-                <text x={sb.checkpoint.x + sb.checkpoint.w} y={sb.checkpoint.y + 8} className={`${styles.trackLabel} ${styles.right}`}>
-                  #0 … #{fmt(sb.axis.max)}
+                  correlate {cp >= 0 ? `· read to ${fmt(cp)}` : ""}
                 </text>
                 <line x1={sb.axis.x} x2={sb.axis.x + sb.axis.w} y1={sb.checkpoint.y + 15} y2={sb.checkpoint.y + 15} />
                 <rect x={sb.axis.x} y={sb.checkpoint.y + 13} width={Math.max(0, ax(cp) - sb.axis.x)} height={4} rx={2} className={styles.checkFill} />
                 <g className={styles.marker} style={{ transform: `translate(${ax(cp)}px, ${sb.checkpoint.y + 15}px)` }}>
-                  <path d="M0,-6 L5,0 L0,6 L-5,0 z" />
+                  <path d="M0,-5 L4,0 L0,5 L-4,0 z" />
                 </g>
               </g>
             )}
-            {sb.lanes.map((g) => (
-              <g key={g.lane}>
-                <text x={g.head.x} y={g.head.y + 12} className={styles.laneHead}>
-                  lane {g.lane}
-                  <tspan className={styles.storeSub}>{g.budget ? ` · ${g.budget}` : g.lane === "default" ? " · leaseMillis 10 s" : ""}</tspan>
-                </text>
-                {g.rows.map(({ target: t, box, track }) => {
-                  const st = status_of(t, w);
-                  const on = !!lit?.targets.has(t.id) || (hoverRx !== undefined && t.reaction === hoverRx);
-                  const narrow = lay.mode === "narrow";
-                  const col = (f: number) => box.x + box.w * f;
-                  const span = (f1: number, f2: number) => Math.floor((box.w * (f2 - f1)) / 6.3) - 1;
-                  const y1 = box.y + 14;
-                  const y2 = narrow ? box.y + 30 : y1;
-                  const bx = narrow ? col(0.55) : col(SUB_COLS.status);
-                  const bw = narrow ? box.w * 0.45 : box.w * (SUB_COLS.lease - SUB_COLS.status) - 6;
-                  return (
-                    // biome-ignore lint/a11y/noStaticElementInteractions: hover links a subscription to its reaction
-                    <g
-                      key={t.id}
-                      className={`${styles.subRow} ${t.fresh ? styles.fresh : ""} ${on ? styles.focus : ""} ${off(on)}`}
-                      data-state={st.key}
-                      onMouseEnter={() => t.reaction && setHoverRx(t.reaction)}
-                      onMouseLeave={() => setHoverRx(undefined)}
-                    >
-                      <rect x={box.x - 4} y={box.y - 1} width={box.w + 8} height={box.h + track.h + 4} rx={6} className={styles.rowBg} />
-                      <text x={col(0)} y={y1} className={styles.subName}>
-                        {trim(t.id, narrow ? 30 : span(0, SUB_COLS.source) - 2)}
-                      </text>
-                      <text x={narrow ? col(0) : col(SUB_COLS.source)} y={y2} className={styles.subCol}>
-                        {trim(t.source ?? "all streams", narrow ? 18 : span(SUB_COLS.source, SUB_COLS.lane))}
-                      </text>
-                      {!narrow && (
-                        <g className={styles.laneChip}>
-                          <rect x={col(SUB_COLS.lane)} y={y1 - 11} width={Math.min(box.w * (SUB_COLS.status - SUB_COLS.lane) - 6, t.lane.length * 6 + 12)} height={14} rx={7} />
-                          <text x={col(SUB_COLS.lane) + 6} y={y1 - 1}>
-                            {trim(t.lane, span(SUB_COLS.lane, SUB_COLS.status) - 1)}
-                            {t.priority !== undefined ? ` p${t.priority}` : ""}
-                          </text>
-                        </g>
-                      )}
-                      <g className={styles.badge} data-state={st.key}>
-                        <rect x={bx} y={y1 - 11} width={Math.min(bw, st.label.length * 5.9 + 14)} height={15} rx={7.5} />
-                        <text x={bx + 7} y={y1}>
-                          {trim(st.label, Math.floor((bw - 14) / 5.9))}
-                        </text>
-                      </g>
-                      {!narrow && t.lease && (
-                        <g>
-                          <text x={col(SUB_COLS.lease)} y={y1} className={styles.subCol}>
-                            {trim(t.lease, span(SUB_COLS.lease, SUB_COLS.retries))}
-                          </text>
-                          <rect x={col(SUB_COLS.lease)} y={y1 + 3} width={box.w * 0.09} height={3} rx={1.5} className={styles.leaseBar} />
-                        </g>
-                      )}
-                      {!narrow && (
-                        <text x={col(SUB_COLS.retries)} y={y1} className={styles.subCol}>
-                          {t.retry ? `${t.retry}${t.due ? ` · ${trim(t.due, 10)}` : ""}` : "—"}
-                        </text>
-                      )}
-                      <text x={box.x + box.w} y={y2} className={`${styles.subCol} ${styles.right}`}>
-                        {st.at < 0 ? "−1" : `#${fmt(st.at)}`} · {st.mark < 0 ? "—" : `#${fmt(st.mark)}`}
-                      </text>
-                      <line x1={track.x} x2={track.x + track.w} y1={track.y + 4} y2={track.y + 4} className={styles.trackLine} />
-                      {st.mark > st.at && (
-                        <rect x={ax(st.at)} y={track.y + 1} width={Math.max(2, ax(st.mark) - ax(st.at))} height={6} rx={3} className={styles.backlog} />
-                      )}
-                      {st.mark >= 0 && (
-                        <g className={styles.marker} style={{ transform: `translate(${ax(st.mark)}px, ${track.y + 4}px)` }}>
-                          <path d="M0,-5 L4,0 L0,5 L-4,0 z" className={styles.markHollow} />
-                        </g>
-                      )}
-                      <g className={`${styles.marker} ${styles.watermark}`} style={{ transform: `translate(${ax(st.at)}px, ${track.y + 4}px)` }}>
-                        <circle r={4} />
-                      </g>
+            {sb.lanes.flatMap((g) =>
+              g.rows.map(({ target: t, box, track }) => {
+                const st = status_of(t, w);
+                const on = !!lit?.targets.has(t.id) || (hoverRx !== undefined && t.reaction === hoverRx);
+                return (
+                  // biome-ignore lint/a11y/noStaticElementInteractions: hover links a subscription to its reaction
+                  <g
+                    key={t.id}
+                    className={`${styles.subRow} ${t.fresh ? styles.fresh : ""} ${on ? styles.focus : ""} ${off(on)}`}
+                    data-state={st.key}
+                    onMouseEnter={() => t.reaction && setHoverRx(t.reaction)}
+                    onMouseLeave={() => setHoverRx(undefined)}
+                  >
+                    <text x={box.x} y={box.y + 10} className={styles.trackLabel}>
+                      {trim(t.id, 40)}
+                      <tspan className={styles.trackState}> · {trim(st.label, 32)}</tspan>
+                    </text>
+                    <line x1={track.x} x2={track.x + track.w} y1={track.y + 4} y2={track.y + 4} className={styles.trackLine} />
+                    {st.mark > st.at && (
+                      <rect x={ax(st.at)} y={track.y + 2} width={Math.max(2, ax(st.mark) - ax(st.at))} height={4} rx={2} className={styles.backlog} />
+                    )}
+                    <g className={`${styles.marker} ${styles.watermark}`} style={{ transform: `translate(${ax(st.at)}px, ${track.y + 4}px)` }}>
+                      <circle r={3.5} />
                     </g>
-                  );
-                })}
-              </g>
-            ))}
+                  </g>
+                );
+              })
+            )}
           </g>
         );
       })}
