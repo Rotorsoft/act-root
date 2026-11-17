@@ -1611,3 +1611,12 @@
 .token circle {
   filter: drop-shadow(0 0 6px color-mix(in srgb, var(--dg-action) 70%, transparent));
 }
+
+/* the store in one neutral tone; the active cell in the accent */
+.cell {
+  --s: var(--dg-line) !important;
+}
+.cell.active,
+.cell.selected {
+  --s: var(--dg-action) !important;
+}

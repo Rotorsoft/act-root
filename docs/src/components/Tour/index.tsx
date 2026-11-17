@@ -25,7 +25,7 @@ import {
   useState,
 } from "react";
 import Field from "./Field";
-import { type Box, type Chip, data_lines, type Layout, layout, type Mode, SUB_COLS, short, type View } from "./layout";
+import { type Box, type Chip, data_lines, type Layout, layout, type Mode, short, type View } from "./layout";
 import styles from "./styles.module.css";
 import type { AppSpec, Link as DocLink, Move, Step, TourSpec } from "./types";
 import { type Cell, census, type Frame, type Frames, fill, fmt, frames as fold, sentences, spoken, type Target, type World } from "./world";
@@ -208,6 +208,7 @@ function CellView({
   dim,
   off,
   selected,
+  active,
   onSelect,
 }: {
   cell: Cell;
@@ -217,6 +218,7 @@ function CellView({
   dim: boolean;
   off: boolean;
   selected: boolean;
+  active: boolean;
   onSelect: (uid: number) => void;
 }) {
   const state = cell.leaving ? styles.leaving : cell.fresh ? styles.fresh : cell.moved ? styles.moved : "";
@@ -225,7 +227,7 @@ function CellView({
     <g className={styles.cellPos} style={{ transform: `translate(${box.x}px, ${box.y}px)` }}>
       {/* biome-ignore lint/a11y/useSemanticElements: an SVG cell cannot be a <button> */}
       <g
-        className={`${styles.cell} ${state} ${dim ? styles.dim : ""} ${selected ? styles.selected : ""} ${off ? styles.off : ""}`}
+        className={`${styles.cell} ${state} ${dim ? styles.dim : ""} ${selected ? styles.selected : ""} ${active ? styles.active : ""} ${off ? styles.off : ""}`}
         data-kind={cell.kind}
         data-color={color}
         role="button"
@@ -352,7 +354,7 @@ function Stage({
     !!lit?.cells.size ||
     !!lit?.streams.size ||
     !!lit?.targets.size ||
-    (step.ops ?? []).some((o) => o.kind !== "state" && o.kind !== "dim");
+    (step.ops ?? []).some((o) => o.op !== "state" && o.op !== "dim");
   const area = (on: boolean) => (on ? styles.glow : lit ? styles.off : "");
 
   return (
@@ -645,6 +647,7 @@ function Stage({
                 dim={(s.dim_from !== undefined && cell.id >= s.dim_from) || (s.only !== undefined && cell.stream !== s.only)}
                 off={!!lit && !lit.cells.has(cell.uid) && hover !== cell.stream}
                 selected={selected === cell.uid}
+                active={!!lit?.cells.has(cell.uid) || hover === cell.stream || (!!cell.fresh && !cell.leaving)}
                 onSelect={onSelect}
               />
             ))}

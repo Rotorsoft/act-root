@@ -1,6 +1,6 @@
 /**
  * The store at scale: every event in the store as one dot, in global id order,
- * wrapping like text. Snapshots are rings, tombstones dark caps, sensitive
+ * wrapping like text. One neutral tone: snapshots are rings, tombstones caps, sensitive
  * events carry a lock. A step animates from the previous store: new events
  * drop in at the tail, deleted ones lift out (into the archive bin when a
  * close archived them), a restore slides every dot to its new id, a scan
@@ -67,12 +67,6 @@ function dots_of(store: Store, base: BaseEvent[]): Dot[] {
   return out;
 }
 
-const KINDS = ["ticket", "agent", "user", "ledger"];
-const kind_of = (stream: string) => {
-  const i = KINDS.findIndex((k) => stream.startsWith(`${k}-`));
-  return i < 0 ? 4 : i;
-};
-
 const ease = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2);
 
 export default function Field({
@@ -117,15 +111,10 @@ export default function Field({
     if (!ctx) return;
     const css = getComputedStyle(cv);
     const v = (name: string, fallback: string) => css.getPropertyValue(name).trim() || fallback;
-    const palette = [v("--t-s0", "#2f6fdf"), v("--t-s1", "#0f9a8a"), v("--t-s2", "#c2389a"), v("--t-s3", "#7a8a14"), v("--dg-note", "#8a93a3")];
-    const snap = v("--dg-state", "#a87d00");
     const tomb = v("--dg-line", "#5d6574");
-    const bad = v("--dg-bad", "#c62828");
-    const pink = v("--dg-external", "#c8336f");
     const accent = v("--dg-action", "#2b5fd0");
     const reaction = v("--dg-reaction", "#7f4cc7");
     const text = v("--ifm-font-color-base", "#222");
-    const workers = [accent, v("--dg-event", "#d96a14"), v("--dg-projection", "#17875c"), reaction];
 
     const dots = dots_of(store, base);
     const max_id = dots.reduce((m, d) => Math.max(m, d.id, d.from ?? 0), 0);
@@ -150,6 +139,9 @@ export default function Field({
     const glow = new Map(store.glows.map((g) => [g.stream, g.worker]));
     const worker_list = [...new Set(store.glows.map((g) => g.worker))];
     const tour_ids = dots.filter((d) => d.tour && !d.leaving).map((d) => d.id);
+    // one neutral tone for every dot; the scene's streams (or the hovered one) in one accent
+    const neutral = v("--act-text-muted", "#7a8394");
+    const focus = new Set(hover ? [hover] : dots.filter((d) => d.tour && !d.leaving).map((d) => d.stream));
 
     const T = 900;
     const delay = reduce ? 0 : enter;
@@ -221,39 +213,53 @@ export default function Field({
           }
           if (t >= 1) continue;
         }
-        const dim = hover && d.stream !== hover ? 0.18 : 1;
-        ctx.globalAlpha = alpha * dim;
-        const rr = r * scale * (hover && d.stream === hover ? 1.35 : 1);
         const g = glow.get(d.stream);
+        const on = focus.has(d.stream) || !!g;
+        const dim = on ? 1 : focus.size || glow.size ? 0.32 : 0.62;
+        const tone = on ? accent : neutral;
+        ctx.globalAlpha = alpha * dim;
+        const rr = r * scale * (on ? 1.2 : 1);
         if (g) {
-          ctx.fillStyle = workers[worker_list.indexOf(g) % workers.length]!;
-          ctx.globalAlpha = 0.28 * dim;
+          // a worker's streams: a soft halo, filled for the first worker, ringed for the next
+          const second = worker_list.indexOf(g) % 2 === 1;
+          ctx.globalAlpha = 0.3;
+          ctx.fillStyle = accent;
+          ctx.strokeStyle = accent;
+          ctx.lineWidth = 1;
           ctx.beginPath();
-          ctx.arc(p.x, p.y, rr * 2.3, 0, Math.PI * 2);
+          ctx.arc(p.x, p.y, rr * 2.2, 0, Math.PI * 2);
+          if (second) ctx.stroke();
+          else ctx.fill();
+          ctx.globalAlpha = alpha * dim;
+        } else if (on) {
+          ctx.globalAlpha = 0.22 * alpha;
+          ctx.fillStyle = accent;
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, rr * 2, 0, Math.PI * 2);
           ctx.fill();
           ctx.globalAlpha = alpha * dim;
         }
         if (d.kind === "snapshot") {
           // a ring: the state, folded
-          ctx.strokeStyle = snap;
+          ctx.strokeStyle = tone;
           ctx.lineWidth = Math.max(0.9, rr * 0.45);
           ctx.beginPath();
           ctx.arc(p.x, p.y, rr * 1.05, 0, Math.PI * 2);
           ctx.stroke();
         } else if (d.kind === "tombstone") {
           // a cap: the stream is closed
-          ctx.fillStyle = tomb;
+          ctx.fillStyle = tone;
           ctx.fillRect(p.x - rr * 1.05, p.y - rr * 1.05, rr * 2.1, rr * 2.1);
           ctx.fillStyle = text;
           ctx.fillRect(p.x - rr * 1.05, p.y - rr * 1.05, rr * 2.1, Math.max(0.8, rr * 0.5));
         } else {
-          ctx.fillStyle = palette[kind_of(d.stream)]!;
+          ctx.fillStyle = tone;
           ctx.beginPath();
           ctx.arc(p.x, p.y, rr, 0, Math.PI * 2);
           ctx.fill();
           if (d.pii) {
             // a small mark in the dot: its sensitive fields sit in the pii column
-            ctx.fillStyle = d.shredded ? bad : pink;
+            ctx.fillStyle = v("--act-surface-1", "#fff");
             if (d.shredded) ctx.fillRect(p.x - rr * 0.8, p.y - rr * 0.15, rr * 1.6, Math.max(0.8, rr * 0.3));
             else {
               ctx.beginPath();

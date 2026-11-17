@@ -490,7 +490,7 @@ const all = await app.query_array({});
         steps: [
           {
             now: "The store holds {events} events on {streams} streams, in one global log",
-            say: "This is a ticket desk's **event store**, at scale: every dot is one event, in global `id` order, wrapping like text. Blue dots are tickets, teal agents, pink-ringed ones users with sensitive fields; amber rings are snapshots. Hover a dot to see its stream. The history is generated from a fixed seed, so it's the same every time.",
+            say: "This is a ticket desk's **event store**, at scale: every dot is one event, in global `id` order, wrapping like text. Every dot has the same tone, whatever its stream: a ring is a snapshot, a square a tombstone, a hollow center an event with sensitive fields. Hover a dot to see its stream. The history is generated from a fixed seed, so it's the same every time.",
             focus: ["field:main"],
           },
           {
@@ -508,7 +508,7 @@ const all = await app.query_array({});
           },
           {
             now: "ticket-4821 holds v0 ({#t21-open}) and v1 ({#t21-m1}); other streams sit between them",
-            say: "Each event also belongs to one **stream** and takes that stream's next **version**. The dashed lens marks the events of this scene; the cells under the field zoom in on them. Ticket 4821 holds v0 and v1, with other streams' events between them. Hover `ticket-4821` in the list to light its dots.",
+            say: "Each event also belongs to one **stream** and takes that stream's next **version**. The dashed lens marks the events of this scene; the cells under the field zoom in on them. Ticket 4821 holds v0 and v1, with other streams' events between them. Hover one of its dots to light the whole stream.",
             ops: [
               { op: "unflag" },
               { op: "flag", on: "cell:t21-open", text: "ticket-4821 v0" },
@@ -518,7 +518,7 @@ const all = await app.query_array({});
           },
           {
             now: '`app.query_array({ stream: "ticket-4821", stream_exact: true })` reads one stream',
-            say: "Reading one stream is a query over the same log: `stream_exact` picks one stream's events, in version order. The stream table below folds the log the same way.",
+            say: "Reading one stream is a query over the same log: `stream_exact` picks one stream's events, in version order. Hover a dot and its stream lights up across the whole log.",
             code: `const ticket = await app.query_array({ stream: "ticket-4821", stream_exact: true });
 // [ v0 TicketOpened, v1 MessageAdded ]`,
             ops: [{ op: "unflag" }, { op: "dim", only: "ticket-4821" }],
@@ -1632,7 +1632,7 @@ await app.prioritize({ source: "^audit-" }, -5); // lower`,
           {
             now: "The webhook POSTs {#t32-esc}: 503, retry 1 due in 200 ms × jitter",
             pipe: { name: "reaction", at: 3, fail: true },
-            say: "The webhook POSTs {#t32-esc} and the service answers 503. A failed attempt waits out the **backoff** in the code card: `baseMs: 200` for the first retry, times a jitter factor between 0.5 and 1.5. The schedule is stored on the target, so no worker retries before it is due.",
+            say: "The webhook POSTs {#t32-esc} and the service answers 503. A failed attempt waits out the **backoff** (open the `</>` icon for the code): `baseMs: 200` for the first retry, times a jitter factor between 0.5 and 1.5. The schedule is stored on the target, so no worker retries before it is due.",
             moves: [
               { from: "webhook", to: "svc", label: "POST {#t32-esc}" },
               { from: "svc", to: "webhook", label: "503", tone: "bad" },
@@ -2883,7 +2883,7 @@ await app.close(idle.slice(0, 40).map(([stream]) => ({ stream, archive: () => ar
           },
           {
             now: "The store now holds {events} events on {streams} streams; {closed} are closed",
-            say: "The ids of the deleted events are never reused: the holes stay until a restore compacts the store. The counter above the field always reads from the store itself.",
+            say: "The ids of the deleted events are never reused: the holes stay until a restore compacts the store. The counts in the store's header always read from the store itself.",
             focus: ["field:main"],
           },
         ],
