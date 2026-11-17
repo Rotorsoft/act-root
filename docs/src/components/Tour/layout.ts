@@ -673,11 +673,12 @@ export function layout(
       ...(store.ghost && {
         bounce: narrow
           ? { x: sx + S - 132, y: top + 4, w: 132, h: 46 }
-          : {
-              x: sx - 8 - 68,
-              y: Math.max(top + 2, appl.port.y - 62),
-              w: 136,
-              h: 46,
+          : // one line in the action layer's label row, ending at the commit port: clear of the log
+            {
+              x: appl.port.x - 14 - 262,
+              y: appl.layer_box.y + 3,
+              w: 262,
+              h: 16,
             },
       }),
     };
