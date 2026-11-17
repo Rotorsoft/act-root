@@ -33,6 +33,9 @@ import { type Cell, census, type Frame, type Frames, fill, fmt, frames as fold, 
 export type { TourSpec } from "./types";
 
 const MOVE_MS = 820;
+
+// the stage names a narrow pill shows; the full name is its title
+const SHORT: Record<string, string> = { preconditions: "rules", "state check": "check" };
 const LAND_MS = 900;
 const PALETTE = 8;
 
@@ -401,10 +404,11 @@ function Stage({
           const state = stop ? "fail" : layer_state(i);
           return (
             <g key={stage} className={styles.stage} data-state={state}>
+              <title>{stage}</title>
               <rect x={box.x} y={box.y} width={box.w} height={box.h} rx={9} />
               <text x={box.x + box.w / 2} y={box.y + 13}>
                 {state === "done" ? "✓ " : state === "fail" ? "✕ " : ""}
-                {trim(stage, Math.floor(box.w / 5.9) - (state === "done" || state === "fail" ? 2 : 0))}
+                {(stage.length + (state === "done" || state === "fail" ? 2 : 0)) * 5.9 > box.w - 8 ? (SHORT[stage] ?? stage) : stage}
               </text>
             </g>
           );
@@ -429,7 +433,7 @@ function Stage({
         <g className={styles.port} data-state={commit_state}>
           <circle cx={a.port.x} cy={a.port.y} r={7} />
           {!a.vertical && (
-            <text x={a.port.x + 10} y={a.port.y + 4} className={styles.portLabel}>
+            <text x={a.port.x - 4} y={a.port.y - 12} className={`${styles.portLabel} ${styles.right}`}>
               commit
             </text>
           )}
@@ -452,8 +456,8 @@ function Stage({
             className={styles.link}
             data-kind={l.kind}
             d={
-              l.kind === "listen"
-                ? `M${l.a.x},${l.a.y} C${l.a.x},${(l.a.y + l.b.y) / 2} ${l.b.x},${(l.a.y + l.b.y) / 2} ${l.b.x},${l.b.y - 2}`
+              l.pts
+                ? `M${l.pts.map((p) => `${p.x},${p.y}`).join(" L")}`
                 : `M${l.a.x},${l.a.y} C${(l.a.x + l.b.x) / 2},${l.a.y} ${(l.a.x + l.b.x) / 2},${l.b.y} ${l.b.x - 2},${l.b.y}`
             }
             markerEnd="url(#tour-arrow)"
@@ -463,10 +467,10 @@ function Stage({
           const on = lit_chip.has(`state:${st.name}`);
           const fresh = st.node ? w.states[st.node]?.fresh : false;
           return (
-            <g key={st.name} className={`${styles.stateBox} ${on ? styles.focus : ""} ${fresh ? styles.fresh : ""} ${lit && !on ? styles.soft : ""}`}>
+            <g key={`${st.name}-${st.box.y}`} className={`${styles.stateBox} ${on ? styles.focus : ""} ${fresh ? styles.fresh : ""} ${lit && !on ? styles.soft : ""}`}>
               <rect x={st.box.x} y={st.box.y} width={st.box.w} height={st.box.h} rx={8} />
               <text x={st.box.x + 8} y={st.box.y + 15} className={styles.cardTitle}>
-                {st.name}
+                {st.title ?? st.name}
                 {st.sub && <tspan className={styles.appSub}> {trim(st.sub, Math.max(4, Math.floor(st.box.w / 6.4) - st.name.length - 8))}</tspan>}
               </text>
               {st.version !== undefined && (
@@ -617,46 +621,44 @@ function Stage({
             ))}
             {s.ghost && (
               <g className={`${styles.ghost} ${styles.fresh}`} style={{ transform: `translate(${sb.tail.x}px, ${sb.tail.y}px)` }}>
-                <rect width={sb.tail.w + 40} height={sb.tail.h} rx={7} />
+                <rect width={sb.tail.w} height={sb.tail.h} rx={7} />
                 <text x={8} y={14} className={styles.cellId}>
-                  ↩ bounced at the store
+                  ↩ bounced
                 </text>
                 <text x={8} y={29} className={styles.ghostError}>
-                  {s.ghost.error} · {s.ghost.stream}
+                  {trim(s.ghost.error, 15)}
                 </text>
                 <text x={8} y={44} className={styles.cellStream}>
-                  {s.ghost.expected !== undefined ? `expected v${s.ghost.expected}, head v${s.ghost.actual}` : "nothing appended"}
+                  {s.ghost.expected !== undefined ? `exp v${s.ghost.expected} · head v${s.ghost.actual}` : "nothing appended"}
                 </text>
               </g>
             )}
 
             {/* subscriptions, on the store's id axis */}
             {sb.subs_head && (
+              <text x={sb.subs_head.x} y={sb.subs_head.y + 12} className={styles.sectionTitle}>
+                Subscriptions <tspan className={styles.storeSub}>· ● watermark ◇ work mark, on the store's id axis</tspan>
+              </text>
+            )}
+            {sb.cols && lay.mode === "wide" && (
               <g className={styles.subHead}>
-                <text x={sb.subs_head.x} y={sb.subs_head.y + 12} className={styles.sectionTitle}>
-                  Subscriptions{" "}
-                  <tspan className={styles.storeSub}>· ● watermark ◇ work mark, on the store's id axis</tspan>
-                </text>
-                {lay.mode === "wide" &&
-                  (
-                    [
-                      ["target", SUB_COLS.target],
-                      ["source", SUB_COLS.source],
-                      ["lane", SUB_COLS.lane],
-                      ["status", SUB_COLS.status],
-                      ["lease", SUB_COLS.lease],
-                      ["retries", SUB_COLS.retries],
-                    ] as const
-                  ).map(([label, f]) => (
-                    <text key={label} x={sb.subs_head!.x + sb.subs_head!.w * f} y={sb.subs_head!.y + 27} className={styles.colHead}>
-                      {label}
-                    </text>
-                  ))}
-                {lay.mode === "wide" && (
-                  <text x={sb.subs_head.x + sb.subs_head.w} y={sb.subs_head.y + 27} className={`${styles.colHead} ${styles.right}`}>
-                    watermark · mark
+                {(
+                  [
+                    ["target", SUB_COLS.target],
+                    ["source", SUB_COLS.source],
+                    ["lane", SUB_COLS.lane],
+                    ["status", SUB_COLS.status],
+                    ["lease", SUB_COLS.lease],
+                    ["retries", SUB_COLS.retries],
+                  ] as const
+                ).map(([label, f]) => (
+                  <text key={label} x={sb.cols!.x + sb.cols!.w * f} y={sb.cols!.y + 11} className={styles.colHead}>
+                    {label}
                   </text>
-                )}
+                ))}
+                <text x={sb.cols.x + sb.cols.w} y={sb.cols.y + 11} className={`${styles.colHead} ${styles.right}`}>
+                  watermark · mark
+                </text>
               </g>
             )}
             {sb.checkpoint && (

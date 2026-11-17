@@ -25,6 +25,8 @@ export type Chip = {
 
 /** A state inside its slice: its actions flow in on the left, its events out on the right. */
 export type StateBox = {
+  /** the scene node's label when one state is loaded twice (`Agent · next`) */
+  title?: string;
   name: string;
   box: Box;
   lines: string[];
@@ -46,7 +48,7 @@ export type AppLayout = {
   states: StateBox[];
   slices: { name: string; box: Box; code?: string }[];
   /** arrows: action → state, state → event, event → reaction or projection */
-  links: { a: Pt; b: Pt; kind: "in" | "out" | "listen" }[];
+  links: { a: Pt; b: Pt; kind: "in" | "out" | "listen"; pts?: Pt[] }[];
   cards: { node: Node; box: Box; lines: string[] }[];
   port: Pt;
 };
@@ -83,6 +85,8 @@ export type StoreBox = {
   checkpoint?: Box;
   lanes: LaneGroup[];
   subs_head?: Box;
+  /** the subscription column header, under the checkpoint band */
+  cols?: Box;
 };
 
 export type TableBox = { table: Table; box: Box };
@@ -184,7 +188,7 @@ function app_layout(
   const links: AppLayout["links"] = [];
   const pad = 10;
   const iw = w - pad * 2;
-  let cy = y + 28;
+  let cy = y + 26;
 
   // the ports it's wired to
   const ports = [...(app.ports ?? [])];
@@ -298,9 +302,8 @@ function app_layout(
     const sw = inner - aw - ew - gap * 2;
     for (const st of sl.states) {
       const own = by_state.get(st.name) ?? [];
-      const first = own.find((n) => world.states[n.id]);
-      const values = first ? data_lines(world.states[first.id]?.data, 5) : [];
-      const lines = values.length ? values : (st.fields ?? []).map((f) => f);
+      const loaded = own.filter((n) => world.states[n.id]);
+      const instances = loaded.length ? loaded : [undefined];
       const sx = x + pad + 6 + aw + gap;
       const ex = sx + sw + gap;
       const ah = column(
@@ -322,25 +325,37 @@ function app_layout(
         cy,
         ew
       );
-      const sh = 22 + Math.max(1, lines.length) * LINE + 6;
-      const h = Math.max(ah, eh, sh);
-      const box: Box = {
-        x: sx,
-        y: cy,
-        w: sw,
-        h: Math.max(sh, Math.min(h, sh + 20)),
-      };
-      states.push({
-        name: st.name,
-        box,
-        lines,
-        code: code[st.name],
-        ...(first && {
-          node: first.id,
-          sub: first.sub,
-          version: world.states[first.id]?.version,
-        }),
+      let iy = cy;
+      let box: Box = { x: sx, y: cy, w: sw, h: 0 };
+      instances.forEach((n, k) => {
+        const values = n ? data_lines(world.states[n.id]?.data, 5) : [];
+        const lines = values.length ? values : (st.fields ?? []).map((f) => f);
+        const ih = 22 + Math.max(1, lines.length) * LINE + 6;
+        const b: Box = {
+          x: sx,
+          y: iy,
+          w: sw,
+          h:
+            instances.length === 1
+              ? Math.max(ih, Math.min(Math.max(ah, eh), ih + 20))
+              : ih,
+        };
+        states.push({
+          name: st.name,
+          box: b,
+          lines,
+          code: code[st.name],
+          ...(instances.length > 1 && n && { title: n.label }),
+          ...(n && {
+            node: n.id,
+            sub: n.sub,
+            version: world.states[n.id]?.version,
+          }),
+        });
+        if (k === 0) box = b;
+        iy += b.h + 6;
       });
+      const h = Math.max(ah, eh, iy - cy - 6);
       state_at.set(st.name, box);
       for (const c of chips.filter(
         (c) =>
@@ -368,14 +383,7 @@ function app_layout(
           kind: "out",
         });
       }
-      // a second scene node on the same state (two loads of one state) gets a card of its own
-      for (const n of own.filter((n) => n !== first && world.states[n.id]))
-        cards.push({
-          node: n,
-          box: { x: 0, y: 0, w: 0, h: 0 },
-          lines: data_lines(world.states[n.id]?.data, 5),
-        });
-      cy += h + 8;
+      cy += h + 6;
     }
     const listeners: Omit<Chip, "box">[] = [
       ...(sl.reactions ?? []).map((r) => ({
@@ -393,7 +401,7 @@ function app_layout(
     ];
     if (listeners.length) {
       const before = chips.length;
-      cy += 8;
+      cy += 12;
       cy += flow(chips, listeners, x + pad + 6, cy, iw - 12) + 6;
       for (const c of chips.slice(before)) {
         const proj = sl.projections?.find((p) => p.name === c.name);
@@ -403,12 +411,35 @@ function app_layout(
             : proj?.of
               ? state_at.get(proj.of)
               : event_at.get(proj?.on?.[0] ?? "");
-        if (from)
+        if (from) {
+          const lane_y = c.box.y - 6;
+          const right = from.x + from.w + 4;
+          const a =
+            c.kind === "projection" && proj?.of
+              ? { x: from.x + from.w / 2, y: from.y + from.h }
+              : { x: from.x + from.w, y: from.y + from.h / 2 };
+          const pts =
+            c.kind === "projection" && proj?.of
+              ? [
+                  a,
+                  { x: a.x, y: lane_y },
+                  { x: c.box.x + c.box.w / 2, y: lane_y },
+                  { x: c.box.x + c.box.w / 2, y: c.box.y },
+                ]
+              : [
+                  a,
+                  { x: right, y: a.y },
+                  { x: right, y: lane_y },
+                  { x: c.box.x + c.box.w / 2, y: lane_y },
+                  { x: c.box.x + c.box.w / 2, y: c.box.y },
+                ];
           links.push({
-            a: { x: from.x + from.w / 2, y: from.y + from.h },
+            a,
             b: { x: c.box.x + c.box.w / 2, y: c.box.y },
             kind: "listen",
+            pts,
           });
+        }
       }
     }
     slices.push({
@@ -558,10 +589,13 @@ export function layout(
   const stores: StoreBox[] = world.stores.map((store) => {
     const top = sy;
     sy += narrow ? 42 : 28;
+    // a small store gets only a strip; the room goes to the cells
     const field_h =
-      view === "macro"
-        ? Math.round(Math.max(110, Math.min(210, S * 0.26)))
-        : 52;
+      store.next_id < 300
+        ? 24
+        : view === "macro"
+          ? Math.round(Math.max(110, Math.min(190, S * 0.24)))
+          : 48;
     const field: Box = { x: sx, y: sy, w: S, h: field_h };
     sy += field_h + 4;
     const legend: Box = { x: sx, y: sy, w: S, h: 14 };
@@ -575,13 +609,13 @@ export function layout(
     const slots = shown.length + (store.ghost ? 1 : 0);
     const place = (i: number): Box => ({
       x: sx + (i % per_row) * (cell.w + cg),
-      y: sy + 12 + Math.floor(i / per_row) * (cell.h + 22),
+      y: sy + 12 + Math.floor(i / per_row) * (cell.h + 20),
       w: cell.w,
       h: cell.h,
     });
     const cells = shown.map((c, i) => ({ cell: c, box: place(i) }));
     const tail = place(shown.length);
-    if (slots) sy += Math.ceil(slots / per_row) * (cell.h + 22) + 4;
+    if (slots) sy += Math.ceil(slots / per_row) * (cell.h + 20) + 4;
 
     // subscriptions: grouped by lane, a header row, each with a track on the id axis
     const axis = { x: sx, w: S, max: Math.max(1, store.next_id - 1) };
@@ -589,11 +623,14 @@ export function layout(
     const lanes: LaneGroup[] = [];
     let checkpoint: Box | undefined;
     let subs_head: Box | undefined;
+    let cols: Box | undefined;
     if (own.length) {
-      subs_head = { x: sx, y: sy, w: S, h: 30 };
-      sy += 32;
+      subs_head = { x: sx, y: sy, w: S, h: 16 };
+      sy += 18;
       checkpoint = { x: sx, y: sy, w: S, h: 18 };
       sy += 22;
+      cols = { x: sx, y: sy, w: S, h: 14 };
+      sy += 16;
       for (const lane of [...new Set(own.map((t) => t.lane))]) {
         const head: Box = { x: sx, y: sy, w: S, h: 16 };
         sy += 18;
@@ -630,6 +667,7 @@ export function layout(
       checkpoint,
       lanes,
       subs_head,
+      cols,
     };
   });
 
