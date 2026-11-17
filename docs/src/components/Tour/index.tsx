@@ -701,14 +701,14 @@ function Stage({
                     >
                       <rect x={box.x - 4} y={box.y - 1} width={box.w + 8} height={box.h + track.h + 4} rx={6} className={styles.rowBg} />
                       <text x={col(0)} y={y1} className={styles.subName}>
-                        {trim(t.id, narrow ? 30 : span(0, SUB_COLS.source))}
+                        {trim(t.id, narrow ? 30 : span(0, SUB_COLS.source) - 2)}
                       </text>
                       <text x={narrow ? col(0) : col(SUB_COLS.source)} y={y2} className={styles.subCol}>
                         {trim(t.source ?? "all streams", narrow ? 18 : span(SUB_COLS.source, SUB_COLS.lane))}
                       </text>
                       {!narrow && (
                         <g className={styles.laneChip}>
-                          <rect x={col(SUB_COLS.lane)} y={y1 - 11} width={Math.min(box.w * 0.095, t.lane.length * 6 + 12)} height={14} rx={7} />
+                          <rect x={col(SUB_COLS.lane)} y={y1 - 11} width={Math.min(box.w * (SUB_COLS.status - SUB_COLS.lane) - 6, t.lane.length * 6 + 12)} height={14} rx={7} />
                           <text x={col(SUB_COLS.lane) + 6} y={y1 - 1}>
                             {trim(t.lane, span(SUB_COLS.lane, SUB_COLS.status) - 1)}
                             {t.priority !== undefined ? ` p${t.priority}` : ""}
