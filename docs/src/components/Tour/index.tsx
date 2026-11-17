@@ -63,9 +63,37 @@ function schedule(moves: Move[]): { starts: number[]; total: number } {
   return { starts, total: last };
 }
 
-// the token travels, the change lands and pulses, then the step holds to be read
-const dwell = (now: string, say: string, total: number) =>
-  total + LAND_MS + Math.max(2800, Math.min(8000, (say.length + now.length) * 38));
+/** A caption's sentences: one or two lines each. */
+export function sentences(text: string): string[] {
+  return text
+    .split(/(?<=[.!?:])\s+(?=[A-Z`*"(])/)
+    .map((t) => t.trim())
+    .filter(Boolean);
+}
+
+/**
+ * The words to say for a caption: no symbols read aloud. An id is "event
+ * 1912", a version "version 2", a code span its words, markdown dropped.
+ */
+export function spoken(text: string): string {
+  return text
+    .replace(/\*\*/g, "")
+    .replace(/`([^`]+)`/g, (_, code: string) =>
+      code
+        .replace(/\(.*?\)/g, "")
+        .replace(/[{}[\]"'<>]/g, " ")
+        .replace(/([a-z])([A-Z])/g, "$1 $2")
+        .replace(/[._:/-]+/g, " ")
+    )
+    .replace(/#([\d,]+)/g, "event $1")
+    .replace(/\bv(\d+)\b/g, "version $1")
+    .replace(/→/g, " to ")
+    .replace(/−1/g, "minus 1")
+    .replace(/×/g, " times ")
+    .replace(/·/g, ",")
+    .replace(/\s+/g, " ")
+    .trim();
+}
 
 type Fit = { mode: Mode; px: number };
 function useFit(ref: React.RefObject<HTMLElement | null>): Fit {
@@ -779,19 +807,6 @@ function spotlight(step: Step, w: World): Lit | undefined {
   return any ? lit : undefined;
 }
 
-function next_line(spec: TourSpec, all: Frames, index: number): string {
-  const here = all[index]!;
-  const step = spec.chapters[here.chapter]!.scenes[here.scene]!.steps[here.step]!;
-  if (step.next) return step.next;
-  const after = all[index + 1];
-  if (!after) return "the end of the tour";
-  const chapter = spec.chapters[after.chapter]!;
-  if (after.chapter !== here.chapter) return `chapter ${after.chapter + 1}: ${chapter.title}`;
-  const scene = chapter.scenes[after.scene]!;
-  if (after.scene !== here.scene) return `scene: ${scene.title}`;
-  return fill(scene.steps[after.step]!.now, after.world, all.base);
-}
-
 /** The app's anatomy for a chapter: its own, or the last one declared. */
 function app_at(spec: TourSpec, chapter: number): AppSpec {
   for (let i = chapter; i >= 0; i--) {
@@ -851,7 +866,13 @@ export default function Tour({ spec }: { spec: TourSpec }) {
   const [reduce, setReduce] = useState(true);
   const [selected, setSelected] = useState<number | undefined>();
   const [menu, setMenu] = useState(false);
-  const [panels, setPanels] = useState(true);
+  const [transcript, setTranscript] = useState(false);
+  const [cc, setCc] = useState(true);
+  const [sound, setSound] = useState(false);
+  const [muted, setMuted] = useState(false);
+  const [speed, setSpeed] = useState(1);
+  const [cue, setCue] = useState(-1);
+  const [voice, setVoice] = useState(false);
   const [tip, setTip] = useState<OpenTip | undefined>();
   const [hover, setHover] = useState<string | undefined>();
   const close_timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -879,35 +900,19 @@ export default function Tour({ spec }: { spec: TourSpec }) {
   }, [scene, frame.step, frame.world, all.base]);
   const sel = selected === undefined ? undefined : frame.world.stores.flatMap((s) => s.cells).find((c) => c.uid === selected);
   const lit = useMemo(() => spotlight(step, frame.world), [step, frame.world]);
-  const now = fill(step.now, frame.world, all.base);
   const say = fill(step.say, frame.world, all.base);
-  const next = next_line(spec, all, index);
-  const pipe = step.pipe && spec.pipelines[step.pipe.name] ? step.pipe : undefined;
-  // the streams the scene works on; the field holds the rest
-  const scene_streams = useMemo(() => {
-    const rows = new Map<string, { stream: string; head: number; count: number; color: number }>();
-    for (const st of frame.world.stores)
-      for (const c of st.cells) {
-        if (c.leaving) continue;
-        const key = frame.world.stores.length > 1 ? `${c.stream} (${st.name})` : c.stream;
-        const r = rows.get(key);
-        if (r) {
-          r.head = Math.max(r.head, c.version);
-          r.count++;
-        } else rows.set(key, { stream: key, head: c.version, count: 1, color: colors.get(c.stream) ?? 0 });
-      }
-    return [...rows.values()];
-  }, [frame.world, colors]);
-  const feed = useMemo(() => {
-    const lines: { at: number; text: string }[] = [];
-    for (let i = frame.chapter_start; i <= index; i++) for (const text of all[i]!.world.feed) lines.push({ at: i, text });
-    return lines.reverse();
-  }, [all, frame.chapter_start, index]);
+  const lines = useMemo(() => sentences(say), [say]);
+  const speech = useMemo(() => {
+    const words = step.speak ? sentences(fill(step.speak, frame.world, all.base)) : lines.map(spoken);
+    return words;
+  }, [step.speak, frame.world, all.base, lines]);
   // a store animates from the step before only when we moved forward by one
   const animate = index === prevIndex + 1;
+  const pointing = new Set(step.ui ?? []);
 
   useEffect(() => {
     setReduce(window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+    setVoice(typeof window !== "undefined" && "speechSynthesis" in window);
     const id = window.location.hash.slice(1);
     const at = spec.chapters.findIndex((c) => c.id === id);
     if (at > 0) setIndex(all.findIndex((f) => f.chapter === at));
@@ -922,24 +927,57 @@ export default function Tour({ spec }: { spec: TourSpec }) {
       setRun((r) => r + 1);
       setTip(undefined);
       setMenu(false);
+      setCue(-1);
       const ch = spec.chapters[all[next]!.chapter]!;
       if (typeof window !== "undefined" && window.location.hash !== `#${ch.id}`) window.history.replaceState(null, "", `#${ch.id}`);
     },
     [all, spec, index]
   );
 
+  // the pacing: the token travels, then each sentence is spoken (or shown for its length), then the next step
   useEffect(() => {
-    if (!playing) return;
+    if (!playing) {
+      if (voice) window.speechSynthesis.cancel();
+      return;
+    }
+    let cancelled = false;
+    const timers: ReturnType<typeof setTimeout>[] = [];
     const last = index >= all.length - 1 || all[index + 1]!.chapter !== frame.chapter;
-    const t = setTimeout(
-      () => {
-        if (last) setPlaying(false);
-        else go(index + 1, true);
-      },
-      dwell(now, say, reduce ? 0 : total)
-    );
-    return () => clearTimeout(t);
-  }, [playing, index, all, frame.chapter, now, say, total, reduce, go]);
+    const advance = () => {
+      if (cancelled) return;
+      if (last) setPlaying(false);
+      else go(index + 1, true);
+    };
+    const talk = voice && sound && !muted;
+    const show = (i: number) => {
+      if (cancelled) return;
+      if (i >= lines.length) {
+        timers.push(setTimeout(advance, 450));
+        return;
+      }
+      setCue(i);
+      if (talk) {
+        const u = new SpeechSynthesisUtterance(speech[i] ?? spoken(lines[i]!));
+        u.rate = speed;
+        u.lang = "en-US";
+        u.onend = () => show(i + 1);
+        u.onerror = () => show(i + 1);
+        window.speechSynthesis.speak(u);
+      } else timers.push(setTimeout(() => show(i + 1), Math.max(1800, lines[i]!.length * 52) / speed));
+    };
+    timers.push(setTimeout(() => show(0), (reduce ? 0 : total + LAND_MS) / speed));
+    return () => {
+      cancelled = true;
+      for (const t of timers) clearTimeout(t);
+      if (voice) window.speechSynthesis.cancel();
+    };
+  }, [playing, index, all, frame.chapter, lines, speech, total, reduce, go, voice, sound, muted, speed]);
+
+  const play = () => {
+    // a browser lets a page speak only after a gesture: the first Play turns the sound on
+    if (!playing && !muted) setSound(true);
+    setPlaying((p) => !p);
+  };
 
   const openTip: TipFn = useCallback((id, el, c) => {
     clearTimeout(close_timer.current);
@@ -957,6 +995,7 @@ export default function Tour({ spec }: { spec: TourSpec }) {
     if (e.key === "Escape") {
       setTip(undefined);
       setMenu(false);
+      setTranscript(false);
       return;
     }
     if (e.target instanceof HTMLSelectElement || e.target instanceof HTMLButtonElement) return;
@@ -964,7 +1003,7 @@ export default function Tour({ spec }: { spec: TourSpec }) {
     else if (e.key === "ArrowLeft") go(index - 1);
     else if (e.key === " ") {
       e.preventDefault();
-      setPlaying((p) => !p);
+      play();
     }
   };
 
@@ -981,91 +1020,12 @@ export default function Tour({ spec }: { spec: TourSpec }) {
   const step_tip: TipContent = { title: scene.title, code, api: scene.api, doc: scene.doc, test: scene.test };
   const root_w = box.current?.clientWidth ?? 800;
   const tip_w = Math.min(600, root_w - 16);
+  const caption = playing && cue >= 0 ? lines[cue] : lines.join(" ");
+  const ui = (key: string) => (pointing.has(key) ? styles.pointing : "");
 
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: the player takes the arrow keys and space
     <div ref={box} className={styles.tour} data-mode={fit.mode} onKeyDown={onKey} tabIndex={-1}>
-      <header className={styles.top}>
-        <div className={styles.menuWrap}>
-          <button type="button" className={styles.menuButton} onClick={() => setMenu((m) => !m)} aria-expanded={menu}>
-            ☰ Chapters
-          </button>
-          {menu && (
-            <ol className={styles.menu}>
-              {spec.chapters.map((c, i) => (
-                <li key={c.id}>
-                  <button
-                    type="button"
-                    className={i === frame.chapter ? styles.current : ""}
-                    aria-current={i === frame.chapter ? "step" : undefined}
-                    onClick={() => go(all.findIndex((f) => f.chapter === i))}
-                  >
-                    <span className={styles.num}>{i + 1}</span>
-                    <span>
-                      {c.title}
-                      <small>{c.audience}</small>
-                    </span>
-                  </button>
-                </li>
-              ))}
-            </ol>
-          )}
-        </div>
-        <h2>
-          {frame.chapter + 1}. {chapter.title}
-        </h2>
-        <span className={styles.audience}>{chapter.audience}</span>
-        <span className={styles.viewTag}>{view === "macro" ? "the whole store" : "zoomed in"}</span>
-        <button type="button" className={styles.full} onClick={fullscreen} aria-label="Full screen">
-          ⛶
-        </button>
-      </header>
-
-      <div className={styles.nowNext} aria-live="polite">
-        <p className={styles.now} key={`now-${index}`}>
-          <span className={styles.tag}>Now</span>
-          <span>
-            {rich(now)}
-            {atStart && !playing && <span className={styles.cue}> · Press Play or → to start</span>}
-          </span>
-          <button
-            type="button"
-            className={styles.codeIcon}
-            aria-label="How this step is coded, and where to read more"
-            onMouseEnter={(e) => openTip("step", e.currentTarget, step_tip)}
-            onMouseLeave={(e) => openTip("step", e.currentTarget, undefined)}
-            onFocus={(e) => openTip("step", e.currentTarget, step_tip)}
-            onClick={(e) => openTip("step", e.currentTarget, step_tip)}
-          >
-            {"</>"}
-          </button>
-        </p>
-        <p className={styles.sayLine}>{rich(say)}</p>
-        <p className={styles.next}>
-          <span className={styles.tag}>Next</span>
-          <span>{rich(next)}</span>
-        </p>
-      </div>
-
-      <ol className={styles.pipe} aria-label={pipe ? `${pipe.name} stages` : undefined} data-empty={!pipe || undefined}>
-        {pipe ? (
-          <>
-            <li className={styles.pipeName}>{pipe.name}</li>
-            {spec.pipelines[pipe.name]!.map((stage, i) => {
-              const state = i < pipe.at ? "done" : i === pipe.at ? (pipe.fail ? "fail" : "active") : pipe.fail ? "skip" : "todo";
-              return (
-                <li key={stage} data-state={state}>
-                  <span>{state === "done" ? "✓" : state === "fail" ? "✕" : i + 1}</span>
-                  {stage}
-                </li>
-              );
-            })}
-          </>
-        ) : (
-          <li className={styles.pipeName}>one operation</li>
-        )}
-      </ol>
-
       <div className={styles.stageWrap}>
         <Stage
           lay={lay}
@@ -1109,84 +1069,129 @@ export default function Tour({ spec }: { spec: TourSpec }) {
           </div>
         ))}
         {sel && <Inspector cell={sel} onClose={() => setSelected(undefined)} />}
-      </div>
-
-      <div className={styles.controls}>
-        <button type="button" onClick={() => go(index - 1)} disabled={atStart} aria-label="Previous step">
-          ‹
-        </button>
-        <button type="button" className={styles.play} onClick={() => setPlaying((p) => !p)}>
-          {playing ? "Pause" : "Play"}
-        </button>
-        <button type="button" onClick={() => go(index + 1)} disabled={atEnd} aria-label="Next step">
-          ›
-        </button>
-        <span className={styles.count}>
-          step {index - frame.chapter_start + 1} of {chapterFrames.length} · scene {frame.scene + 1} of {chapter.scenes.length}:{" "}
-          {scene.title}
-        </span>
-        <button type="button" className={styles.panelToggle} onClick={() => setPanels((p) => !p)} aria-expanded={panels}>
-          {panels ? "Hide steps and feed" : "Show steps and feed"}
-        </button>
-      </div>
-
-      {panels && (
-        <div className={styles.panels}>
-          <section className={styles.stepsBox}>
-            <h4>Steps in this scene</h4>
-            <ol className={styles.steps}>
-              {scene.steps.map((s, i) => {
-                const state = i < frame.step ? "done" : i === frame.step ? "now" : "todo";
-                const f = all[frame.scene_start + i]!;
+        {cc && caption && (
+          <div className={styles.captions} aria-live="polite">
+            <p key={`${index}-${cue}`}>{rich(caption)}</p>
+          </div>
+        )}
+        {transcript && (
+          <aside className={styles.transcript} aria-label="Transcript of this chapter">
+            <div className={styles.transcriptHead}>
+              <b>
+                {frame.chapter + 1}. {chapter.title}
+              </b>
+              <button type="button" onClick={() => setTranscript(false)} aria-label="Close the transcript">
+                ✕
+              </button>
+            </div>
+            <ol>
+              {chapterFrames.map((f) => {
+                const i = all.indexOf(f);
+                const st = spec.chapters[f.chapter]!.scenes[f.scene]!.steps[f.step]!;
                 return (
-                  <li key={i} data-state={state}>
-                    <button type="button" onClick={() => go(frame.scene_start + i)} aria-current={state === "now" ? "step" : undefined}>
-                      <span className={styles.stepMark}>{state === "done" ? "✓" : i + 1}</span>
-                      <span>{rich(fill(s.now, f.world, all.base))}</span>
+                  <li key={i} data-state={i < index ? "done" : i === index ? "now" : "todo"}>
+                    <button type="button" onClick={() => go(i)}>
+                      <b>{rich(fill(st.now, f.world, all.base))}</b>
+                      <span>{rich(fill(st.say, f.world, all.base))}</span>
                     </button>
                   </li>
                 );
               })}
             </ol>
-          </section>
-          <section className={styles.streamsBox}>
-            <h4>Streams in this scene</h4>
-            <ol className={styles.streamList}>
-              {scene_streams.map((r) => (
-                // biome-ignore lint/a11y/noNoninteractiveElementInteractions: hover lights the stream's dots in the field
-                <li
-                  key={r.stream}
-                  data-color={r.color}
-                  onMouseEnter={() => setHover(r.stream.split(" ")[0])}
-                  onMouseLeave={() => setHover(undefined)}
-                >
-                  <span className={styles.swatch} />
-                  <code>{r.stream}</code>
-                  <span className={styles.streamMeta}>
-                    v{r.head} · {r.count} event{r.count > 1 ? "s" : ""}
-                  </span>
+          </aside>
+        )}
+      </div>
+
+      <div className={styles.bar}>
+        <div className={styles.menuWrap}>
+          <button type="button" className={`${styles.menuButton} ${ui("menu")}`} onClick={() => setMenu((m) => !m)} aria-expanded={menu}>
+            ☰ {frame.chapter + 1}. {chapter.title}
+          </button>
+          {menu && (
+            <ol className={styles.menu}>
+              {spec.chapters.map((c, i) => (
+                <li key={c.id}>
+                  <button
+                    type="button"
+                    className={i === frame.chapter ? styles.current : ""}
+                    aria-current={i === frame.chapter ? "step" : undefined}
+                    onClick={() => go(all.findIndex((f) => f.chapter === i))}
+                  >
+                    <span className={styles.num}>{i + 1}</span>
+                    <span>
+                      {c.title}
+                      <small>{c.audience}</small>
+                    </span>
+                  </button>
                 </li>
               ))}
             </ol>
-          </section>
-          <section className={styles.feedBox}>
-            <details open={fit.mode !== "narrow"}>
-              <summary>What happened so far ({feed.length})</summary>
-              <ol className={styles.feed} aria-label="What happened so far in this chapter">
-                {feed.map((l, i) => (
-                  <li key={`${l.at}-${i}`} className={l.at === index ? styles.feedNow : ""}>
-                    <button type="button" onClick={() => go(l.at)}>
-                      <span className={styles.feedStep}>{l.at - frame.chapter_start + 1}</span>
-                      <span>{rich(l.text)}</span>
-                    </button>
-                  </li>
-                ))}
-                {!feed.length && <li className={styles.hint}>Nothing yet: press Play or step forward.</li>}
-              </ol>
-            </details>
-          </section>
+          )}
         </div>
-      )}
+        <span className={styles.count}>
+          {index - frame.chapter_start + 1} / {chapterFrames.length}
+        </span>
+        <div className={styles.transport}>
+          <button type="button" onClick={() => go(index - 1)} disabled={atStart} aria-label="Previous step">
+            ‹
+          </button>
+          <button type="button" className={`${styles.play} ${ui("play")}`} onClick={play} aria-label={playing ? "Pause" : "Play"}>
+            {playing ? "❚❚" : "▶"}
+          </button>
+          <button type="button" onClick={() => go(index + 1)} disabled={atEnd} aria-label="Next step">
+            ›
+          </button>
+        </div>
+        <div className={styles.toggles}>
+          <button
+            type="button"
+            className={`${styles.codeIcon} ${ui("tip")}`}
+            aria-label="How this step is coded, and where to read more"
+            onMouseEnter={(e) => openTip("step", e.currentTarget, step_tip)}
+            onMouseLeave={(e) => openTip("step", e.currentTarget, undefined)}
+            onFocus={(e) => openTip("step", e.currentTarget, step_tip)}
+            onClick={(e) => openTip("step", e.currentTarget, step_tip)}
+          >
+            {"</>"}
+          </button>
+          <button type="button" className={`${cc ? styles.on : ""} ${ui("cc")}`} onClick={() => setCc((c) => !c)} aria-pressed={cc} aria-label="Captions">
+            CC
+          </button>
+          {voice && (
+            <button
+              type="button"
+              className={`${sound && !muted ? styles.on : ""} ${ui("sound")}`}
+              onClick={() => {
+                const on = !(sound && !muted);
+                setSound(on);
+                setMuted(!on);
+                if (!on) window.speechSynthesis.cancel();
+              }}
+              aria-pressed={sound && !muted}
+              aria-label="Narration"
+            >
+              {sound && !muted ? "🔊" : "🔈"}
+            </button>
+          )}
+          <select value={speed} onChange={(e) => setSpeed(Number(e.target.value))} aria-label="Speed">
+            <option value={0.75}>0.75×</option>
+            <option value={1}>1×</option>
+            <option value={1.25}>1.25×</option>
+          </select>
+          <button
+            type="button"
+            className={`${transcript ? styles.on : ""} ${ui("transcript")}`}
+            onClick={() => setTranscript((t) => !t)}
+            aria-pressed={transcript}
+            aria-label="Transcript"
+          >
+            ☰ text
+          </button>
+          <button type="button" onClick={fullscreen} aria-label="Full screen">
+            ⛶
+          </button>
+        </div>
+      </div>
 
       {tip && (
         // biome-ignore lint/a11y/noStaticElementInteractions: hovering the tooltip keeps it open

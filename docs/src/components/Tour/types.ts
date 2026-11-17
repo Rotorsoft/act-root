@@ -261,6 +261,10 @@ export type Step = {
   /** what the Now/Next bar previews; by default the next step's `now` */
   next?: string;
   say: string;
+  /** the spoken form of `say`, when it must differ (ids, API names); captions always show `say` */
+  speak?: string;
+  /** controls of the player this step points at (chapter 0): `play`, `cc`, `sound`, `menu`, `transcript`, `tip` */
+  ui?: string[];
   moves?: Move[];
   ops?: Op[];
   pipe?: Pipe;

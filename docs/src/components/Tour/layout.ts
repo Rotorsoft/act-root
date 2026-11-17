@@ -687,7 +687,8 @@ export function layout(
       sy += h + 10;
     }
 
-  const height = Math.max(sy, appl.box.y + appl.box.h, ty, ly) + 8;
+  // room at the bottom for the captions
+  const height = Math.max(sy, appl.box.y + appl.box.h, ty, ly) + 104;
 
   const center = (b: Box): Pt => ({ x: b.x + b.w / 2, y: b.y + b.h / 2 });
   const chip = (kind: Chip["kind"], name: string) =>
