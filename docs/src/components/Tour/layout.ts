@@ -85,6 +85,8 @@ export type StoreBox = {
   checkpoint?: Box;
   lanes: LaneGroup[];
   subs_head?: Box;
+  /** where a commit the version guard turned back stops: at the store's edge, never in the log */
+  bounce?: Box;
   /** the subscription column header, under the checkpoint band */
   cols?: Box;
 };
@@ -606,7 +608,7 @@ export function layout(
     const cg = 6;
     const per_row = Math.max(1, Math.floor((S + cg) / (cell.w + cg)));
     const shown = view === "macro" ? store.cells.slice(-per_row) : store.cells;
-    const slots = shown.length + (store.ghost ? 1 : 0);
+    const slots = shown.length;
     const place = (i: number): Box => ({
       x: sx + (i % per_row) * (cell.w + cg),
       y: sy + 12 + Math.floor(i / per_row) * (cell.h + 20),
@@ -668,6 +670,16 @@ export function layout(
       lanes,
       subs_head,
       cols,
+      ...(store.ghost && {
+        bounce: narrow
+          ? { x: sx + S - 132, y: top + 4, w: 132, h: 46 }
+          : {
+              x: sx - 8 - 68,
+              y: Math.max(top + 2, appl.port.y - 62),
+              w: 136,
+              h: 46,
+            },
+      }),
     };
   });
 
@@ -688,9 +700,11 @@ export function layout(
     appl.states.find((s) => s.name === node.label.split(" ·")[0]);
   const tail_of = (s: StoreBox | undefined) =>
     s &&
-    (s.cells.length || s.store.ghost
-      ? center(s.tail)
-      : { x: s.field.x + s.field.w - 12, y: s.field.y + s.field.h - 10 });
+    (s.bounce
+      ? { x: s.bounce.x + 12, y: s.bounce.y + s.bounce.h / 2 }
+      : s.cells.length
+        ? center(s.tail)
+        : { x: s.field.x + s.field.w - 12, y: s.field.y + s.field.h - 10 });
 
   const anchor = (a: Anchor): Pt | undefined => {
     if (a === "gate") return center(appl.gate);

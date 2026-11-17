@@ -619,17 +619,24 @@ function Stage({
                 onSelect={onSelect}
               />
             ))}
-            {s.ghost && (
-              <g className={`${styles.ghost} ${styles.fresh}`} style={{ transform: `translate(${sb.tail.x}px, ${sb.tail.y}px)` }}>
-                <rect width={sb.tail.w} height={sb.tail.h} rx={7} />
+            {s.ghost && sb.bounce && (
+              <g className={styles.ghost} style={{ transform: `translate(${sb.bounce.x}px, ${sb.bounce.y}px)` }}>
+                {/* the commit came in at the port and was turned back */}
+                {lay.mode === "wide" && (
+                  <path
+                    className={styles.bounceLink}
+                    d={`M${lay.app.port.x - sb.bounce.x},${lay.app.port.y - sb.bounce.y} L${lay.app.port.x - sb.bounce.x},${sb.bounce.h}`}
+                  />
+                )}
+                <rect width={sb.bounce.w} height={sb.bounce.h} rx={8} />
                 <text x={8} y={14} className={styles.cellId}>
-                  ↩ bounced
+                  ↩ bounced at the store
                 </text>
-                <text x={8} y={29} className={styles.ghostError}>
-                  {trim(s.ghost.error, 15)}
+                <text x={8} y={28} className={styles.ghostError}>
+                  ConcurrencyError
                 </text>
-                <text x={8} y={44} className={styles.cellStream}>
-                  {s.ghost.expected !== undefined ? `exp v${s.ghost.expected} · head v${s.ghost.actual}` : "nothing appended"}
+                <text x={8} y={41} className={styles.ghostLine}>
+                  {s.ghost.expected !== undefined ? `expected v${s.ghost.expected} · head v${s.ghost.actual}` : "nothing appended"}
                 </text>
               </g>
             )}

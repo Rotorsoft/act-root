@@ -732,17 +732,35 @@
 .ghost text {
   fill: var(--dg-bad) !important;
 }
-.ghost {
-  animation: bounce 0.9s var(--t-ease) var(--enter, 0ms) backwards;
+/* a bounced commit: it reaches the store's edge, turns back, then fades; it never enters the log */
+.ghost > * {
+  animation: bounce 4.5s var(--t-ease) var(--enter, 0ms) both;
 }
 @keyframes bounce {
   0% {
     opacity: 0;
-    transform: translateX(-40px);
+    transform: translateX(-36px);
   }
-  55% {
+  12% {
     opacity: 1;
+    transform: translateX(4px);
   }
+  20% {
+    transform: translateX(-8px);
+  }
+  28%,
+  75% {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  100% {
+    opacity: 0.35;
+  }
+}
+.ghostLine {
+  font-family: var(--ifm-font-family-monospace);
+  font-size: 9.5px;
+  fill: var(--dg-bad) !important;
 }
 .ghostError {
   font-size: 9.5px;
@@ -1176,7 +1194,7 @@
   .stage[data-state="active"] rect,
   .fresh,
   .leaving,
-  .ghost,
+  .ghost > *,
   .rowFresh,
   .moved > rect:first-child,
   .fresh > rect:first-child,
@@ -1341,4 +1359,11 @@
     animation: none;
     stroke-dashoffset: 0;
   }
+}
+
+.bounceLink {
+  stroke: var(--dg-bad);
+  stroke-width: 1.5;
+  stroke-dasharray: 3 2;
+  fill: none;
 }

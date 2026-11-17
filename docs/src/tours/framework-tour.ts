@@ -2112,7 +2112,7 @@ act().withState(Ticket).withProjection(Tickets).build();`,
                 key: "ticket-4831",
                 values: { status: "open", agent: "bo", messages: 1 },
               },
-              { op: "project", table: "tickets", prefix: "ticket" },
+
               { op: "ack", target: "tickets", at: "t31-m1" },
             ],
           },
@@ -2140,7 +2140,7 @@ await app.reset(["tickets"]); // or a filter: app.reset({ stream: "^proj-" })`,
             ],
           },
           {
-            now: "The replay walks the whole log again: {replayed} events → {rows} rows",
+            now: "The replay walks the whole log again, {#t31-m1} included: {replayed} events → {rows} rows",
             pipe: { name: "projection", at: 4 },
             say: "The replay walks the log from {#t21-open} and the rows come back. Nothing in the log changed: a projection is derived data.",
             moves: [
