@@ -373,9 +373,7 @@ function Stage({
         <rect x={a.layer_box.x} y={a.layer_box.y} width={a.layer_box.w} height={a.layer_box.h} rx={10} className={styles.layerBox} />
         <text x={a.layer_box.x + 8} y={a.layer_box.y + 14} className={styles.layerLabel}>
           action layer
-          {lay.mode === "wide" && !w.stores.some((x) => x.ghost) && (
-            <tspan className={styles.appSub}> · every refusal but ConcurrencyError happens here</tspan>
-          )}
+          {lay.mode === "wide" && <tspan className={styles.appSub}> · every refusal but ConcurrencyError happens here</tspan>}
         </text>
         {a.layer.map(({ stage, box }, i) => {
           const next = a.layer[i + 1]?.box;
@@ -434,7 +432,7 @@ function Stage({
         {/* the commit port: commits leave here, and only the version guard can turn one back */}
         <g className={styles.port} data-state={commit_state}>
           <circle cx={a.port.x} cy={a.port.y} r={7} />
-          {!a.vertical && !w.stores.some((x) => x.ghost) && (
+          {!a.vertical && (
             <text x={a.port.x - 4} y={a.port.y - 12} className={`${styles.portLabel} ${styles.right}`}>
               commit
             </text>
@@ -622,15 +620,15 @@ function Stage({
               />
             ))}
             {s.ghost && sb.bounce && lay.mode === "wide" && (
-              <g className={styles.ghost} style={{ transform: `translate(${sb.bounce.x}px, ${sb.bounce.y}px)` }}>
-                {/* the commit reached the port and was turned back; it never enters the log */}
+              <g className={styles.ghost}>
+                {/* a short stub from the commit port across the store's frame to the pill */}
                 <path
                   className={styles.bounceLink}
-                  d={`M${sb.bounce.w},${sb.bounce.h / 2} L${lay.app.port.x - sb.bounce.x},${sb.bounce.h / 2} L${lay.app.port.x - sb.bounce.x},${lay.app.port.y - sb.bounce.y - 7}`}
+                  d={`M${lay.app.port.x + 7},${lay.app.port.y} L${sb.box.x},${lay.app.port.y} L${sb.box.x},${sb.bounce.y + sb.bounce.h / 2} L${sb.bounce.x},${sb.bounce.y + sb.bounce.h / 2}`}
                 />
-                <rect width={sb.bounce.w} height={sb.bounce.h} rx={8} />
-                <text x={8} y={12} className={styles.ghostLine}>
-                  ↩ ConcurrencyError ·{" "}
+                <rect x={sb.bounce.x} y={sb.bounce.y} width={sb.bounce.w} height={sb.bounce.h} rx={9} />
+                <text x={sb.bounce.x + 9} y={sb.bounce.y + 13} className={styles.ghostLine}>
+                  ↩ bounced at the store · ConcurrencyError ·{" "}
                   {s.ghost.expected !== undefined ? `expected v${s.ghost.expected} · head v${s.ghost.actual}` : "nothing appended"}
                 </text>
               </g>

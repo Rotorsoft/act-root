@@ -591,6 +591,12 @@ export function layout(
   const stores: StoreBox[] = world.stores.map((store) => {
     const top = sy;
     sy += narrow ? 42 : 28;
+    // a commit the version guard turned back gets a row of its own at the store's entry edge
+    let bounce_row: Box | undefined;
+    if (store.ghost && !narrow) {
+      bounce_row = { x: sx, y: sy, w: Math.min(S, 400), h: 18 };
+      sy += 24;
+    }
     // a small store gets only a strip; the room goes to the cells
     const field_h =
       store.next_id < 300
@@ -673,13 +679,7 @@ export function layout(
       ...(store.ghost && {
         bounce: narrow
           ? { x: sx + S - 132, y: top + 4, w: 132, h: 46 }
-          : // one line in the action layer's label row, ending at the commit port: clear of the log
-            {
-              x: appl.port.x - 14 - 262,
-              y: appl.layer_box.y + 3,
-              w: 262,
-              h: 16,
-            },
+          : bounce_row!,
       }),
     };
   });
@@ -702,7 +702,7 @@ export function layout(
   const tail_of = (s: StoreBox | undefined) =>
     s &&
     (s.bounce
-      ? { x: s.bounce.x + 12, y: s.bounce.y + s.bounce.h / 2 }
+      ? { x: s.bounce.x + 10, y: s.bounce.y + s.bounce.h / 2 }
       : s.cells.length
         ? center(s.tail)
         : { x: s.field.x + s.field.w - 12, y: s.field.y + s.field.h - 10 });
