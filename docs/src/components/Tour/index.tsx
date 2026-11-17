@@ -600,11 +600,7 @@ function Stage({
                   {lay.mode === "wide" && <text x={7} y={3.5}>{label}</text>}
                 </g>
               ))}
-              {view === "micro" && lay.mode === "wide" && (
-                <text x={sb.legend.w - 46} y={3.5} className={styles.fieldHint}>
-                  the whole store, zoomed out · dashed lens: the cells below
-                </text>
-              )}
+              
             </g>
             {sb.cells.map(({ cell, box }) => (
               <CellView
