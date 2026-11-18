@@ -202,7 +202,7 @@ describe("config is validated at the declaration/runtime site", () => {
     .emit(() => ["ticked", {}])
     .build();
 
-  it("refuses a poll frequency or a page limit Node or the store can't honor", async () => {
+  it("refuses a poll frequency, or a query limit or bound, Node or the store can't honor", async () => {
     const ctx = await sandbox(act().withState(counter), {
       actOptions: { autoSettle: false },
     });
@@ -223,12 +223,24 @@ describe("config is validated at the declaration/runtime site", () => {
       expect(() => app.settle({ correlate: { limit: 1.5 } })).toThrow(ZodError);
       await expect(app.query({ limit: Number.NaN })).rejects.toThrow(ZodError);
       await expect(app.query_array({ limit: -1 })).rejects.toThrow(ZodError);
+      // A load's asOf and every query bound, which one store ignored and
+      // another passed to its driver.
+      await expect(
+        app.load(counter, "c", undefined, { limit: Number.NaN })
+      ).rejects.toThrow(ZodError);
+      await expect(app.query({ before: Number.NaN })).rejects.toThrow(ZodError);
+      await expect(
+        app.query({ created_before: new Date("not a date") })
+      ).rejects.toThrow(ZodError);
       // Control: 0 keeps its meaning (the poll's default, no limit elsewhere).
       expect(app.start_correlations({ limit: 0 }, 0)).toBe(true);
       app.stop_correlations();
       await expect(app.correlate({ limit: 0 })).resolves.toBeDefined();
       await expect(app.blocked_streams({ limit: 0 })).resolves.toEqual([]);
       await expect(app.query_array({ limit: 0 })).resolves.toEqual([]);
+      await expect(
+        app.load(counter, "c", undefined, { limit: 1, before: 5 })
+      ).resolves.toBeDefined();
     } finally {
       await ctx.dispose();
     }

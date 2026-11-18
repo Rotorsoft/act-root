@@ -66,16 +66,22 @@ export const register_weak_disposer = <T extends object>(
  * Run every live disposer in reverse registration order, sequentially, so a
  * disposer can rely on later-registered ones having already finished.
  *
+ * A disposer that throws doesn't stop the others: every one runs, and the
+ * failures are returned for the caller to report.
+ *
  * Registrations are left in place, so a second teardown call re-runs them,
  * exactly as before this registry learned about weak entries.
  */
-export const run_disposers = async (): Promise<void> => {
+export const run_disposers = async (): Promise<unknown[]> => {
+  const failures: unknown[] = [];
   for (const { run, ref } of [...entries].reverse()) {
-    if (!ref) {
-      await (run as Disposer)();
-      continue;
+    const target = ref?.deref();
+    if (ref && !target) continue;
+    try {
+      await (ref ? run(target as never) : (run as Disposer)());
+    } catch (error) {
+      failures.push(error);
     }
-    const target = ref.deref();
-    if (target) await (run as (t: object) => Promise<void>)(target);
   }
+  return failures;
 };

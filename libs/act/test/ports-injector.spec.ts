@@ -67,6 +67,27 @@ describe("ports-injector", () => {
       processExitSpy.mockRestore();
     });
 
+    it("runs every disposer and adapter when one fails, then exits 1", async () => {
+      const processExitSpy = vi
+        .spyOn(process, "exit")
+        .mockImplementation(() => undefined as never);
+      const { dispose, store } = await import("../src/ports.js");
+      const earlier = vi.fn();
+      dispose(earlier);
+      const disposeAndExit = dispose(() =>
+        Promise.reject(new Error("disposer failed"))
+      );
+      const adapter = store();
+      vi.spyOn(adapter, "dispose").mockRejectedValue(
+        new Error("adapter failed")
+      );
+      await disposeAndExit("EXIT");
+      expect(earlier).toHaveBeenCalledOnce();
+      expect(adapter.dispose).toHaveBeenCalledOnce();
+      expect(processExitSpy).toHaveBeenCalledWith(1);
+      processExitSpy.mockRestore();
+    });
+
     it("should call disposers in reverse registration order", async () => {
       // env=test → disposeAndExit skips process.exit, no spy needed.
       // logLevel=fatal silences the port registration info log emitted
