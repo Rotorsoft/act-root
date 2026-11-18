@@ -87,12 +87,19 @@ const LaneConfigSchema = z.object({
   cycleMs: z.number().min(0).optional(),
 });
 
-// Page — the `limit` of `app.correlate`, `app.start_correlations`,
-// `app.blocked_streams` and settle's `correlate`. The stores read a falsy
-// limit as "no limit" (the poll reads 0 as its default), so 0 stays; a NaN
-// read the whole log.
+// Page — the `limit` and bounds of every query: `app.query`, `app.load`'s
+// `asOf`, `app.correlate`, `app.start_correlations`, `app.blocked_streams`
+// and settle's `correlate`. 0 stays (the poll reads it as its default); a NaN
+// limit read the whole log, and a NaN or Invalid Date bound was ignored by
+// one store and threw a raw driver error in another.
 const LimitSchema = z.number().int().min(0).optional();
-const PageOptionsSchema = z.object({ limit: LimitSchema });
+const PageOptionsSchema = z.object({
+  limit: LimitSchema,
+  before: z.number().optional(),
+  after: z.number().optional(),
+  created_before: z.date().optional(),
+  created_after: z.date().optional(),
+});
 
 // Poll — `app.start_correlations`' frequency. Node runs a timer below 1 ms,
 // above 2^31 − 1 ms or NaN every millisecond.

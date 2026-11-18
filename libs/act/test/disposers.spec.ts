@@ -37,6 +37,15 @@ describe("dispose registry", () => {
     expect(order).toEqual(["second", "first"]);
   });
 
+  it("keeps running the rest when one throws, and returns the failure", async () => {
+    const order: string[] = [];
+    const failure = new Error("failed");
+    register_disposer(async () => void order.push("first"));
+    register_disposer(() => Promise.reject(failure));
+    expect(await run_disposers()).toEqual([failure]);
+    expect(order).toEqual(["first"]);
+  });
+
   it("runs a weak disposer while its target is reachable, handing it back", async () => {
     const target = { name: "act" };
     const { ref } = fake_ref(target);

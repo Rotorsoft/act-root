@@ -3364,7 +3364,8 @@ export declare const unscoped_ports: () => Scoped;
  * 1. Custom disposers (registered via {@link dispose}) — in reverse order
  * 2. Port adapters (log, store, cache) — in reverse registration order
  * 3. Adapter registry is cleared
- * 4. Process exits (skipped in test environment)
+ * 4. Process exits (skipped in test environment), with 1 when any of them threw:
+ *    a failure is logged and the rest still run
  *
  * In production, \`"ERROR"\` exits are silently ignored to avoid crashing on
  * transient failures (e.g. an uncaught promise in a non-critical path).

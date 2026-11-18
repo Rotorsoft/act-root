@@ -843,6 +843,7 @@ export class Act<
               asOf,
             }
           : streamOrTarget;
+      check("page", target.asOf ?? {});
       return await this._es.load(merged, target, callback);
     });
   }
@@ -1352,7 +1353,7 @@ export class Act<
     after?: string;
     limit?: number;
   }): Promise<StreamPosition[]> {
-    check("page", options ?? {});
+    check("page", { limit: options?.limit });
     return this._scoped(async () => {
       const positions: StreamPosition[] = [];
       await store().query_streams(

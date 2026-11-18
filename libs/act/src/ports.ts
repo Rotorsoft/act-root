@@ -208,7 +208,8 @@ const DEFAULT_SCOPE: Scoped = {
  * 1. Custom disposers (registered via {@link dispose}) — in reverse order
  * 2. Port adapters (log, store, cache) — in reverse registration order
  * 3. Adapter registry is cleared
- * 4. Process exits (skipped in test environment)
+ * 4. Process exits (skipped in test environment), with 1 when any of them threw:
+ *    a failure is logged and the rest still run
  *
  * In production, `"ERROR"` exits are silently ignored to avoid crashing on
  * transient failures (e.g. an uncaught promise in a non-critical path).
@@ -229,14 +230,21 @@ export async function disposeAndExit(code: ExitCode = "EXIT"): Promise<void> {
 
   // Run sequentially in reverse registration order so a disposer can rely on
   // later-registered disposers (and adapters on later-registered adapters)
-  // having already finished — Promise.all would race them.
-  await run_disposers();
+  // having already finished — Promise.all would race them. A failure is
+  // logged and the rest still run, so the process always gets to exit.
+  const failures = await run_disposers();
   for (const adapter of [...adapters.values()].reverse()) {
-    await adapter.dispose();
-    log().info(`[act] - ${adapter.constructor.name}`);
+    try {
+      await adapter.dispose();
+      log().info(`[act] - ${adapter.constructor.name}`);
+    } catch (error) {
+      failures.push(error);
+    }
   }
   adapters.clear();
-  config().env !== "test" && process.exit(code === "ERROR" ? 1 : 0);
+  for (const error of failures) log().error(error, "Dispose failed");
+  const failed = code === "ERROR" || failures.length > 0;
+  config().env !== "test" && process.exit(failed ? 1 : 0);
 }
 
 /**
