@@ -504,6 +504,22 @@ describe("sse publish, $settled and onConnections", () => {
     expect((await next).value).toMatchObject({ kind: "patch", stream: "t-1" });
     await streams_only.return?.(undefined);
 
+    // A state listed with no streams names none, as the typed input allows.
+    const settled_only = (
+      await caller.subscribe.$live({
+        streams: { Tally: undefined },
+        settled: true,
+      })
+    )[Symbol.asyncIterator]();
+    const settle = settled_only.next();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    await app.do("add", { stream: "t-3", actor }, { by: 1 });
+    expect((await settle).value).toEqual({
+      kind: "settled",
+      data: { targets: ["tally-view"] },
+    });
+    await settled_only.return?.(undefined);
+
     // A refused open commits nothing and takes no slot.
     for (const input of [
       undefined,
@@ -517,6 +533,6 @@ describe("sse publish, $settled and onConnections", () => {
           [Symbol.asyncIterator]()
           .next()
       ).rejects.toMatchObject({ code: "UNPROCESSABLE_CONTENT" });
-    expect(counts).toEqual([1, 0, 1, 0]);
+    expect(counts).toEqual([1, 0, 1, 0, 1, 0]);
   });
 });

@@ -189,9 +189,18 @@ describe("live_sources", () => {
     expect(live_sources({ settled: true }, served, {}, 5)).toEqual({
       sources: [],
     });
+    // A state listed with no streams names none, as a typed input allows.
+    expect(
+      live_sources(
+        { streams: { A: undefined, B: ["b-1"] }, settled: true },
+        served,
+        {},
+        5
+      )
+    ).toEqual({ sources: [{ state: "B", stream: "b-1" }] });
   });
 
-  it("refuses an unserved state, a stream outside its pattern, nothing, or too many", () => {
+  it("refuses an unserved state, a stream outside its pattern, one under two states, nothing, or too many", () => {
     expect(
       live_sources({ streams: { C: ["c-1"] } }, served, patterns, 5)
     ).toEqual({ refused: 'no live state "C"' });
@@ -204,6 +213,9 @@ describe("live_sources", () => {
     expect(live_sources({ streams: { A: [""] } }, served, {}, 5)).toEqual({
       refused: '"" is not a stream of A',
     });
+    expect(
+      live_sources({ streams: { A: ["s-1"], B: ["s-1"] } }, served, {}, 5)
+    ).toEqual({ refused: '"s-1" is listed under both A and B' });
     expect(live_sources({}, served, {}, 5)).toEqual({
       refused: "name at least one stream, or settled",
     });

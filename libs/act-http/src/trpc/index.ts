@@ -96,7 +96,7 @@ import { sse_state_names } from "../api/sse-states.js";
 
 // A `$live` request: streams by state name, and whether to add the settled targets.
 const LiveRequestSchema = z.object({
-  streams: z.record(z.string(), z.array(z.string())).optional(),
+  streams: z.record(z.string(), z.array(z.string()).optional()).optional(),
   settled: z.boolean().optional(),
 });
 

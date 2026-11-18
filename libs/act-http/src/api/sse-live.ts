@@ -117,12 +117,13 @@ export async function* run_live_subscription(
 /**
  * The sources a `$live` request names, checked: every state must be one the
  * transport serves, every stream must match its state's pattern when it has
- * one, and the request must name something, within `max_streams`. Returns the
- * refusal's message, or the sources with each stream once.
+ * one, a stream belongs to one state, and the request must name something,
+ * within `max_streams`. A state listed with no streams (`undefined`) names
+ * none. Returns the refusal's message, or the sources with each stream once.
  */
 export function live_sources(
   request: {
-    readonly streams?: Readonly<Record<string, readonly string[]>>;
+    readonly streams?: Readonly<Record<string, readonly string[] | undefined>>;
     readonly settled?: boolean;
   },
   served: ReadonlySet<string>,
@@ -133,6 +134,7 @@ export function live_sources(
 ): { sources: LiveSource[] } | { refused: string } {
   const sources = new Map<string, LiveSource>();
   for (const [state, streams] of Object.entries(request.streams ?? {})) {
+    if (!streams) continue;
     if (!served.has(state)) return { refused: `no live state "${state}"` };
     const pattern = patterns[state];
     for (const stream of streams) {
@@ -143,6 +145,11 @@ export function live_sources(
           (pattern instanceof RegExp ? pattern.test(stream) : pattern(stream)));
       if (!matches)
         return { refused: `"${String(stream)}" is not a stream of ${state}` };
+      const listed = sources.get(stream);
+      if (listed && listed.state !== state)
+        return {
+          refused: `"${stream}" is listed under both ${listed.state} and ${state}`,
+        };
       sources.set(stream, { state, stream });
     }
   }
