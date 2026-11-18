@@ -1,4 +1,4 @@
-import { Calculator, calculatorApp } from "@act/calculator";
+import { type Calculator, calculatorApp } from "@act/calculator";
 import { hono } from "@rotorsoft/act-http/hono";
 import { BroadcastChannel } from "@rotorsoft/act-http/sse";
 import { trpc } from "@rotorsoft/act-http/trpc";
@@ -13,26 +13,14 @@ import { resolveDemoActor } from "./demo-actor.js";
 export type LiveState = z.infer<typeof Calculator.state> & { _v: number };
 
 // SSE broadcast. One in-memory channel shared by the generated tRPC
-// subscriptions and REST stream routes below. Publication is host-owned:
-// every local commit, from either transport, lands here via the
-// `committed` lifecycle event and fans out as version-keyed patches.
+// subscriptions and REST stream routes below. `publish: true` has the
+// generators publish every local commit to it once, as version-keyed patches
+// (both generators share the channel, and each commit is still published
+// once).
 export const broadcast = new BroadcastChannel<LiveState>();
-calculatorApp.on("committed", Calculator, (snapshots) => {
-  // Fired only with committed snapshots: the last one and its event exist.
-  const last = snapshots.at(-1)!;
-  const patches = snapshots.map((s) => s.patch ?? {});
-  // `.snap` took the next version: send it as an empty patch, or every
-  // live client reads the next commit as a gap and refetches.
-  if (last.version > last.event!.version) patches.push({});
-  broadcast.publish(
-    last.event!.stream,
-    { ...last.state, _v: last.version },
-    patches
-  );
-});
 
 const stream = () => "calculator";
-const sse = { channel: broadcast };
+const sse = { channel: broadcast, publish: true };
 
 // DEMO ONLY — no auth; production hosts MUST resolve a verified actor.
 // Every generated mutation trusts whatever this returns. In a real

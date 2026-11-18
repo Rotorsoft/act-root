@@ -45,5 +45,6 @@ export type { ApplyResult } from "./apply-patch.js";
 export { applyPatchMessage } from "./apply-patch.js";
 export { BroadcastChannel } from "./broadcast.js";
 export { PresenceTracker } from "./presence.js";
+export { type CommitSource, publishCommits } from "./publish.js";
 export { StateCache } from "./state-cache.js";
 export type { BroadcastState, PatchMessage, Subscriber } from "./types.js";

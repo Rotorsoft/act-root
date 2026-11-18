@@ -5,7 +5,7 @@
  * produce. Run end-to-end through `app.request()` so no live server
  * is needed.
  */
-import { act, sensitive, state, ZodEmpty } from "@rotorsoft/act";
+import { act, projection, sensitive, state, ZodEmpty } from "@rotorsoft/act";
 import { fixture } from "@rotorsoft/act/test";
 import { testClient } from "hono/testing";
 import { assert, describe, expect, vi } from "vitest";
@@ -293,5 +293,51 @@ describe("hono sse — a state with sensitive events", () => {
     const { sse: _, ...no_sse } = default_options(new BroadcastChannel());
     const res = await hono(app, no_sse).request("/sse/User?stream=u1");
     expect(res.status).toBe(404);
+  });
+});
+
+describe("hono sse — publish, $settled and onConnections", () => {
+  const Added = z.object({ by: z.number() });
+  const Tally = state({ Tally: z.object({ n: z.number() }) })
+    .init(() => ({ n: 0 }))
+    .emits({ Added })
+    .patch({ Added: ({ data }, s) => ({ n: s.n + data.by }) })
+    .on({ add: Added })
+    .emit((a) => ["Added", a])
+    .build();
+  const View = projection("tally-view")
+    .on({ Added })
+    .do(async function view() {})
+    .build();
+  const test = fixture(act().withState(Tally).withProjection(View));
+
+  test("streams the targets each settle advanced at /sse/$settled", async ({
+    app,
+  }) => {
+    const channel = new BroadcastChannel<{ _v: number; n: number }>();
+    const counts: number[] = [];
+    const api = hono(app, {
+      actor: () => ({ id: "u-1", name: "alice" }),
+      stream: () => "t-1",
+      sse: {
+        channel,
+        publish: true,
+        settled: true,
+        onConnections: (n) => counts.push(n),
+      },
+    });
+    const res = await api.request("/api/sse/$settled");
+    expect(res.status).toBe(200);
+    const frames = read_sse_frames(res, ["settled"]);
+    await app.do(
+      "add",
+      { stream: "t-1", actor: { id: "u-1", name: "alice" } },
+      { by: 2 }
+    );
+    expect(await frames).toEqual([
+      { event: "settled", data: JSON.stringify({ targets: ["tally-view"] }) },
+    ]);
+    expect(channel.state("t-1")).toEqual({ n: 2, _v: 0 });
+    await vi.waitFor(() => expect(counts).toEqual([1, 0]));
   });
 });

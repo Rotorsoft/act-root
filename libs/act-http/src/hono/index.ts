@@ -77,6 +77,7 @@ import {
 } from "../api/index.js";
 import { fire_and_forget, SseConnectionCounter } from "../api/sse-counter.js";
 import { SseOptionsSchema } from "../api/sse-options.js";
+import { run_settled_subscription, sse_sources } from "../api/sse-settled.js";
 import { sse_state_names } from "../api/sse-states.js";
 
 /**
@@ -247,18 +248,19 @@ export function hono<
     | ActionSelection<TApp>
     | undefined,
   TStreams extends StreamPatterns<TApp> = {},
+  const TSse extends SseOptions = SseOptions,
 >(
   app: TApp,
   options: HonoOptions<TApp> & {
     readonly basePath?: TBase;
     readonly actions?: TSelection;
     readonly streams?: StreamPatterns<TApp> & TStreams;
-    readonly sse: NonNullable<HonoOptions["sse"]>;
+    readonly sse: TSse;
   }
 ): Hono<
   { Variables: ActMiddlewareVariables },
   ActionRoutes<TApp, TBase, SelectedActions<TApp, TSelection>, TStreams> &
-    SseRoutes<TApp, TBase>,
+    SseRoutes<TApp, TBase, TSse>,
   TBase
 >;
 export function hono<
@@ -316,8 +318,59 @@ export function hono<TApp extends ActSurface>(
       channel: options.sse.channel,
       ...SseOptionsSchema.parse(options.sse),
     };
-    const sse_counter = new SseConnectionCounter(sse_config.maxConnections);
+    const sse_counter = new SseConnectionCounter(
+      sse_config.maxConnections,
+      options.sse.onConnections
+    );
     const state_names = sse_state_names(app, "hono");
+    const settled_source = sse_sources(app, sse_config, "hono");
+    // One event stream: take a slot (503 when the cap is full, before any
+    // header is written), keep the connection alive with a heartbeat, write
+    // each frame, and free the slot when the client goes away.
+    const serve = (
+      c: Context,
+      frames: (signal: AbortSignal) => AsyncIterable<{
+        readonly kind: string;
+        readonly data: unknown;
+      }>
+    ) => {
+      if (!sse_counter.acquire()) {
+        c.header("Retry-After", "1");
+        const body: ApiError = {
+          error: "ServiceUnavailable",
+          detail: "max concurrent SSE connections reached",
+          code: "SSE_BUSY",
+        };
+        return c.json(body, 503);
+      }
+      const controller = new AbortController();
+      return streamSSE(c, async (sse_stream) => {
+        sse_stream.onAbort(() => controller.abort());
+        const heartbeat = setInterval(() => {
+          fire_and_forget(() =>
+            sse_stream.writeSSE({ event: "ping", data: "" })
+          );
+        }, sse_config.heartbeatMs);
+        try {
+          for await (const frame of frames(controller.signal))
+            await sse_stream.writeSSE({
+              event: frame.kind,
+              data: JSON.stringify(frame.data),
+            });
+        } finally {
+          clearInterval(heartbeat);
+          sse_counter.release();
+        }
+      });
+    };
+    if (settled_source)
+      api.get("/sse/$settled", (c) =>
+        serve(c, (signal) =>
+          run_settled_subscription(settled_source, undefined, signal, {
+            maxPending: sse_config.maxPendingPerConnection,
+          })
+        )
+      );
     for (const state_name of state_names) {
       api.get(`/sse/${state_name}`, async (c) => {
         const stream_id = c.req.query("stream");
@@ -329,45 +382,12 @@ export function hono<TApp extends ActSurface>(
           };
           return c.json(body, 400);
         }
-        if (!sse_counter.acquire()) {
-          c.header("Retry-After", "1");
-          const body: ApiError = {
-            error: "ServiceUnavailable",
-            detail: "max concurrent SSE connections reached",
-            code: "SSE_BUSY",
-          };
-          return c.json(body, 503);
-        }
-        // The route already acquired the slot above so streamSSE
-        // could return `503` before writing headers if the cap was
-        // full. The shared loop runs without accounting; the route
-        // releases the slot in `finally`.
-        const controller = new AbortController();
-        return streamSSE(c, async (sse_stream) => {
-          sse_stream.onAbort(() => controller.abort());
-          const heartbeat = setInterval(() => {
-            fire_and_forget(() =>
-              sse_stream.writeSSE({ event: "ping", data: "" })
-            );
-          }, sse_config.heartbeatMs);
-          try {
-            for await (const frame of runSseSubscription(
-              sse_config.channel,
-              stream_id,
-              undefined,
-              controller.signal,
-              { maxPending: sse_config.maxPendingPerConnection }
-            )) {
-              await sse_stream.writeSSE({
-                event: frame.kind,
-                data: JSON.stringify(frame.data),
-              });
-            }
-          } finally {
-            clearInterval(heartbeat);
-            sse_counter.release();
-          }
-        });
+        // `serve` holds the slot, so the shared loop runs without accounting.
+        return serve(c, (signal) =>
+          runSseSubscription(sse_config.channel, stream_id, undefined, signal, {
+            maxPending: sse_config.maxPendingPerConnection,
+          })
+        );
       });
     }
   }
@@ -486,7 +506,7 @@ export function hono<TApp extends ActSurface>(
  * One `GET <basePath>/sse/<state>?stream=<id>` per state of `TApp`, with
  * `sse`: an event stream on `200`, {@link ApiError} on an error status.
  */
-export type SseRoutes<TApp, TBase extends string> = {
+export type SseRoutes<TApp, TBase extends string, TSse = unknown> = {
   [N in AppStateNames<TApp> as MergePath<TBase, `/sse/${N}`>]: {
     $get:
       | {
@@ -502,7 +522,20 @@ export type SseRoutes<TApp, TBase extends string> = {
           status: 400 | 401 | 503;
         };
   };
-};
+} & (TSse extends { readonly settled: true }
+  ? {
+      [P in MergePath<TBase, "/sse/$settled">]: {
+        $get:
+          | { input: {}; output: {}; outputFormat: "body"; status: 200 }
+          | {
+              input: {};
+              output: ApiError;
+              outputFormat: "json";
+              status: 401 | 503;
+            };
+      };
+    }
+  : {});
 
 /** Every status a generated action route answers with the error envelope. */
 type ErrorStatus = 400 | 401 | 409 | 410 | 412 | 422 | 500 | 503;

@@ -86,6 +86,11 @@ import {
 } from "../api/index.js";
 import { SseConnectionCounter } from "../api/sse-counter.js";
 import { SseOptionsSchema } from "../api/sse-options.js";
+import {
+  run_settled_subscription,
+  type SseSettledFrame,
+  sse_sources,
+} from "../api/sse-settled.js";
 import { sse_state_names } from "../api/sse-states.js";
 
 /**
@@ -272,14 +277,22 @@ type ActionProcedures<TApp, TNames extends string, TStreams> = {
 };
 
 /** One subscription per state of `TApp`, yielding that state's frames. */
-type SubscribeRouter<TApp> = {
+type SubscribeRouter<TApp, TSse = SseOptions> = {
   subscribe: {
     [N in AppStateNames<TApp>]: TRPCSubscriptionProcedure<{
       input: { stream: string };
       output: AsyncIterable<SseSubscriptionFrame<AppState<TApp, N>>, void, any>;
       meta: object;
     }>;
-  };
+  } & (TSse extends { readonly settled: true }
+    ? {
+        $settled: TRPCSubscriptionProcedure<{
+          input: void;
+          output: AsyncIterable<SseSettledFrame, void, any>;
+          meta: object;
+        }>;
+      }
+    : {});
 };
 
 /** The router {@link trpc} builds: the actions, and the subscriptions with `sse`. */
@@ -344,17 +357,18 @@ export function trpc<
     | ActionSelection<TApp>
     | undefined,
   TStreams extends StreamPatterns<TApp> = {},
+  const TSse extends SseOptions = SseOptions,
 >(
   app: TApp,
   options: TrpcOptions<Ctx, TApp> & {
     readonly actions?: TSelection;
     readonly streams?: StreamPatterns<TApp> & TStreams;
-    readonly sse: SseOptions;
+    readonly sse: TSse;
   }
 ): GeneratedRouter<
   Ctx,
   TApp,
-  SubscribeRouter<TApp>,
+  SubscribeRouter<TApp, TSse>,
   SelectedActions<TApp, TSelection>,
   TStreams
 >;
@@ -507,9 +521,30 @@ export function trpc<Ctx extends object, TApp extends ActSurface>(
       channel: options.sse.channel,
       ...SseOptionsSchema.parse(options.sse),
     };
-    const sse_counter = new SseConnectionCounter(sse_config.maxConnections);
+    const sse_counter = new SseConnectionCounter(
+      sse_config.maxConnections,
+      options.sse.onConnections
+    );
     const state_names = sse_state_names(app, "trpc");
+    const settled_source = sse_sources(app, sse_config, "trpc");
     const sse_handlers: Record<string, unknown> = {};
+    const too_many = () => {
+      throw new TRPCError({
+        code: "TOO_MANY_REQUESTS",
+        message: "max concurrent SSE subscriptions reached",
+      });
+    };
+    if (settled_source)
+      sse_handlers.$settled = t.procedure.subscription(async function* ({
+        ctx,
+        signal,
+      }) {
+        await resolve_actor(ctx as unknown as Ctx);
+        yield* run_settled_subscription(settled_source, sse_counter, signal, {
+          maxPending: sse_config.maxPendingPerConnection,
+          on_cap_exceeded: too_many,
+        });
+      });
     for (const state_name of state_names) {
       sse_handlers[state_name] = t.procedure
         .input(z.object({ stream: z.string().min(1) }))
@@ -528,12 +563,7 @@ export function trpc<Ctx extends object, TApp extends ActSurface>(
             signal,
             {
               maxPending: sse_config.maxPendingPerConnection,
-              on_cap_exceeded: () => {
-                throw new TRPCError({
-                  code: "TOO_MANY_REQUESTS",
-                  message: "max concurrent SSE subscriptions reached",
-                });
-              },
+              on_cap_exceeded: too_many,
             }
           );
         });

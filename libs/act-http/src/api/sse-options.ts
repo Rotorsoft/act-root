@@ -26,4 +26,6 @@ export const SseOptionsSchema = z.object({
     .min(1)
     .max(100_000)
     .default(DEFAULT_SSE_MAX_PENDING_PER_CONNECTION),
+  publish: z.boolean().default(false),
+  settled: z.boolean().default(false),
 });

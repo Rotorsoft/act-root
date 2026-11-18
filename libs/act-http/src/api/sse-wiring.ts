@@ -68,6 +68,23 @@ export type SseOptions = {
    * Default `256`. Validated range `[1, 100_000]`.
    */
   readonly maxPendingPerConnection?: number;
+  /**
+   * Publish every commit to {@link channel} once, as the subscriptions
+   * expect (`publishCommits` on `/sse`), instead of the host writing its own
+   * `committed` listener. Two generators set to publish to the same
+   * channel publish each commit once. Off by default.
+   */
+  readonly publish?: boolean;
+  /**
+   * Add one subscription, `$settled` (tRPC `subscribe.$settled`, Hono
+   * `GET <basePath>/sse/$settled`), yielding `{ kind: "settled", data: {
+   * targets } }` each time the app settles with targets that advanced: the
+   * signal a list or dashboard fed by a projection refetches on. It counts
+   * against {@link maxConnections}. Off by default.
+   */
+  readonly settled?: boolean;
+  /** Told the number of open subscriptions after every open and close. */
+  readonly onConnections?: (count: number) => void;
 };
 
 /**
