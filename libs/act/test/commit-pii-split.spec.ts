@@ -229,4 +229,41 @@ describe("sensitive() marker survival", () => {
     expect(rows[0]?.data).toEqual({ kind: "email" });
     await app.shutdown();
   });
+
+  it("splits pii in an event declared as an intersection, a z.lazy() or a pipe", async () => {
+    const fields = z.object({ email: sensitive(z.string()) });
+    const plan = z.object({ plan: z.string() });
+    const events = {
+      Joined: fields.and(plan),
+      Lazy: z.lazy(() => fields.extend(plan.shape)),
+      Piped: fields.extend(plan.shape).transform((v) => v),
+    };
+    const W = state({ W: z.object({ n: z.number() }) })
+      .init(() => ({ n: 0 }))
+      .emits(events)
+      .patch({
+        Joined: (_, s) => ({ n: s.n + 1 }),
+        Lazy: (_, s) => ({ n: s.n + 1 }),
+        Piped: (_, s) => ({ n: s.n + 1 }),
+      })
+      .on({ join: z.object({ event: z.enum(["Joined", "Lazy", "Piped"]) }) })
+      .emit(({ event }) => [event, { email: "alice@example.com", plan: "pro" }])
+      .build();
+    const app = act().withState(W).build();
+    for (const event of ["Joined", "Lazy", "Piped"] as const) {
+      expect(app.registry.sensitive_fields(event)).toEqual(["email"]);
+      await app.do(
+        "join",
+        { stream: `w-${event}`, actor: marker_actor },
+        { event }
+      );
+      const rows: { data: unknown; pii?: unknown }[] = [];
+      await store().query((e) => rows.push(e as never), {
+        stream: `w-${event}`,
+      });
+      expect(rows[0]?.pii).toEqual({ email: "alice@example.com" });
+      expect(rows[0]?.data).toEqual({ plan: "pro" });
+    }
+    await app.shutdown();
+  });
 });

@@ -54,6 +54,16 @@ export function wrapped(schema: unknown): z.ZodType[] {
 }
 
 /**
+ * The schemas whose fields make up an object-like schema that isn't an object
+ * itself: both sides of an intersection, or what a wrapper holds
+ * ({@link wrapped}).
+ */
+export function parts_of(schema: unknown): z.ZodType[] {
+  const def = def_of(schema);
+  return def?.type === "intersection" ? [def.left, def.right] : wrapped(schema);
+}
+
+/**
  * True when `test` holds for the schema or any schema it wraps, at any depth.
  * Each schema is visited once, so a lazy schema that returns itself ends.
  */

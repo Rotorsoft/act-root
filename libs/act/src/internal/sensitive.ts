@@ -2,7 +2,7 @@
 // that read it. The public `sensitive()` is in `../types/schemas.ts`; an app's
 // sensitive fields are `registry.sensitive_fields`.
 import type { z } from "zod";
-import { some_layer } from "./zod.js";
+import { parts_of, some_layer } from "./zod.js";
 
 /**
  * Marker key stamped onto a schema's own `def`. Zod clones a schema on every
@@ -35,8 +35,10 @@ const is_pii = (schema: z.ZodType): boolean =>
  *
  * A union event has no top-level shape, so the options are walked and merged:
  * a key sensitive in any variant must be split, because the stored payload
- * could be that variant.
- * The first variant to declare a key wins, which only matters to a caller that
+ * could be that variant. An event declared as an intersection, a `z.lazy()` or
+ * a pipe (`.transform()`, `.pipe()`) is walked through to the objects it is
+ * made of, the same way.
+ * The first schema to declare a key wins, which only matters to a caller that
  * wants the schema rather than the name.
  *
  * Returning the schemas rather than just the names is what lets a caller do
@@ -44,22 +46,19 @@ const is_pii = (schema: z.ZodType): boolean =>
  * date, so the `pii` sidecar's dates can be revived like any other.
  */
 export function pii_schemas(schema: z.ZodType): Record<string, z.ZodType> {
+  const fields: Record<string, z.ZodType> = {};
   const shape = (schema as { shape?: Record<string, z.ZodType> }).shape;
   if (shape && typeof shape === "object") {
-    const fields: Record<string, z.ZodType> = {};
     for (const key of Object.keys(shape))
       if (is_pii(shape[key])) fields[key] = shape[key];
     return fields;
   }
   const options = (schema as { options?: unknown }).options;
-  if (Array.isArray(options)) {
-    const fields: Record<string, z.ZodType> = {};
-    for (const option of options)
-      for (const [key, field] of Object.entries(
-        pii_schemas(option as z.ZodType)
-      ))
-        fields[key] ??= field;
-    return fields;
-  }
-  return {};
+  const parts = Array.isArray(options)
+    ? (options as z.ZodType[])
+    : parts_of(schema);
+  for (const part of parts)
+    for (const [key, field] of Object.entries(pii_schemas(part)))
+      fields[key] ??= field;
+  return fields;
 }
