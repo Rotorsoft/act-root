@@ -1,3 +1,10 @@
+# [@rotorsoft/act-http-v2.5.0](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-http-v2.4.0...@rotorsoft/act-http-v2.5.0) (2026-11-18)
+
+
+### Features
+
+* **act-http:** follow many streams and the settled targets in one $live subscription ([#2586](https://github.com/Rotorsoft/act-root/issues/2586)) ([a8865c1](https://github.com/Rotorsoft/act-root/commit/a8865c1edf0d10e5f055c6fe794ccd61a97ae964)), closes [#2585](https://github.com/Rotorsoft/act-root/issues/2585)
+
 # [@rotorsoft/act-http-v2.4.0](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-http-v2.3.0...@rotorsoft/act-http-v2.4.0) (2026-11-18)
 
 
