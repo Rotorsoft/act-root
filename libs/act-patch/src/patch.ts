@@ -1,11 +1,5 @@
+import { is_plain } from "./plain.js";
 import type { Patch, Schema } from "./types.js";
-
-/** Whether a value is an ordinary object, which a patch merges into. */
-const is_plain = (value: unknown): boolean => {
-  if (typeof value !== "object" || value === null) return false;
-  const ctor = value.constructor;
-  return ctor === Object || ctor === undefined;
-};
 
 /**
  * Immutably deep-merges `patches` into `original`.
