@@ -545,9 +545,9 @@ const chapters: Chapter[] = [
             ui: ["tip"],
           },
           {
-            now: "Captions and sound",
-            say: "Captions follow the narration, and CC and the speaker button turn them off.",
-            ui: ["cc", "sound"],
+            now: "Captions and speed",
+            say: "The captions follow the voice, and the speed control next to Play sets the pace.",
+            ui: ["speed"],
           },
           {
             now: "Step, play, and pick a chapter",

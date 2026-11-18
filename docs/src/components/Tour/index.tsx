@@ -53,14 +53,6 @@ const PALETTE = 8;
 
 const useBrowserLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
 
-/** `code` and **bold** in narration. */
-function rich(text: string): ReactNode[] {
-  return text.split(/(`[^`]+`|\*\*[^*]+\*\*)/).map((part, i) => {
-    if (part.startsWith("`")) return <code key={i}>{part.slice(1, -1)}</code>;
-    if (part.startsWith("**")) return <b key={i}>{part.slice(2, -2)}</b>;
-    return part;
-  });
-}
 
 /** How natural a voice is likely to sound: neural and premium voices first, in the page's language. */
 function voice_rank(v: SpeechSynthesisVoice, lang: string): number {
@@ -956,15 +948,15 @@ export default function Tour({ spec }: { spec: TourSpec }) {
   const [reduce, setReduce] = useState(true);
   const [selected, setSelected] = useState<number | undefined>();
   const [menu, setMenu] = useState(false);
-  const [transcript, setTranscript] = useState(false);
-  const [cc, setCc] = useState(true);
-  const [sound, setSound] = useState(false);
-  const [muted, setMuted] = useState(false);
+  // captions are always on; narration and music start with the first Play
+  const cc = true;
+  const [sound, setSound] = useState(true);
+  const muted = false;
   const [speed, setSpeed] = useState(1);
   const [cue, setCue] = useState(-1);
   const [card, setCard] = useState<string | undefined>();
-  const [music, setMusic] = useState(true);
-  const [music_level, setMusicLevel] = useState(0.5);
+  const music = true;
+  const music_level = 0.6;
   const ambient = useRef<Ambient | undefined>(undefined);
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
   const [voice_name, setVoiceName] = useState<string>("");
@@ -972,14 +964,7 @@ export default function Tour({ spec }: { spec: TourSpec }) {
     (): SpeechSynthesisVoice | undefined => voices.find((v) => v.name === voice_name) ?? voices[0],
     [voices, voice_name]
   );
-  const choose_voice = (name: string) => {
-    setVoiceName(name);
-    try {
-      window.localStorage.setItem("act-tour-voice", name);
-    } catch {
-      // the choice lasts this visit only
-    }
-  };
+
 
   const menu_ref = useRef<HTMLDivElement>(null);
   const [voice, setVoice] = useState(false);
@@ -1015,11 +1000,6 @@ export default function Tour({ spec }: { spec: TourSpec }) {
     // the app and the store each scale their own content to fill; the stage keeps its width
     return at(1).l;
   }, [fit.mode, fit.px, stage_px, view, scene.nodes, frame.world, app, layer]);
-  const code = useMemo(() => {
-    let c = scene.code;
-    for (let i = 0; i <= frame.step; i++) c = scene.steps[i]!.code ?? c;
-    return c && fill(c, frame.world, all.base);
-  }, [scene, frame.step, frame.world, all.base]);
   const sel = selected === undefined ? undefined : frame.world.stores.flatMap((s) => s.cells).find((c) => c.uid === selected);
   const lit = useMemo(() => spotlight(step, frame.world), [step, frame.world]);
   const say = fill(step.say, frame.world, all.base);
@@ -1186,7 +1166,6 @@ export default function Tour({ spec }: { spec: TourSpec }) {
     if (e.key === "Escape") {
       setTip(undefined);
       setMenu(false);
-      setTranscript(false);
       return;
     }
     if (e.target instanceof HTMLSelectElement || e.target instanceof HTMLButtonElement) return;
@@ -1209,7 +1188,6 @@ export default function Tour({ spec }: { spec: TourSpec }) {
 
   const atStart = index === 0;
   const atEnd = index === all.length - 1;
-  const step_tip: TipContent = { title: scene.title, code, api: scene.api, doc: scene.doc, test: scene.test };
   const root_w = box.current?.clientWidth ?? 800;
   const tip_w = Math.min(600, root_w - 16);
   // a beat of speech shows the caption sentence it belongs to
@@ -1270,32 +1248,6 @@ export default function Tour({ spec }: { spec: TourSpec }) {
         <div className={styles.captions} aria-live="polite">
           {cc && caption && <p key={`${index}-${caption}`}>{plain(caption)}</p>}
         </div>
-        {transcript && (
-          <aside className={styles.transcript} aria-label="Transcript of this chapter">
-            <div className={styles.transcriptHead}>
-              <b>
-                {frame.chapter + first}. {chapter.title}
-              </b>
-              <button type="button" onClick={() => setTranscript(false)} aria-label="Close the transcript">
-                ✕
-              </button>
-            </div>
-            <ol>
-              {chapterFrames.map((f) => {
-                const i = all.indexOf(f);
-                const st = spec.chapters[f.chapter]!.scenes[f.scene]!.steps[f.step]!;
-                return (
-                  <li key={i} data-state={i < index ? "done" : i === index ? "now" : "todo"}>
-                    <button type="button" onClick={() => go(i)}>
-                      <b>{rich(fill(st.now, f.world, all.base))}</b>
-                      <span>{rich(fill(st.say, f.world, all.base))}</span>
-                    </button>
-                  </li>
-                );
-              })}
-            </ol>
-          </aside>
-        )}
       </div>
 
       <div className={styles.bar}>
@@ -1365,81 +1317,12 @@ export default function Tour({ spec }: { spec: TourSpec }) {
           </button>
         </div>
         <div className={styles.toggles}>
-          <button
-            type="button"
-            className={`${styles.codeIcon} ${ui("tip")}`}
-            aria-label="How this step is coded, and where to read more"
-            onMouseEnter={(e) => openTip("step", e.currentTarget, step_tip)}
-            onMouseLeave={(e) => openTip("step", e.currentTarget, undefined)}
-            onFocus={(e) => openTip("step", e.currentTarget, step_tip)}
-            onClick={(e) => openTip("step", e.currentTarget, step_tip)}
-          >
-            {"</>"}
-          </button>
-          <button type="button" className={`${cc ? styles.on : ""} ${ui("cc")}`} onClick={() => setCc((c) => !c)} aria-pressed={cc} aria-label="Captions">
-            CC
-          </button>
-          {voice && (
-            <button
-              type="button"
-              className={`${sound && !muted ? styles.on : ""} ${ui("sound")}`}
-              onClick={() => {
-                const on = !(sound && !muted);
-                setSound(on);
-                setMuted(!on);
-                if (!on) window.speechSynthesis.cancel();
-              }}
-              aria-pressed={sound && !muted}
-              aria-label="Narration"
-            >
-              {sound && !muted ? "🔊" : "🔈"}
-            </button>
-          )}
-          <button
-            type="button"
-            className={music && sound && !muted ? styles.on : ""}
-            onClick={() => setMusic((m) => !m)}
-            aria-pressed={music}
-            aria-label="Background music"
-            title="Background music"
-          >
-            ♪
-          </button>
-          <input
-            type="range"
-            className={styles.volume}
-            min={0}
-            max={1}
-            step={0.05}
-            value={music_level}
-            onChange={(e) => setMusicLevel(Number(e.target.value))}
-            aria-label="Music volume"
-            disabled={!music}
-          />
-          {voice && voices.length > 0 && (
-            <select className={styles.voiceSelect} value={pick_voice()?.name ?? ""} onChange={(e) => choose_voice(e.target.value)} aria-label="Voice">
-              {voices.slice(0, 24).map((v) => (
-                <option key={v.name} value={v.name}>
-                  {v.name.replace(/^Microsoft |^Google /, "").replace(/ - .*$/, "")} ({v.lang})
-                </option>
-              ))}
-            </select>
-          )}
-          <select value={speed} onChange={(e) => setSpeed(Number(e.target.value))} aria-label="Speed">
+          <select className={ui("speed")} value={speed} onChange={(e) => setSpeed(Number(e.target.value))} aria-label="Speed">
             <option value={0.75}>0.75×</option>
             <option value={1}>1×</option>
             <option value={1.25}>1.25×</option>
           </select>
-          <button
-            type="button"
-            className={`${transcript ? styles.on : ""} ${ui("transcript")}`}
-            onClick={() => setTranscript((t) => !t)}
-            aria-pressed={transcript}
-            aria-label="Transcript"
-          >
-            ☰ text
-          </button>
-          <button type="button" onClick={fullscreen} aria-label="Full screen">
+          <button type="button" onClick={fullscreen} aria-label="Full screen" title="Full screen">
             ⛶
           </button>
         </div>
