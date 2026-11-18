@@ -9,64 +9,111 @@ Every claim below was checked against `libs/act/src/` and the guarantee table in
 `docs/docs/architecture/behavior-contracts.md`. **Doc** is a page under `docs/docs/`.
 **Test** is a spec under `libs/act/test/` unless it names another package.
 
-## What the viewer can always answer
+## The screen
 
-Every step in the spec carries a short `now` line (who does what to which target, with the
-API in mono). The player shows it in a Now/Next bar above the stage, with the next step's
-line (or the next scene or chapter) dimmed beside it. A pipeline strip lights the active
-stage of a multi-stage operation (an action: payload, load, preconditions, handler, fold,
-state check, commit; a reaction: correlate, claim, fetch, handle, ack; a close: probe,
-guard, archive, truncate, seed) and stops red where a refusal stops it. The stage dims what
-the step doesn't touch. A step list per scene and an activity feed, generated from the
-step's operations on the log, show what is done and what is coming.
+Two parts only: the **stage**, which takes the whole width and every pixel of height above
+one slim **control row**. In full screen the stage takes the whole display. There is no
+frame, no title row and no side panel.
 
-## The stage
+The stage has two linked centers. The **event store** is the main one, on the right, at
+about 60% of the width: the whole store as a field of dots (a seeded, deterministic history
+of 1,000 to 2,000 events per macro chapter), the detailed cells under a lens, the counts in
+its header, and, in chapters about reactions, one quiet track per subscription on the
+store's id axis. The **running Act app** is the second, on the left: the `app.do` gate and
+the operator entry points, the **action layer** (payload, load, preconditions, handler,
+fold, state check, then the commit port) and the slices with their states, actions,
+events, reactions and projections. The app's content scales up as one group to fill its
+frame, and stands the action layer upright when it has height to spare. One link joins the
+two: commits go in through the port, loads and reactions read back out. **Actors** are
+small icons at the left edge (a person for people, a gear for automations), and read models
+sit under them.
 
-Three regions share the full width. On the left are the **callers** (people, workers,
-outside systems) and, under them, the **read models** the app writes: the app's output for
-queries, outside the event store. In the middle is the **running Act app**, drawn from a
-per-chapter declaration of its registry: ports (store, cache, logger), the `app.do` gate and
-the operator entry points (`app.close`, `app.reset`, …), the **action layer** (payload, load,
-preconditions, handler, fold, state check), and the slices with their states, actions,
-events, reactions, projections and lanes. Every element with code behind it carries a `</>`
-icon, which opens the snippet, the API and the doc and test links in a tooltip. On the right
-is the **event store**: the whole store as a field of dots (a seeded, deterministic history of
-1,000 to 2,000 events per macro chapter), the detailed cells under a lens, a counter, and
-every subscription as a row on the store's id axis (watermark, work mark, the backlog
-between them, and the correlate checkpoint on its own track), grouped by lane.
+Code never shows on the stage. Every element with code behind it carries a `</>` icon in
+the same top-right slot, which opens the snippet, the API and the doc and test links.
 
-Every token routes through the app: in at `app.do`, through the action layer, out through
-the store port. Every number on screen (ids, counts like "40 tickets, 153 events
-archived") is filled in from the fold, not written by hand; example days and policies are
-marked as picked for the example.
+Each step dims everything it doesn't touch to a fifth and gives the area it works in (the
+action layer, the store) a soft glow. Data moves as a token with a short trail of
+particles, along the drawing and never across it: in at `app.do`, along the action layer,
+out of the commit port, along the link, in at the store's edge, then down to the slot it
+lands in. Where the lens shows ids that aren't adjacent, a dashed marker names the skipped
+range. Every number on screen is filled in from the fold, not written by hand; example days
+and policies are marked as picked for the example.
+
+The **control row** holds the chapter button ("Chapter 3 of 18 · Rules … · step 2/6"), with
+a progress bar across its top segmented by chapter, then step back, play and step forward,
+the step's `</>` tip, CC, sound, music and its volume, the voice, the speed, the transcript
+drawer and full screen. The chapter menu is a panel that fits the viewport (a bottom sheet
+on a phone). Playing runs on from chapter to chapter, with a short spoken title card
+between them, so playing from chapter 0 runs the whole tour.
+
+## Narration
+
+Each step's `say` line is both the caption and the narration. Captions are subtitles
+inside the stage: a translucent, blurred bubble sized to the text, at most two lines, one
+sentence at a time, in plain words with no code chips. The layout keeps that strip free.
+The voice is the browser's speech synthesis, using the most natural voice it offers
+(Natural, Neural, Premium, Enhanced or Online voices first, in the page's language), which
+the viewer can change. It reads at 0.95, pauses briefly between sentences and longer between
+steps, and the step waits for the voice. A generated ambient pad (Web Audio, no files) plays
+under it and ducks about 12 dB while the voice speaks. Without speech, captions are timed.
+
+The narration is written in the voice of the Act book: flowing sentences, a concrete moment
+at the ticket desk, the problem before the solution, no lists and no code read aloud. Each
+chapter's first step opens on the problem that chapter solves:
+
+| Chapter | The moment it opens on |
+|---|---|
+| 0 | a ticket says closed and nobody can say why; every update was a small act of forgetting |
+| 1 | a manager asks why one ticket took a week to close, which a table of rows can't answer |
+| 2 | Maya's screen keeps flickering, and the desk needs a ticket that knows what it is |
+| 3 | rules scattered across controllers drift apart |
+| 4 | two agents, one ticket, the same instant |
+| 5 | a ticket's whole life replayed on every action would get slow |
+| 6 | a new ticket shouldn't sit waiting for someone to notice it |
+| 7 | Monday morning, and one process can't keep up |
+| 8 | two in the morning, and the escalation service is down |
+| 9 | an untouched ticket should escalate on its own, with no cron job |
+| 10 | the support screen needs a fast list of tickets |
+| 11 | an agent carries five tickets at most, a rule that lives on the agent |
+| 12 | a customer asks the desk to forget her |
+| 13 | a year on, closed tickets still cost storage |
+| 14 | nobody wants to close tickets by hand, months later |
+| 15 | after the closing and pruning, the store is full of holes |
+| 16 | the desk grows to two servers on one store |
+| 17 | agents click buttons in a browser, they don't call `app.do` |
+| 18 | everything ran against one port, the store |
+
+The tables below are the beat outline each chapter was built from; the spoken lines live in
+the spec.
 
 ## The picture that never leaves the screen
 
-The middle of the stage is **the event store**: one global log, the "all" stream. Every
-event sits in it in commit order with its global `id`. Each event belongs to one stream and
-has that stream's `version`, so many streams interleave in one log. Cells are colored by
-stream; the stream table under the log folds the same cells per stream (name, head
-version, events).
+The store is one global log, the "all" stream. Every event sits in it in commit order with
+its global `id`. Each event belongs to one stream and has that stream's `version`, so many
+streams interleave in one log. Every dot shares one neutral tone; the streams a scene is
+about, a hovered stream and the active cell light up in one accent color. Snapshots,
+tombstones and sensitive events keep subtle glyphs in the same tone (a ring, a cap, a
+hollow center).
 
 Every operation in the tour is drawn as what it does to that log:
 
 | Operation | What the log shows |
 |---|---|
-| commit | new cells append at the right, one id each; several streams in one commit share a bracket |
-| refused in the action layer (`ValidationError`, `StreamClosedError`, `PreconditionError`, the state check) | nothing reaches the store: the token stops in red inside the app, at the stage that refused it |
-| `ConcurrencyError` | the only refusal at the store: the commit reaches the store's edge and bounces, showing the expected and the actual version; nothing is appended |
+| commit | new cells append at the tail, one id each; several streams in one commit share a bracket |
+| refused in the action layer (`ValidationError`, `StreamClosedError`, `PreconditionError`, the state check) | nothing reaches the store: the token stops in red inside the app, at the stage that refused it, with a note on its own row |
+| `ConcurrencyError` | the only refusal at the store: a red pill in the store's own row at its entry edge shows the expected and the actual version; nothing is appended |
 | `StoreError` / breaker | the store itself is unavailable: its frame turns red and dashed; not a refusal |
 | snapshot | a `__snapshot__` cell, on its stream's next version |
 | correlate | the checkpoint marker moves along the log |
-| drain | a worker's lease on a target, its watermark marker moves along the target's source cells |
-| defer / backoff | the target shows a clock and a due time; claim skips it |
+| drain | a worker's lease on a target, its watermark marker moves along the target's track |
+| defer / backoff | the target shows a due time; claim skips it |
 | blocked | the target turns red; its watermark stops |
-| close | a `__tombstone__` guard appends, the stream's cells fade out, one seed cell appends at v0 |
+| close | a `__tombstone__` guard appends, the stream's dots lift into the archive, one seed appends at v0 |
 | windowed close | the cells below the closest safe snapshot fade out; the stream stays live |
-| forget | the lock on each cell of the stream turns into a shredder mark |
+| forget | each sensitive event of the stream gets a shredded mark |
 | restore | the log is rebuilt and ids renumber densely |
 
-Colors stay the docs' diagram tokens (`--dg-*`): actor slate, action blue, state amber,
+The app keeps the docs' diagram tokens (`--dg-*`): actor slate, action blue, state amber,
 event orange, projection green, reaction purple, outside world pink, store teal.
 
 ## Chapters
@@ -74,6 +121,19 @@ event orange, projection green, reaction purple, outside world pink, store teal.
 Simple to complex. The audience tag says who the chapter is mostly for: **first app**
 (an app developer meeting Act), **production** (an app developer going to production),
 **operator** and **adapter author**.
+
+---
+
+### 0. How to read this tour · everyone
+
+A prologue of about 90 seconds. It opens on the problem: a customer's ticket says closed,
+nobody remembers closing it, and a system that kept only the current row can never say why,
+because every update was a small act of forgetting. Act keeps every change as an event in
+one log instead. Then it walks the screen, lighting each part as it is named: the actors,
+the app and its action layer, the slices with their reactions and projections, the event
+store, a highlighted stream, a commit flowing along the link into the log, the `</>` icon,
+captions and sound, and the controls. Its own small app (`APP_PROJ`) and three seeded
+events keep it independent of chapter 1.
 
 ---
 
@@ -85,7 +145,7 @@ added, a second ticket opened, a message on the first ticket.
 | # | Viewer sees | Narration | API |
 |---|---|---|---|
 | 1.1 | The log with four cells, ids #0–#3, two colors interleaved | "Act keeps every change as an event in one ordered log. Each event gets a global id when it commits." | `Committed` (`id`, `stream`, `version`, `name`, `data`, `created`, `meta`) |
-| 1.2 | The stream table folds the cells: `ticket-4821` v0, v1; `agent-ana` v0; `ticket-4822` v0 | "Each event also belongs to one stream and takes that stream's next version. Streams interleave in the log." | `app.query_array({ stream, stream_exact: true })` |
+| 1.2 | The lens zooms in on the cells: `ticket-4821` v0, v1; `agent-ana` v0; `ticket-4822` v0 | "Each event also belongs to one stream and takes that stream's next version. Streams interleave in the log." | `app.query_array({ stream, stream_exact: true })` |
 | 1.3 | A cell opens to show `meta.correlation` and `meta.causation` | "Every event carries who caused it: the action, its actor, and a correlation id that a whole workflow shares." | `meta.correlation`, `meta.causation.action` |
 
 Doc: `concepts/event-sourcing.md#event-store`. Test: `libs/act-tck/src/store-tck.ts` → "lands
