@@ -43,3 +43,18 @@ A block with **no** marker must be a self-contained program: it imports what
 it uses and references no undefined symbols. If a real example fails the gate,
 fix the snippet (it has drifted from the API); only reach for `no-check` when
 the block was never meant to compile on its own.
+
+# Tour narration
+
+The tour at `/tour` speaks each sentence from a pre-rendered clip in
+`docs/static/tour/voice/<key>.m4a`, where `key` is the first 12 hex characters
+of the sentence's sha1. A missing clip falls back to the browser's voice.
+
+```bash
+pnpm -F docs tour:lines   # write static/tour/voice/lines.json from the tour spec
+.venv/bin/python docs/scripts/tour-voice.py --model <dir>   # render new lines with Kokoro
+```
+
+`tour-voice.py` renders only lines without a clip and deletes clips no line
+names, so editing a sentence re-records just that sentence. Its docstring has
+the one-time Kokoro setup; the model stays outside the repo.
