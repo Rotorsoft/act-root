@@ -1,3 +1,10 @@
+# [@rotorsoft/act-patch-v1.2.15](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-patch-v1.2.14...@rotorsoft/act-patch-v1.2.15) (2026-11-18)
+
+
+### Bug Fixes
+
+* **act-patch:** decide a plain object by its prototype, so a constructor key can't shadow it ([#2576](https://github.com/Rotorsoft/act-root/issues/2576)) ([a9a06e0](https://github.com/Rotorsoft/act-root/commit/a9a06e0e862f15d38475f54d3f37148e592afc8f)), closes [#2571](https://github.com/Rotorsoft/act-root/issues/2571)
+
 # [@rotorsoft/act-patch-v1.2.14](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-patch-v1.2.13...@rotorsoft/act-patch-v1.2.14) (2026-11-15)
 
 
