@@ -220,7 +220,7 @@ export const app = act()
     expect(model.entries[0].projections).toHaveLength(0);
   });
 
-  it("act._sourceFile skip in slice varName tagging (line 189)", () => {
+  it("act._sourceFile skip in slice varName tagging", () => {
     const files: FileTab[] = [
       {
         path: "src/states.ts",
@@ -264,7 +264,7 @@ export const app2 = act().withSlice(MySlice).build();
     expect(model.entries.length).toBeGreaterThanOrEqual(1);
   });
 
-  it("duplicate .withSlice() in same file (line 149 false branch)", () => {
+  it("duplicate .withSlice() in same file", () => {
     const files: FileTab[] = [
       {
         path: "src/states.ts",

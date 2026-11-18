@@ -368,6 +368,55 @@ describe("audit", () => {
       ).resolves.toBeUndefined();
       expect(findings).toEqual([]);
     });
+
+    // Second deprecation family on top of widget — so the sort
+    // callback (`(a,b) => b.count - a.count` on the deprecated set)
+    // actually runs with 2+ items.
+    const twoDeprecated = state({
+      Two: z.object({ a: z.number(), b: z.number() }),
+    })
+      .init(() => ({ a: 0, b: 0 }))
+      .emits({
+        Alpha: z.object({ a: z.number() }),
+        Alpha_v2: z.object({ a: z.number() }),
+        Beta: z.object({ b: z.number() }),
+        Beta_v2: z.object({ b: z.number() }),
+      })
+      .patch({
+        Alpha: ({ data }, s) => ({ ...s, a: data.a }),
+        Alpha_v2: ({ data }, s) => ({ ...s, a: data.a }),
+        Beta: ({ data }, s) => ({ ...s, b: data.b }),
+        Beta_v2: ({ data }, s) => ({ ...s, b: data.b }),
+      })
+      .on({ noop: z.object({}) })
+      .emit(() => ["Alpha_v2", { a: 0 }])
+      .build();
+
+    it("sorts multiple deprecated event families by descending count", async () => {
+      const app = act().withState(twoDeprecated).build();
+      // Beta has more events than Alpha — both deprecated.
+      for (let i = 0; i < 3; i++) {
+        await store().commit(
+          [{ stream: "s", msgs: [{ name: "Alpha", data: { a: i } }] }],
+          meta
+        );
+      }
+      for (let i = 0; i < 7; i++) {
+        await store().commit(
+          [{ stream: "s", msgs: [{ name: "Beta", data: { b: i } }] }],
+          meta
+        );
+      }
+
+      const findings = await collect(
+        app.audit(["deprecated-load"], {
+          thresholds: { deprecated_min: 0.1 },
+        })
+      );
+      // Both deprecated event families surface, Beta first (higher count).
+      const names = findings.map((f) => (f as { name: string }).name);
+      expect(names).toEqual(["Beta", "Alpha"]);
+    });
   });
 
   describe("dispatcher", () => {
@@ -616,6 +665,26 @@ describe("audit", () => {
       );
       expect(stuck).toBeDefined();
     });
+
+    it("reaction-health yields nothing for healthy subscribed streams", async () => {
+      // Subscribed stream, no lease, no retries, not blocked → audit
+      // visits the row via query_streams and yields no finding.
+      // Exercises the "all checks fail" path through on_stream.
+      const app = act().withState(widget).build();
+      await store().commit(
+        [
+          {
+            stream: "healthy",
+            msgs: [{ name: "Repriced", data: { price: 1 } }],
+          },
+        ],
+        meta
+      );
+      await store().subscribe([{ stream: "healthy", source: "healthy" }]);
+
+      const findings = await collect(app.audit(["reaction-health"]));
+      expect(findings).toEqual([]);
+    });
   });
 
   describe("snapshot-drift category", () => {
@@ -698,6 +767,94 @@ describe("audit", () => {
       for (let i = 0; i < 30; i++) {
         await store().commit(
           [{ stream: "w1", msgs: [{ name: "Repriced", data: { price: i } }] }],
+          meta
+        );
+      }
+      const findings = await collect(
+        app.audit(["snapshot-drift"], {
+          thresholds: { drift_min: 10 },
+        })
+      );
+      expect(findings).toEqual([]);
+    });
+
+    it("snapshot-drift skips streams whose head is a framework marker", async () => {
+      const app = act().withState(order).build();
+      for (let i = 0; i < 30; i++) {
+        await store().commit(
+          [
+            {
+              stream: "tomb",
+              msgs: [{ name: "OrderPlaced", data: { items: i } }],
+            },
+          ],
+          meta
+        );
+      }
+      await store().commit(
+        [{ stream: "tomb", msgs: [{ name: "__tombstone__", data: {} }] }],
+        meta
+      );
+
+      const findings = await collect(
+        app.audit(["snapshot-drift"], {
+          thresholds: { drift_min: 20 },
+        })
+      );
+      expect(findings).toEqual([]);
+    });
+
+    it("snapshot-drift skips streams below driftMin", async () => {
+      // Stream with snap state but only a handful of events → not
+      // worth a drift finding.
+      const app = act().withState(order).build();
+      for (let i = 0; i < 3; i++) {
+        await store().commit(
+          [
+            {
+              stream: "tiny",
+              msgs: [{ name: "OrderPlaced", data: { items: i } }],
+            },
+          ],
+          meta
+        );
+      }
+      const findings = await collect(
+        app.audit(["snapshot-drift"], {
+          thresholds: { drift_min: 20 },
+        })
+      );
+      expect(findings).toEqual([]);
+    });
+
+    it("snapshot-drift skips streams whose post-snapshot count is below driftMin", async () => {
+      const app = act().withState(order).build();
+      // Total events ≥ driftMin to enter the candidate set, but
+      // post-snapshot count is below threshold.
+      for (let i = 0; i < 15; i++) {
+        await store().commit(
+          [
+            {
+              stream: "fresh",
+              msgs: [{ name: "OrderPlaced", data: { items: i } }],
+            },
+          ],
+          meta
+        );
+      }
+      await store().commit(
+        [{ stream: "fresh", msgs: [{ name: "__snapshot__", data: {} }] }],
+        meta
+      );
+      // Only a couple of events after the snapshot — not enough to flag.
+      for (let i = 0; i < 2; i++) {
+        await store().commit(
+          [
+            {
+              stream: "fresh",
+              msgs: [{ name: "OrderPlaced", data: { items: 100 + i } }],
+            },
+          ],
           meta
         );
       }
@@ -795,6 +952,33 @@ describe("audit", () => {
       );
       expect(findings).toEqual([]);
     });
+
+    it("restart-candidate skips streams whose head is a framework marker", async () => {
+      // count > threshold AND head is __tombstone__ → skip.
+      const app = act().withState(order).build();
+      for (let i = 0; i < 25; i++) {
+        await store().commit(
+          [
+            {
+              stream: "tomb",
+              msgs: [{ name: "OrderPlaced", data: { items: i } }],
+            },
+          ],
+          meta
+        );
+      }
+      await store().commit(
+        [{ stream: "tomb", msgs: [{ name: "__tombstone__", data: {} }] }],
+        meta
+      );
+
+      const findings = await collect(
+        app.audit(["restart-candidate"], {
+          thresholds: { restart_min: 20 },
+        })
+      );
+      expect(findings).toEqual([]);
+    });
   });
 
   describe("routing-health category", () => {
@@ -854,317 +1038,6 @@ describe("audit", () => {
         (f) => f.category === "routing-health" && f.reason === "unrouted"
       );
       expect(unrouted.length).toBeGreaterThanOrEqual(1);
-    });
-  });
-
-  describe("correlation-gaps category", () => {
-    it("flags events whose causation.event.id points at a missing parent", async () => {
-      const app = act().withState(widget).build();
-      // Event 1: a stand-alone event (no parent — fine).
-      await store().commit(
-        [{ stream: "w1", msgs: [{ name: "Repriced", data: { price: 1 } }] }],
-        {
-          correlation: "c1",
-          causation: {},
-        }
-      );
-      // Event 2: a "reaction" event whose causation references id
-      // 999 — doesn't exist. Audit should flag it.
-      await store().commit(
-        [{ stream: "w1", msgs: [{ name: "Repriced", data: { price: 2 } }] }],
-        {
-          correlation: "c1",
-          causation: { event: { id: 999, stream: "fake", name: "fake" } },
-        } as unknown as { correlation: string; causation: object }
-      );
-
-      const findings = await collect(app.audit(["correlation-gaps"]));
-      expect(findings).toHaveLength(1);
-      expect(findings[0]).toMatchObject({
-        category: "correlation-gaps",
-        reason: "orphan-parent",
-      });
-    });
-
-    it("does not flag initial action commits without an event parent", async () => {
-      const app = act().withState(widget).build();
-      const meta = { correlation: "c1", causation: {} };
-      for (let i = 0; i < 5; i++) {
-        await store().commit(
-          [{ stream: "w1", msgs: [{ name: "Repriced", data: { price: i } }] }],
-          meta
-        );
-      }
-      const findings = await collect(app.audit(["correlation-gaps"]));
-      expect(findings).toEqual([]);
-    });
-  });
-
-  describe("clock-anomalies category", () => {
-    it("yields nothing under normal monotonic commits", async () => {
-      const app = act().withState(widget).build();
-      const meta = { correlation: "c1", causation: {} };
-      await store().commit(
-        [{ stream: "w1", msgs: [{ name: "Repriced", data: { price: 1 } }] }],
-        meta
-      );
-      await sleep(20);
-      await store().commit(
-        [{ stream: "w1", msgs: [{ name: "Repriced", data: { price: 2 } }] }],
-        meta
-      );
-      const findings = await collect(app.audit(["clock-anomalies"]));
-      expect(findings).toEqual([]);
-    });
-
-    it("flags future-dated events", async () => {
-      const app = act().withState(widget).build();
-      const meta = { correlation: "c1", causation: {} };
-      await store().commit(
-        [{ stream: "w1", msgs: [{ name: "Repriced", data: { price: 1 } }] }],
-        meta
-      );
-      // Force the committed event's `created` 1 hour into the
-      // future via direct in-memory mutation — simulates a writer
-      // whose clock was ahead of audit time.
-      const events = (
-        store() as unknown as {
-          _events: Array<{ created: Date }>;
-        }
-      )._events;
-      for (const e of events) {
-        e.created = new Date(Date.now() + 60 * 60 * 1000);
-      }
-
-      const findings = await collect(app.audit(["clock-anomalies"]));
-      const future = findings.find(
-        (f) => f.category === "clock-anomalies" && f.reason === "future-created"
-      );
-      expect(future).toBeDefined();
-    });
-
-    it("flags out-of-order per-stream timestamps", async () => {
-      const app = act().withState(widget).build();
-      const meta = { correlation: "c1", causation: {} };
-      await store().commit(
-        [{ stream: "w1", msgs: [{ name: "Repriced", data: { price: 1 } }] }],
-        meta
-      );
-      await store().commit(
-        [{ stream: "w1", msgs: [{ name: "Repriced", data: { price: 2 } }] }],
-        meta
-      );
-      // Backdate event 2 so its `created` is earlier than event
-      // 1 — simulates a writer whose clock jumped backward
-      // between commits.
-      const events = (
-        store() as unknown as {
-          _events: Array<{ stream: string; created: Date }>;
-        }
-      )._events;
-      const onW1 = events.filter((e) => e.stream === "w1");
-      onW1[0].created = new Date(Date.now() - 5 * 60 * 1000);
-      onW1[1].created = new Date(Date.now() - 15 * 60 * 1000);
-
-      const findings = await collect(app.audit(["clock-anomalies"]));
-      const ooo = findings.find(
-        (f) => f.category === "clock-anomalies" && f.reason === "out-of-order"
-      );
-      expect(ooo).toMatchObject({
-        category: "clock-anomalies",
-        stream: "w1",
-        reason: "out-of-order",
-      });
-    });
-  });
-
-  // Coverage of branches that are reachable but only via specific
-  // configurations not exercised by the main scenario tests above.
-  // Each test names the branch it's there for so future readers know
-  // why it exists.
-  describe("branch coverage edge cases", () => {
-    // Second deprecation family on top of widget — so the sort
-    // callback (`(a,b) => b.count - a.count` on the deprecated set)
-    // actually runs with 2+ items.
-    const twoDeprecated = state({
-      Two: z.object({ a: z.number(), b: z.number() }),
-    })
-      .init(() => ({ a: 0, b: 0 }))
-      .emits({
-        Alpha: z.object({ a: z.number() }),
-        Alpha_v2: z.object({ a: z.number() }),
-        Beta: z.object({ b: z.number() }),
-        Beta_v2: z.object({ b: z.number() }),
-      })
-      .patch({
-        Alpha: ({ data }, s) => ({ ...s, a: data.a }),
-        Alpha_v2: ({ data }, s) => ({ ...s, a: data.a }),
-        Beta: ({ data }, s) => ({ ...s, b: data.b }),
-        Beta_v2: ({ data }, s) => ({ ...s, b: data.b }),
-      })
-      .on({ noop: z.object({}) })
-      .emit(() => ["Alpha_v2", { a: 0 }])
-      .build();
-
-    it("sorts multiple deprecated event families by descending count", async () => {
-      const app = act().withState(twoDeprecated).build();
-      // Beta has more events than Alpha — both deprecated.
-      for (let i = 0; i < 3; i++) {
-        await store().commit(
-          [{ stream: "s", msgs: [{ name: "Alpha", data: { a: i } }] }],
-          meta
-        );
-      }
-      for (let i = 0; i < 7; i++) {
-        await store().commit(
-          [{ stream: "s", msgs: [{ name: "Beta", data: { b: i } }] }],
-          meta
-        );
-      }
-
-      const findings = await collect(
-        app.audit(["deprecated-load"], {
-          thresholds: { deprecated_min: 0.1 },
-        })
-      );
-      // Both deprecated event families surface, Beta first (higher count).
-      const names = findings.map((f) => (f as { name: string }).name);
-      expect(names).toEqual(["Beta", "Alpha"]);
-    });
-
-    it("restart-candidate skips streams whose head is a framework marker", async () => {
-      // count > threshold AND head is __tombstone__ → skip.
-      const app = act().withState(order).build();
-      for (let i = 0; i < 25; i++) {
-        await store().commit(
-          [
-            {
-              stream: "tomb",
-              msgs: [{ name: "OrderPlaced", data: { items: i } }],
-            },
-          ],
-          meta
-        );
-      }
-      await store().commit(
-        [{ stream: "tomb", msgs: [{ name: "__tombstone__", data: {} }] }],
-        meta
-      );
-
-      const findings = await collect(
-        app.audit(["restart-candidate"], {
-          thresholds: { restart_min: 20 },
-        })
-      );
-      expect(findings).toEqual([]);
-    });
-
-    it("reaction-health yields nothing for healthy subscribed streams", async () => {
-      // Subscribed stream, no lease, no retries, not blocked → audit
-      // visits the row via query_streams and yields no finding.
-      // Exercises the "all checks fail" path through on_stream.
-      const app = act().withState(widget).build();
-      await store().commit(
-        [
-          {
-            stream: "healthy",
-            msgs: [{ name: "Repriced", data: { price: 1 } }],
-          },
-        ],
-        meta
-      );
-      await store().subscribe([{ stream: "healthy", source: "healthy" }]);
-
-      const findings = await collect(app.audit(["reaction-health"]));
-      expect(findings).toEqual([]);
-    });
-
-    it("snapshot-drift skips streams whose head is a framework marker", async () => {
-      const app = act().withState(order).build();
-      for (let i = 0; i < 30; i++) {
-        await store().commit(
-          [
-            {
-              stream: "tomb",
-              msgs: [{ name: "OrderPlaced", data: { items: i } }],
-            },
-          ],
-          meta
-        );
-      }
-      await store().commit(
-        [{ stream: "tomb", msgs: [{ name: "__tombstone__", data: {} }] }],
-        meta
-      );
-
-      const findings = await collect(
-        app.audit(["snapshot-drift"], {
-          thresholds: { drift_min: 20 },
-        })
-      );
-      expect(findings).toEqual([]);
-    });
-
-    it("snapshot-drift skips streams below driftMin", async () => {
-      // Stream with snap state but only a handful of events → not
-      // worth a drift finding.
-      const app = act().withState(order).build();
-      for (let i = 0; i < 3; i++) {
-        await store().commit(
-          [
-            {
-              stream: "tiny",
-              msgs: [{ name: "OrderPlaced", data: { items: i } }],
-            },
-          ],
-          meta
-        );
-      }
-      const findings = await collect(
-        app.audit(["snapshot-drift"], {
-          thresholds: { drift_min: 20 },
-        })
-      );
-      expect(findings).toEqual([]);
-    });
-
-    it("snapshot-drift skips streams whose post-snapshot count is below driftMin", async () => {
-      const app = act().withState(order).build();
-      // Total events ≥ driftMin to enter the candidate set, but
-      // post-snapshot count is below threshold.
-      for (let i = 0; i < 15; i++) {
-        await store().commit(
-          [
-            {
-              stream: "fresh",
-              msgs: [{ name: "OrderPlaced", data: { items: i } }],
-            },
-          ],
-          meta
-        );
-      }
-      await store().commit(
-        [{ stream: "fresh", msgs: [{ name: "__snapshot__", data: {} }] }],
-        meta
-      );
-      // Only a couple of events after the snapshot — not enough to flag.
-      for (let i = 0; i < 2; i++) {
-        await store().commit(
-          [
-            {
-              stream: "fresh",
-              msgs: [{ name: "OrderPlaced", data: { items: 100 + i } }],
-            },
-          ],
-          meta
-        );
-      }
-      const findings = await collect(
-        app.audit(["snapshot-drift"], {
-          thresholds: { drift_min: 10 },
-        })
-      );
-      expect(findings).toEqual([]);
     });
 
     it("routing-health ignores streams subscribed without a lane string", async () => {
@@ -1280,6 +1153,49 @@ describe("audit", () => {
       );
       expect(repricedUnrouted).toBeUndefined();
     });
+  });
+
+  describe("correlation-gaps category", () => {
+    it("flags events whose causation.event.id points at a missing parent", async () => {
+      const app = act().withState(widget).build();
+      // Event 1: a stand-alone event (no parent — fine).
+      await store().commit(
+        [{ stream: "w1", msgs: [{ name: "Repriced", data: { price: 1 } }] }],
+        {
+          correlation: "c1",
+          causation: {},
+        }
+      );
+      // Event 2: a "reaction" event whose causation references id
+      // 999 — doesn't exist. Audit should flag it.
+      await store().commit(
+        [{ stream: "w1", msgs: [{ name: "Repriced", data: { price: 2 } }] }],
+        {
+          correlation: "c1",
+          causation: { event: { id: 999, stream: "fake", name: "fake" } },
+        } as unknown as { correlation: string; causation: object }
+      );
+
+      const findings = await collect(app.audit(["correlation-gaps"]));
+      expect(findings).toHaveLength(1);
+      expect(findings[0]).toMatchObject({
+        category: "correlation-gaps",
+        reason: "orphan-parent",
+      });
+    });
+
+    it("does not flag initial action commits without an event parent", async () => {
+      const app = act().withState(widget).build();
+      const meta = { correlation: "c1", causation: {} };
+      for (let i = 0; i < 5; i++) {
+        await store().commit(
+          [{ stream: "w1", msgs: [{ name: "Repriced", data: { price: i } }] }],
+          meta
+        );
+      }
+      const findings = await collect(app.audit(["correlation-gaps"]));
+      expect(findings).toEqual([]);
+    });
 
     it("correlation-gaps does not flag events whose parent exists", async () => {
       const app = act().withState(widget).build();
@@ -1305,6 +1221,84 @@ describe("audit", () => {
 
       const findings = await collect(app.audit(["correlation-gaps"]));
       expect(findings).toEqual([]);
+    });
+  });
+
+  describe("clock-anomalies category", () => {
+    it("yields nothing under normal monotonic commits", async () => {
+      const app = act().withState(widget).build();
+      const meta = { correlation: "c1", causation: {} };
+      await store().commit(
+        [{ stream: "w1", msgs: [{ name: "Repriced", data: { price: 1 } }] }],
+        meta
+      );
+      await sleep(20);
+      await store().commit(
+        [{ stream: "w1", msgs: [{ name: "Repriced", data: { price: 2 } }] }],
+        meta
+      );
+      const findings = await collect(app.audit(["clock-anomalies"]));
+      expect(findings).toEqual([]);
+    });
+
+    it("flags future-dated events", async () => {
+      const app = act().withState(widget).build();
+      const meta = { correlation: "c1", causation: {} };
+      await store().commit(
+        [{ stream: "w1", msgs: [{ name: "Repriced", data: { price: 1 } }] }],
+        meta
+      );
+      // Force the committed event's `created` 1 hour into the
+      // future via direct in-memory mutation — simulates a writer
+      // whose clock was ahead of audit time.
+      const events = (
+        store() as unknown as {
+          _events: Array<{ created: Date }>;
+        }
+      )._events;
+      for (const e of events) {
+        e.created = new Date(Date.now() + 60 * 60 * 1000);
+      }
+
+      const findings = await collect(app.audit(["clock-anomalies"]));
+      const future = findings.find(
+        (f) => f.category === "clock-anomalies" && f.reason === "future-created"
+      );
+      expect(future).toBeDefined();
+    });
+
+    it("flags out-of-order per-stream timestamps", async () => {
+      const app = act().withState(widget).build();
+      const meta = { correlation: "c1", causation: {} };
+      await store().commit(
+        [{ stream: "w1", msgs: [{ name: "Repriced", data: { price: 1 } }] }],
+        meta
+      );
+      await store().commit(
+        [{ stream: "w1", msgs: [{ name: "Repriced", data: { price: 2 } }] }],
+        meta
+      );
+      // Backdate event 2 so its `created` is earlier than event
+      // 1 — simulates a writer whose clock jumped backward
+      // between commits.
+      const events = (
+        store() as unknown as {
+          _events: Array<{ stream: string; created: Date }>;
+        }
+      )._events;
+      const onW1 = events.filter((e) => e.stream === "w1");
+      onW1[0].created = new Date(Date.now() - 5 * 60 * 1000);
+      onW1[1].created = new Date(Date.now() - 15 * 60 * 1000);
+
+      const findings = await collect(app.audit(["clock-anomalies"]));
+      const ooo = findings.find(
+        (f) => f.category === "clock-anomalies" && f.reason === "out-of-order"
+      );
+      expect(ooo).toMatchObject({
+        category: "clock-anomalies",
+        stream: "w1",
+        reason: "out-of-order",
+      });
     });
   });
 

@@ -110,7 +110,7 @@ describe("topo_sort", () => {
     expect(sorted).toHaveLength(2);
   });
 
-  it("dep already seeded in in_degree map (line 36 branch)", () => {
+  it("dep already seeded in in_degree map", () => {
     // File A depends on shared. File B also depends on shared.
     // When processing B's dep on shared, shared is already in in_degree map.
     // This exercises the `?? 0` fallback not being used since dep IS in in_degree.

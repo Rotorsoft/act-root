@@ -234,7 +234,7 @@ export const P = projection("uncaptured")
     expect(model.projections).toHaveLength(0);
   });
 
-  it("eval throws non-Error (line 182 false branch)", () => {
+  it("eval throws non-Error", () => {
     const files: FileTab[] = [
       {
         path: "src/bad.ts",
@@ -254,7 +254,7 @@ export const P = projection("uncaptured")
     expect(model).toBeDefined();
   });
 
-  it("outer catch with non-Error (line 209 false branch)", () => {
+  it("outer catch with non-Error", () => {
     const realFiles = [{ path: "src/app.ts", content: `const x = 1;` }];
     const poisoned: any = [...realFiles];
     poisoned.filter = () => {
@@ -264,40 +264,12 @@ export const P = projection("uncaptured")
     expect(error).toBe("string error in setup");
   });
 
-  it("outer catch in execute() for setup failure (line 209)", () => {
-    const realFiles = [{ path: "src/app.ts", content: `const x = 1;` }];
-    const poisoned: any = [...realFiles];
-    poisoned.filter = () => {
-      throw new Error("setup failure");
-    };
-    const { error } = extract_model(poisoned as FileTab[]);
-    expect(error).toBeDefined();
-  });
-
-  it("outer catch non-Error branch (line 209 String(e))", () => {
+  it("outer catch non-Error branch", () => {
     const poisoned: any = [{ path: "src/app.ts", content: "const x = 1;" }];
     poisoned.filter = () => {
       throw { toString: () => "non-error setup failure" };
     };
     const { error } = extract_model(poisoned as FileTab[]);
     expect(error).toBeDefined();
-  });
-
-  it("eval catch non-Error branch (line 182 String(e))", () => {
-    const files: FileTab[] = [
-      {
-        path: "src/bad.ts",
-        content: [
-          'import { state } from "@rotorsoft/act";',
-          'import { z } from "zod";',
-          'throw "non-error throw";',
-          "export const S = state({ S: z.object({}) })",
-          "  .init(() => ({})).emits({ E: z.object({}) })",
-          '  .on({ a: z.object({}) }).emit("E").build();',
-        ].join("\n"),
-      },
-    ];
-    const { model } = extract_model(files);
-    expect(model).toBeDefined();
   });
 });

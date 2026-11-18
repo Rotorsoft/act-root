@@ -3,7 +3,7 @@ import { build_model } from "../src/client/lib/build-model.js";
 import type { FileTab } from "../src/client/types/file-tab.js";
 
 describe("build_model direct tests", () => {
-  it("fixup_reactions joins all files when no source_file provided (line 66)", () => {
+  it("fixup_reactions joins all files when no source_file provided", () => {
     const files: FileTab[] = [
       {
         path: "src/slices.ts",
@@ -39,7 +39,7 @@ describe("build_model direct tests", () => {
     expect(sl!.reactions[0].handlerName).toBe("onCreated");
   });
 
-  it("act builder states not already in state_by_ref (lines 134-136)", () => {
+  it("act builder states not already in state_by_ref", () => {
     const actOnlyState = {
       _tag: "State",
       name: "ActOnlyState",
@@ -71,7 +71,7 @@ describe("build_model direct tests", () => {
     expect(st!.events[0].name).toBe("Evt1");
   });
 
-  it("slice with null state reference produces Missing state reference (lines 166-167)", () => {
+  it("slice with null state reference produces Missing state reference", () => {
     const result = {
       states: [],
       slices: [
@@ -94,7 +94,7 @@ describe("build_model direct tests", () => {
     expect(sl!.error).toContain("broken import");
   });
 
-  it("slice state not in state_by_ref, tries addState in-place success (lines 173-180)", () => {
+  it("slice state not in state_by_ref, tries addState in-place success", () => {
     const inlineState = {
       _tag: "State",
       name: "InlineSliceState",
@@ -128,7 +128,7 @@ describe("build_model direct tests", () => {
     expect(st).toBeDefined();
   });
 
-  it("slice state not in state_by_ref, addState fails (lines 181-182)", () => {
+  it("slice state not in state_by_ref, addState fails", () => {
     const corruptState = {
       name: "CorruptState",
       get events(): any {
@@ -159,7 +159,7 @@ describe("build_model direct tests", () => {
     expect(sl!.error).toContain("corrupt events");
   });
 
-  it("slice processing catch block when entire slice build throws (lines 204-205)", () => {
+  it("slice processing catch block when entire slice build throws", () => {
     const throwingSlice = {
       _tag: "Slice",
       _varName: "ThrowSlice",
@@ -184,7 +184,7 @@ describe("build_model direct tests", () => {
     expect(sl!.states).toHaveLength(0);
   });
 
-  it("global error return when result.error exists and no states/slices (line 307)", () => {
+  it("global error return when result.error exists and no states/slices", () => {
     const result = {
       states: [],
       slices: [],
@@ -199,7 +199,7 @@ describe("build_model direct tests", () => {
     expect(model.slices).toHaveLength(0);
   });
 
-  it("build_state returns error when event has undefined schema (line 31)", () => {
+  it("build_state returns error when event has undefined schema", () => {
     const stateWithUndefinedEvent = {
       _tag: "State",
       name: "BadState",
@@ -221,7 +221,7 @@ describe("build_model direct tests", () => {
     expect(model.states.find((s) => s.name === "BadState")).toBeUndefined();
   });
 
-  it("build_state returns error when action has undefined schema (line 37)", () => {
+  it("build_state returns error when action has undefined schema", () => {
     const stateWithUndefinedAction = {
       _tag: "State",
       name: "BadActionState",
@@ -244,7 +244,7 @@ describe("build_model direct tests", () => {
     ).toBeUndefined();
   });
 
-  it("step 1 catch block for corrupted state (line 144)", () => {
+  it("step 1 catch block for corrupted state", () => {
     const corruptState = {
       _tag: "State",
       get name(): string {
@@ -266,7 +266,7 @@ describe("build_model direct tests", () => {
     expect(model).toBeDefined();
   });
 
-  it("step 1 catch block for act-builder state (line 156)", () => {
+  it("step 1 catch block for act-builder state", () => {
     const corruptState = {
       _tag: "State",
       get name(): string {
@@ -295,7 +295,7 @@ describe("build_model direct tests", () => {
     expect(model).toBeDefined();
   });
 
-  it("slice state already built with error in step 1, referenced from slice (line 190)", () => {
+  it("slice state already built with error in step 1, referenced from slice", () => {
     const badState = {
       _tag: "State",
       name: "BadState",
@@ -327,7 +327,7 @@ describe("build_model direct tests", () => {
     expect(sl!.states).toHaveLength(0);
   });
 
-  it("slice state build_state returns error (line 190)", () => {
+  it("slice state build_state returns error", () => {
     const stateWithBadEvent = {
       _tag: "State",
       name: "SliceBadEvtState",
@@ -358,7 +358,7 @@ describe("build_model direct tests", () => {
     expect(sl!.error).toContain("undefined schema");
   });
 
-  it("duplicate state in raw_states triggers state_by_ref.has continue (line 140)", () => {
+  it("duplicate state in raw_states triggers state_by_ref.has continue", () => {
     const stateObj = {
       _tag: "State",
       name: "DupState",
@@ -380,7 +380,7 @@ describe("build_model direct tests", () => {
     expect(model.states.filter((s) => s.name === "DupState")).toHaveLength(1);
   });
 
-  it("fixup_reactions returns early when source_file not in files (line 84)", () => {
+  it("fixup_reactions returns early when source_file not in files", () => {
     const result = {
       states: [],
       slices: [],
@@ -441,7 +441,7 @@ describe("build_model direct tests", () => {
     );
   });
 
-  it("build_state with null events and actions (lines 28, 33 ?? fallback)", () => {
+  it("build_state with null events and actions", () => {
     const stateObj = {
       _tag: "State",
       name: "NullState",
@@ -465,7 +465,7 @@ describe("build_model direct tests", () => {
     expect(st!.actions).toHaveLength(0);
   });
 
-  it("build_state with events but null patches (line 47 ?? false fallback)", () => {
+  it("build_state with events but null patches", () => {
     const stateObj = {
       _tag: "State",
       name: "NoPatchState",
@@ -488,7 +488,7 @@ describe("build_model direct tests", () => {
     expect(st!.events[0].hasCustomPatch).toBe(false);
   });
 
-  it("fixup_reactions: handler name in source but no matching fallback (line 95 false)", () => {
+  it("fixup_reactions: handler name in source but no matching fallback", () => {
     const result = {
       states: [],
       slices: [
@@ -523,7 +523,7 @@ describe("build_model direct tests", () => {
     expect(model.slices[0].reactions[0].handlerName).toBe("on SomeOtherEvent");
   });
 
-  it("step 1 catch with non-Error thrown (line 145 false branch)", () => {
+  it("step 1 catch with non-Error thrown", () => {
     const corruptState = {
       _tag: "State",
       get name(): string {
@@ -544,7 +544,7 @@ describe("build_model direct tests", () => {
     expect(model).toBeDefined();
   });
 
-  it("act builder with undefined states array (line 151 ?? fallback)", () => {
+  it("act builder with undefined states array", () => {
     const result = {
       states: [],
       slices: [],
@@ -565,7 +565,7 @@ describe("build_model direct tests", () => {
     expect(model).toBeDefined();
   });
 
-  it("act builder catch with non-Error (line 157 false branch)", () => {
+  it("act builder catch with non-Error", () => {
     const corruptState = {
       _tag: "State",
       get name(): string {
@@ -594,7 +594,7 @@ describe("build_model direct tests", () => {
     expect(model).toBeDefined();
   });
 
-  it("slice with undefined _varName uses 'slice' default (line 167)", () => {
+  it("slice with undefined _varName uses 'slice' default", () => {
     const result = {
       states: [],
       slices: [
@@ -615,7 +615,7 @@ describe("build_model direct tests", () => {
     expect(model.slices[0].name).toBe("slice");
   });
 
-  it("slice with null state and fileError (line 180)", () => {
+  it("slice with null state and fileError", () => {
     const result = {
       states: [],
       slices: [
@@ -637,7 +637,7 @@ describe("build_model direct tests", () => {
     expect(sl!.error).toContain("Import failed");
   });
 
-  it("slice state build_state throws non-Error (line 205 false branch)", () => {
+  it("slice state build_state throws non-Error", () => {
     const corruptState = {
       _tag: "State", // must have _tag so it passes typeof check
       get name(): string {
@@ -667,7 +667,7 @@ describe("build_model direct tests", () => {
     expect(sl!.error).toContain("string thrown in build_state");
   });
 
-  it("slice with undefined states array (line 180 ?? fallback)", () => {
+  it("slice with undefined states array", () => {
     const result = {
       states: [],
       slices: [
@@ -690,7 +690,7 @@ describe("build_model direct tests", () => {
     expect(sl!.states).toHaveLength(0);
   });
 
-  it("slice catch with non-Error (line 205 false branch)", () => {
+  it("slice catch with non-Error", () => {
     const throwingSlice = {
       _tag: "Slice",
       _varName: "ThrowSlice2",
@@ -713,7 +713,7 @@ describe("build_model direct tests", () => {
     expect(sl!.error).toBe("string thrown");
   });
 
-  it("slice with undefined projections (line 213 ?? fallback)", () => {
+  it("slice with undefined projections", () => {
     const result = {
       states: [],
       slices: [
@@ -735,7 +735,7 @@ describe("build_model direct tests", () => {
     expect(sl!.projections).toHaveLength(0);
   });
 
-  it("slice projection with non-Projection _tag (line 213-214)", () => {
+  it("slice projection with non-Projection _tag", () => {
     const result = {
       states: [],
       slices: [
@@ -757,7 +757,7 @@ describe("build_model direct tests", () => {
     expect(sl!.projections).toHaveLength(0);
   });
 
-  it("slice with undefined reactions (line 222)", () => {
+  it("slice with undefined reactions", () => {
     const result = {
       states: [],
       slices: [
@@ -779,7 +779,7 @@ describe("build_model direct tests", () => {
     expect(sl!.reactions).toEqual([]);
   });
 
-  it("slice catch with non-Error from fixup_reactions (line 227)", () => {
+  it("slice catch with non-Error from fixup_reactions", () => {
     const result = {
       states: [],
       slices: [
@@ -801,7 +801,7 @@ describe("build_model direct tests", () => {
     expect(model.slices[0].file).toBeUndefined();
   });
 
-  it("expected_slices produces error from result.error or fallback (lines 250-252)", () => {
+  it("expected_slices produces error from result.error or fallback", () => {
     const result = {
       states: [],
       slices: [],
@@ -822,7 +822,7 @@ describe("build_model direct tests", () => {
     expect(sl2!.error).toBe("Global error");
   });
 
-  it("expected_slices fallback to 'Failed to build slice' (line 252)", () => {
+  it("expected_slices fallback to 'Failed to build slice'", () => {
     const result = {
       states: [],
       slices: [],
@@ -837,7 +837,7 @@ describe("build_model direct tests", () => {
     expect(sl!.error).toBe("Failed to build slice");
   });
 
-  it("act with undefined reactions (line 290 ?? fallback)", () => {
+  it("act with undefined reactions", () => {
     const result = {
       states: [],
       slices: [],
@@ -859,7 +859,7 @@ describe("build_model direct tests", () => {
     expect(model.reactions).toHaveLength(0);
   });
 
-  it("act entry with reactions fallback (line 300 ?? fallback)", () => {
+  it("act entry with reactions fallback", () => {
     const result = {
       states: [],
       slices: [],
@@ -1096,7 +1096,7 @@ describe("build_model direct tests", () => {
     expect(entry.projections).toHaveLength(0);
   });
 
-  it("act with null slices array (line 190 || fallback)", () => {
+  it("act with null slices array", () => {
     const result = {
       states: [],
       slices: [],

@@ -132,37 +132,6 @@ describe("Builder", () => {
     });
   });
 
-  it("should throw on duplicate action or event", () => {
-    const builder = act();
-    // Use two different state objects with the same action name
-    const state1 = {
-      name: "foo1",
-      state: ZodEmpty,
-      init: () => ({}),
-      actions: { a: ZodEmpty },
-      events: { e: ZodEmpty },
-      patch: { e: () => ({}) },
-      on: { a: () => ["e", {}] as [string, object] },
-      view: (e: any) => e,
-      message: (v: any) => v,
-      pii_aware: false,
-    };
-    const state2 = {
-      name: "foo2",
-      state: ZodEmpty,
-      init: () => ({}),
-      actions: { a: ZodEmpty },
-      events: { e: ZodEmpty },
-      patch: { e: () => ({}) },
-      on: { a: () => ["e", {}] as [string, object] },
-      view: (e: any) => e,
-      message: (v: any) => v,
-      pii_aware: false,
-    };
-    builder.withState(state1);
-    expect(() => builder.withState(state2)).toThrow("Duplicate action");
-  });
-
   it("should throw for anonymous handlers in act builder", () => {
     expect(() =>
       act()

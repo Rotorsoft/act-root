@@ -674,7 +674,7 @@ const app = act()
     expect(model.reactions[0].handlerName).toBeDefined();
   });
 
-  it("scoped import falls all the way to unknown_module_proxy (line 107 branch #6)", () => {
+  it("scoped import falls all the way to unknown_module_proxy", () => {
     const files: FileTab[] = [
       {
         path: "src/app.ts",
@@ -694,7 +694,7 @@ export const S = state({ S: z.object({}) })
     expect(model.states).toHaveLength(1);
   });
 
-  it("scoped import with subpath (line 103 truthy branch)", () => {
+  it("scoped import with subpath", () => {
     const files: FileTab[] = [
       {
         path: "packages/mylib/src/utils.ts",
@@ -717,7 +717,7 @@ export const S = state({ S: z.object({ x: z.string() }) })
     expect(model.states).toHaveLength(1);
   });
 
-  it("scoped import with no package name after @ (line 102 false)", () => {
+  it("scoped import with no package name after @", () => {
     const files: FileTab[] = [
       {
         path: "src/app.ts",
@@ -736,7 +736,7 @@ export const S = state({ S: z.object({}) })
     expect(error).toBeUndefined();
   });
 
-  it("scoped import with empty package name (line 102 false)", () => {
+  it("scoped import with empty package name", () => {
     const files: FileTab[] = [
       {
         path: "src/app.ts",
