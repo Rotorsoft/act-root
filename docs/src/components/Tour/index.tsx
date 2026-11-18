@@ -1093,7 +1093,11 @@ export default function Tour({ spec }: { spec: TourSpec }) {
     let cancelled = false;
     const timers: ReturnType<typeof setTimeout>[] = [];
     const last = index >= all.length - 1 || all[index + 1]!.chapter !== frame.chapter;
-    const talk = playing && voice && sound && !muted;
+    // the narrator is swappable per step: a pre-rendered clip when the step has one, else the browser's voice
+    const clip = playing && sound && !muted && step.audio ? new Audio(step.audio) : undefined;
+    let clip_done = !clip;
+    let captions_done = false;
+    const talk = !clip && playing && voice && sound && !muted;
     const advance = () => {
       if (cancelled || !playing) return;
       if (index >= all.length - 1) return setPlaying(false);
@@ -1114,8 +1118,9 @@ export default function Tour({ spec }: { spec: TourSpec }) {
     const show = (i: number) => {
       if (cancelled) return;
       if (i >= beats) {
-        // a longer breath between steps
-        timers.push(setTimeout(advance, STEP_GAP_MS / speed));
+        captions_done = true;
+        // a longer breath between steps, once the clip (if any) has finished too
+        if (clip_done) timers.push(setTimeout(advance, STEP_GAP_MS / speed));
         return;
       }
       setCue(i);
@@ -1149,13 +1154,33 @@ export default function Tour({ spec }: { spec: TourSpec }) {
         window.speechSynthesis.speak(u);
       } else timers.push(setTimeout(() => show(i + 1), Math.max(1800, speech[i]!.length * 55) / speed));
     };
-    timers.push(setTimeout(() => show(0), (reduce ? 0 : total + LAND_MS) / speed));
+    timers.push(
+      setTimeout(
+        () => {
+          if (clip) {
+            clip.playbackRate = speed;
+            ambient.current?.duck(true);
+            const end = () => {
+              ambient.current?.duck(false);
+              clip_done = true;
+              if (captions_done && !cancelled) timers.push(setTimeout(advance, STEP_GAP_MS / speed));
+            };
+            clip.onended = end;
+            clip.onerror = end;
+            void clip.play().catch(end);
+          }
+          show(0);
+        },
+        (reduce ? 0 : total + LAND_MS) / speed
+      )
+    );
     return () => {
       cancelled = true;
       for (const t of timers) clearTimeout(t);
       if (voice) window.speechSynthesis.cancel();
+      clip?.pause();
     };
-  }, [playing, index, all, frame.chapter, lines, speech, total, reduce, go, voice, sound, muted, speed, pick_voice, spec, first]);
+  }, [playing, index, all, frame.chapter, lines, speech, total, reduce, go, voice, sound, muted, speed, pick_voice, spec, first, step.audio]);
 
   useEffect(() => {
     if (!menu) return;

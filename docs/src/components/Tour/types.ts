@@ -263,6 +263,8 @@ export type Step = {
   say: string;
   /** the spoken form of `say`, when it must differ (ids, API names); captions always show `say` */
   speak?: string;
+  /** a pre-rendered narration clip for this step; when set, it plays instead of the browser's voice */
+  audio?: string;
   /** controls of the player this step points at (chapter 0): `play`, `cc`, `sound`, `menu`, `transcript`, `tip` */
   ui?: string[];
   moves?: Move[];
