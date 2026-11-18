@@ -97,6 +97,30 @@ describe("trpc(app, options) — generated router", () => {
     ]);
   });
 
+  test("generates only the selected actions", ({ app }) => {
+    const keys = (actions: object) =>
+      Object.keys(
+        trpc(app, { ...default_options(), actions } as never)._def.procedures
+      ).sort();
+    expect(keys({ exclude: ["OpenTicket"] })).toEqual(["Clear", "PressKey"]);
+    expect(keys({ include: ["OpenTicket"] })).toEqual(["OpenTicket"]);
+    // Neither list, as plain JavaScript can pass: every action.
+    expect(keys({})).toEqual(["Clear", "OpenTicket", "PressKey"]);
+  });
+
+  test("refuses a selection that names both lists or an unregistered action", ({
+    app,
+  }) => {
+    const generate = (actions: object) => () =>
+      trpc(app, { ...default_options(), actions } as never);
+    expect(generate({ include: ["Clear"], exclude: ["PressKey"] })).toThrow(
+      "pass `actions.include` or `actions.exclude`, not both"
+    );
+    expect(generate({ exclude: ["Remove", "Clear"] })).toThrow(
+      'trpc: `actions` names "Remove", which the app doesn\'t register.'
+    );
+  });
+
   test("each emitted procedure is callable as a top-level mutation", ({
     app,
   }) => {

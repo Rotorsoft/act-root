@@ -59,7 +59,11 @@
  */
 import { REDACTED, SHREDDED } from "@rotorsoft/act";
 import { z } from "zod";
-import type { ActSurface } from "../api/dispatch.js";
+import {
+  type ActionSelection,
+  type ActSurface,
+  selected_actions,
+} from "../api/dispatch.js";
 
 /**
  * Minimal OpenAPI 3.1 document type. The emitter targets the 3.1
@@ -97,6 +101,10 @@ export type OpenAPIDocument = {
  * - `expectedVersion` — optional, default `false`. When `true`,
  *   every mutation operation documents an optional `If-Match`
  *   request header carrying the expected stream version.
+ *
+ * `openapi` also takes `actions` (`{ include }` or `{ exclude }`, typed
+ * against the app's action names), the same selection the Hono generator
+ * takes, so the document describes exactly the routes it serves.
  */
 export type OpenAPIOptions = {
   readonly info: OpenAPIInfo;
@@ -668,7 +676,7 @@ function build_operation(
  */
 export function openapi<TApp extends Pick<ActSurface, "registry">>(
   app: TApp,
-  options: OpenAPIOptions
+  options: OpenAPIOptions & { readonly actions?: ActionSelection<TApp> }
 ): OpenAPIDocument {
   OpenAPIOptionsSchema.parse({
     info: { title: options.info?.title, version: options.info?.version },
@@ -679,7 +687,11 @@ export function openapi<TApp extends Pick<ActSurface, "registry">>(
   const state_schemas: Record<string, Record<string, unknown>> = {};
   const sensitive_of = (name: string) => app.registry.sensitive_fields(name);
 
-  for (const [action_name, state] of Object.entries(app.registry.actions)) {
+  for (const [action_name, state] of selected_actions(
+    app,
+    options.actions,
+    "openapi"
+  )) {
     const zod_schema = state.actions[action_name] as z.ZodType;
     // `io: "input"` describes what a client must SEND: a `.default()` field
     // is optional, extra keys are not rejected (Zod strips them), and a

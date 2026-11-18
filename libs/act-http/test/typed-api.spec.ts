@@ -195,3 +195,48 @@ describe("hono(app) types", () => {
     client.api.sse;
   });
 });
+
+describe("generating some actions only", () => {
+  const actor = () => ({ id: "a", name: "a" });
+
+  it("leaves an excluded action off the tRPC router", () => {
+    const router = trpc(app, { actor, stream, actions: { exclude: ["add"] } });
+    expectTypeOf<
+      keyof inferRouterInputs<typeof router>
+    >().toEqualTypeOf<"write">();
+  });
+
+  it("narrows when the context is typed on actor, without type arguments", () => {
+    const router = trpc(app, {
+      actor: (ctx: Ctx) => ({ id: ctx.user, name: ctx.user }),
+      stream,
+      actions: { exclude: ["add"] },
+    });
+    expectTypeOf<
+      keyof inferRouterInputs<typeof router>
+    >().toEqualTypeOf<"write">();
+  });
+
+  it("keeps only the included actions on the tRPC router", () => {
+    const router = trpc(app, { actor, stream, actions: { include: ["add"] } });
+    expectTypeOf<
+      keyof inferRouterInputs<typeof router>
+    >().toEqualTypeOf<"add">();
+  });
+
+  it("leaves an excluded action off the Hono routes", () => {
+    const client = testClient(
+      hono(app, { actor, stream, actions: { exclude: ["add"] } })
+    );
+    expectTypeOf(client.api.actions.write.$post).toBeFunction();
+    // @ts-expect-error no route for an excluded action
+    client.api.actions.add;
+  });
+
+  it("refuses a name the app doesn't register", () => {
+    expectTypeOf(() =>
+      // @ts-expect-error "remove" is not an action of the app
+      trpc(app, { actor, stream, actions: { exclude: ["remove"] } })
+    ).toBeFunction();
+  });
+});

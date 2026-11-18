@@ -88,6 +88,55 @@ export type ActionResult<TApp, K> = Snapshot<
 >[];
 
 /**
+ * Which of `TApp`'s actions a generator emits: exactly the `include`d ones,
+ * or every one but the `exclude`d. An action left out gets no route, no
+ * OpenAPI operation and no key in the generated type, so the hand-written
+ * procedure that owns it is its one entry point.
+ */
+export type ActionSelection<TApp> =
+  | { readonly include: readonly (keyof AppActions<TApp> & string)[] }
+  | { readonly exclude: readonly (keyof AppActions<TApp> & string)[] };
+
+/** The action names a selection keeps; every action without one. */
+export type SelectedActions<TApp, S> = S extends {
+  readonly include: readonly (infer I)[];
+}
+  ? I & keyof AppActions<TApp> & string
+  : S extends { readonly exclude: readonly (infer X)[] }
+    ? Exclude<keyof AppActions<TApp> & string, X>
+    : keyof AppActions<TApp> & string;
+
+/**
+ * The registry's actions a generator emits under `selection`, as
+ * `[name, state]` entries. Refuses a selection that names both lists, or an
+ * action the registry doesn't have, so a typo can't leave a route mounted.
+ */
+export function selected_actions(
+  app: Pick<ActSurface, "registry">,
+  selection: ActionSelection<unknown> | undefined,
+  transport: string
+): [string, ActSurface["registry"]["actions"][string]][] {
+  const entries = Object.entries(app.registry.actions);
+  if (!selection) return entries;
+  const { include, exclude } = selection as {
+    include?: readonly string[];
+    exclude?: readonly string[];
+  };
+  if (include && exclude)
+    throw new Error(
+      `${transport}: pass \`actions.include\` or \`actions.exclude\`, not both.`
+    );
+  const names = include ?? exclude ?? [];
+  const unknown = names.filter((name) => !(name in app.registry.actions));
+  if (unknown.length)
+    throw new Error(
+      `${transport}: \`actions\` names ${unknown.map((n) => `"${n}"`).join(", ")}, which the app doesn't register.`
+    );
+  const listed = new Set(names);
+  return entries.filter(([name]) => listed.has(name) === !!include);
+}
+
+/**
  * What a `stream` or `expectedVersion` resolver receives: the action's
  * name, its parsed payload and the transport's context, as one tuple per
  * action, so checking the name narrows the payload.

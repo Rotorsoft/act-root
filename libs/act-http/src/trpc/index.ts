@@ -64,12 +64,15 @@ import {
 import { z } from "zod";
 import {
   type ActionResult,
+  type ActionSelection,
   type ActSurface,
   type AppActions,
   type AppState,
   type AppStateNames,
   make_dispatch,
   type ResolverArgs,
+  type SelectedActions,
+  selected_actions,
 } from "../api/dispatch.js";
 import {
   type ActorExtractor,
@@ -256,8 +259,8 @@ type GeneratedRoot<Ctx extends object> = {
  * so `createTRPCReact<typeof router>()` sees `PressKey`, `Clear`, …
  * instead of an index signature, which trips tRPC React's collision check.
  */
-type ActionProcedures<TApp> = {
-  [K in keyof AppActions<TApp> & string]: TRPCMutationProcedure<{
+type ActionProcedures<TApp, TNames extends string> = {
+  [K in TNames]: TRPCMutationProcedure<{
     input: AppActions<TApp>[K];
     output: ActionResult<TApp, K>;
     meta: object;
@@ -280,7 +283,11 @@ export type GeneratedRouter<
   Ctx extends object,
   TApp,
   TRecord,
-> = TRPCBuiltRouter<GeneratedRoot<Ctx>, ActionProcedures<TApp> & TRecord>;
+  TNames extends string = keyof AppActions<TApp> & string,
+> = TRPCBuiltRouter<
+  GeneratedRoot<Ctx>,
+  ActionProcedures<TApp, TNames> & TRecord
+>;
 
 /**
  * Build a typed tRPC router from a built `Act` instance.
@@ -314,27 +321,48 @@ export type GeneratedRouter<
  *   middleware augments `Ctx` with `{ actor: Actor }` on the
  *   downstream procedure context.
  *
+ * Pass `actions: { include: [...] }` or `{ exclude: [...] }`, typed against
+ * the app's action names, to generate mutations for some actions only. An
+ * action left out has no key on the router, so calling it doesn't compile:
+ * leave out the ones a hand-written procedure owns, so each action has one
+ * entry point. A name the app doesn't register fails at generation.
+ *
  * @param app A built `Act` orchestrator.
- * @param options Auth, stream, and (optional) idempotency seams.
- * @returns A tRPC router with one mutation per registered action.
+ * @param options Auth, stream, (optional) idempotency, and (optional) the
+ *   actions to generate.
+ * @returns A tRPC router with one mutation per generated action.
  */
 export function trpc<
   Ctx extends object = object,
   TApp extends ActSurface = ActSurface,
+  const TSelection extends ActionSelection<TApp> | undefined =
+    | ActionSelection<TApp>
+    | undefined,
 >(
   app: TApp,
-  options: TrpcOptions<Ctx, TApp> & { readonly sse: SseOptions }
-): GeneratedRouter<Ctx, TApp, SubscribeRouter<TApp>>;
+  options: TrpcOptions<Ctx, TApp> & {
+    readonly actions?: TSelection;
+    readonly sse: SseOptions;
+  }
+): GeneratedRouter<
+  Ctx,
+  TApp,
+  SubscribeRouter<TApp>,
+  SelectedActions<TApp, TSelection>
+>;
 export function trpc<
   Ctx extends object = object,
   TApp extends ActSurface = ActSurface,
+  const TSelection extends ActionSelection<TApp> | undefined =
+    | ActionSelection<TApp>
+    | undefined,
 >(
   app: TApp,
-  options: TrpcOptions<Ctx, TApp>
-): GeneratedRouter<Ctx, TApp, unknown>;
+  options: TrpcOptions<Ctx, TApp> & { readonly actions?: TSelection }
+): GeneratedRouter<Ctx, TApp, unknown, SelectedActions<TApp, TSelection>>;
 export function trpc<Ctx extends object, TApp extends ActSurface>(
   app: TApp,
-  options: TrpcOptions<Ctx>
+  options: TrpcOptions<Ctx> & { readonly actions?: ActionSelection<unknown> }
 ): unknown {
   const t = initTRPC.context<Ctx>().create();
   const dispatch = make_dispatch<Ctx>(app, options, options.idempotency?.store);
@@ -362,7 +390,11 @@ export function trpc<Ctx extends object, TApp extends ActSurface>(
     string,
     ReturnType<ReturnType<typeof t.procedure.input>["mutation"]>
   > = {};
-  for (const [action_name, state] of Object.entries(app.registry.actions)) {
+  for (const [action_name, state] of selected_actions(
+    app,
+    options.actions,
+    "trpc"
+  )) {
     const action_schema = state.actions[action_name];
     handlers[action_name] = t.procedure
       // Passthrough parser: tRPC's own `.input()` validation is deliberately
@@ -427,7 +459,7 @@ export function trpc<Ctx extends object, TApp extends ActSurface>(
     // SSE subscriptions mount under the `subscribe` key of the same router
     // as the action mutations, so an action named `subscribe` would be
     // silently replaced. Refuse it at generation instead.
-    if ("subscribe" in app.registry.actions)
+    if ("subscribe" in handlers)
       throw new Error(
         'trpc: an action named "subscribe" collides with the SSE subscription router (router.subscribe.<stateName>); rename the action or generate the router without `sse`.'
       );

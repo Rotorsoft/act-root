@@ -6593,7 +6593,7 @@ import type { Context, MiddlewareHandler } from "hono";
 import { Hono } from "hono";
 import type { MergePath, TypedResponse } from "hono/types";
 import type { JSONParsed } from "hono/utils/types";
-import { type ActionResult, type ActSurface, type AppActions, type AppStateNames, type ResolverArgs } from "../api/dispatch.js";
+import { type ActionResult, type ActionSelection, type ActSurface, type AppActions, type AppStateNames, type ResolverArgs, type SelectedActions } from "../api/dispatch.js";
 import { type ActorExtractor, type ApiError, type SseOptions } from "../api/index.js";
 /**
  * Hono context variables this subpath contributes. The generic on
@@ -6712,23 +6712,32 @@ export declare function authenticated(extractor: ActorExtractor<Context>): Middl
  *    the conventional HTTP status (\`409\` / \`412\` for concurrency,
  *    \`422\` for validation, \`400\` for non-retryable, etc.).
  *
+ * Pass \`actions: { include: [...] }\` or \`{ exclude: [...] }\`, typed against
+ * the app's action names, to generate routes for some actions only. An
+ * action left out has no route and no key in the route types, so \`hc\`
+ * can't call it: leave out the ones a hand-written route owns, so each
+ * action has one entry point. A name the app doesn't register fails at
+ * generation.
+ *
  * @param app A built \`Act\` orchestrator.
- * @param options Auth, stream, expected-version, idempotency, and
- *   base-path seams.
- * @returns A Hono app covering every registered action under
+ * @param options Auth, stream, expected-version, idempotency, base-path
+ *   and (optional) actions-to-generate seams.
+ * @returns A Hono app covering every generated action under
  *   \`<basePath>/actions/<name>\`.
  */
-export declare function hono<TApp extends ActSurface = ActSurface, TBase extends string = "/api">(app: TApp, options: HonoOptions<TApp> & {
+export declare function hono<TApp extends ActSurface = ActSurface, TBase extends string = "/api", const TSelection extends ActionSelection<TApp> | undefined = ActionSelection<TApp> | undefined>(app: TApp, options: HonoOptions<TApp> & {
     readonly basePath?: TBase;
+    readonly actions?: TSelection;
     readonly sse: NonNullable<HonoOptions["sse"]>;
 }): Hono<{
     Variables: ActMiddlewareVariables;
-}, ActionRoutes<TApp, TBase> & SseRoutes<TApp, TBase>, TBase>;
-export declare function hono<TApp extends ActSurface = ActSurface, TBase extends string = "/api">(app: TApp, options: HonoOptions<TApp> & {
+}, ActionRoutes<TApp, TBase, SelectedActions<TApp, TSelection>> & SseRoutes<TApp, TBase>, TBase>;
+export declare function hono<TApp extends ActSurface = ActSurface, TBase extends string = "/api", const TSelection extends ActionSelection<TApp> | undefined = ActionSelection<TApp> | undefined>(app: TApp, options: HonoOptions<TApp> & {
     readonly basePath?: TBase;
+    readonly actions?: TSelection;
 }): Hono<{
     Variables: ActMiddlewareVariables;
-}, ActionRoutes<TApp, TBase>, TBase>;
+}, ActionRoutes<TApp, TBase, SelectedActions<TApp, TSelection>>, TBase>;
 /**
  * One \`GET <basePath>/sse/<state>?stream=<id>\` per state of \`TApp\`, with
  * \`sse\`: an event stream on \`200\`, {@link ApiError} on an error status.
@@ -6764,8 +6773,8 @@ type ErrorStatus = 400 | 401 | 409 | 410 | 412 | 422 | 500 | 503;
  * \`app.do\` returns (as JSON) on \`200\`, and {@link ApiError} on an error
  * status. \`hc<typeof api>\` and \`testClient(api)\` read it.
  */
-export type ActionRoutes<TApp, TBase extends string> = {
-    [K in keyof AppActions<TApp> & string as MergePath<TBase, \`/actions/\${K}\`>]: {
+export type ActionRoutes<TApp, TBase extends string, TNames extends string = keyof AppActions<TApp> & string> = {
+    [K in TNames as MergePath<TBase, \`/actions/\${K}\`>]: {
         $post: {
             input: {
                 json: AppActions<TApp>[K];
@@ -6789,7 +6798,7 @@ export {};
 
 exports[`@rotorsoft/act-http — public API stability > stable public surface for ./openapi 1`] = `
 "// === index.d.ts ===
-import type { ActSurface } from "../api/dispatch.js";
+import { type ActionSelection, type ActSurface } from "../api/dispatch.js";
 /**
  * Minimal OpenAPI 3.1 document type. The emitter targets the 3.1
  * spec; the type is intentionally a structural subset rather than
@@ -6825,6 +6834,10 @@ export type OpenAPIDocument = {
  * - \`expectedVersion\` — optional, default \`false\`. When \`true\`,
  *   every mutation operation documents an optional \`If-Match\`
  *   request header carrying the expected stream version.
+ *
+ * \`openapi\` also takes \`actions\` (\`{ include }\` or \`{ exclude }\`, typed
+ * against the app's action names), the same selection the Hono generator
+ * takes, so the document describes exactly the routes it serves.
  */
 export type OpenAPIOptions = {
     readonly info: OpenAPIInfo;
@@ -6920,7 +6933,9 @@ export type OpenAPIComponents = {
  *   empty, or if any \`servers[].url\` fails URL parsing after
  *   \`{variable}\` substitution.
  */
-export declare function openapi<TApp extends Pick<ActSurface, "registry">>(app: TApp, options: OpenAPIOptions): OpenAPIDocument;
+export declare function openapi<TApp extends Pick<ActSurface, "registry">>(app: TApp, options: OpenAPIOptions & {
+    readonly actions?: ActionSelection<TApp>;
+}): OpenAPIDocument;
 //# sourceMappingURL=index.d.ts.map"
 `;
 
@@ -7809,7 +7824,7 @@ exports[`@rotorsoft/act-http — public API stability > stable public surface fo
 import { type Actor } from "@rotorsoft/act";
 import type { IdempotencyStore } from "@rotorsoft/act-ops/idempotency";
 import { type TRPCBuiltRouter, type TRPCDefaultErrorShape, type TRPCMiddlewareFunction, type TRPCMutationProcedure, type TRPCSubscriptionProcedure } from "@trpc/server";
-import { type ActionResult, type ActSurface, type AppActions, type AppState, type AppStateNames, type ResolverArgs } from "../api/dispatch.js";
+import { type ActionResult, type ActionSelection, type ActSurface, type AppActions, type AppState, type AppStateNames, type ResolverArgs, type SelectedActions } from "../api/dispatch.js";
 import { type ActorExtractor, type SseOptions, type SseSubscriptionFrame } from "../api/index.js";
 /**
  * Per-call options for {@link trpc}. The host supplies the three
@@ -7919,8 +7934,8 @@ type GeneratedRoot<Ctx extends object> = {
  * so \`createTRPCReact<typeof router>()\` sees \`PressKey\`, \`Clear\`, …
  * instead of an index signature, which trips tRPC React's collision check.
  */
-type ActionProcedures<TApp> = {
-    [K in keyof AppActions<TApp> & string]: TRPCMutationProcedure<{
+type ActionProcedures<TApp, TNames extends string> = {
+    [K in TNames]: TRPCMutationProcedure<{
         input: AppActions<TApp>[K];
         output: ActionResult<TApp, K>;
         meta: object;
@@ -7939,7 +7954,7 @@ type SubscribeRouter<TApp> = {
     };
 };
 /** The router {@link trpc} builds: the actions, and the subscriptions with \`sse\`. */
-export type GeneratedRouter<Ctx extends object, TApp, TRecord> = TRPCBuiltRouter<GeneratedRoot<Ctx>, ActionProcedures<TApp> & TRecord>;
+export type GeneratedRouter<Ctx extends object, TApp, TRecord, TNames extends string = keyof AppActions<TApp> & string> = TRPCBuiltRouter<GeneratedRoot<Ctx>, ActionProcedures<TApp, TNames> & TRecord>;
 /**
  * Build a typed tRPC router from a built \`Act\` instance.
  *
@@ -7972,14 +7987,24 @@ export type GeneratedRouter<Ctx extends object, TApp, TRecord> = TRPCBuiltRouter
  *   middleware augments \`Ctx\` with \`{ actor: Actor }\` on the
  *   downstream procedure context.
  *
+ * Pass \`actions: { include: [...] }\` or \`{ exclude: [...] }\`, typed against
+ * the app's action names, to generate mutations for some actions only. An
+ * action left out has no key on the router, so calling it doesn't compile:
+ * leave out the ones a hand-written procedure owns, so each action has one
+ * entry point. A name the app doesn't register fails at generation.
+ *
  * @param app A built \`Act\` orchestrator.
- * @param options Auth, stream, and (optional) idempotency seams.
- * @returns A tRPC router with one mutation per registered action.
+ * @param options Auth, stream, (optional) idempotency, and (optional) the
+ *   actions to generate.
+ * @returns A tRPC router with one mutation per generated action.
  */
-export declare function trpc<Ctx extends object = object, TApp extends ActSurface = ActSurface>(app: TApp, options: TrpcOptions<Ctx, TApp> & {
+export declare function trpc<Ctx extends object = object, TApp extends ActSurface = ActSurface, const TSelection extends ActionSelection<TApp> | undefined = ActionSelection<TApp> | undefined>(app: TApp, options: TrpcOptions<Ctx, TApp> & {
+    readonly actions?: TSelection;
     readonly sse: SseOptions;
-}): GeneratedRouter<Ctx, TApp, SubscribeRouter<TApp>>;
-export declare function trpc<Ctx extends object = object, TApp extends ActSurface = ActSurface>(app: TApp, options: TrpcOptions<Ctx, TApp>): GeneratedRouter<Ctx, TApp, unknown>;
+}): GeneratedRouter<Ctx, TApp, SubscribeRouter<TApp>, SelectedActions<TApp, TSelection>>;
+export declare function trpc<Ctx extends object = object, TApp extends ActSurface = ActSurface, const TSelection extends ActionSelection<TApp> | undefined = ActionSelection<TApp> | undefined>(app: TApp, options: TrpcOptions<Ctx, TApp> & {
+    readonly actions?: TSelection;
+}): GeneratedRouter<Ctx, TApp, unknown, SelectedActions<TApp, TSelection>>;
 export {};
 //# sourceMappingURL=index.d.ts.map"
 `;
