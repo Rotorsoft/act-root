@@ -581,7 +581,8 @@ export function layout(
   const gap = narrow ? 14 : 20;
   // callers narrow, then the app and the store sharing the rest about 40 / 48
   // actors are icons at the edge; the app and the store are the two centers
-  const L = narrow ? width - pad * 2 : 50;
+  // a narrow edge for the actors, wider only when read models sit under them
+  const L = narrow ? width - pad * 2 : world.tables.length ? 150 : 50;
   const A = narrow
     ? width - pad * 2
     : Math.round((width - pad * 2 - L - gap * 2) * 0.47);

@@ -204,6 +204,22 @@ function Tokens({ moves, lay, run, reduce }: { moves: Move[]; lay: Layout; run: 
   );
 }
 
+let measure_ctx: CanvasRenderingContext2D | null | undefined;
+/** Fits a label to a width: the whole name when it fits, else cut with an ellipsis. */
+function fit_text(text: string, width: number, size: number, weight = 600): string {
+  if (measure_ctx === undefined) measure_ctx = typeof document !== "undefined" ? document.createElement("canvas").getContext("2d") : null;
+  const ctx = measure_ctx;
+  const w = (t: string) => {
+    if (!ctx) return t.length * size * 0.6;
+    ctx.font = `${weight} ${size}px Inter, system-ui, -apple-system, sans-serif`;
+    return ctx.measureText(t).width;
+  };
+  if (w(text) <= width) return text;
+  let n = text.length - 1;
+  while (n > 1 && w(`${text.slice(0, n)}…`) > width) n--;
+  return `${text.slice(0, n)}…`;
+}
+
 const trim = (text: string, max: number) => (text.length > max ? `${text.slice(0, Math.max(1, max - 1))}…` : text);
 
 function stream_colors(all: Frame[]): Map<string, number> {
@@ -294,11 +310,18 @@ function CellView({
         <text x={box.w - 6} y={14} className={styles.cellVer}>
           v{cell.version}
         </text>
-        <text x={11} y={30} className={styles.cellName}>
-          {trim(label, 12)}
-        </text>
+        {(() => {
+          const room = box.w - 16;
+          const size = fit_text(label, room, 10) === label ? 10 : 9;
+          return (
+            <text x={11} y={30} className={styles.cellName} style={{ fontSize: size }}>
+              <title>{label}</title>
+              {fit_text(label, room, size)}
+            </text>
+          );
+        })()}
         <text x={11} y={44} className={styles.cellStream}>
-          {trim(cell.stream, 14)}
+          {trim(cell.stream, Math.floor((box.w - 16) / 5.8))}
         </text>
         {cell.pii && (
           <text x={box.w - 6} y={44} className={`${styles.pii} ${cell.shredded ? styles.shredded : ""}`}>
@@ -522,7 +545,11 @@ function Stage({
               <rect x={box.x} y={box.y} width={box.w} height={box.h} rx={9} />
               <text x={box.x + box.w / 2} y={box.y + 13}>
                 {state === "done" ? "✓ " : state === "fail" ? "✕ " : ""}
-                {(stage.length + (state === "done" || state === "fail" ? 2 : 0)) * 5.9 > box.w - 8 ? (SHORT[stage] ?? stage) : stage}
+                {(() => {
+                  const mark = state === "done" ? "✓ " : state === "fail" ? "✕ " : "";
+                  const full = fit_text(mark + stage, box.w - 8, 11, 500) === mark + stage;
+                  return fit_text(full ? stage : (SHORT[stage] ?? stage), box.w - 8 - (mark ? 12 : 0), 11, 500);
+                })()}
               </text>
             </g>
           );
@@ -624,7 +651,8 @@ function Stage({
             >
               <rect x={c.box.x} y={c.box.y} width={c.box.w} height={c.box.h} rx={c.kind === "event" ? 4 : 9} />
               <text x={c.box.x + 7} y={c.box.y + 13}>
-                {trim(c.label, Math.floor((c.box.w - (c.code ? 22 : 10)) / 6.3))}
+                <title>{c.label}</title>
+                {fit_text(c.label, c.box.w - (c.code ? TIP * 2 + 6 : 12), 11)}
               </text>
               {c.code && <SvgTip x={c.box.x + c.box.w - TIP} y={c.box.y + c.box.h / 2} id={key} content={{ title: c.name, code: c.code }} open={tip} />}
             </g>
