@@ -1,0 +1,1270 @@
+[
+  {
+    "key": "fb3b9f528967",
+    "text": "Monday, nine sharp."
+  },
+  {
+    "key": "663a014650b4",
+    "text": "Maya calls the help desk, a little upset."
+  },
+  {
+    "key": "a5b9fe9bc020",
+    "text": "Her ticket says closed, and nobody remembers closing it."
+  },
+  {
+    "key": "ca2341426b75",
+    "text": "If the desk kept only the ticket's latest row, that's where the story would end."
+  },
+  {
+    "key": "53f03afb86c0",
+    "text": "Every update to that row was a small act of forgetting."
+  },
+  {
+    "key": "a1a8e0a0ea76",
+    "text": "Act keeps the whole story instead, as events in one log."
+  },
+  {
+    "key": "e5d0be0e172b",
+    "text": "Let's watch it remember."
+  },
+  {
+    "key": "8e03c6f173b0",
+    "text": "At the left edge are the actors: people like Maya, and quiet helpers like the drain."
+  },
+  {
+    "key": "6e679373734b",
+    "text": "In the middle runs the Act app."
+  },
+  {
+    "key": "6c963074144c",
+    "text": "Every request knocks on one door, app dot do, then walks the action layer."
+  },
+  {
+    "key": "40633e21cc37",
+    "text": "Below it live the slices: states with their actions and events, and the reactions and projections that answer them."
+  },
+  {
+    "key": "cd37376ca6bc",
+    "text": "On the right is the event store."
+  },
+  {
+    "key": "99e93320425e",
+    "text": "One log, one dot per event, in the order things happened."
+  },
+  {
+    "key": "4f88219360b9",
+    "text": "The stream a scene is about lights up."
+  },
+  {
+    "key": "aae4622f3f95",
+    "text": "Hover any dot, and its whole stream lights up with it."
+  },
+  {
+    "key": "f9aaf502ca4e",
+    "text": "Data travels along the link:"
+  },
+  {
+    "key": "b16846767b72",
+    "text": "Maya opens a ticket, and its event lands at the end of the log."
+  },
+  {
+    "key": "4b6de3464678",
+    "text": "Curious how something is built?"
+  },
+  {
+    "key": "e98db780c5a7",
+    "text": "Its little code icon shows you, with links to read more."
+  },
+  {
+    "key": "c286409822bb",
+    "text": "The captions follow the voice, and the speed control next to Play sets the pace."
+  },
+  {
+    "key": "5a95bc53f70b",
+    "text": "Play runs a chapter, the arrows step, and the menu jumps anywhere."
+  },
+  {
+    "key": "95c05077426e",
+    "text": "Ready?"
+  },
+  {
+    "key": "d7f55d57558a",
+    "text": "Let's go."
+  },
+  {
+    "key": "19d4ea5e0943",
+    "text": "Lee, the team lead, wants to know why one ticket took a whole week to close."
+  },
+  {
+    "key": "f005bb45a575",
+    "text": "A table of current rows just shrugs."
+  },
+  {
+    "key": "9195e71daa1c",
+    "text": "A log can answer."
+  },
+  {
+    "key": "2439e8490832",
+    "text": "This is the desk's event store: every dot is one event, in the order it happened, wrapping like lines of text."
+  },
+  {
+    "key": "82f683f37282",
+    "text": "A ring is a snapshot, a square is a tombstone, and a hollow dot holds something sensitive."
+  },
+  {
+    "key": "722b693f14e1",
+    "text": "The history grows from a fixed seed, so it's the same every time you watch."
+  },
+  {
+    "key": "888aa3e76a44",
+    "text": "Work keeps rolling in."
+  },
+  {
+    "key": "08133f1c7bd9",
+    "text": "Each commit takes the next global id, so new events always land at the end."
+  },
+  {
+    "key": "6ca603668668",
+    "text": "Nothing already written ever changes."
+  },
+  {
+    "key": "e1a0918fa35a",
+    "text": "Each event also belongs to one stream, and takes that stream's next version."
+  },
+  {
+    "key": "f111e0fe87ff",
+    "text": "The dashed lens marks this scene's events, and the cells below zoom in."
+  },
+  {
+    "key": "7e0642dee7f1",
+    "text": "Ticket 4821 holds version 0 and version 1, with other tickets chatting in between."
+  },
+  {
+    "key": "5486b1c7b7fb",
+    "text": "Reading one ticket's story is just a question asked of the same log."
+  },
+  {
+    "key": "3cca28219e7d",
+    "text": "Ask for the exact stream, and you get its events alone, in order."
+  },
+  {
+    "key": "236a4f3f19f9",
+    "text": "Every event also remembers why it happened."
+  },
+  {
+    "key": "2984eb108e34",
+    "text": "Its causation names the action and who did it."
+  },
+  {
+    "key": "0cd761d86051",
+    "text": "Its correlation is a thread that ties a whole workflow together."
+  },
+  {
+    "key": "c42957fa2694",
+    "text": "Maya's screen keeps flickering, and she'd like someone to care."
+  },
+  {
+    "key": "2f0d72146325",
+    "text": "First the desk needs a ticket that knows what it is."
+  },
+  {
+    "key": "37dc14fd21e0",
+    "text": "In Act that's a state: a Zod schema, a starting value, the events it emits, how each event patches it, and the actions that emit them."
+  },
+  {
+    "key": "1b69d7fa974c",
+    "text": "Hand it to act, build, and you have an app."
+  },
+  {
+    "key": "d9891eb58ac2",
+    "text": "Maya opens ticket 4830 with a title."
+  },
+  {
+    "key": "e58f44e27894",
+    "text": "The first thing Act does is check her payload against the action's schema."
+  },
+  {
+    "key": "c3ac061eeb3f",
+    "text": "Then the action loads the stream."
+  },
+  {
+    "key": "1609936844fa",
+    "text": "Ticket 4830 is brand new, so it starts from its initial value, at version minus 1."
+  },
+  {
+    "key": "a2388b7588b0",
+    "text": "The handler decides what happened: a Ticket Opened, carrying her title."
+  },
+  {
+    "key": "23e3f604597a",
+    "text": "The event folds into the state before anything is saved, and the result is checked against the schema."
+  },
+  {
+    "key": "f3932704558f",
+    "text": "The commit expects version minus 1, finds it, and lands as global id event 1905, stream version 0."
+  },
+  {
+    "key": "43da27903cf5",
+    "text": "Maya gets back a snapshot for every event that landed."
+  },
+  {
+    "key": "a29704a377d4",
+    "text": "She adds a message."
+  },
+  {
+    "key": "8df4b9bb5237",
+    "text": "It loads version 0 and commits version 1, and the log grows by one, to event 1906."
+  },
+  {
+    "key": "98fb02a23199",
+    "text": "Versions count within a stream; ids count across the whole store."
+  },
+  {
+    "key": "c9fb103fe9a7",
+    "text": "Later, loading the ticket replays those events in order."
+  },
+  {
+    "key": "4ad127069ed7",
+    "text": "The ticket was never saved as a row."
+  },
+  {
+    "key": "812abe0202ee",
+    "text": "It's remembered."
+  },
+  {
+    "key": "6e5dd7ad2ecc",
+    "text": "Every desk has rules, and rules love to wander."
+  },
+  {
+    "key": "41c604924568",
+    "text": "One hides in a controller, another in a service, and soon they disagree."
+  },
+  {
+    "key": "6c5b29f06cc5",
+    "text": "In Act every action walks the same checks, in the same order, and stops at the first one that fails."
+  },
+  {
+    "key": "7d24e5e6b830",
+    "text": "Nothing is saved until the last one passes."
+  },
+  {
+    "key": "b1089dc583cf",
+    "text": "Maya tries to close her ticket with a reason of 42."
+  },
+  {
+    "key": "c23de7567482",
+    "text": "A number, where words belong."
+  },
+  {
+    "key": "3353c45982d0",
+    "text": "The schema says no with a Validation Error, and the action never even loads."
+  },
+  {
+    "key": "42e6820c6278",
+    "text": "Bo closes it properly, with a real reason."
+  },
+  {
+    "key": "0bc5de34aa44",
+    "text": "Every check passes, and Ticket Closed lands as version 2."
+  },
+  {
+    "key": "5a7a5d4af152",
+    "text": "Maya, still cross, tries to close it again."
+  },
+  {
+    "key": "ce35d2c42159",
+    "text": "A precondition is a named rule the action needs right now, and this ticket is no longer open."
+  },
+  {
+    "key": "cf7d0c9ba1b1",
+    "text": "The action politely refuses with a Precondition Error."
+  },
+  {
+    "key": "6abd8ea122ab",
+    "text": "Some promises must hold after every action."
+  },
+  {
+    "key": "ddb47d5258f3",
+    "text": "Those are invariants, and they live in the state's schema."
+  },
+  {
+    "key": "6d2d5e855f32",
+    "text": "Say a buggy handler closes ticket 4822 without saying who closed it."
+  },
+  {
+    "key": "f41c4e7c5409",
+    "text": "The schema spots the gap, and the action is refused with a Validation Error before anything is saved."
+  },
+  {
+    "key": "fc0595217885",
+    "text": "None of these refusals reached the log."
+  },
+  {
+    "key": "82606f815ce7",
+    "text": "No event, no version, and no reaction woke up."
+  },
+  {
+    "key": "a36f7ef204b9",
+    "text": "The log still ends at event 1907."
+  },
+  {
+    "key": "828fec96333e",
+    "text": "Two agents, one ticket, the very same instant."
+  },
+  {
+    "key": "13a6d416212f",
+    "text": "Maya and Ana both add a message to ticket 4821, and both actions load it at version 1."
+  },
+  {
+    "key": "d547db55998b",
+    "text": "Maya is a hair faster, and her message lands as version 2 (event 1908)."
+  },
+  {
+    "key": "88962db4c0f5",
+    "text": "Ana's commit expected 1 and found 2, so the store hands it back with a Concurrency Error."
+  },
+  {
+    "key": "be78a57f9f30",
+    "text": "It names the stream, the version she expected, and the one she found."
+  },
+  {
+    "key": "7121167d547e",
+    "text": "Nothing of hers was saved."
+  },
+  {
+    "key": "89a507a4b9ea",
+    "text": "Give the action a retry budget, and Act handles the awkward part."
+  },
+  {
+    "key": "5d849620cf3b",
+    "text": "It reloads, checks the rules again on the fresh state, and commits."
+  },
+  {
+    "key": "e06750784298",
+    "text": "Ana's message lands as version 3 (event 1909), and she never even knows there was a race."
+  },
+  {
+    "key": "317d8d861f4c",
+    "text": "When the caller pins a version, though, the conflict is final."
+  },
+  {
+    "key": "ce6beaf2e668",
+    "text": "With an expected version of 1 the action fails at once."
+  },
+  {
+    "key": "1b2528c312ec",
+    "text": "No retry can make version 3 equal 1."
+  },
+  {
+    "key": "31b9c48d3107",
+    "text": "Ticket 4821 keeps growing, and replaying its whole life on every click would get slow."
+  },
+  {
+    "key": "629715d5dd7f",
+    "text": "A warm load starts from the cache, in memory by default, and replays only what came after."
+  },
+  {
+    "key": "22eebb59b417",
+    "text": "Here the cache already holds the ticket at version 3, and nothing came after, so there's nothing to do."
+  },
+  {
+    "key": "5b215d30ae1d",
+    "text": "With a snap rule on the state, an action that makes the rule true also saves a snapshot."
+  },
+  {
+    "key": "7828dbd579be",
+    "text": "It's an event too, on the stream's next version (version 5, event 1911), holding the state at that moment."
+  },
+  {
+    "key": "3210e4663a79",
+    "text": "Then the server restarts, and the cache is empty."
+  },
+  {
+    "key": "6d907c1959c9",
+    "text": "A cold load starts from the latest snapshot and folds only what came after, not the whole stream."
+  },
+  {
+    "key": "55ad86dfb304",
+    "text": "Sometimes the question is about the past."
+  },
+  {
+    "key": "b75d343dfed9",
+    "text": "A time-travel load reads only the events below event 1909, skipping the cache and any later snapshot, and it never writes a thing."
+  },
+  {
+    "key": "b98dfc666efd",
+    "text": "New tickets shouldn't sit around waiting to be noticed."
+  },
+  {
+    "key": "e1c158e86b61",
+    "text": "The desk wants each one assigned the moment it opens, without anyone wiring up a queue."
+  },
+  {
+    "key": "416c48b259b1",
+    "text": "When an app with reactions starts, correlate reads the log from its bookmark and notes the work for every reaction."
+  },
+  {
+    "key": "4e64db2bd59e",
+    "text": "Here it sweeps the whole store once."
+  },
+  {
+    "key": "75d2c7fe53f2",
+    "text": "After that, it only reads what's new."
+  },
+  {
+    "key": "f7fd03e55b78",
+    "text": "Maya opens ticket 4831 (event 1912)."
+  },
+  {
+    "key": "ac333bfb13b9",
+    "text": "Its event has a reaction, so the commit schedules a settle all by itself."
+  },
+  {
+    "key": "1679af28a72e",
+    "text": "No wiring, no message broker: the log is the backbone."
+  },
+  {
+    "key": "ab9d5fc8415a",
+    "text": "Correlate reads past its bookmark and asks each reaction where it should run."
+  },
+  {
+    "key": "2ec429e5a83b",
+    "text": "The assign reaction names its own target stream for this ticket, which is subscribed, with work marked up to event 1912."
+  },
+  {
+    "key": "e56904f12665",
+    "text": "The drain claims targets that have work, each under a lease, and fetches the events past the target's watermark, which is minus 1 here."
+  },
+  {
+    "key": "18e519d5ebbd",
+    "text": "The handler calls app dot do to assign the ticket."
+  },
+  {
+    "key": "11dffe228649",
+    "text": "That new action inherits the event that woke it: same correlation, with Ticket Opened as its cause."
+  },
+  {
+    "key": "3f0e1e29ce5e",
+    "text": "On success the drain acks."
+  },
+  {
+    "key": "921661d2ec6d",
+    "text": "The watermark moves past event 1912, and the lease is released."
+  },
+  {
+    "key": "b09e4513c29a",
+    "text": "A stream is never acked past an event its reaction hasn't handled."
+  },
+  {
+    "key": "57021d26acb1",
+    "text": "Settle keeps looping correlate and drain until a pass finds nothing."
+  },
+  {
+    "key": "295127d21a1d",
+    "text": "The next pass reads event 1913, which no reaction wants, so the app is settled and says so."
+  },
+  {
+    "key": "f377579d7ce6",
+    "text": "Leave out the target, and a reaction runs on the event's own stream."
+  },
+  {
+    "key": "8bfcac1b78f8",
+    "text": "In tests, switch off auto-settle and walk the pipeline yourself, one step at a time."
+  },
+  {
+    "key": "ce53e57fe4f5",
+    "text": "Monday morning, and one worker can't keep up."
+  },
+  {
+    "key": "990f546519af",
+    "text": "Two tickets open (event 1914, event 1915), and correlate marks two targets."
+  },
+  {
+    "key": "efacba6ec6cf",
+    "text": "Two processes drain the same store and compete for the work."
+  },
+  {
+    "key": "be68f5db372b",
+    "text": "Each claims a different target, because a lease someone holds is invisible to everyone else."
+  },
+  {
+    "key": "e0da87b89fe2",
+    "text": "Then worker A trips over a cable mid-handler."
+  },
+  {
+    "key": "cd9abf6b9b64",
+    "text": "Its lease runs out, and exactly one other worker takes over."
+  },
+  {
+    "key": "63640619cbf3",
+    "text": "B now runs both, and the failed try counts against the target's retry budget."
+  },
+  {
+    "key": "058aeb8e826f",
+    "text": "B's handlers assign both tickets (event 1916, event 1917), then ack both targets."
+  },
+  {
+    "key": "ac86d36e7d7c",
+    "text": "Nobody noticed a thing."
+  },
+  {
+    "key": "aebc3e3bed42",
+    "text": "Some work is just slow, like calling another company's webhook."
+  },
+  {
+    "key": "cee257280923",
+    "text": "It shouldn't hold up everything else."
+  },
+  {
+    "key": "d685028ffe1e",
+    "text": "A lane is a separate drain with its own lease and claim budget, so webhooks get a lane of their own, with 30-second leases."
+  },
+  {
+    "key": "8982694d32cf",
+    "text": "Ticket 4832 escalates (event 1918)."
+  },
+  {
+    "key": "b6bb7ddebe12",
+    "text": "The webhooks lane claims its target while the default lane keeps humming along."
+  },
+  {
+    "key": "a4c51ea5a41c",
+    "text": "Lanes run side by side, so the slow one never blocks the fast one."
+  },
+  {
+    "key": "cfed363d4162",
+    "text": "Inside a lane, priority decides who gets picked first when work piles up."
+  },
+  {
+    "key": "d45993d6dd32",
+    "text": "It never reorders a stream's events, and it can change while the app runs."
+  },
+  {
+    "key": "b897f513a907",
+    "text": "Two in the morning, and the escalation service is down."
+  },
+  {
+    "key": "5b5015a1d35f",
+    "text": "The webhook posts event 1918 and gets a 503 back."
+  },
+  {
+    "key": "7079515509bf",
+    "text": "A failed try waits out its backoff: 200 milliseconds for the first retry, times a jitter between 0.5 and 1.5."
+  },
+  {
+    "key": "c3673bb096d1",
+    "text": "The schedule lives on the target, so no worker jumps the gun."
+  },
+  {
+    "key": "c99984b018cb",
+    "text": "Retries two and three fail too."
+  },
+  {
+    "key": "73d2d15eb286",
+    "text": "The wait doubles each time, to 400 milliseconds and then 800, up to a cap, each with its own jitter."
+  },
+  {
+    "key": "59f57b4e03dc",
+    "text": "The fourth try fails, and the budget is spent, so the target blocks."
+  },
+  {
+    "key": "a43b69d23d57",
+    "text": "Claim skips it, its watermark waits just before event 1918, and a blocked event fires so a human can take a look."
+  },
+  {
+    "key": "95ab18dc4609",
+    "text": "By breakfast the service is back."
+  },
+  {
+    "key": "9e781f0de630",
+    "text": "Unblocking picks up at the watermark: event 1918 goes out once more, and nothing before it runs again."
+  },
+  {
+    "key": "e3bcc2804ac0",
+    "text": "Ticket 4833 escalates (event 1919), and the service answers 400: a request that will never work, no matter how often you send it."
+  },
+  {
+    "key": "673a75c3a8c4",
+    "text": "The webhook throws a Non Retryable Error, which blocks on the spot without spending the budget, unless blocking on errors is switched off."
+  },
+  {
+    "key": "cd26e74fc45d",
+    "text": "Tempting as it is, this is not the moment for a reset."
+  },
+  {
+    "key": "e1aedc73c652",
+    "text": "Reset rewinds the watermark to minus 1 and replays everything, so every webhook would go out again."
+  },
+  {
+    "key": "f28a35e8e448",
+    "text": "Reset rebuilds; unblock recovers."
+  },
+  {
+    "key": "4481ba1c5815",
+    "text": "Sometimes it's the store itself that stumbles."
+  },
+  {
+    "key": "cd00871a4ed7",
+    "text": "The drain, settle and autoclose loops share a circuit breaker: after enough failures it opens, leaves the store alone, and tries again after a cooldown."
+  },
+  {
+    "key": "eb2ea137d27d",
+    "text": "An error event fires each time."
+  },
+  {
+    "key": "79e728444e07",
+    "text": "The store comes back, and the breaker closes on the next pass."
+  },
+  {
+    "key": "7a05a8c7fdd5",
+    "text": "The bad request gets fixed upstream, and the operator unblocks the target."
+  },
+  {
+    "key": "c2afe17bd4ad",
+    "text": "A ticket nobody touches should escalate on its own, without a cron job sweeping the table at midnight."
+  },
+  {
+    "key": "a1de62de3566",
+    "text": "Ticket 4821 is assigned to escalate after 10:00 (event 1920)."
+  },
+  {
+    "key": "3e5f5248f3d5",
+    "text": "Correlate marks its escalate target, and the drain finds the reaction deferred: the event waits, and the target holds a due time."
+  },
+  {
+    "key": "99b8d1e354cf",
+    "text": "Claim skips the target until 10:00."
+  },
+  {
+    "key": "c5209205c4d8",
+    "text": "The due time comes from the event, never from the clock on the wall, so a late worker lands on the same time."
+  },
+  {
+    "key": "67acceb1e66b",
+    "text": "At 10:00 it runs, and the ticket escalates (event 1921)."
+  },
+  {
+    "key": "cd7901d66e42",
+    "text": "Ticket 4822 is set to escalate after 11:00 (event 1922), but Bo closes it at 10:40 (event 1923)."
+  },
+  {
+    "key": "3b129f24c022",
+    "text": "Nicely done, Bo."
+  },
+  {
+    "key": "b0e522352a05",
+    "text": "At 11:00 the timer wakes up, loads the ticket, sees it's closed, and quietly goes back to sleep."
+  },
+  {
+    "key": "355f1a88c388",
+    "text": "The drain acks, and nothing is added."
+  },
+  {
+    "key": "524a29824d52",
+    "text": "A guard like this is how a deferred chain ends."
+  },
+  {
+    "key": "1811d1f33fd8",
+    "text": "When the wait depends on something the handler must look up first, it throws a Defer Signal instead."
+  },
+  {
+    "key": "574321bf87ba",
+    "text": "That holds the stream until it's due, then delivers the event again."
+  },
+  {
+    "key": "c4e37fd66bdc",
+    "text": "Reactions that share a target travel as a group."
+  },
+  {
+    "key": "7aa376152466",
+    "text": "When one defers, the whole group waits and runs again when due."
+  },
+  {
+    "key": "75fdcd7052ab",
+    "text": "A reaction that should wait alone gets a target of its own."
+  },
+  {
+    "key": "7b1f7ea5c31f",
+    "text": "The support screen needs a list of tickets, fast."
+  },
+  {
+    "key": "174c87973aba",
+    "text": "Nobody wants to replay the log for every page view."
+  },
+  {
+    "key": "16fb916201f8",
+    "text": "A state projection folds a state's own patches and writes one row per stream into a read model."
+  },
+  {
+    "key": "6055f8a0686f",
+    "text": "Its target is called tickets, and a new one starts at watermark minus 1."
+  },
+  {
+    "key": "e8627614e444",
+    "text": "It drains like any reaction: it catches up on the whole log, writes the rows, then acks."
+  },
+  {
+    "key": "6a49c974b474",
+    "text": "If a write fails, the watermark stays put and nothing is lost."
+  },
+  {
+    "key": "3498bfb72274",
+    "text": "Maya adds a message to ticket 4831 (event 1924), and the projection's next drain updates a single row."
+  },
+  {
+    "key": "dd894237cbfe",
+    "text": "A slice bundles partial states, projections and reactions into one feature."
+  },
+  {
+    "key": "cd5b08f647a7",
+    "text": "Partial states with the same name merge into one, so features grow without stepping on each other's toes."
+  },
+  {
+    "key": "3c6b4bb7d774",
+    "text": "Then the screen gets a redesign, and the table needs a new shape."
+  },
+  {
+    "key": "74183cf06844",
+    "text": "Empty it and reset the projection."
+  },
+  {
+    "key": "11c465ab7d1c",
+    "text": "The watermark goes back to minus 1, and the replay schedules itself."
+  },
+  {
+    "key": "4c264dbb93eb",
+    "text": "The replay walks the log again from event 1819, and the rows come back, good as new."
+  },
+  {
+    "key": "f009d5973405",
+    "text": "Nothing in the log changed."
+  },
+  {
+    "key": "506596391466",
+    "text": "A projection is only a view of it."
+  },
+  {
+    "key": "c8c744d098ab",
+    "text": "An agent can juggle five open tickets at most, and that rule belongs to the agent, not the ticket."
+  },
+  {
+    "key": "747cecd50987",
+    "text": "So assigning one touches both."
+  },
+  {
+    "key": "601c6d2f7477",
+    "text": "On a fresh store, with two agents and Bo already at five, Lee assigns ticket 5200 to Ana."
+  },
+  {
+    "key": "971dbb3e8187",
+    "text": "The action loads every state the decision needs, all at once."
+  },
+  {
+    "key": "d1aaf8e445b1",
+    "text": "The ticket has no agent yet, so that load is skipped."
+  },
+  {
+    "key": "de5ca7947d5d",
+    "text": "Each event goes to the stream that asked for it: the assignment to the ticket, and the taken slot to Ana."
+  },
+  {
+    "key": "98b102d7108c",
+    "text": "The dropped one goes away with the skipped load."
+  },
+  {
+    "key": "518ea0207de1",
+    "text": "Both land in one commit, each stream guarded by the version it had at load."
+  },
+  {
+    "key": "c3a18efa5973",
+    "text": "All or nothing."
+  },
+  {
+    "key": "76c2e666a1ba",
+    "text": "Next, Lee tries to give ticket 5201 to Bo."
+  },
+  {
+    "key": "2954062f5d21",
+    "text": "That would make 6 open tickets for Bo, and his state's schema says no."
+  },
+  {
+    "key": "8d47c4ba88c5",
+    "text": "It's a Validation Error, and nothing lands on any stream."
+  },
+  {
+    "key": "195f8828f581",
+    "text": "So Lee gives 5201 to Ana instead, loading her stream at version 1."
+  },
+  {
+    "key": "3e5f251caba2",
+    "text": "Meanwhile ticket 5200 closes, and closing frees Ana's slot in its own commit."
+  },
+  {
+    "key": "a83a847a94b5",
+    "text": "Her stream moves to version 2."
+  },
+  {
+    "key": "b5826812437a",
+    "text": "Lee's commit expected Ana at version 1 and found version 2, so the whole commit bounces with a Concurrency Error that names her stream."
+  },
+  {
+    "key": "5f8c97982188",
+    "text": "The retry budget reloads every stream and decides again."
+  },
+  {
+    "key": "b5d2049ae54b",
+    "text": "The retry sees Ana with 0 open tickets and commits both events."
+  },
+  {
+    "key": "df4b9c83c0fd",
+    "text": "A load that lists no events is just a read: nothing is added to it, so it isn't guarded."
+  },
+  {
+    "key": "bc015365dddf",
+    "text": "A customer writes in: please forget me."
+  },
+  {
+    "key": "99240b059949",
+    "text": "In a log that never forgets, that sounds impossible, unless the personal bits were kept apart from the start."
+  },
+  {
+    "key": "f7ced22b567c",
+    "text": "Lee registers, and his email is marked sensitive, so it never goes into the event's data."
+  },
+  {
+    "key": "b27b2141e608",
+    "text": "It goes into a separate pii column of the same row, in the same transaction."
+  },
+  {
+    "key": "68a97072ec7e",
+    "text": "A read with no actor, like a background job or a script, sees REDACTED where every sensitive field would be."
+  },
+  {
+    "key": "84376f82fea5",
+    "text": "Reactions and projections never see them either."
+  },
+  {
+    "key": "a4b31303da03",
+    "text": "The state's disclose rule decides who may read the real thing."
+  },
+  {
+    "key": "f0e57f588872",
+    "text": "Lee loads his own stream as himself, the rule agrees, and he sees his email."
+  },
+  {
+    "key": "f4b782f7536c",
+    "text": "Then Lee asks to be forgotten."
+  },
+  {
+    "key": "a2e78de14f42",
+    "text": "Forgetting user 42 wipes the pii column of every event on the stream, right where it sits."
+  },
+  {
+    "key": "0aa86a58ec05",
+    "text": "Every later read gets SHREDDED, even for the boss."
+  },
+  {
+    "key": "9729807f6fc7",
+    "text": "Everything else in the log stays."
+  },
+  {
+    "key": "eddfa875bd2c",
+    "text": "A snapshot would copy that data somewhere forget can't reach, so a state with sensitive fields can't snap, and the build says so."
+  },
+  {
+    "key": "f4206b379104",
+    "text": "For the same reason, a restart close skips such a stream."
+  },
+  {
+    "key": "a21e4eb89466",
+    "text": "A year later, closed tickets still sit in the log, taking up space and slowing every scan."
+  },
+  {
+    "key": "3b9feca3e7a3",
+    "text": "Time to close the books, carefully."
+  },
+  {
+    "key": "91515433d458",
+    "text": "Ticket 4822 is done, but the tickets projection has only read up to event 1615, so the stream is skipped for now."
+  },
+  {
+    "key": "81b2d967caff",
+    "text": "A close never drops events a reaction hasn't seen."
+  },
+  {
+    "key": "fc14c751d11b",
+    "text": "The projection catches up, and close tries again."
+  },
+  {
+    "key": "4d8ca04adddc",
+    "text": "It commits a tombstone guard at the stream's version (event 1618, version 3)."
+  },
+  {
+    "key": "eb9d6ee97ed6",
+    "text": "From here on, nobody can write to it."
+  },
+  {
+    "key": "76fd63664e6b",
+    "text": "The archive callback runs while the stream is guarded."
+  },
+  {
+    "key": "b7be9e75d9a4",
+    "text": "If it fails, the stream stays guarded and nothing is deleted, so the close can simply try again."
+  },
+  {
+    "key": "4b55c93965de",
+    "text": "Then the stream's events are deleted in one transaction, leaving a single seed: a tombstone at version 0 (event 1619)."
+  },
+  {
+    "key": "356432c20c40",
+    "text": "The cache is updated, and a closed event fires."
+  },
+  {
+    "key": "ebd25626a521",
+    "text": "Any action on a closed stream now gets a Stream Closed Error."
+  },
+  {
+    "key": "024fd2a79b55",
+    "text": "The tombstone is its final word."
+  },
+  {
+    "key": "57abc3fdc005",
+    "text": "A restart is the gentler close."
+  },
+  {
+    "key": "22bf41cf626a",
+    "text": "Ana's stream is guarded and deleted, then seeded with a snapshot of her final state at version 0 (event 1621)."
+  },
+  {
+    "key": "b0bcc6f8c741",
+    "text": "Her next action lands on version 1 (event 1622), picking up right where the seed left off."
+  },
+  {
+    "key": "fe450b108147",
+    "text": "The log gets lighter, and the state carries on."
+  },
+  {
+    "key": "cb9851bd0541",
+    "text": "At scale the same dance runs stream by stream: check for pending work, guard, archive, delete, and leave one tombstone at version 0."
+  },
+  {
+    "key": "16961995bc22",
+    "text": "The dots lift away into the archive, leaving holes, and the seeds land at the end."
+  },
+  {
+    "key": "6a577387624a",
+    "text": "The ids of deleted events are never reused, so the holes stay until a restore tidies up."
+  },
+  {
+    "key": "c91ef3e0a3e5",
+    "text": "The counts in the store's header always come from the store itself."
+  },
+  {
+    "key": "98c567e74eed",
+    "text": "Nobody wants to remember to close tickets by hand, months after they're done."
+  },
+  {
+    "key": "b5bc960fd313",
+    "text": "An autoclose rule becomes a reaction on the state's events, one target per stream."
+  },
+  {
+    "key": "1fa32cf8d89e",
+    "text": "Ticket 7001 closed on Feb 20, so the reaction waits 90 days: a stored schedule, with no sweep."
+  },
+  {
+    "key": "6f520151487e",
+    "text": "When it comes due, inside the quiet off-hours window, it checks the live head."
+  },
+  {
+    "key": "70618eccc664",
+    "text": "Still closed, so it runs the same close an operator would, archiving through the state's own archive."
+  },
+  {
+    "key": "3f649ff676a4",
+    "text": "A reopened ticket would be left alone."
+  },
+  {
+    "key": "ce2c8ad60485",
+    "text": "There's no sweep job anywhere."
+  },
+  {
+    "key": "7bd8e0bf9e46",
+    "text": "Each stream's own timer comes due by itself, and each close runs only when that ticket is still closed and old enough."
+  },
+  {
+    "key": "8101655464d3",
+    "text": "Here the ones due by day 210, a day picked for the example, retire together."
+  },
+  {
+    "key": "bd154f43f9d0",
+    "text": "Some streams never end."
+  },
+  {
+    "key": "5e8949b17a95",
+    "text": "A ledger keeps taking entries for years, and its oldest history just costs space."
+  },
+  {
+    "key": "e6495afb6445",
+    "text": "Keeping 180 days trims anything older."
+  },
+  {
+    "key": "9fcb16c08bd3",
+    "text": "Say today is Oct 1 (the dates here are picked for the example), so the cutoff is Apr 4."
+  },
+  {
+    "key": "9facbc34d16b",
+    "text": "The closest snapshot before that is from Mar 01 (event 1577)."
+  },
+  {
+    "key": "5f2e9c027171",
+    "text": "A windowed close deletes only the events below that snapshot."
+  },
+  {
+    "key": "2397afe29ba5",
+    "text": "No tombstone and no seed: the snapshot holds the balance, and the ledger keeps going."
+  },
+  {
+    "key": "5efd9018f87b",
+    "text": "The window moves forward as the ledger commits."
+  },
+  {
+    "key": "295ba94f6905",
+    "text": "A ledger that went quiet gets trimmed with an explicit windowed close, which archives only through its own archive."
+  },
+  {
+    "key": "09203cbfe807",
+    "text": "Every ledger plays by the same rule: find the closest snapshot older than the cutoff (day 180 here, picked for the example) and delete only what's below it."
+  },
+  {
+    "key": "462ffe4fb920",
+    "text": "A ledger without one keeps everything."
+  },
+  {
+    "key": "310170453d1b",
+    "text": "The snapshots stay, and every ledger stays live."
+  },
+  {
+    "key": "7a0bc0d6bad9",
+    "text": "After all that closing and trimming, the store looks like Swiss cheese, and an old event name is still hanging around."
+  },
+  {
+    "key": "07bdfa213e00",
+    "text": "Restore copies a source into a sink in one transaction."
+  },
+  {
+    "key": "cb392be21108",
+    "text": "Ids renumber neatly, created times are kept, and causation follows the new ids."
+  },
+  {
+    "key": "30bca052e0d0",
+    "text": "It can tidy up on the way, dropping every snapshot that has history before it, while keeping a stream's first one, the one a trimmed or restarted stream starts from."
+  },
+  {
+    "key": "f3b7b23bef1a",
+    "text": "It can update old events too."
+  },
+  {
+    "key": "76449f69dc46",
+    "text": "On the live store an event never changes, and a new name like Posted version 2 takes over from the old one."
+  },
+  {
+    "key": "95ad96d4f14b",
+    "text": "A restore can rewrite the old ones as they pass, checked on both sides."
+  },
+  {
+    "key": "196416163997",
+    "text": "Restore leaves the cache and your read models alone."
+  },
+  {
+    "key": "aa19d4755877",
+    "text": "So after a big restore, clear the cache and rebuild the projections with a reset."
+  },
+  {
+    "key": "b675eec99f6a",
+    "text": "And before trouble finds you, an audit walks the store and tells the operator what needs attention:"
+  },
+  {
+    "key": "e0f3c7940d61",
+    "text": "schema drift, close and restart candidates, stuck reactions, snapshot drift and correlation gaps."
+  },
+  {
+    "key": "af8f5e9d6114",
+    "text": "The desk grows to two servers sharing one Postgres store, and each wants to know when the other writes."
+  },
+  {
+    "key": "89dde6ad4a45",
+    "text": "Without notify, server B only notices A's commit when it polls, every 10 s by default."
+  },
+  {
+    "key": "f81e88c3f50f",
+    "text": "With a store that notifies, A's commit taps B on the shoulder right away, and B settles."
+  },
+  {
+    "key": "b3457d7ccdb2",
+    "text": "A server never hears its own commits, since those already settle locally."
+  },
+  {
+    "key": "a675c2b1a308",
+    "text": "Inject the store before building the app, or nothing gets wired."
+  },
+  {
+    "key": "032b3e572a67",
+    "text": "Notify is a nudge, not a promise."
+  },
+  {
+    "key": "92d8c853f490",
+    "text": "Correctness always comes from claiming and draining over the store, which is why the wake-up channel can be swapped, for example for Redis."
+  },
+  {
+    "key": "a86c306ef7fc",
+    "text": "One process can also host several Acts, each with its own store and cache, passed in together."
+  },
+  {
+    "key": "1268fc67f3ea",
+    "text": "Two tenants, two logs, and no gossip between them."
+  },
+  {
+    "key": "272f3397e95a",
+    "text": "One store always belongs to one application."
+  },
+  {
+    "key": "b4707bc592c6",
+    "text": "When it's time to go home, shutdown waits for in-flight drains up to a grace period, hands back the correlation lease, and starts nothing new."
+  },
+  {
+    "key": "bae5aabf936d",
+    "text": "Agents don't type app dot do; they click buttons in a browser."
+  },
+  {
+    "key": "5994aa3d6c47",
+    "text": "The HTTP package walks the registry and builds a route for every action: the payload goes in, its snapshots come out, typed all the way to the browser."
+  },
+  {
+    "key": "be8b5c58e284",
+    "text": "Errors map to status codes in one table, so a refused precondition comes back as 409 with PRECONDITION."
+  },
+  {
+    "key": "8ec6f867fdb1",
+    "text": "With server-sent events, every committed change reaches the browsers watching that state as a small, versioned patch."
+  },
+  {
+    "key": "14c4001fb0b0",
+    "text": "A browser that falls behind knows to refetch."
+  },
+  {
+    "key": "3ebbae184f37",
+    "text": "Calls to the outside world are reactions too."
+  },
+  {
+    "key": "e0e0edc7550a",
+    "text": "A webhook handler comes with a timeout, an idempotency key taken from the event id, and typed errors that drive retries and blocking."
+  },
+  {
+    "key": "2a93b013a307",
+    "text": "Everything you've watched ran on one port: the store."
+  },
+  {
+    "key": "80c3a2d5c5aa",
+    "text": "In-memory is the default, and Postgres and SQLite run the very same log in production."
+  },
+  {
+    "key": "503c66826a96",
+    "text": "Inject one before building the app."
+  },
+  {
+    "key": "d330664463c2",
+    "text": "Swap the adapter, and nothing above the log changes: same ids, same versions, same leases."
+  },
+  {
+    "key": "17eb78d26794",
+    "text": "A new adapter earns its badge with the TCK, the same test suite the built-in stores run."
+  },
+  {
+    "key": "ef017def26f5",
+    "text": "A commit across streams is all or nothing, a live lease belongs to one worker, a truncate leaves a seed, and notify never echoes."
+  },
+  {
+    "key": "ebb6662fc561",
+    "text": "The rules a store must follow are exported from the adapter entry point, so every store refuses the same bad writes and plants the same seeds."
+  },
+  {
+    "key": "8c42b01f001c",
+    "text": "And that's the tour: every capability you saw is something the log does."
+  },
+  {
+    "key": "b81682d94ba1",
+    "text": "Chapter 0. How to read this tour"
+  },
+  {
+    "key": "42ddba08aa33",
+    "text": "Chapter 1. One log, many streams"
+  },
+  {
+    "key": "a8354e02ecab",
+    "text": "Chapter 2. A state and its first action"
+  },
+  {
+    "key": "31670cb653b6",
+    "text": "Chapter 3. Rules: preconditions and invariants"
+  },
+  {
+    "key": "33077f353d4c",
+    "text": "Chapter 4. Two writers, one stream"
+  },
+  {
+    "key": "a85c619c7025",
+    "text": "Chapter 5. Loading fast: cache, snapshots, time travel"
+  },
+  {
+    "key": "2ae68e942011",
+    "text": "Chapter 6. A reaction"
+  },
+  {
+    "key": "f602de653883",
+    "text": "Chapter 7. Many workers, lanes and priority"
+  },
+  {
+    "key": "f6c062642471",
+    "text": "Chapter 8. When a reaction fails"
+  },
+  {
+    "key": "330e28c95213",
+    "text": "Chapter 9. Timers: deferred reactions"
+  },
+  {
+    "key": "b20ce9ac4ed5",
+    "text": "Chapter 10. Projections, slices and rebuilds"
+  },
+  {
+    "key": "5193d089ccf5",
+    "text": "Chapter 11. Rules across streams:.loads"
+  },
+  {
+    "key": "66e04a870f45",
+    "text": "Chapter 12. Sensitive data"
+  },
+  {
+    "key": "c5cfd4bf48c3",
+    "text": "Chapter 13. Closing the books"
+  },
+  {
+    "key": "d79980b48e5e",
+    "text": "Chapter 14. Close policies and rolling windows"
+  },
+  {
+    "key": "94059ef72bc5",
+    "text": "Chapter 15. Restore, migrate and audit"
+  },
+  {
+    "key": "22c98b027ba2",
+    "text": "Chapter 16. Scaling out: processes, wakeups, scoped Acts"
+  },
+  {
+    "key": "feecb0cc4ba6",
+    "text": "Chapter 17. At the edge: generated APIs and live updates"
+  },
+  {
+    "key": "4980ef767308",
+    "text": "Chapter 18. Adapters and the TCK"
+  }
+]

@@ -1252,3 +1252,19 @@ export function spoken(text: string): string {
     .replace(/ ([,.:;])/g, "$1")
     .trim();
 }
+
+/** What the narrator says for a step: one string per caption sentence, ids and code read as words. */
+export function step_speech(
+  step: { say: string; speak?: string },
+  w: World,
+  base: BaseEvent[]
+): string[] {
+  return step.speak
+    ? sentences(fill(step.speak, w, base))
+    : sentences(fill(step.say, w, base)).map(spoken);
+}
+
+/** What the narrator says on the title card between chapters. */
+export function card_speech(n: number, title: string): string {
+  return spoken(`Chapter ${n}. ${title}`);
+}

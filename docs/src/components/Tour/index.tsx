@@ -28,13 +28,16 @@ import Field, { stream_hue } from "./Field";
 import { type Box, type Chip, data_lines, type Layout, layout, type Mode, short, type View } from "./layout";
 import styles from "./styles.module.css";
 import type { AppSpec, Link as DocLink, Move, Step, TourSpec } from "./types";
+import useBaseUrl from "@docusaurus/useBaseUrl";
 import { Ambient } from "./music";
-import { type Cell, census, type Frame, type Frames, fill, fmt, frames as fold, sentences, spoken, type Target, type World } from "./world";
+import { type Cell, census, type Frame, type Frames, card_speech, fill, fmt, frames as fold, sentences, step_speech, type Target, type World } from "./world";
 
 export type { TourSpec } from "./types";
 
 const MOVE_MS = 820;
 const TRAIL = [1, 2, 3];
+/** clip keys that failed to load, so each is tried once */
+const missing_clips = new Set<string>();
 /** how long a chapter's title card shows between chapters */
 const CARD_MS = 2400;
 /** the narration's rate at 1×: a touch slower than the default */
@@ -1036,6 +1039,19 @@ export default function Tour({ spec }: { spec: TourSpec }) {
   const [cue, setCue] = useState(-1);
   const [card, setCard] = useState<string | undefined>();
   const [, setHydrated] = useState(false);
+  // rendered narration: lines.json maps each spoken sentence to its clip's key
+  const voice_dir = useBaseUrl("/tour/voice/");
+  const [voice_keys, setVoiceKeys] = useState<Map<string, string>>(() => new Map());
+  useEffect(() => {
+    let live = true;
+    fetch(`${voice_dir}lines.json`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((rows: { key: string; text: string }[]) => live && setVoiceKeys(new Map(rows.map((r) => [r.text, r.key]))))
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [voice_dir]);
   const music = true;
   const music_level = 0.6;
   const ambient = useRef<Ambient | undefined>(undefined);
@@ -1085,10 +1101,7 @@ export default function Tour({ spec }: { spec: TourSpec }) {
   const lit = useMemo(() => spotlight(step, frame.world), [step, frame.world]);
   const say = fill(step.say, frame.world, all.base);
   const lines = useMemo(() => sentences(say), [say]);
-  const speech = useMemo(() => {
-    const words = step.speak ? sentences(fill(step.speak, frame.world, all.base)) : lines.map(spoken);
-    return words;
-  }, [step.speak, frame.world, all.base, lines]);
+  const speech = useMemo(() => step_speech(step, frame.world, all.base), [step, frame.world, all.base]);
   // a store animates from the step before only when we moved forward by one
   const animate = index === prevIndex + 1;
   const pointing = new Set(step.ui ?? []);
@@ -1141,40 +1154,21 @@ export default function Tour({ spec }: { spec: TourSpec }) {
     if (!playing && voice) window.speechSynthesis.cancel();
     let cancelled = false;
     const timers: ReturnType<typeof setTimeout>[] = [];
+    let clip: HTMLAudioElement | undefined;
     const last = index >= all.length - 1 || all[index + 1]!.chapter !== frame.chapter;
-    // the narrator is swappable per step: a pre-rendered clip when the step has one, else the browser's voice
-    const clip = playing && sound && !muted && step.audio ? new Audio(step.audio) : undefined;
-    let clip_done = !clip;
-    let captions_done = false;
-    const talk = !clip && playing && voice && sound && !muted;
-    const advance = () => {
-      if (cancelled || !playing) return;
-      if (index >= all.length - 1) return setPlaying(false);
-      if (!last) return go(index + 1, true);
-      // the chapter is done: a title card for the next one, then on into it
-      const next = all[index + 1]!.chapter;
-      const text = `Chapter ${next + first} · ${spec.chapters[next]!.title}`;
-      setCard(text);
-      if (talk) {
-        const u = new SpeechSynthesisUtterance(spoken(text.replace(" · ", ". ")));
-        u.rate = speed * RATE;
-        if (pick_voice()) u.voice = pick_voice()!;
-        window.speechSynthesis.speak(u);
-      }
-      timers.push(setTimeout(() => !cancelled && go(index + 1, true), CARD_MS / speed));
-    };
-    const beats = speech.length;
-    const show = (i: number) => {
-      if (cancelled) return;
-      if (i >= beats) {
-        captions_done = true;
-        // a longer breath between steps, once the clip (if any) has finished too
-        if (clip_done) timers.push(setTimeout(advance, STEP_GAP_MS / speed));
-        return;
-      }
-      setCue(i);
-      if (talk) {
-        const text = speech[i]!;
+    const audible = playing && sound && !muted;
+
+    // say one sentence: its rendered clip when there is one, else the browser's voice, else a timed pause
+    const say = (text: string, done: () => void) => {
+      let ended = false;
+      const finish = () => {
+        if (ended) return;
+        ended = true;
+        ambient.current?.duck(false);
+        done();
+      };
+      const synth = () => {
+        if (!voice) return void timers.push(setTimeout(finish, Math.max(1800, text.length * 55) / speed));
         const u = new SpeechSynthesisUtterance(text);
         u.rate = speed * RATE;
         const v = pick_voice();
@@ -1182,54 +1176,68 @@ export default function Tour({ spec }: { spec: TourSpec }) {
           u.voice = v;
           u.lang = v.lang;
         } else u.lang = "en-US";
-        // the voice drives the pace; a watchdog moves on if it never reports the end
-        let done = false;
-        const next = () => {
-          if (done) return;
-          done = true;
-          // a breath between sentences
-          timers.push(setTimeout(() => show(i + 1), SENTENCE_GAP_MS / speed));
-        };
         u.onstart = () => ambient.current?.duck(true);
-        u.onend = () => {
-          ambient.current?.duck(false);
-          next();
-        };
-        u.onerror = () => {
-          ambient.current?.duck(false);
-          next();
-        };
-        timers.push(setTimeout(next, (3000 + text.length * 110) / speed));
+        u.onend = finish;
+        u.onerror = finish;
+        // a watchdog moves on if the voice never reports the end
+        timers.push(setTimeout(finish, (3000 + text.length * 110) / speed));
         window.speechSynthesis.speak(u);
-      } else timers.push(setTimeout(() => show(i + 1), Math.max(1800, speech[i]!.length * 55) / speed));
+      };
+      const key = voice_keys.get(text);
+      if (!key || missing_clips.has(key)) return synth();
+      const a = new Audio(`${voice_dir}${key}.m4a`);
+      a.playbackRate = speed;
+      a.preservesPitch = true;
+      clip = a;
+      a.onplay = () => ambient.current?.duck(true);
+      a.onended = finish;
+      // no clip rendered for this line yet: the browser's voice reads it instead, once
+      let fell = false;
+      const fallback = () => {
+        if (fell || ended || cancelled) return;
+        fell = true;
+        missing_clips.add(key);
+        synth();
+      };
+      a.onerror = fallback;
+      void a.play().catch(fallback);
     };
-    timers.push(
-      setTimeout(
-        () => {
-          if (clip) {
-            clip.playbackRate = speed;
-            ambient.current?.duck(true);
-            const end = () => {
-              ambient.current?.duck(false);
-              clip_done = true;
-              if (captions_done && !cancelled) timers.push(setTimeout(advance, STEP_GAP_MS / speed));
-            };
-            clip.onended = end;
-            clip.onerror = end;
-            void clip.play().catch(end);
-          }
-          show(0);
-        },
-        (reduce ? 0 : total + LAND_MS) / speed
-      )
-    );
+
+    const advance = () => {
+      if (cancelled || !playing) return;
+      if (index >= all.length - 1) return setPlaying(false);
+      if (!last) return go(index + 1, true);
+      // the chapter is done: a title card for the next one, then on into it
+      const next = all[index + 1]!.chapter;
+      const title = spec.chapters[next]!.title;
+      setCard(`Chapter ${next + first} · ${title}`);
+      const on = () => !cancelled && go(index + 1, true);
+      if (audible) {
+        const t0 = Date.now();
+        say(card_speech(next + first, title), () => timers.push(setTimeout(on, Math.max(0, CARD_MS / speed - (Date.now() - t0)))));
+      } else timers.push(setTimeout(on, CARD_MS / speed));
+    };
+    const show = (i: number) => {
+      if (cancelled) return;
+      if (i >= speech.length) {
+        // a longer breath between steps
+        timers.push(setTimeout(advance, STEP_GAP_MS / speed));
+        return;
+      }
+      setCue(i);
+      const next = () => !cancelled && timers.push(setTimeout(() => show(i + 1), SENTENCE_GAP_MS / speed));
+      if (audible) say(speech[i]!, next);
+      else timers.push(setTimeout(() => show(i + 1), Math.max(1800, speech[i]!.length * 55) / speed));
+    };
+    timers.push(setTimeout(() => show(0), (reduce ? 0 : total + LAND_MS) / speed));
     return () => {
       cancelled = true;
       for (const t of timers) clearTimeout(t);
       if (voice) window.speechSynthesis.cancel();
       clip?.pause();
+      ambient.current?.duck(false);
     };
-  }, [playing, index, all, frame.chapter, lines, speech, total, reduce, go, voice, sound, muted, speed, pick_voice, spec, first, step.audio]);
+  }, [playing, index, all, frame.chapter, speech, total, reduce, go, voice, sound, muted, speed, pick_voice, spec, first, voice_keys, voice_dir]);
 
   useEffect(() => {
     if (!menu) return;
