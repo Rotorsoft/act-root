@@ -1,18 +1,31 @@
 /**
- * A soft ambient bed for the tour, made in the browser with the Web Audio API:
- * slow pad chords through a low-pass filter and a gentle generated reverb, in a
- * calm key, with no percussion. Nothing to license and no file to ship.
+ * A light, story-like bed for the tour, made in the browser with the Web Audio
+ * API: soft chords on a gentle I–V–vi–IV loop, a round bass, and a plucked
+ * melody that wanders over the chord with a little echo. Nothing to license
+ * and no file to ship. It ducks under the narrator's voice.
  */
 
-// C major 7, A minor 7, F major 7, G6: a slow, open loop
+const BPM = 96;
+const BEAT = 60 / BPM;
+const BAR = BEAT * 4;
+// C, G, A minor, F: root and chord tones (MIDI)
 const CHORDS = [
-  [48, 55, 59, 64],
-  [45, 52, 55, 60],
-  [41, 48, 52, 57],
-  [43, 50, 55, 64],
+  { root: 36, tones: [60, 64, 67] },
+  { root: 43, tones: [59, 62, 67] },
+  { root: 45, tones: [60, 64, 69] },
+  { root: 41, tones: [60, 65, 69] },
 ];
-const CHORD_S = 8;
-const DUCK = 0.25; // about −12 dB under the voice
+// the melody picks from the C major pentatonic, two octaves up from middle C
+const SCALE = [72, 74, 76, 79, 81, 84, 86, 88];
+// eighth-note rhythm per bar: 1 plays, 0 rests
+const RHYTHMS = [
+  [1, 0, 1, 1, 0, 1, 0, 0],
+  [1, 0, 0, 1, 0, 1, 1, 0],
+  [1, 1, 0, 1, 0, 0, 1, 0],
+  [0, 1, 0, 1, 1, 0, 1, 0],
+];
+const DUCK = 0.32; // about −10 dB under the voice
+const LEVEL = 1; // the bed's loudness at full volume: clearly there, under the voice
 
 const hz = (midi: number) => 440 * 2 ** ((midi - 69) / 12);
 
@@ -20,35 +33,47 @@ export class Ambient {
   private ctx: AudioContext | undefined;
   private master: GainNode | undefined;
   private duck_gain: GainNode | undefined;
+  private bus: GainNode | undefined;
+  private echo: GainNode | undefined;
   private timer: ReturnType<typeof setInterval> | undefined;
-  private step = 0;
-  private level = 0.5;
+  private bar = 0;
+  private next_bar = 0;
+  private note = 2;
+  private level = 0.6;
 
-  /** Starts the bed; call it from a user gesture the first time. */
+  /** Starts the bed; call it from the Play click, which lets the page make sound. */
   start(): void {
-    if (this.timer) return;
     if (!this.ctx) this.build();
     const ctx = this.ctx!;
     void ctx.resume();
+    if (this.timer) return;
     this.master!.gain.cancelScheduledValues(ctx.currentTime);
-    this.master!.gain.setTargetAtTime(this.level * 0.09, ctx.currentTime, 1.2);
-    this.chord();
-    this.timer = setInterval(() => this.chord(), CHORD_S * 1000);
+    this.master!.gain.setTargetAtTime(this.level * LEVEL, ctx.currentTime, 0.4);
+    this.next_bar = ctx.currentTime + 0.1;
+    // schedule a little ahead, one bar at a time
+    const tick = () => {
+      while (this.next_bar < ctx.currentTime + BAR) {
+        this.play_bar(this.next_bar);
+        this.next_bar += BAR;
+      }
+    };
+    tick();
+    this.timer = setInterval(tick, 250);
   }
 
-  /** Fades the bed out and stops scheduling chords. */
+  /** Fades the bed out and stops scheduling. */
   stop(): void {
     if (!this.ctx || !this.master) return;
     clearInterval(this.timer);
     this.timer = undefined;
-    this.master.gain.setTargetAtTime(0, this.ctx.currentTime, 0.6);
+    this.master.gain.setTargetAtTime(0, this.ctx.currentTime, 0.4);
   }
 
   /** The bed's volume, from 0 to 1. */
   volume(v: number): void {
     this.level = v;
     if (this.ctx && this.master && this.timer)
-      this.master.gain.setTargetAtTime(v * 0.09, this.ctx.currentTime, 0.3);
+      this.master.gain.setTargetAtTime(v * LEVEL, this.ctx.currentTime, 0.3);
   }
 
   /** Lowers the bed while the narrator speaks, and brings it back after. */
@@ -57,7 +82,7 @@ export class Ambient {
     this.duck_gain.gain.setTargetAtTime(
       on ? DUCK : 1,
       this.ctx.currentTime,
-      on ? 0.15 : 0.6
+      on ? 0.12 : 0.5
     );
   }
 
@@ -66,53 +91,90 @@ export class Ambient {
     const master = ctx.createGain();
     master.gain.value = 0;
     const duck_gain = ctx.createGain();
-    const filter = ctx.createBiquadFilter();
-    filter.type = "lowpass";
-    filter.frequency.value = 900;
-    filter.Q.value = 0.4;
-    // a short generated hall: decaying noise in both channels
-    const reverb = ctx.createConvolver();
-    const len = ctx.sampleRate * 3.2;
-    const impulse = ctx.createBuffer(2, len, ctx.sampleRate);
-    for (let ch = 0; ch < 2; ch++) {
-      const data = impulse.getChannelData(ch);
-      for (let i = 0; i < len; i++)
-        data[i] = (Math.random() * 2 - 1) * (1 - i / len) ** 2.6;
-    }
-    reverb.buffer = impulse;
-    const wet = ctx.createGain();
-    wet.gain.value = 0.45;
-    filter.connect(duck_gain);
-    filter.connect(reverb).connect(wet).connect(duck_gain);
-    duck_gain.connect(master).connect(ctx.destination);
+    const tone = ctx.createBiquadFilter();
+    tone.type = "lowpass";
+    tone.frequency.value = 3200;
+    // a soft feedback echo for the plucks
+    const delay = ctx.createDelay(1);
+    delay.delayTime.value = BEAT * 0.75;
+    const feedback = ctx.createGain();
+    feedback.gain.value = 0.28;
+    const echo = ctx.createGain();
+    echo.gain.value = 0.35;
+    echo.connect(delay).connect(feedback).connect(delay);
+    delay.connect(tone);
+    const bus = ctx.createGain();
+    bus.connect(tone);
+    tone.connect(duck_gain).connect(master).connect(ctx.destination);
     this.ctx = ctx;
     this.master = master;
     this.duck_gain = duck_gain;
-    this.filter = filter;
+    this.bus = bus;
+    this.echo = echo;
   }
 
-  private filter: BiquadFilterNode | undefined;
-
-  private chord(): void {
+  private voice(
+    type: OscillatorType,
+    freq: number,
+    t: number,
+    attack: number,
+    hold: number,
+    release: number,
+    peak: number,
+    echo = false
+  ): void {
     const ctx = this.ctx!;
-    const t = ctx.currentTime + 0.05;
-    const notes = CHORDS[this.step++ % CHORDS.length]!;
-    for (const [i, midi] of notes.entries()) {
-      for (const detune of [-6, 5]) {
-        const osc = ctx.createOscillator();
-        osc.type = i === 0 ? "sine" : "triangle";
-        osc.frequency.value = hz(midi);
-        osc.detune.value = detune;
-        const env = ctx.createGain();
-        const peak = (i === 0 ? 0.32 : 0.18) / notes.length;
-        env.gain.setValueAtTime(0, t);
-        env.gain.linearRampToValueAtTime(peak, t + 2.4);
-        env.gain.setValueAtTime(peak, t + CHORD_S - 1);
-        env.gain.linearRampToValueAtTime(0, t + CHORD_S + 2.5);
-        osc.connect(env).connect(this.filter!);
-        osc.start(t);
-        osc.stop(t + CHORD_S + 2.6);
-      }
+    const osc = ctx.createOscillator();
+    osc.type = type;
+    osc.frequency.value = freq;
+    const env = ctx.createGain();
+    env.gain.setValueAtTime(0, t);
+    env.gain.linearRampToValueAtTime(peak, t + attack);
+    env.gain.setTargetAtTime(peak * 0.6, t + attack, hold / 3);
+    env.gain.setTargetAtTime(0, t + attack + hold, release / 4);
+    osc.connect(env).connect(this.bus!);
+    if (echo) env.connect(this.echo!);
+    osc.start(t);
+    osc.stop(t + attack + hold + release + 0.1);
+  }
+
+  private play_bar(t: number): void {
+    const chord = CHORDS[this.bar % CHORDS.length]!;
+    const rhythm =
+      RHYTHMS[Math.floor(this.bar / CHORDS.length) % RHYTHMS.length]!;
+    this.bar++;
+    // the chord: soft and round, under everything
+    for (const m of chord.tones)
+      this.voice("sine", hz(m), t, 0.25, BAR - 0.4, 0.8, 0.07);
+    // the bass: a round note on beats one and three
+    this.voice("sine", hz(chord.root), t, 0.02, BEAT * 1.2, 0.4, 0.2);
+    this.voice(
+      "sine",
+      hz(chord.root + 7),
+      t + BEAT * 2,
+      0.02,
+      BEAT * 1.2,
+      0.4,
+      0.15
+    );
+    // the melody: plucked steps that wander, leaning on the chord's tones
+    for (const [i, on] of rhythm.entries()) {
+      if (!on) continue;
+      const step = [-1, 1, 1, -1, 2, -2, 1, 0][(this.bar * 3 + i) % 8]!;
+      this.note = Math.max(0, Math.min(SCALE.length - 1, this.note + step));
+      let m = SCALE[this.note]!;
+      // on the downbeat, land on a tone of the chord
+      if (i === 0) m = chord.tones[(this.bar + 1) % chord.tones.length]! + 12;
+      this.voice(
+        "triangle",
+        hz(m),
+        t + i * (BEAT / 2),
+        0.005,
+        0.08,
+        0.5,
+        0.2,
+        true
+      );
     }
   }
 }

@@ -1145,7 +1145,8 @@ export default function Tour({ spec }: { spec: TourSpec }) {
   const play = () => {
     // the first Play is the gesture that lets the page make sound
     if (!ambient.current && typeof AudioContext !== "undefined") ambient.current = new Ambient();
-    // a browser lets a page speak only after a gesture: the first Play turns the sound on
+    // start (and resume) the music inside the click itself, where the browser allows it
+    if (!playing && music) ambient.current?.start();
     if (!playing && !muted) setSound(true);
     setPlaying((p) => !p);
   };
