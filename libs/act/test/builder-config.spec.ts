@@ -221,11 +221,14 @@ describe("config is validated at the declaration/runtime site", () => {
         ZodError
       );
       expect(() => app.settle({ correlate: { limit: 1.5 } })).toThrow(ZodError);
+      await expect(app.query({ limit: Number.NaN })).rejects.toThrow(ZodError);
+      await expect(app.query_array({ limit: -1 })).rejects.toThrow(ZodError);
       // Control: 0 keeps its meaning (the poll's default, no limit elsewhere).
       expect(app.start_correlations({ limit: 0 }, 0)).toBe(true);
       app.stop_correlations();
       await expect(app.correlate({ limit: 0 })).resolves.toBeDefined();
       await expect(app.blocked_streams({ limit: 0 })).resolves.toEqual([]);
+      await expect(app.query_array({ limit: 0 })).resolves.toEqual([]);
     } finally {
       await ctx.dispose();
     }

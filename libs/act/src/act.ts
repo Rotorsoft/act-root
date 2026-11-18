@@ -879,6 +879,7 @@ export class Act<
     last?: Committed<TEvents, keyof TEvents>;
     count: number;
   }> {
+    check("page", query);
     return this._scoped(async () => {
       let first: Committed<TEvents, keyof TEvents> | undefined;
       let last: Committed<TEvents, keyof TEvents> | undefined;
