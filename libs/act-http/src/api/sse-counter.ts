@@ -14,9 +14,12 @@
 export class SseConnectionCounter {
   public readonly limit: number;
   private _open = 0;
+  // Told the open count after every open and close.
+  private readonly _on_change: ((open: number) => void) | undefined;
 
-  constructor(limit: number) {
+  constructor(limit: number, onChange?: (open: number) => void) {
     this.limit = limit;
+    this._on_change = onChange;
   }
 
   /**
@@ -27,6 +30,7 @@ export class SseConnectionCounter {
   acquire(): boolean {
     if (this._open >= this.limit) return false;
     this._open++;
+    this._on_change?.(this._open);
     return true;
   }
 
@@ -36,7 +40,9 @@ export class SseConnectionCounter {
    * crashed handlers don't leak count.
    */
   release(): void {
-    if (this._open > 0) this._open--;
+    if (this._open === 0) return;
+    this._open--;
+    this._on_change?.(this._open);
   }
 
   /** Currently-open count. Test/observability hook. */

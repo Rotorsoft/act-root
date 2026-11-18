@@ -6516,6 +6516,23 @@ export type SseOptions = {
      * Default \`256\`. Validated range \`[1, 100_000]\`.
      */
     readonly maxPendingPerConnection?: number;
+    /**
+     * Publish every commit to {@link channel} once, as the subscriptions
+     * expect (\`publishCommits\` on \`/sse\`), instead of the host writing its own
+     * \`committed\` listener. Two generators set to publish to the same
+     * channel publish each commit once. Off by default.
+     */
+    readonly publish?: boolean;
+    /**
+     * Add one subscription, \`$settled\` (tRPC \`subscribe.$settled\`, Hono
+     * \`GET <basePath>/sse/$settled\`), yielding \`{ kind: "settled", data: {
+     * targets } }\` each time the app settles with targets that advanced: the
+     * signal a list or dashboard fed by a projection refetches on. It counts
+     * against {@link maxConnections}. Off by default.
+     */
+    readonly settled?: boolean;
+    /** Told the number of open subscriptions after every open and close. */
+    readonly onConnections?: (count: number) => void;
 };
 /**
  * Default cap on concurrent open subscriptions per generator
@@ -6746,14 +6763,14 @@ export declare function authenticated(extractor: ActorExtractor<Context>): Middl
  * @returns A Hono app covering every generated action under
  *   \`<basePath>/actions/<name>\`.
  */
-export declare function hono<TApp extends ActSurface = ActSurface, TBase extends string = "/api", const TSelection extends ActionSelection<TApp> | undefined = ActionSelection<TApp> | undefined, TStreams extends StreamPatterns<TApp> = {}>(app: TApp, options: HonoOptions<TApp> & {
+export declare function hono<TApp extends ActSurface = ActSurface, TBase extends string = "/api", const TSelection extends ActionSelection<TApp> | undefined = ActionSelection<TApp> | undefined, TStreams extends StreamPatterns<TApp> = {}, const TSse extends SseOptions = SseOptions>(app: TApp, options: HonoOptions<TApp> & {
     readonly basePath?: TBase;
     readonly actions?: TSelection;
     readonly streams?: StreamPatterns<TApp> & TStreams;
-    readonly sse: NonNullable<HonoOptions["sse"]>;
+    readonly sse: TSse;
 }): Hono<{
     Variables: ActMiddlewareVariables;
-}, ActionRoutes<TApp, TBase, SelectedActions<TApp, TSelection>, TStreams> & SseRoutes<TApp, TBase>, TBase>;
+}, ActionRoutes<TApp, TBase, SelectedActions<TApp, TSelection>, TStreams> & SseRoutes<TApp, TBase, TSse>, TBase>;
 export declare function hono<TApp extends ActSurface = ActSurface, TBase extends string = "/api", const TSelection extends ActionSelection<TApp> | undefined = ActionSelection<TApp> | undefined, TStreams extends StreamPatterns<TApp> = {}>(app: TApp, options: HonoOptions<TApp> & {
     readonly basePath?: TBase;
     readonly actions?: TSelection;
@@ -6765,7 +6782,7 @@ export declare function hono<TApp extends ActSurface = ActSurface, TBase extends
  * One \`GET <basePath>/sse/<state>?stream=<id>\` per state of \`TApp\`, with
  * \`sse\`: an event stream on \`200\`, {@link ApiError} on an error status.
  */
-export type SseRoutes<TApp, TBase extends string> = {
+export type SseRoutes<TApp, TBase extends string, TSse = unknown> = {
     [N in AppStateNames<TApp> as MergePath<TBase, \`/sse/\${N}\`>]: {
         $get: {
             input: {
@@ -6787,7 +6804,23 @@ export type SseRoutes<TApp, TBase extends string> = {
             status: 400 | 401 | 503;
         };
     };
-};
+} & (TSse extends {
+    readonly settled: true;
+} ? {
+    [P in MergePath<TBase, "/sse/$settled">]: {
+        $get: {
+            input: {};
+            output: {};
+            outputFormat: "body";
+            status: 200;
+        } | {
+            input: {};
+            output: ApiError;
+            outputFormat: "json";
+            status: 401 | 503;
+        };
+    };
+} : {});
 /** Every status a generated action route answers with the error envelope. */
 type ErrorStatus = 400 | 401 | 409 | 410 | 412 | 422 | 500 | 503;
 /**
@@ -7684,6 +7717,7 @@ export type { ApplyResult } from "./apply-patch.js";
 export { applyPatchMessage } from "./apply-patch.js";
 export { BroadcastChannel } from "./broadcast.js";
 export { PresenceTracker } from "./presence.js";
+export { type CommitSource, publishCommits } from "./publish.js";
 export { StateCache } from "./state-cache.js";
 export type { BroadcastState, PatchMessage, Subscriber } from "./types.js";
 //# sourceMappingURL=index.d.ts.map
@@ -7722,6 +7756,42 @@ export declare class PresenceTracker {
     isOnline(streamId: string, identity_id: string): boolean;
 }
 //# sourceMappingURL=presence.d.ts.map
+// === publish.d.ts ===
+import type { BroadcastChannel } from "./broadcast.js";
+/** The parts of a committed snapshot publication reads. */
+type CommittedSnapshot = {
+    readonly state: unknown;
+    readonly version: number;
+    readonly patch?: unknown;
+    readonly event?: {
+        readonly stream: string;
+        readonly version: number;
+    };
+};
+/**
+ * What {@link publishCommits} needs from an app: its \`committed\` event. Typed
+ * structurally, so this subpath never imports the framework and stays safe
+ * to bundle for the browser.
+ */
+export type CommitSource = {
+    on(event: "committed", listener: (snapshots: CommittedSnapshot[]) => void): unknown;
+    off(event: "committed", listener: (snapshots: CommittedSnapshot[]) => void): unknown;
+};
+/**
+ * Publish every commit of \`app\` to \`channel\` once, as the clients' patch
+ * stream expects: the stream's patches in order, then an empty patch when
+ * \`.snap\` took a version, so a live client doesn't read the next commit as a
+ * gap; the state carries \`_v\`, the stream's version. \`committed\` fires once
+ * per stream a commit appended to, so each call publishes one stream.
+ *
+ * Calling it again for the same app and channel publishes nothing more and
+ * returns the same disposer.
+ *
+ * @returns A function that stops publishing.
+ */
+export declare function publishCommits(app: CommitSource, channel: BroadcastChannel<any>): () => void;
+export {};
+//# sourceMappingURL=publish.d.ts.map
 // === state-cache.d.ts ===
 import type { BroadcastState } from "./types.js";
 /**
@@ -7857,6 +7927,7 @@ import type { IdempotencyStore } from "@rotorsoft/act-ops/idempotency";
 import { type TRPCBuiltRouter, type TRPCDefaultErrorShape, type TRPCMiddlewareFunction, type TRPCMutationProcedure, type TRPCSubscriptionProcedure } from "@trpc/server";
 import { type ActionInput, type ActionResult, type ActionSelection, type ActSurface, type AppActions, type AppState, type AppStateNames, type ResolverArgs, type SelectedActions, type StreamPatterns } from "../api/dispatch.js";
 import { type ActorExtractor, type SseOptions, type SseSubscriptionFrame } from "../api/index.js";
+import { type SseSettledFrame } from "../api/sse-settled.js";
 /**
  * Per-call options for {@link trpc}. The host supplies the three
  * seams the package can't make decisions on:
@@ -7974,7 +8045,7 @@ type ActionProcedures<TApp, TNames extends string, TStreams> = {
     }>;
 };
 /** One subscription per state of \`TApp\`, yielding that state's frames. */
-type SubscribeRouter<TApp> = {
+type SubscribeRouter<TApp, TSse = SseOptions> = {
     subscribe: {
         [N in AppStateNames<TApp>]: TRPCSubscriptionProcedure<{
             input: {
@@ -7983,7 +8054,15 @@ type SubscribeRouter<TApp> = {
             output: AsyncIterable<SseSubscriptionFrame<AppState<TApp, N>>, void, any>;
             meta: object;
         }>;
-    };
+    } & (TSse extends {
+        readonly settled: true;
+    } ? {
+        $settled: TRPCSubscriptionProcedure<{
+            input: void;
+            output: AsyncIterable<SseSettledFrame, void, any>;
+            meta: object;
+        }>;
+    } : {});
 };
 /** The router {@link trpc} builds: the actions, and the subscriptions with \`sse\`. */
 export type GeneratedRouter<Ctx extends object, TApp, TRecord, TNames extends string = keyof AppActions<TApp> & string, TStreams = {}> = TRPCBuiltRouter<GeneratedRoot<Ctx>, ActionProcedures<TApp, TNames, TStreams> & TRecord>;
@@ -8030,11 +8109,11 @@ export type GeneratedRouter<Ctx extends object, TApp, TRecord, TNames extends st
  *   actions to generate.
  * @returns A tRPC router with one mutation per generated action.
  */
-export declare function trpc<Ctx extends object = object, TApp extends ActSurface = ActSurface, const TSelection extends ActionSelection<TApp> | undefined = ActionSelection<TApp> | undefined, TStreams extends StreamPatterns<TApp> = {}>(app: TApp, options: TrpcOptions<Ctx, TApp> & {
+export declare function trpc<Ctx extends object = object, TApp extends ActSurface = ActSurface, const TSelection extends ActionSelection<TApp> | undefined = ActionSelection<TApp> | undefined, TStreams extends StreamPatterns<TApp> = {}, const TSse extends SseOptions = SseOptions>(app: TApp, options: TrpcOptions<Ctx, TApp> & {
     readonly actions?: TSelection;
     readonly streams?: StreamPatterns<TApp> & TStreams;
-    readonly sse: SseOptions;
-}): GeneratedRouter<Ctx, TApp, SubscribeRouter<TApp>, SelectedActions<TApp, TSelection>, TStreams>;
+    readonly sse: TSse;
+}): GeneratedRouter<Ctx, TApp, SubscribeRouter<TApp, TSse>, SelectedActions<TApp, TSelection>, TStreams>;
 export declare function trpc<Ctx extends object = object, TApp extends ActSurface = ActSurface, const TSelection extends ActionSelection<TApp> | undefined = ActionSelection<TApp> | undefined, TStreams extends StreamPatterns<TApp> = {}>(app: TApp, options: TrpcOptions<Ctx, TApp> & {
     readonly actions?: TSelection;
     readonly streams?: StreamPatterns<TApp> & TStreams;

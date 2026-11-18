@@ -47,6 +47,19 @@ export type ActSurface = {
     sensitive_fields(name: string): readonly string[];
   };
   do(action: string, target: Target, payload: unknown): Promise<unknown>;
+  /**
+   * The app's lifecycle events, which `sse.publish` (`committed`) and
+   * `sse.settled` (`settled`) listen to. A built Act has them; a surface
+   * without them can't use those two options.
+   */
+  on?(
+    event: "committed" | "settled",
+    listener: (arg: unknown) => void
+  ): unknown;
+  off?(
+    event: "committed" | "settled",
+    listener: (arg: unknown) => void
+  ): unknown;
 };
 
 /**

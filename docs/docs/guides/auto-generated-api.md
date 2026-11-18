@@ -67,7 +67,7 @@ import { trpc } from "@rotorsoft/act-http/trpc";
 
 const actor = (ctx: unknown) => resolveActorFromJwt(ctx); // throw to deny
 const stream = () => "calculator";
-const sse = { channel: new BroadcastChannel() }; // publish commits to it
+const sse = { channel: new BroadcastChannel(), publish: true }; // commits publish to it
 
 export const router = trpc(calculatorApp, { actor, stream, sse }); // tRPC
 export const api = hono(calculatorApp, { actor, stream, sse }); // REST + SSE
@@ -395,11 +395,11 @@ Behavior: fresh claim → handler runs, response normal. Duplicate of a committe
 
 ## Real-time subscriptions
 
-Both `trpc(app, { sse })` and `hono(app, { sse })` accept an optional SSE wiring that walks the registry and emits **one subscription per unique state name**, including states reached only through [`.loads`](../concepts/state-management.md#rules-across-streams-loads), all reading from a host-supplied `BroadcastChannel`. The host continues to own publication; the generator owns subscription, accounting, cleanup, and the wire format — so the loop you used to hand-write (open SSE response, subscribe to channel, forward patches, manage heartbeat, decrement counter on close) collapses to one option. On tRPC the subscriptions mount at `router.subscribe.<stateName>`, beside the action mutations, so `subscribe` is a reserved action name there: generating a router with `sse` for an app that has an action called `subscribe` throws instead of silently dropping the action.
+Both `trpc(app, { sse })` and `hono(app, { sse })` accept an optional SSE wiring that walks the registry and emits **one subscription per unique state name**, including states reached only through [`.loads`](../concepts/state-management.md#rules-across-streams-loads), all reading from a host-supplied `BroadcastChannel`. With `publish: true` the generator also publishes every commit to it; the generator owns subscription, accounting, cleanup, and the wire format — so the loop you used to hand-write (open SSE response, subscribe to channel, forward patches, manage heartbeat, decrement counter on close) collapses to one option. On tRPC the subscriptions mount at `router.subscribe.<stateName>`, beside the action mutations, so `subscribe` is a reserved action name there: generating a router with `sse` for an app that has an action called `subscribe` throws instead of silently dropping the action.
 
 A state whose events declare `sensitive(...)` fields can't be served over SSE: generating either transport with `sse` for an app that has one throws at build. The channel caches one state per stream, folded over whichever actor committed last, and sends it to every subscriber, so it would hand one actor's plaintext to everyone and overwrite the owner's view with `[REDACTED]`. Generate without `sse`, or keep the sensitive fields in a state you don't broadcast.
 
-The host builds the state and patches it publishes as [Broadcasting a commit](../concepts/real-time.md#broadcasting-a-commit) shows, including the empty patch a `.snap` needs.
+Pass `publish: true` and the generator publishes each commit once, as [Broadcasting a commit](../concepts/real-time.md#broadcasting-a-commit) describes: the stream's patches, the empty patch a `.snap` needs, and `_v`. A tRPC and a Hono generator set to publish to the same channel still publish each commit once. A server that doesn't use the generators calls `publishCommits(app, channel)` from `@rotorsoft/act-http/sse`, which returns a function that stops it. Leave `publish` off only to publish something other than the commit's state.
 
 ```ts no-check
 import { BroadcastChannel } from "@rotorsoft/act-http/sse";
@@ -408,16 +408,12 @@ import { hono } from "@rotorsoft/act-http/hono";
 
 const broadcast = new BroadcastChannel<MyState>();
 
-// Server-side: after every app.do(...), publish the state and its
-// patches, built as "Broadcasting a commit" in the real-time guide shows.
-broadcast.publish(target.stream, state, patches);
-
 // tRPC — emits one subscription per registered state under
 // `router.subscribe.<stateName>`.
 const router = trpc(app, {
   actor,
   stream,
-  sse: { channel: broadcast },
+  sse: { channel: broadcast, publish: true },
 });
 // Client:
 //   trpc.subscribe.Ticket.useSubscription({ stream: "ticket-42" })
@@ -427,11 +423,25 @@ const router = trpc(app, {
 const api = hono(app, {
   actor,
   stream,
-  sse: { channel: broadcast },
+  sse: { channel: broadcast, publish: true },
 });
 // Client:
 //   new EventSource("/api/sse/Ticket?stream=ticket-42")
 ```
+
+### Lists and dashboards: `$settled`
+
+`subscribe.<State>` serves screens that render one stream. A list or a dashboard reads a projection, which catches up when the app settles, after the commit: refetched on a patch, it reads stale rows. Pass `settled: true` for one more subscription, `subscribe.$settled` on tRPC and `GET <basePath>/sse/$settled` on Hono, which yields `{ kind: "settled", data: { targets } }` each time the app settles with targets that advanced, the projections and reactions a drain acked. Refetch the views fed by those targets:
+
+```ts no-check
+trpc.subscribe.$settled.useSubscription(undefined, {
+  onData: ({ data }) => {
+    if (data.targets.includes("invoices_view")) utils.listInvoices.invalidate();
+  },
+});
+```
+
+It counts against `maxConnections` like the state subscriptions, and a frame waiting for a slow client takes the next settle's targets too, so none is lost. `onConnections: (count) => …` is told the number of open subscriptions after every open and close, for a host that reacts when the last client leaves.
 
 ### What the generator owns
 

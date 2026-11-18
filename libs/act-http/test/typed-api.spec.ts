@@ -284,3 +284,30 @@ describe("caller-addressed streams", () => {
     ).toBeFunction();
   });
 });
+
+describe("the $settled subscription", () => {
+  const actor = () => ({ id: "a", name: "a" });
+  const channel = new BroadcastChannel();
+
+  it("is on the tRPC router only with settled: true", () => {
+    const on = trpc(app, { actor, stream, sse: { channel, settled: true } });
+    type Frames = inferRouterOutputs<typeof on>["subscribe"];
+    expectTypeOf<keyof Frames>().toEqualTypeOf<
+      "Counter" | "Note" | "$settled"
+    >();
+    const off = trpc(app, { actor, stream, sse: { channel } });
+    expectTypeOf<
+      keyof inferRouterOutputs<typeof off>["subscribe"]
+    >().toEqualTypeOf<"Counter" | "Note">();
+  });
+
+  it("is a Hono route only with settled: true", () => {
+    const client = testClient(
+      hono(app, { actor, stream, sse: { channel, settled: true } })
+    );
+    expectTypeOf(client.api.sse.$settled.$get).toBeFunction();
+    const without = testClient(hono(app, { actor, stream, sse: { channel } }));
+    // @ts-expect-error no $settled route without settled: true
+    without.api.sse.$settled;
+  });
+});

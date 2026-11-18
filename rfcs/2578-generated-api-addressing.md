@@ -48,7 +48,7 @@ trpc(app, {
 
 ### `sse` gains three optional fields (`trpc`, `hono`)
 
-- `publish?: boolean`: when true, the generator registers one `committed` listener per broadcast state and publishes each commit once, with the real-time guide's algorithm (patches in order, an empty patch when `.snap` took a version, `_v` set). Plus one new export on `@rotorsoft/act-http/sse`, for hosts outside the generators: `publishCommits(app, channel, states?): () => void`, taking the app structurally (`registry` and `on`) so the subpath never imports the framework and stays browser-safe.
+- `publish?: boolean`: when true, the generator registers one `committed` listener per broadcast state and publishes each commit once, with the real-time guide's algorithm (patches in order, an empty patch when `.snap` took a version, `_v` set). Plus one new export on `@rotorsoft/act-http/sse`, for hosts outside the generators: `publishCommits(app, channel): () => void` (built without the draft's `states?` filter: a channel only sends a stream to its subscribers, so publishing every commit costs nothing a filter would save), taking the app structurally (`registry` and `on`) so the subpath never imports the framework and stays browser-safe.
 - `settled?: boolean`: adds one subscription, `subscribe.$settled` on tRPC and `GET <base>/sse/$settled` on Hono (a `$` name can't collide with a state name). It yields `{ kind: "settled", data: { targets: string[] } }` once per `settled` event, where `targets` are the acked leases' streams. It shares the connection cap and `maxPendingPerConnection` with the state subscriptions.
 - `onConnections?: (count: number) => void`: called on every open and close across the generated subscriptions.
 

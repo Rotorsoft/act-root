@@ -5,7 +5,7 @@
  * first, then `patch` per publication), cap enforcement
  * (TOO_MANY_REQUESTS), and clean teardown on abort.
  */
-import { act, sensitive, state, ZodEmpty } from "@rotorsoft/act";
+import { act, projection, sensitive, state, ZodEmpty } from "@rotorsoft/act";
 import { fixture } from "@rotorsoft/act/test";
 import { initTRPC, TRPCError } from "@trpc/server";
 import { describe, expect } from "vitest";
@@ -390,5 +390,76 @@ describe("trpc sse — a state with sensitive events", () => {
     const { sse: _, ...no_sse } = default_options(new BroadcastChannel());
     const router = trpc<Ctx, typeof app>(app, no_sse);
     expect(Object.keys(router._def.procedures)).toContain("register");
+  });
+});
+
+describe("sse publish, $settled and onConnections", () => {
+  const Added = z.object({ by: z.number() });
+  const Tally = state({ Tally: z.object({ n: z.number() }) })
+    .init(() => ({ n: 0 }))
+    .emits({ Added })
+    .patch({ Added: ({ data }, s) => ({ n: s.n + data.by }) })
+    .on({ add: Added })
+    .emit((a) => ["Added", a])
+    .build();
+  const View = projection("tally-view")
+    .on({ Added })
+    .do(async function view() {})
+    .build();
+  const live = fixture(act().withState(Tally).withProjection(View));
+  const actor = { id: "u-1", name: "u-1" };
+
+  live(
+    "publishes commits, and yields the targets each settle advanced",
+    async ({ app }) => {
+      const channel = new BroadcastChannel<{ _v: number; n: number }>();
+      const counts: number[] = [];
+      const router = trpc(app, {
+        actor: (ctx: Ctx) => ({ id: ctx.actorId, name: ctx.actorId }),
+        stream: () => "t-1",
+        sse: {
+          channel,
+          publish: true,
+          settled: true,
+          onConnections: (n) => counts.push(n),
+        },
+      });
+      const t = initTRPC.context<Ctx>().create();
+      const caller = t.createCallerFactory(router)({ actorId: "u-1" });
+      const iter = await caller.subscribe.$settled();
+      const abort = new AbortController();
+      const frames = take_frames(iter as never, 1, abort);
+      await app.do("add", { stream: "t-1", actor }, { by: 3 });
+      expect(channel.state("t-1")).toEqual({ n: 3, _v: 0 });
+      expect(await frames).toEqual([
+        { kind: "settled", data: { targets: ["tally-view"] } },
+      ]);
+      expect(counts).toEqual([1, 0]);
+    }
+  );
+
+  live("refuses $settled past the connection cap", async ({ app }) => {
+    const router = trpc(app, {
+      actor: (ctx: Ctx) => ({ id: ctx.actorId, name: ctx.actorId }),
+      stream: () => "t-1",
+      sse: {
+        channel: new BroadcastChannel(),
+        settled: true,
+        maxConnections: 1,
+      },
+    });
+    const t = initTRPC.context<Ctx>().create();
+    const caller = t.createCallerFactory(router)({ actorId: "u-1" });
+    const first = (await caller.subscribe.$settled())[Symbol.asyncIterator]();
+    const pending = first.next();
+    // The first subscription takes its slot once the actor resolves.
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    const second = (await caller.subscribe.$settled())[Symbol.asyncIterator]();
+    await expect(second.next()).rejects.toMatchObject({
+      code: "TOO_MANY_REQUESTS",
+    });
+    await app.do("add", { stream: "t-1", actor }, { by: 1 });
+    expect((await pending).value).toMatchObject({ kind: "settled" });
+    await first.return?.(undefined);
   });
 });
