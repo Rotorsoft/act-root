@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v2.1.15](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v2.1.14...@rotorsoft/act-v2.1.15) (2026-11-18)
+
+
+### Bug Fixes
+
+* **act:** check app.query's limit, the one [#2541](https://github.com/Rotorsoft/act-root/issues/2541) missed ([#2568](https://github.com/Rotorsoft/act-root/issues/2568)) ([a48f65b](https://github.com/Rotorsoft/act-root/commit/a48f65bfa8f3034d0ff01255caec45c7a9116bd0)), closes [#2556](https://github.com/Rotorsoft/act-root/issues/2556)
+
 # [@rotorsoft/act-v2.1.14](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v2.1.13...@rotorsoft/act-v2.1.14) (2026-11-15)
 
 
