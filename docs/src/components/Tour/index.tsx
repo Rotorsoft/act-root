@@ -138,7 +138,7 @@ function path_frames(points: { x: number; y: number }[]): Keyframe[] {
   pts.push(points[points.length - 1]!);
   return pts.map((p, i) => ({
     transform: `translate(${p.x}px, ${p.y}px)`,
-    opacity: i === 0 ? 0 : i === pts.length - 1 ? 0.15 : 1,
+    opacity: i === 0 || i === pts.length - 1 ? 0 : 1,
   }));
 }
 
