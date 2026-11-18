@@ -64,8 +64,8 @@ export type SchemaRegister<TSchemaReg> = {
  *   references like `Registry<any, any, any>` keep working.
  * @property actions - Map of action names to state definitions.
  * @property events - Map of event names to event registration info.
- * @property sensitive_fields - Lookup of the top-level `sensitive(...)`-marked
- *   fields of an action or an event, by name (the two never share one).
+ * @property sensitive_fields - Lookup of the `sensitive(...)`-marked fields of
+ *   an action or an event, by name (the two never share one).
  *   Typed to the app's action and event names. Derived once at build time.
  *   Returns the empty array for a name with none. The framework splits and
  *   gates an event's fields; an action's are reported for tooling that
