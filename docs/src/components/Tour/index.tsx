@@ -565,7 +565,7 @@ function Stage({
             )}
           </g>
         ))}
-        {a.links.map((l, i) => (
+        {a.links.filter((l) => l.kind === "listen").map((l, i) => (
           <path
             key={`link-${i}`}
             className={styles.link}
