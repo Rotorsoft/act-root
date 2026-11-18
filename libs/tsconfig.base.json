@@ -16,6 +16,9 @@
     "erasableSyntaxOnly": true,
     "types": ["node", "vitest/globals"],
     "paths": {
+      "@rotorsoft/act/adapter": ["./act/src/adapter.ts"],
+      "@rotorsoft/act/test": ["./act/src/test/index.ts"],
+      "@rotorsoft/act/types": ["./act/src/types/index.ts"],
       "@rotorsoft/*": ["./*/src/index.ts"]
     }
   }
