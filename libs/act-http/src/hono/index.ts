@@ -56,11 +56,14 @@ import type { MergePath, TypedResponse } from "hono/types";
 import type { JSONParsed } from "hono/utils/types";
 import {
   type ActionResult,
+  type ActionSelection,
   type ActSurface,
   type AppActions,
   type AppStateNames,
   make_dispatch,
   type ResolverArgs,
+  type SelectedActions,
+  selected_actions,
 } from "../api/dispatch.js";
 import {
   type ActorExtractor,
@@ -220,40 +223,58 @@ const default_key_from = (c: Context): string | undefined =>
  *    the conventional HTTP status (`409` / `412` for concurrency,
  *    `422` for validation, `400` for non-retryable, etc.).
  *
+ * Pass `actions: { include: [...] }` or `{ exclude: [...] }`, typed against
+ * the app's action names, to generate routes for some actions only. An
+ * action left out has no route and no key in the route types, so `hc`
+ * can't call it: leave out the ones a hand-written route owns, so each
+ * action has one entry point. A name the app doesn't register fails at
+ * generation.
+ *
  * @param app A built `Act` orchestrator.
- * @param options Auth, stream, expected-version, idempotency, and
- *   base-path seams.
- * @returns A Hono app covering every registered action under
+ * @param options Auth, stream, expected-version, idempotency, base-path
+ *   and (optional) actions-to-generate seams.
+ * @returns A Hono app covering every generated action under
  *   `<basePath>/actions/<name>`.
  */
 export function hono<
   TApp extends ActSurface = ActSurface,
   TBase extends string = "/api",
+  const TSelection extends ActionSelection<TApp> | undefined =
+    | ActionSelection<TApp>
+    | undefined,
 >(
   app: TApp,
   options: HonoOptions<TApp> & {
     readonly basePath?: TBase;
+    readonly actions?: TSelection;
     readonly sse: NonNullable<HonoOptions["sse"]>;
   }
 ): Hono<
   { Variables: ActMiddlewareVariables },
-  ActionRoutes<TApp, TBase> & SseRoutes<TApp, TBase>,
+  ActionRoutes<TApp, TBase, SelectedActions<TApp, TSelection>> &
+    SseRoutes<TApp, TBase>,
   TBase
 >;
 export function hono<
   TApp extends ActSurface = ActSurface,
   TBase extends string = "/api",
+  const TSelection extends ActionSelection<TApp> | undefined =
+    | ActionSelection<TApp>
+    | undefined,
 >(
   app: TApp,
-  options: HonoOptions<TApp> & { readonly basePath?: TBase }
+  options: HonoOptions<TApp> & {
+    readonly basePath?: TBase;
+    readonly actions?: TSelection;
+  }
 ): Hono<
   { Variables: ActMiddlewareVariables },
-  ActionRoutes<TApp, TBase>,
+  ActionRoutes<TApp, TBase, SelectedActions<TApp, TSelection>>,
   TBase
 >;
 export function hono<TApp extends ActSurface>(
   app: TApp,
-  options: HonoOptions
+  options: HonoOptions & { readonly actions?: ActionSelection<unknown> }
 ): unknown {
   const base_path = options.basePath ?? "/api";
   const api = new Hono<{ Variables: ActMiddlewareVariables }>().basePath(
@@ -334,7 +355,11 @@ export function hono<TApp extends ActSurface>(
     }
   }
 
-  for (const [action_name, state] of Object.entries(app.registry.actions)) {
+  for (const [action_name, state] of selected_actions(
+    app,
+    options.actions,
+    "hono"
+  )) {
     const schema = state.actions[action_name];
     api.post(
       `/actions/${action_name}`,
@@ -460,8 +485,12 @@ type ErrorStatus = 400 | 401 | 409 | 410 | 412 | 422 | 500 | 503;
  * `app.do` returns (as JSON) on `200`, and {@link ApiError} on an error
  * status. `hc<typeof api>` and `testClient(api)` read it.
  */
-export type ActionRoutes<TApp, TBase extends string> = {
-  [K in keyof AppActions<TApp> & string as MergePath<TBase, `/actions/${K}`>]: {
+export type ActionRoutes<
+  TApp,
+  TBase extends string,
+  TNames extends string = keyof AppActions<TApp> & string,
+> = {
+  [K in TNames as MergePath<TBase, `/actions/${K}`>]: {
     $post:
       | {
           input: { json: AppActions<TApp>[K] };

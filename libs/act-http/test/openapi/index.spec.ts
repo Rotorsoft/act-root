@@ -79,6 +79,17 @@ describe("openapi(app, options) — doc emitter", () => {
     }
   });
 
+  test("documents only the selected actions", ({ app }) => {
+    const doc = openapi(app, {
+      ...base_options(),
+      actions: { include: ["Clear", "PressKey"] },
+    });
+    expect(Object.keys(doc.paths).sort()).toEqual([
+      "/api/actions/Clear",
+      "/api/actions/PressKey",
+    ]);
+  });
+
   test("custom basePath flows through to every path", ({ app }) => {
     const doc = openapi(app, { ...base_options(), basePath: "/v2" });
     expect(Object.keys(doc.paths).sort()).toEqual([

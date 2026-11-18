@@ -83,6 +83,19 @@ describe("hono(app, options) — generated REST surface", () => {
     ]);
   });
 
+  test("an excluded action has no route", async ({ app }) => {
+    const api = hono(app, {
+      ...default_options(),
+      actions: { exclude: ["OpenTicket"] },
+    } as never);
+    const res = await api.request("/api/actions/OpenTicket", {
+      method: "POST",
+      headers: make_headers(),
+      body: JSON.stringify({ title: "x" }),
+    });
+    expect(res.status).toBe(404);
+  });
+
   test("threads actor (via internal middleware) and stream into app.do", async ({
     app,
   }) => {

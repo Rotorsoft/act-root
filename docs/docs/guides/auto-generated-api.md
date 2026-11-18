@@ -537,6 +537,27 @@ export const router = trpc<Ctx, typeof app>(app, {
 
 The client keeps its types: `createTRPCReact<typeof router>()` sees the same procedures, inputs and outputs the hand-written router declared. `packages/server` generates its tRPC router and REST routes this way, and `packages/client` types itself from them.
 
+### Keeping some procedures hand-written
+
+Business rules belong in the state (`.requires`, `.loads`), so a generated route can't bypass them. What stays in a hand-written procedure is work the domain doesn't own: a stream or id derived on the server, a snapshot of another aggregate copied into the payload, mail sent after the commit. An action behind such a procedure must have no generated route, or the generated twin skips that work. Leave it out with `actions`:
+
+```ts no-check
+const generated = trpc(app, {
+  actor: (ctx: Ctx) => ctx.user, // types the context, so no type arguments
+  stream: (action, input, ctx) => `ticket-${ctx.tenantId}`,
+  actions: { exclude: ["CreateInvoice"] }, // owned by createInvoice below
+});
+
+export const router = t.mergeRouters(
+  generated,
+  t.router({ createInvoice: /* loads the client, then app.do("CreateInvoice", …) */ })
+);
+```
+
+`actions` takes `{ include: [...] }` or `{ exclude: [...] }`, typed against the app's action names, on `trpc`, `hono` and `openapi` alike. A left-out action has no route, no OpenAPI operation and no key in the router or route types, so a client can't call it. A name the app doesn't register fails when the API is generated. One entry point per action.
+
+Let TypeScript infer the type arguments when you pass `actions`, typing the context on `actor` as above. With explicit ones (`trpc<Ctx, typeof app>(...)`) it can't also infer the selection, so the router type keeps every action while the left-out ones have no route.
+
 ## Pointers
 
 - `libs/act-http/src/trpc/index.ts`, `libs/act-http/src/hono/index.ts`, `libs/act-http/src/openapi/index.ts` — the three generators
