@@ -28,12 +28,19 @@ import Field from "./Field";
 import { type Box, type Chip, data_lines, type Layout, layout, type Mode, short, type View } from "./layout";
 import styles from "./styles.module.css";
 import type { AppSpec, Link as DocLink, Move, Step, TourSpec } from "./types";
+import { Ambient } from "./music";
 import { type Cell, census, type Frame, type Frames, fill, fmt, frames as fold, sentences, spoken, type Target, type World } from "./world";
 
 export type { TourSpec } from "./types";
 
 const MOVE_MS = 820;
 const TRAIL = [1, 2, 3];
+/** how long a chapter's title card shows between chapters */
+const CARD_MS = 2400;
+/** the narration's rate at 1×: a touch slower than the default */
+const RATE = 0.95;
+const SENTENCE_GAP_MS = 280;
+const STEP_GAP_MS = 750;
 const CAPTION_PX = 84;
 const BAR_PX = 46;
 /** every `</>` icon sits this far in from its element's top-right corner */
@@ -53,6 +60,21 @@ function rich(text: string): ReactNode[] {
     if (part.startsWith("**")) return <b key={i}>{part.slice(2, -2)}</b>;
     return part;
   });
+}
+
+/** How natural a voice is likely to sound: neural and premium voices first, in the page's language. */
+function voice_rank(v: SpeechSynthesisVoice, lang: string): number {
+  const n = v.name;
+  let score = 0;
+  if (/natural|neural/i.test(n)) score += 50;
+  if (/premium|enhanced/i.test(n)) score += 40;
+  if (/google us english/i.test(n)) score += 35;
+  if (/online/i.test(n)) score += 30;
+  if (/\b(ava|samantha|zoe|aria|jenny|allison|evan)\b/i.test(n)) score += 10;
+  if (/compact|espeak|eloquence/i.test(n)) score -= 40;
+  if (v.lang === lang) score += 100;
+  else if (v.lang.split("-")[0] === lang.split("-")[0]) score += 60;
+  return score;
 }
 
 /** A caption in plain words: code spans lose their chips (a call keeps its name), bold stays. */
@@ -939,6 +961,26 @@ export default function Tour({ spec }: { spec: TourSpec }) {
   const [muted, setMuted] = useState(false);
   const [speed, setSpeed] = useState(1);
   const [cue, setCue] = useState(-1);
+  const [card, setCard] = useState<string | undefined>();
+  const [music, setMusic] = useState(true);
+  const [music_level, setMusicLevel] = useState(0.5);
+  const ambient = useRef<Ambient | undefined>(undefined);
+  const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
+  const [voice_name, setVoiceName] = useState<string>("");
+  const pick_voice = useCallback(
+    (): SpeechSynthesisVoice | undefined => voices.find((v) => v.name === voice_name) ?? voices[0],
+    [voices, voice_name]
+  );
+  const choose_voice = (name: string) => {
+    setVoiceName(name);
+    try {
+      window.localStorage.setItem("act-tour-voice", name);
+    } catch {
+      // the choice lasts this visit only
+    }
+  };
+
+  const menu_ref = useRef<HTMLDivElement>(null);
   const [voice, setVoice] = useState(false);
   const [tip, setTip] = useState<OpenTip | undefined>();
   const [hover, setHover] = useState<string | undefined>();
@@ -948,6 +990,8 @@ export default function Tour({ spec }: { spec: TourSpec }) {
   // the stage takes the whole height but the control row; its bottom strip is kept for the subtitles
   const stage_px = Math.max(360, fit.vh - (fit.full ? 0 : fit.top) - BAR_PX);
 
+  // an intro chapter is chapter 0
+  const first = spec.chapters[0]?.id === "intro" ? 0 : 1;
   const frame = all[index]!;
   const chapter = spec.chapters[frame.chapter]!;
   const scene = chapter.scenes[frame.scene]!;
@@ -989,7 +1033,22 @@ export default function Tour({ spec }: { spec: TourSpec }) {
 
   useEffect(() => {
     setReduce(window.matchMedia("(prefers-reduced-motion: reduce)").matches);
-    setVoice(typeof window !== "undefined" && "speechSynthesis" in window);
+    const can = typeof window !== "undefined" && "speechSynthesis" in window;
+    setVoice(can);
+    if (can) {
+      // the voice list arrives late in some browsers
+      const load = () => {
+        const lang = document.documentElement.lang || navigator.language || "en-US";
+        setVoices([...window.speechSynthesis.getVoices()].sort((a, b) => voice_rank(b, lang) - voice_rank(a, lang)));
+      };
+      load();
+      window.speechSynthesis.addEventListener?.("voiceschanged", load);
+    }
+    try {
+      setVoiceName(window.localStorage.getItem("act-tour-voice") ?? "");
+    } catch {
+      // storage can be blocked; the best voice is picked instead
+    }
     const id = window.location.hash.slice(1);
     const at = spec.chapters.findIndex((c) => c.id === id);
     if (at > 0) setIndex(all.findIndex((f) => f.chapter === at));
@@ -1005,6 +1064,7 @@ export default function Tour({ spec }: { spec: TourSpec }) {
       setTip(undefined);
       setMenu(false);
       setCue(-1);
+      setCard(undefined);
       const ch = spec.chapters[all[next]!.chapter]!;
       if (typeof window !== "undefined" && window.location.hash !== `#${ch.id}`) window.history.replaceState(null, "", `#${ch.id}`);
     },
@@ -1018,34 +1078,58 @@ export default function Tour({ spec }: { spec: TourSpec }) {
     let cancelled = false;
     const timers: ReturnType<typeof setTimeout>[] = [];
     const last = index >= all.length - 1 || all[index + 1]!.chapter !== frame.chapter;
+    const talk = playing && voice && sound && !muted;
     const advance = () => {
       if (cancelled || !playing) return;
-      if (last) setPlaying(false);
-      else go(index + 1, true);
+      if (index >= all.length - 1) return setPlaying(false);
+      if (!last) return go(index + 1, true);
+      // the chapter is done: a title card for the next one, then on into it
+      const next = all[index + 1]!.chapter;
+      const text = `Chapter ${next + first} · ${spec.chapters[next]!.title}`;
+      setCard(text);
+      if (talk) {
+        const u = new SpeechSynthesisUtterance(spoken(text.replace(" · ", ". ")));
+        u.rate = speed * RATE;
+        if (pick_voice()) u.voice = pick_voice()!;
+        window.speechSynthesis.speak(u);
+      }
+      timers.push(setTimeout(() => !cancelled && go(index + 1, true), CARD_MS / speed));
     };
-    const talk = playing && voice && sound && !muted;
     const beats = speech.length;
     const show = (i: number) => {
       if (cancelled) return;
       if (i >= beats) {
-        timers.push(setTimeout(advance, 450));
+        // a longer breath between steps
+        timers.push(setTimeout(advance, STEP_GAP_MS / speed));
         return;
       }
       setCue(i);
       if (talk) {
         const text = speech[i]!;
         const u = new SpeechSynthesisUtterance(text);
-        u.rate = speed;
-        u.lang = "en-US";
+        u.rate = speed * RATE;
+        const v = pick_voice();
+        if (v) {
+          u.voice = v;
+          u.lang = v.lang;
+        } else u.lang = "en-US";
         // the voice drives the pace; a watchdog moves on if it never reports the end
         let done = false;
         const next = () => {
           if (done) return;
           done = true;
-          show(i + 1);
+          // a breath between sentences
+          timers.push(setTimeout(() => show(i + 1), SENTENCE_GAP_MS / speed));
         };
-        u.onend = next;
-        u.onerror = next;
+        u.onstart = () => ambient.current?.duck(true);
+        u.onend = () => {
+          ambient.current?.duck(false);
+          next();
+        };
+        u.onerror = () => {
+          ambient.current?.duck(false);
+          next();
+        };
         timers.push(setTimeout(next, (3000 + text.length * 110) / speed));
         window.speechSynthesis.speak(u);
       } else timers.push(setTimeout(() => show(i + 1), Math.max(1800, speech[i]!.length * 55) / speed));
@@ -1056,9 +1140,30 @@ export default function Tour({ spec }: { spec: TourSpec }) {
       for (const t of timers) clearTimeout(t);
       if (voice) window.speechSynthesis.cancel();
     };
-  }, [playing, index, all, frame.chapter, lines, speech, total, reduce, go, voice, sound, muted, speed]);
+  }, [playing, index, all, frame.chapter, lines, speech, total, reduce, go, voice, sound, muted, speed, pick_voice, spec, first]);
+
+  useEffect(() => {
+    if (!menu) return;
+    const close = (e: MouseEvent) => {
+      if (menu_ref.current && !menu_ref.current.contains(e.target as Node)) setMenu(false);
+    };
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, [menu]);
+
+  // the music plays only while the tour plays, and the sound toggle silences it with the voice
+  useEffect(() => {
+    const a = ambient.current;
+    if (!a) return;
+    if (playing && music && sound && !muted) a.start();
+    else a.stop();
+  }, [playing, music, sound, muted]);
+  useEffect(() => ambient.current?.volume(music_level), [music_level]);
+  useEffect(() => () => ambient.current?.stop(), []);
 
   const play = () => {
+    // the first Play is the gesture that lets the page make sound
+    if (!ambient.current && typeof AudioContext !== "undefined") ambient.current = new Ambient();
     // a browser lets a page speak only after a gesture: the first Play turns the sound on
     if (!playing && !muted) setSound(true);
     setPlaying((p) => !p);
@@ -1100,8 +1205,7 @@ export default function Tour({ spec }: { spec: TourSpec }) {
   };
 
   const chapterFrames = all.filter((f) => f.chapter === frame.chapter);
-  // an intro chapter is chapter 0
-  const first = spec.chapters[0]?.id === "intro" ? 0 : 1;
+
   const atStart = index === 0;
   const atEnd = index === all.length - 1;
   const step_tip: TipContent = { title: scene.title, code, api: scene.api, doc: scene.doc, test: scene.test };
@@ -1157,6 +1261,11 @@ export default function Tour({ spec }: { spec: TourSpec }) {
           </div>
         ))}
         {sel && <Inspector cell={sel} onClose={() => setSelected(undefined)} />}
+        {card && (
+          <div className={styles.card} role="status">
+            {card}
+          </div>
+        )}
         <div className={styles.captions} aria-live="polite">
           {cc && caption && <p key={`${index}-${caption}`}>{plain(caption)}</p>}
         </div>
@@ -1189,18 +1298,47 @@ export default function Tour({ spec }: { spec: TourSpec }) {
       </div>
 
       <div className={styles.bar}>
-        <div className={styles.menuWrap}>
-          <button type="button" className={`${styles.menuButton} ${ui("menu")}`} onClick={() => setMenu((m) => !m)} aria-expanded={menu}>
-            ☰ {frame.chapter + first}. {chapter.title}
+        {/* the whole tour's progress, one segment per chapter */}
+        <div className={styles.progress} aria-hidden>
+          {spec.chapters.map((c, i) => {
+            const fs = all.filter((f) => f.chapter === i);
+            const at = i < frame.chapter ? 1 : i > frame.chapter ? 0 : (index - frame.chapter_start + 1) / fs.length;
+            return (
+              <span key={c.id} style={{ flexGrow: fs.length }} data-now={i === frame.chapter || undefined}>
+                <i style={{ width: `${at * 100}%` }} />
+              </span>
+            );
+          })}
+        </div>
+        <div className={styles.menuWrap} ref={menu_ref}>
+          <button
+            type="button"
+            className={`${styles.menuButton} ${ui("menu")}`}
+            onClick={() => setMenu((m) => !m)}
+            aria-expanded={menu}
+            aria-haspopup="menu"
+          >
+            <span className={styles.menuLabel}>
+              Chapter {frame.chapter + first} of {spec.chapters.length - 1 + first}
+            </span>
+            <span className={styles.menuTitle}> · {chapter.title}</span>
+            <span className={styles.menuStep}>
+              {" "}
+              · step {index - frame.chapter_start + 1}/{chapterFrames.length}
+            </span>
+            <span aria-hidden> ▴</span>
           </button>
           {menu && (
-            <ol className={styles.menu}>
+            <ol className={styles.menu} data-mode={fit.mode}>
               {spec.chapters.map((c, i) => (
                 <li key={c.id}>
                   <button
                     type="button"
                     className={i === frame.chapter ? styles.current : ""}
                     aria-current={i === frame.chapter ? "step" : undefined}
+                    ref={(el) => {
+                      if (el && i === frame.chapter) el.scrollIntoView({ block: "nearest" });
+                    }}
                     onClick={() => go(all.findIndex((f) => f.chapter === i))}
                   >
                     <span className={styles.num}>{i + first}</span>
@@ -1214,9 +1352,6 @@ export default function Tour({ spec }: { spec: TourSpec }) {
             </ol>
           )}
         </div>
-        <span className={styles.count}>
-          {index - frame.chapter_start + 1} / {chapterFrames.length}
-        </span>
         <div className={styles.transport}>
           <button type="button" onClick={() => go(index - 1)} disabled={atStart} aria-label="Previous step">
             ‹
@@ -1258,6 +1393,36 @@ export default function Tour({ spec }: { spec: TourSpec }) {
             >
               {sound && !muted ? "🔊" : "🔈"}
             </button>
+          )}
+          <button
+            type="button"
+            className={music && sound && !muted ? styles.on : ""}
+            onClick={() => setMusic((m) => !m)}
+            aria-pressed={music}
+            aria-label="Background music"
+            title="Background music"
+          >
+            ♪
+          </button>
+          <input
+            type="range"
+            className={styles.volume}
+            min={0}
+            max={1}
+            step={0.05}
+            value={music_level}
+            onChange={(e) => setMusicLevel(Number(e.target.value))}
+            aria-label="Music volume"
+            disabled={!music}
+          />
+          {voice && voices.length > 0 && (
+            <select className={styles.voiceSelect} value={pick_voice()?.name ?? ""} onChange={(e) => choose_voice(e.target.value)} aria-label="Voice">
+              {voices.slice(0, 24).map((v) => (
+                <option key={v.name} value={v.name}>
+                  {v.name.replace(/^Microsoft |^Google /, "").replace(/ - .*$/, "")} ({v.lang})
+                </option>
+              ))}
+            </select>
           )}
           <select value={speed} onChange={(e) => setSpeed(Number(e.target.value))} aria-label="Speed">
             <option value={0.75}>0.75×</option>

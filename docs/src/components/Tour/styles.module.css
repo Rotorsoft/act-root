@@ -1651,3 +1651,108 @@
   font-family: var(--ifm-font-family-monospace);
   font-size: 9.5px;
 }
+
+/* the chapter button and the tour's progress, segmented by chapter */
+.bar {
+  position: relative;
+}
+.progress {
+  position: absolute;
+  top: -1px;
+  left: 0;
+  right: 0;
+  display: flex;
+  gap: 2px;
+  height: 3px;
+}
+.progress span {
+  position: relative;
+  flex-basis: 0;
+  background: color-mix(in srgb, var(--dg-line) 30%, transparent);
+}
+.progress span[data-now] {
+  background: color-mix(in srgb, var(--dg-action) 25%, transparent);
+}
+.progress i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: var(--dg-action);
+  transition: width 0.4s var(--t-ease);
+}
+.bar .menuButton {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  max-width: min(52vw, 520px);
+  font-weight: 600;
+}
+.menuTitle {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+.menuStep {
+  color: var(--act-text-muted, var(--ifm-color-emphasis-600));
+  font-weight: 400;
+  white-space: nowrap;
+}
+.menuLabel {
+  white-space: nowrap;
+}
+/* the chapter menu: a panel that always fits, the current chapter in view */
+.bar .menu {
+  position: absolute;
+  top: auto;
+  bottom: 44px;
+  left: 0;
+  width: min(440px, calc(100vw - 16px));
+  max-height: min(70vh, calc(100vh - 120px));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.bar .menu[data-mode="narrow"] {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  width: 100%;
+  max-height: 70vh;
+  border-radius: 16px 16px 0 0;
+}
+/* a title card between chapters */
+.card {
+  position: absolute;
+  z-index: 9;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  padding: 18px 30px;
+  border-radius: 18px;
+  background: rgba(12, 16, 26, 0.62);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  color: #fff;
+  font-size: clamp(1.3rem, 2.2vw, 2.1rem);
+  font-weight: 700;
+  animation: captionIn 0.5s var(--t-ease);
+}
+.voiceSelect {
+  max-width: 170px;
+}
+.volume {
+  width: 70px;
+  accent-color: var(--dg-action);
+}
+.tour[data-mode="narrow"] .voiceSelect,
+.tour[data-mode="narrow"] .volume,
+.tour[data-mode="narrow"] .menuTitle,
+.tour[data-mode="narrow"] .menuStep {
+  display: none;
+}
+.bar .menu button {
+  height: auto;
+  min-height: 36px;
+  border: 0;
+  align-items: flex-start;
+}
