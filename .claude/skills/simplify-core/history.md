@@ -336,9 +336,9 @@ Verified in the main loop before ranking: the `query` limit (5 events: `limit: 2
 My own defects, fixed in PRs the user approved: the tour's two code tips (#2564) and #2554's guard (reverted in #2565). The run started those fixes on a branch before asking, against step 6; the permission check stopped the commit.
 
 Proposals, ticketed when the reports were in. Defects first:
-- D1 (concepts). `app.query` / `query_array` don't check `limit`, which #2541 ("every query limit") missed: a fix on a fix → #2556.
-- D2 (reading). act-http SSE fails open for an app object without `registry.sensitive_fields`, a regression from #2537 → #2557 (the maintainer's call).
-- D3 (concepts). #2537's action/event name rule refuses apps that ran on 2.1.13, in a patch → #2558 (the maintainer's call).
+- D1 (concepts). `app.query` / `query_array` don't check `limit`, which #2541 ("every query limit") missed: a fix on a fix → #2556 → #2568.
+- D2 (reading). act-http SSE fails open for an app object without `registry.sensitive_fields`, a regression from #2537 → #2557 → #2569 (the maintainer chose fail closed; the type stays optional).
+- D3 (concepts). #2537's action/event name rule refuses apps that ran on 2.1.13, in a patch → #2558 → #2569 (the maintainer kept the rule; a migration note added).
 - D4 (examples). Two tour code tips don't compile against the tour's schemas → #2564.
 Simplifications:
 - 1 (r-1, e-1). Cut the tour script's chapter tables (−395) → #2559 → #2564.
@@ -352,4 +352,4 @@ Findings, not proposed: nothing type-checks the tour's code strings (a gate woul
 
 Lens metrics: Postgres was down (Docker off), so 4 full runs at 11.7–11.8 s without act-pg and no local coverage gate; recipes + packages 260 tests; tour tips 47/49; no-check snippets 160/213, `@example` 82/99, scaffold 77/92 parse with 0 API errors; NaN-accepting numeric inputs 2; reading path do/settle 13 files, restore 8.
 
-Tickets: #2556–#2563. PRs: #2564, #2565, #2566.
+Tickets: #2556–#2563. PRs: #2564–#2566, #2568, #2569. The maintainer left the time-travel test link out of the tour.
