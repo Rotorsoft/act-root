@@ -207,15 +207,18 @@ function Tokens({ moves, lay, run, reduce }: { moves: Move[]; lay: Layout; run: 
 let measure_ctx: CanvasRenderingContext2D | null | undefined;
 // text is measured only after the page has hydrated, so the server's render and the first client render match
 let can_measure = false;
-/** Fits a label to a width: the whole name when it fits, else cut with an ellipsis. */
-function fit_text(text: string, width: number, size: number, weight = 600): string {
+/** A label's width in pixels: measured once the page has hydrated, estimated before. */
+function text_width(text: string, size: number, weight = 600): number {
   if (can_measure && measure_ctx === undefined) measure_ctx = document.createElement("canvas").getContext("2d");
   const ctx = measure_ctx;
-  const w = (t: string) => {
-    if (!ctx) return t.length * size * 0.6;
-    ctx.font = `${weight} ${size}px Inter, system-ui, -apple-system, sans-serif`;
-    return ctx.measureText(t).width;
-  };
+  if (!ctx) return text.length * size * 0.6;
+  ctx.font = `${weight} ${size}px Inter, system-ui, -apple-system, sans-serif`;
+  return ctx.measureText(text).width;
+}
+
+/** Fits a label to a width: the whole name when it fits, else cut with an ellipsis. */
+function fit_text(text: string, width: number, size: number, weight = 600): string {
+  const w = (t: string) => text_width(t, size, weight);
   if (w(text) <= width) return text;
   let n = text.length - 1;
   while (n > 1 && w(`${text.slice(0, n)}…`) > width) n--;
@@ -564,14 +567,26 @@ function Stage({
             <g key={stage} className={styles.stage} data-state={state}>
               <title>{stage}</title>
               <rect x={box.x} y={box.y} width={box.w} height={box.h} rx={9} />
-              <text x={box.x + box.w / 2} y={box.y + 13}>
-                {state === "done" ? "✓ " : state === "fail" ? "✕ " : ""}
-                {(() => {
-                  const mark = state === "done" ? "✓ " : state === "fail" ? "✕ " : "";
-                  const full = fit_text(mark + stage, box.w - 8, 11, 500) === mark + stage;
-                  return fit_text(full ? stage : (SHORT[stage] ?? stage), box.w - 8 - (mark ? 12 : 0), 11, 500);
-                })()}
-              </text>
+              {(() => {
+                // the stage's word never truncates: the long names take their short form, then the type shrinks
+                const room = box.w - 10;
+                const word = text_width(stage, 11, 500) <= room ? stage : (SHORT[stage] ?? stage);
+                const size = Math.min(11, (11 * room) / Math.max(1, text_width(word, 11, 500)));
+                return (
+                  <text x={box.x + box.w / 2} y={box.y + 13} style={{ fontSize: size }}>
+                    {word}
+                  </text>
+                );
+              })()}
+              {/* done or failed: a badge on the chip's corner, outside its text */}
+              {(state === "done" || state === "fail") && (
+                <g className={styles.stageMark}>
+                  <circle cx={box.x + 3} cy={box.y + 2} r={6} />
+                  <text x={box.x + 3} y={box.y + 5}>
+                    {state === "done" ? "✓" : "✕"}
+                  </text>
+                </g>
+              )}
             </g>
           );
         })}

@@ -1798,3 +1798,19 @@
     animation: none;
   }
 }
+
+/* a stage's done or failed badge, on its corner */
+.stageMark circle {
+  fill: var(--dg-good);
+  stroke: var(--act-surface-1, #fff);
+  stroke-width: 1.5;
+}
+.stage[data-state="fail"] .stageMark circle {
+  fill: var(--dg-bad);
+}
+.svg .stage .stageMark text {
+  fill: #fff !important;
+  font-size: 8px !important;
+  font-weight: 800;
+  text-anchor: middle;
+}
