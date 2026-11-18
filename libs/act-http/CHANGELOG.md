@@ -1,3 +1,10 @@
+# [@rotorsoft/act-http-v2.2.0](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-http-v2.1.9...@rotorsoft/act-http-v2.2.0) (2026-11-18)
+
+
+### Features
+
+* **act-http:** generate only the actions an app selects ([#2582](https://github.com/Rotorsoft/act-root/issues/2582)) ([091175c](https://github.com/Rotorsoft/act-root/commit/091175ccbd4ec314a7163f5f1e31fd0bd9cb7b86)), closes [#2579](https://github.com/Rotorsoft/act-root/issues/2579)
+
 # [@rotorsoft/act-http-v2.1.9](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-http-v2.1.8...@rotorsoft/act-http-v2.1.9) (2026-11-18)
 
 
