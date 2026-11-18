@@ -329,14 +329,14 @@ Tickets: #2517–#2528, and #2529 (my own fixes).
 
 Audit: #2531–#2539 (the 11-15 tickets), #2537, #2544/#2545, #2552, #2554/#2555 and Renovate since the last run. #2544 → #2545 is a fix on my own fix in the same file (a helper between a doc and its export, and no `/release-check`). #2554 guarded a failure #2532 had already fixed; #2555 found the real cause. #2537 added a concept (one namespace for action and event names) in a patch.
 
-Decisions on P2026-11-15*: all shipped. D1 → #2531, D2 → #2532, D3 → #2522's fix, D4 → #2533, D5 → #2535, D6 → #2534, 1 → #2536, 2 → #2537's surface work, 3 → #2538, 4 → #2539, 5 → #2540, 6 → #2545.
+Decisions on P2026-11-15*: all shipped. D1 → #2531, D2 → #2532, D3 → #2541, D4 → #2533, D5 → #2535, D6 → #2534, 1 → #2536, 2 and 4 → #2539, 3 → #2538, 5 → #2540, 6 → #2545.
 
 Verified in the main loop before ranking: the `query` limit (5 events: `limit: 2` → 2, control; NaN → 5; −1 → 1); SSE's check before and after #2537 (`sse-states.ts`, schema walk → optional lookup); the tour's `agent` and `CloseTicket` tips against its schemas; one of the six repeated tests line for line. Coverage of act and act-diagram is identical with #2565.
 
 My own defects, fixed in PRs the user approved: the tour's two code tips (#2564) and #2554's guard (reverted in #2565). The run started those fixes on a branch before asking, against step 6; the permission check stopped the commit.
 
 Proposals, ticketed when the reports were in. Defects first:
-- D1 (concepts). `app.query` / `query_array` don't check `limit` → #2556 (held: the `page` check also refuses a fractional limit, the maintainer's call).
+- D1 (concepts). `app.query` / `query_array` don't check `limit`, which #2541 ("every query limit") missed: a fix on a fix → #2556.
 - D2 (reading). act-http SSE fails open for an app object without `registry.sensitive_fields`, a regression from #2537 → #2557 (the maintainer's call).
 - D3 (concepts). #2537's action/event name rule refuses apps that ran on 2.1.13, in a patch → #2558 (the maintainer's call).
 - D4 (examples). Two tour code tips don't compile against the tour's schemas → #2564.
