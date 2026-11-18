@@ -368,6 +368,7 @@ function useSiteTheme(): string {
 
 function Hero() {
   const docsUrl = useBaseUrl("/docs/intro");
+  const tourUrl = useBaseUrl("/tour");
   const frameUrl = useBaseUrl("/flows/wolfdesk.html");
   const galleryUrl = useBaseUrl("/flows/index.html");
   const guideUrl = useBaseUrl("/docs/guides/flow-animations");
@@ -391,6 +392,9 @@ function Hero() {
         <div className={styles.heroCtas}>
           <Link className={`button button--primary button--lg ${styles.cta}`} to={docsUrl}>
             Get started
+          </Link>
+          <Link className={`button button--secondary button--lg ${styles.cta}`} to={tourUrl}>
+            ▶ Take the tour
           </Link>
           <Link
             className={`button button--secondary button--lg ${styles.cta}`}
