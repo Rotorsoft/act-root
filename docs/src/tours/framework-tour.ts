@@ -440,6 +440,7 @@ const chapters: Chapter[] = [
     title: "How to read this tour",
     audience: "everyone",
     blurb: "A short walk around the screen before the first chapter.",
+    history: [{ seed: 7, events: 1800, days: 300, kinds: DESK_KINDS }],
     seed: [
       {
         stream: "ticket-101",
@@ -2330,6 +2331,7 @@ await app.reset(["tickets"]); // or a filter: app.reset({ stream: "^proj-" })`,
     audience: "production",
     blurb:
       "One action can decide on several streams and append to all of them in one commit, each guarded by its version.",
+    history: [{ seed: 7, events: 1800, days: 300, kinds: DESK_KINDS }],
     seed: [
       { stream: "agent-ana", name: "AgentAdded", data: { name: "Ana" } },
       { stream: "agent-bo", name: "AgentAdded", data: { name: "Bo" } },
@@ -2384,7 +2386,7 @@ const Agent = state({ Agent: z.object({ name: z.string(), open: z.number().min(0
           {
             now: "Lee runs `AssignTicket` ticket-5200 → Ana: loads ticket-5200 and agent-ana",
             pipe: { name: "action", at: 3 },
-            say: "An agent can juggle five open tickets at most, and that rule belongs to the agent, not the ticket. So assigning one touches both. On a fresh store, with two agents and Bo already at five, Lee assigns ticket 5200 to Ana. The action loads every state the decision needs, all at once. The ticket has no agent yet, so that load is skipped.",
+            say: "An agent can juggle five open tickets at most, and that rule belongs to the agent, not the ticket. So assigning one touches both. Ana and Bo are on shift today, and Bo is already at five. Lee assigns ticket 5200 to Ana. The action loads every state the decision needs, all at once. The ticket has no agent yet, so that load is skipped.",
             moves: [
               { from: "lead", to: "AssignTicket", label: "{ agentId: ana }" },
               { from: "AssignTicket", to: "ticket", label: "load ticket-5200" },
@@ -2612,6 +2614,7 @@ const Agent = state({ Agent: z.object({ name: z.string(), open: z.number().min(0
     audience: "production",
     blurb:
       "Sensitive fields live in their own column of the event row, are gated on read, and can be wiped without rewriting the log.",
+    history: [{ seed: 7, events: 1800, days: 300, kinds: DESK_KINDS }],
     seed: [
       {
         stream: "ticket-6001",
