@@ -419,7 +419,7 @@ function Stage({
       {/* the actors: an icon each, at the edge */}
       {lay.callers.map(({ node, box }) => {
         const cx = box.x + box.w / 2;
-        const cy = box.y + 18;
+        const cy = box.y + 14;
         return (
           <g
             key={node.id}
@@ -427,14 +427,14 @@ function Stage({
             data-kind={node.kind}
           >
             <title>{node.sub ? `${node.label} · ${node.sub}` : node.label}</title>
-            <circle cx={cx} cy={cy} r={17} className={styles.actorDisc} />
+            <circle cx={cx} cy={cy} r={13} className={styles.actorDisc} />
             {node.kind === "actor" ? (
-              <g className={styles.actorIcon}>
+              <g className={styles.actorIcon} transform={`translate(${cx} ${cy}) scale(0.78) translate(${-cx} ${-cy})`}>
                 <circle cx={cx} cy={cy - 5} r={4.6} />
                 <path d={`M${cx - 8.5},${cy + 10} a8.5,7.5 0 0 1 17,0 z`} />
               </g>
             ) : node.kind === "worker" ? (
-              <g className={styles.actorIcon}>
+              <g className={styles.actorIcon} transform={`translate(${cx} ${cy}) scale(0.78) translate(${-cx} ${-cy})`}>
                 <circle cx={cx} cy={cy} r={6.5} className={styles.gear} />
                 {[0, 45, 90, 135, 180, 225, 270, 315].map((d) => (
                   <rect key={d} x={cx - 1.6} y={cy - 10.5} width={3.2} height={4} transform={`rotate(${d} ${cx} ${cy})`} />
@@ -442,13 +442,13 @@ function Stage({
                 <circle cx={cx} cy={cy} r={2.4} className={styles.gearHole} />
               </g>
             ) : (
-              <g className={styles.actorIcon}>
+              <g className={styles.actorIcon} transform={`translate(${cx} ${cy}) scale(0.78) translate(${-cx} ${-cy})`}>
                 <circle cx={cx} cy={cy} r={8} className={styles.globe} />
                 <path d={`M${cx - 8},${cy} h16 M${cx},${cy - 8} c-5,5 -5,11 0,16 M${cx},${cy - 8} c5,5 5,11 0,16`} className={styles.globe} />
               </g>
             )}
-            <text x={cx} y={box.y + 50} className={styles.actorLabel}>
-              {trim(node.label, 13)}
+            <text x={cx} y={box.y + 40} className={styles.actorLabel}>
+              {trim(node.label, 8)}
             </text>
           </g>
         );

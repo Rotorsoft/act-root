@@ -117,7 +117,7 @@ export type Layout = {
   chip_of: (id: string) => { kind: string; name: string } | undefined;
 };
 
-const CALLER_H = 58;
+const CALLER_H = 46;
 const CHIP_H = 19;
 const LINE = 13;
 const TRACK = 8;
@@ -581,10 +581,10 @@ export function layout(
   const gap = narrow ? 14 : 20;
   // callers narrow, then the app and the store sharing the rest about 40 / 48
   // actors are icons at the edge; the app and the store are the two centers
-  const L = narrow ? width - pad * 2 : 84;
+  const L = narrow ? width - pad * 2 : 50;
   const A = narrow
     ? width - pad * 2
-    : Math.round((width - pad * 2 - L - gap * 2) * 0.4);
+    : Math.round((width - pad * 2 - L - gap * 2) * 0.47);
   const S = narrow ? width - pad * 2 : width - pad * 2 - L - A - gap * 2;
   const lx = pad;
   const ax = narrow ? pad : lx + L + gap;
@@ -612,7 +612,7 @@ export function layout(
     ly += 16;
     for (const node of cnodes) {
       callers.push({ node, box: { x: lx, y: ly, w: L, h: CALLER_H } });
-      ly += CALLER_H + 14;
+      ly += CALLER_H + 8;
     }
   }
 
