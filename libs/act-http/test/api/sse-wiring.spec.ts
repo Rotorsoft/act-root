@@ -486,7 +486,7 @@ describe("sse_state_names", () => {
     expect(sse_state_names(app, "hono")).toEqual(["Ticket", "Calculator"]);
   });
 
-  it("treats a bare surface without the sensitive lookup as having none", () => {
+  it("refuses a state with events when the surface has no sensitive lookup", () => {
     const app = {
       do: async () => [],
       registry: {
@@ -494,12 +494,14 @@ describe("sse_state_names", () => {
           open: {
             name: "Ticket",
             actions: {},
-            events: { Opened: z.object({}) },
+            events: { Opened: z.object({ secret: sensitive(z.string()) }) },
           },
         },
       },
     };
-    expect(sse_state_names(app, "trpc")).toEqual(["Ticket"]);
+    expect(() => sse_state_names(app, "trpc")).toThrow(
+      'trpc: state "Ticket" can\'t be served over SSE: the app has no `registry.sensitive_fields`'
+    );
   });
 
   describe("a state only reached through .loads", () => {

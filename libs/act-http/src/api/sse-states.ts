@@ -5,7 +5,8 @@ import type { ActSurface } from "./dispatch.js";
  * The state names a transport opens one SSE subscription for: every state
  * with an action, and every state an action loads, since its streams change
  * too. Throws for a state whose events declare `sensitive(...)`
- * fields: the channel caches one state per stream, folded over whichever
+ * fields, or whose events can't be checked because the app has no
+ * `registry.sensitive_fields`: the channel caches one state per stream, folded over whichever
  * actor committed last, and serves it to every subscriber, so it would hand
  * one actor's plaintext to everyone and overwrite the owner's view with
  * redaction markers.
@@ -17,9 +18,15 @@ export function sse_state_names(app: ActSurface, transport: string): string[] {
     for (const loads of Object.values(s.loads ?? {}))
       for (const { state } of loads ?? []) names.set(state.name, state.events);
   }
+  const sensitive_fields = app.registry.sensitive_fields;
   for (const [name, events] of names) {
-    const sensitive = Object.keys(events).filter(
-      (event) => (app.registry.sensitive_fields?.(event) ?? []).length > 0
+    const declared = Object.keys(events);
+    if (declared.length && !sensitive_fields)
+      throw new Error(
+        `${transport}: state "${name}" can't be served over SSE: the app has no \`registry.sensitive_fields\`, so its events can't be checked for sensitive fields. Pass the built Act.`
+      );
+    const sensitive = declared.filter(
+      (event) => sensitive_fields!(event).length > 0
     );
     if (sensitive.length)
       throw new Error(
