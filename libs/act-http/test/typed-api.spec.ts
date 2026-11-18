@@ -240,3 +240,47 @@ describe("generating some actions only", () => {
     ).toBeFunction();
   });
 });
+
+describe("caller-addressed streams", () => {
+  const actor = () => ({ id: "a", name: "a" });
+
+  it("takes { stream, payload } for an addressed state's actions only", () => {
+    const router = trpc(app, { actor, stream, streams: { Counter: /^c-/ } });
+    type In = inferRouterInputs<typeof router>;
+    expectTypeOf<In["add"]>().toEqualTypeOf<{
+      stream: string;
+      payload: { by: number };
+    }>();
+    expectTypeOf<In["write"]>().toEqualTypeOf<{ text: string }>();
+  });
+
+  it("needs no stream resolver when every state is addressed", () => {
+    const router = trpc(app, {
+      actor,
+      streams: { Counter: /^c-/, Note: (s) => s.startsWith("n-") },
+    });
+    expectTypeOf<inferRouterInputs<typeof router>["write"]>().toEqualTypeOf<{
+      stream: string;
+      payload: { text: string };
+    }>();
+  });
+
+  it("puts an addressed action's stream in the Hono path", () => {
+    const client = testClient(
+      hono(app, { actor, stream, streams: { Counter: /^c-/ } })
+    );
+    expectTypeOf(client.api.actions.add[":stream"].$post)
+      .parameter(0)
+      .toEqualTypeOf<{ json: { by: number }; param: { stream: string } }>();
+    expectTypeOf(client.api.actions.write.$post)
+      .parameter(0)
+      .toEqualTypeOf<{ json: { text: string } }>();
+  });
+
+  it("refuses a state the app doesn't register", () => {
+    expectTypeOf(() =>
+      // @ts-expect-error "Ledger" is not a state of the app
+      trpc(app, { actor, stream, streams: { Ledger: /^l-/ } })
+    ).toBeFunction();
+  });
+});

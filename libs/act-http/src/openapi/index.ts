@@ -62,7 +62,9 @@ import { z } from "zod";
 import {
   type ActionSelection,
   type ActSurface,
+  type StreamPatterns,
   selected_actions,
+  stream_patterns,
 } from "../api/dispatch.js";
 
 /**
@@ -103,8 +105,10 @@ export type OpenAPIDocument = {
  *   request header carrying the expected stream version.
  *
  * `openapi` also takes `actions` (`{ include }` or `{ exclude }`, typed
- * against the app's action names), the same selection the Hono generator
- * takes, so the document describes exactly the routes it serves.
+ * against the app's action names) and `streams` (the caller-addressed states
+ * and their patterns), the same options the Hono generator takes, so the
+ * document describes exactly the routes it serves: an addressed action's
+ * path ends in a `{stream}` parameter, carrying `pattern` for a `RegExp`.
  */
 export type OpenAPIOptions = {
   readonly info: OpenAPIInfo;
@@ -585,9 +589,22 @@ function build_operation(
   action_name: string,
   body_schema: Record<string, unknown>,
   response_ref: string,
-  options: OpenAPIOptions
+  options: OpenAPIOptions,
+  pattern: RegExp | ((stream: string) => boolean) | undefined
 ): OpenAPIOperation {
   const parameters: OpenAPIParameter[] = [];
+  if (pattern)
+    parameters.push({
+      name: "stream",
+      in: "path",
+      required: true,
+      description:
+        "The stream the action targets. A stream that doesn't match its state's pattern produces a 422 with code INVALID_STREAM.",
+      schema:
+        pattern instanceof RegExp
+          ? { type: "string", pattern: pattern.source }
+          : { type: "string" },
+    });
   if (options.idempotency) {
     parameters.push({
       name: "Idempotency-Key",
@@ -676,8 +693,15 @@ function build_operation(
  */
 export function openapi<TApp extends Pick<ActSurface, "registry">>(
   app: TApp,
-  options: OpenAPIOptions & { readonly actions?: ActionSelection<TApp> }
+  options: OpenAPIOptions & {
+    readonly actions?: ActionSelection<TApp>;
+    readonly streams?: StreamPatterns<TApp>;
+  }
 ): OpenAPIDocument {
+  // Refuses a pattern for a state the app doesn't have. The document has no
+  // `stream` resolver to cover the other states: the REST host passes it.
+  stream_patterns(app, options.streams, true, "openapi");
+  const streams: StreamPatterns<unknown> | undefined = options.streams;
   OpenAPIOptionsSchema.parse({
     info: { title: options.info?.title, version: options.info?.version },
     servers: options.servers,
@@ -710,8 +734,19 @@ export function openapi<TApp extends Pick<ActSurface, "registry">>(
     const response_ref = state_schemas[snapshots]
       ? `#/components/schemas/${snapshots}`
       : "#/components/schemas/SnapshotArray";
-    paths[`${base_path}/actions/${action_name}`] = {
-      post: build_operation(action_name, body_schema, response_ref, options),
+    const pattern = streams?.[state.name];
+    paths[
+      pattern
+        ? `${base_path}/actions/${action_name}/{stream}`
+        : `${base_path}/actions/${action_name}`
+    ] = {
+      post: build_operation(
+        action_name,
+        body_schema,
+        response_ref,
+        options,
+        pattern
+      ),
     };
   }
 

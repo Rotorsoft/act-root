@@ -1,5 +1,13 @@
+import { expectTypeOf } from "vitest";
 import { z } from "zod";
-import { type Actor, act, dispose, state, ZodEmpty } from "../src/index.js";
+import {
+  type Actor,
+  act,
+  dispose,
+  slice,
+  state,
+  ZodEmpty,
+} from "../src/index.js";
 
 const A1 = state({ A1: z.object({}) })
   .init(() => ({}))
@@ -430,5 +438,24 @@ describe("Builder", () => {
       const _count: number = snap.state.count;
       expect(_count).toBe(0);
     });
+  });
+});
+
+describe("the registry keeps each action's state name", () => {
+  it("types registry.actions[action].name as its state's name", () => {
+    const B1 = state({ B1: z.object({}) })
+      .init(() => ({}))
+      .emits({ B1Done: z.object({}) })
+      .patch({ B1Done: () => ({}) })
+      .on({ DoB1: z.object({}) })
+      .emit(() => ["B1Done", {}])
+      .build();
+    const app = act()
+      .withState(A1)
+      .withSlice(slice().withState(B1).build())
+      .build();
+    expectTypeOf(app.registry.actions.Act1.name).toEqualTypeOf<"A1">();
+    expectTypeOf(app.registry.actions.DoB1.name).toEqualTypeOf<"B1">();
+    expect(app.registry.actions.DoB1.name).toBe("B1");
   });
 });

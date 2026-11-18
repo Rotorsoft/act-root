@@ -119,6 +119,40 @@ describe("hono(app, options) — generated REST surface", () => {
     );
   });
 
+  test("takes a caller-addressed state's stream from the path", async ({
+    app,
+  }) => {
+    const do_spy = vi.spyOn(app, "do");
+    const client = testClient(
+      hono(app, {
+        ...default_options(),
+        streams: { Calculator: /^calc-\d+$/ },
+      })
+    );
+    const ok = await client.api.actions.PressKey[":stream"].$post(
+      { json: { key: "5" }, param: { stream: "calc-7" } },
+      { headers: make_headers() }
+    );
+    expect(ok.status).toBe(200);
+    expect(do_spy).toHaveBeenCalledWith(
+      "PressKey",
+      { stream: "calc-7", actor: { id: "u-1", name: "alice" } },
+      { key: "5" }
+    );
+    do_spy.mockClear();
+    const refused = await client.api.actions.PressKey[":stream"].$post(
+      { json: { key: "5" }, param: { stream: "ticket-1" } },
+      { headers: make_headers() }
+    );
+    expect(refused.status).toBe(422);
+    expect(await refused.json()).toEqual({
+      error: "InvalidStream",
+      detail: '"ticket-1" is not a stream of Calculator',
+      code: "INVALID_STREAM",
+    });
+    expect(do_spy).not.toHaveBeenCalled();
+  });
+
   test("mounts under a custom basePath", async ({ app }) => {
     const api = hono(app, { ...default_options(), basePath: "/v1" });
     const res = await testClient(api).v1.actions.PressKey.$post(

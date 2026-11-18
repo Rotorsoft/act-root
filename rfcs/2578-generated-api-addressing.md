@@ -12,7 +12,7 @@
 2. **Leaving an action out (#2579).** Every registered action gets a route. When a hand-written procedure owns an action (it derives the stream, snapshots another aggregate into the payload, or sends mail after the commit), the generated twin stays mounted beside it and bypasses that work.
 3. **Live updates end to end (#2580).** The generators emit the subscription side only. Every host writes the same `committed` → `publish` listener, including the `.snap` empty patch the real-time guide warns about; read-model views (lists, dashboards) have no signal that their projection caught up; and nothing tells the host how many clients are connected.
 
-All of this is act-http only. Core already emits what it needs: `committed` carries the snapshots, and `settled` carries the acked leases.
+All of this is act-http only. Core already emits what it needs: `committed` carries the snapshots, and `settled` carries the acked leases. Typing `streams` per state also needs each action's state name, which core's types now carry: `Registry`, `Act`, `ActBuilder`, `Slice` and `SliceBuilder` gain a trailing, defaulted type parameter mapping action names to state names (decided while building #2578).
 
 ## Public surface added
 
@@ -37,8 +37,8 @@ trpc(app, {
   - tRPC: the input is `{ stream: string; payload: <action input> }`. The payload stays exactly the action's schema.
   - Hono: `POST <base>/actions/<Action>/:stream`.
   - OpenAPI: that route with a `stream` path parameter, carrying `pattern` when the entry is a `RegExp`.
-- A stream that doesn't match is refused before `app.do`: `422` with code `INVALID_STREAM` on Hono and OpenAPI, `BAD_REQUEST` with the same code on tRPC.
-- `expectedVersion` receives the resolved stream, so a per-entity `If-Match` works.
+- A stream that doesn't match is refused before `app.do`: `422` with code `INVALID_STREAM` on Hono and OpenAPI, and `UNPROCESSABLE_CONTENT` (422) on tRPC, as a malformed payload is. (The draft said `BAD_REQUEST` on tRPC.)
+- ~~`expectedVersion` receives the resolved stream.~~ Dropped in the build: a typed fourth argument breaks a resolver declared with three parameters, and an `If-Match` resolver reads the version from the request, not the stream.
 
 ### `actions`: which actions get a route (`trpc`, `hono`, `openapi`)
 

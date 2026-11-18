@@ -43,8 +43,11 @@ import type { Actor, AsOf, AuditCategory, AuditFinding, AuditOptions, BatchHandl
  * @template TActions Schemas for actions
  * @template TStateMap Map of state names to state schemas
  * @template TActor Actor type extending base Actor
+ * @template TActionStates Each action's state name, by action name, filled
+ *   in by \`withState\` and \`withSlice\`, so \`registry.actions[action].name\` is
+ *   the state's literal name. Defaults to \`Record<string, string>\`.
  */
-export declare class Act<TSchemaReg extends SchemaRegister<TActions>, TEvents extends Schemas, TActions extends Schemas, TStateMap extends Record<string, Schema> = Record<string, never>, TActor extends Actor = Actor> implements IAct<TEvents, TActions, TActor, TSchemaReg> {
+export declare class Act<TSchemaReg extends SchemaRegister<TActions>, TEvents extends Schemas, TActions extends Schemas, TStateMap extends Record<string, Schema> = Record<string, never>, TActor extends Actor = Actor, TActionStates extends Record<string, string> = Record<string, string>> implements IAct<TEvents, TActions, TActor, TSchemaReg> {
     private _emitter;
     private readonly _breaker;
     private readonly _drain;
@@ -57,7 +60,7 @@ export declare class Act<TSchemaReg extends SchemaRegister<TActions>, TEvents ex
     private _poll_limit;
     private readonly _notify_disposer;
     /** Public registry — kept as-is per the no-prefix-on-public convention. */
-    readonly registry: Registry<TSchemaReg, TEvents, TActions, keyof TStateMap & string>;
+    readonly registry: Registry<TSchemaReg, TEvents, TActions, keyof TStateMap & string, TActionStates>;
     private readonly _states;
     /**
      * Emit a lifecycle event. The payload type is inferred from the event name
@@ -116,7 +119,7 @@ export declare class Act<TSchemaReg extends SchemaRegister<TActions>, TEvents ex
     /** Drain lanes declared via \`.withLane(...)\`. Implicit default not included. */
     get lanes(): ReadonlyArray<LaneConfig>;
     /** Use the {@link act} builder rather than constructing directly. */
-    constructor(registry: Registry<TSchemaReg, TEvents, TActions, keyof TStateMap & string>, states?: Map<string, State<any, any, any>>, batch_handlers?: Map<string, BatchHandler<any>>, options?: ActOptions, lanes?: ReadonlyArray<LaneConfig>, patch_fn?: PatchFn);
+    constructor(registry: Registry<TSchemaReg, TEvents, TActions, keyof TStateMap & string, TActionStates>, states?: Map<string, State<any, any, any>>, batch_handlers?: Map<string, BatchHandler<any>>, options?: ActOptions, lanes?: ReadonlyArray<LaneConfig>, patch_fn?: PatchFn);
     private _build_breaker;
     private _build_drain_controllers;
     private _advise_orphaned_lanes;
@@ -2116,11 +2119,14 @@ interface BuilderBase<Self, TEvents extends Schemas, TActions extends Schemas, T
  * @template TLanes - Union of declared lane names. Narrowed by
  *   \`.withLane({name})\` calls so \`.to({lane})\` and \`ActOptions.onlyLanes\`
  *   reject typos at compile time. Starts at \`"default"\`.
+ * @template TActionStates - Each action's state name, by action name, filled
+ *   in by \`withState\` and \`withSlice\`, so \`registry.actions[action].name\` is
+ *   the state's literal name. Defaults to \`Record<string, string>\`.
  *
  * @see {@link act} for usage examples
  * @see {@link Act} for the built orchestrator API
  */
-export interface ActBuilder<TSchemaReg extends SchemaRegister<TActions>, TEvents extends Schemas, TActions extends Schemas, TStateMap extends Record<string, Schema> = {}, TActor extends Actor = Actor, TLanes extends string = typeof DEFAULT_LANE> extends BuilderBase<ActBuilder<TSchemaReg, TEvents, TActions, TStateMap, TActor, TLanes>, TEvents, TActions, TActor, TLanes> {
+export interface ActBuilder<TSchemaReg extends SchemaRegister<TActions>, TEvents extends Schemas, TActions extends Schemas, TStateMap extends Record<string, Schema> = {}, TActor extends Actor = Actor, TLanes extends string = typeof DEFAULT_LANE, TActionStates extends Record<string, string> = Record<string, string>> extends BuilderBase<ActBuilder<TSchemaReg, TEvents, TActions, TStateMap, TActor, TLanes, TActionStates>, TEvents, TActions, TActor, TLanes> {
     /**
      * Registers a state definition with the builder.
      *
@@ -2135,7 +2141,9 @@ export interface ActBuilder<TSchemaReg extends SchemaRegister<TActions>, TEvents
         [K in keyof TNewActions]: TNewState;
     }, TEvents & TNewEvents, TActions & TNewActions, TStateMap & {
         [K in TNewName]: TNewState;
-    }, TActor, TLanes>;
+    }, TActor, TLanes, TActionStates & {
+        [K in keyof TNewActions & string]: TNewName;
+    }>;
     /**
      * Registers a slice with the builder.
      *
@@ -2147,7 +2155,7 @@ export interface ActBuilder<TSchemaReg extends SchemaRegister<TActions>, TEvents
      * @throws {Error} If duplicate action or event names are detected, or an
      *   action and an event share a name
      */
-    withSlice: <TNewSchemaReg extends SchemaRegister<TNewActions>, TNewEvents extends Schemas, TNewActions extends Schemas, TNewMap extends Record<string, Schema>, TNewLanes extends string>(slice: Slice<TNewSchemaReg, TNewEvents, TNewActions, TNewMap, Actor, TNewLanes>) => ActBuilder<TSchemaReg & TNewSchemaReg, TEvents & TNewEvents, TActions & TNewActions, TStateMap & TNewMap, TActor, TLanes | TNewLanes>;
+    withSlice: <TNewSchemaReg extends SchemaRegister<TNewActions>, TNewEvents extends Schemas, TNewActions extends Schemas, TNewMap extends Record<string, Schema>, TNewLanes extends string, TNewActionStates extends Record<string, string> = Record<string, string>>(slice: Slice<TNewSchemaReg, TNewEvents, TNewActions, TNewMap, Actor, TNewLanes, TNewActionStates>) => ActBuilder<TSchemaReg & TNewSchemaReg, TEvents & TNewEvents, TActions & TNewActions, TStateMap & TNewMap, TActor, TLanes | TNewLanes, TActionStates & TNewActionStates>;
     /**
      * Locks a custom actor type for this application.
      *
@@ -2174,7 +2182,7 @@ export interface ActBuilder<TSchemaReg extends SchemaRegister<TActions>, TEvents
      * }, { by: 5 });
      * \`\`\`
      */
-    withActor: <TNewActor extends Actor>() => ActBuilder<TSchemaReg, TEvents, TActions, TStateMap, TNewActor, TLanes>;
+    withActor: <TNewActor extends Actor>() => ActBuilder<TSchemaReg, TEvents, TActions, TStateMap, TNewActor, TLanes, TActionStates>;
     /**
      * Declares a drain lane. Lane name narrows \`TLanes\` so
      * \`.to({lane})\` and \`ActOptions.onlyLanes\` type-check against it.
@@ -2190,7 +2198,7 @@ export interface ActBuilder<TSchemaReg extends SchemaRegister<TActions>, TEvents
      *   .build();
      * \`\`\`
      */
-    withLane: <const TConfig extends LaneConfig>(config: TConfig) => ActBuilder<TSchemaReg, TEvents, TActions, TStateMap, TActor, TLanes | TConfig["name"]>;
+    withLane: <const TConfig extends LaneConfig>(config: TConfig) => ActBuilder<TSchemaReg, TEvents, TActions, TStateMap, TActor, TLanes | TConfig["name"], TActionStates>;
     /**
      * Builds and returns the Act orchestrator instance.
      *
@@ -2202,7 +2210,7 @@ export interface ActBuilder<TSchemaReg extends SchemaRegister<TActions>, TEvents
      *
      * @see {@link Act} for available orchestrator methods
      */
-    build: (options?: ActOptions<TLanes>) => Act<TSchemaReg, TEvents, TActions, TStateMap, TActor>;
+    build: (options?: ActOptions<TLanes>) => Act<TSchemaReg, TEvents, TActions, TStateMap, TActor, TActionStates>;
 }
 /**
  * Builder interface for defining a state with event sourcing.
@@ -2491,8 +2499,11 @@ export type ActionBuilder<TState extends Schema, TEvents extends Schemas, TActio
  * @template TActions - Action schemas from this slice's states
  * @template TStateMap - Map of state names to state schemas
  * @template TActor - Actor type extending base Actor
+ * @template TActionStates - Each action's state name, by action name, filled
+ *   in by \`withState\` and \`withSlice\`, so \`registry.actions[action].name\` is
+ *   the state's literal name. Defaults to \`Record<string, string>\`.
  */
-export type Slice<TSchemaReg extends SchemaRegister<TActions>, TEvents extends Schemas, TActions extends Schemas, TStateMap extends Record<string, Schema> = {}, TActor extends Actor = Actor, TLanes extends string = typeof DEFAULT_LANE> = {
+export type Slice<TSchemaReg extends SchemaRegister<TActions>, TEvents extends Schemas, TActions extends Schemas, TStateMap extends Record<string, Schema> = {}, TActor extends Actor = Actor, TLanes extends string = typeof DEFAULT_LANE, TActionStates extends Record<string, string> = Record<string, string>> = {
     readonly _tag: "Slice";
     readonly states: Map<string, State<any, any, any>>;
     readonly events: EventRegister<TEvents>;
@@ -2512,6 +2523,7 @@ export type Slice<TSchemaReg extends SchemaRegister<TActions>, TEvents extends S
     readonly _TActor?: TActor;
     /** @internal phantom field for type-level lane union tracking */
     readonly _TLanes?: TLanes;
+    readonly _A?: TActionStates;
 };
 /**
  * Fluent builder interface for composing functional slices.
@@ -2524,8 +2536,11 @@ export type Slice<TSchemaReg extends SchemaRegister<TActions>, TEvents extends S
  * @template TActions - Action schemas
  * @template TStateMap - Map of state names to state schemas
  * @template TActor - Actor type extending base Actor
+ * @template TActionStates - Each action's state name, by action name, filled
+ *   in by \`withState\` and \`withSlice\`, so \`registry.actions[action].name\` is
+ *   the state's literal name. Defaults to \`Record<string, string>\`.
  */
-export interface SliceBuilder<TSchemaReg extends SchemaRegister<TActions>, TEvents extends Schemas, TActions extends Schemas, TStateMap extends Record<string, Schema> = {}, TActor extends Actor = Actor, TLanes extends string = typeof DEFAULT_LANE> extends BuilderBase<SliceBuilder<TSchemaReg, TEvents, TActions, TStateMap, TActor, TLanes>, TEvents, TActions, TActor, TLanes> {
+export interface SliceBuilder<TSchemaReg extends SchemaRegister<TActions>, TEvents extends Schemas, TActions extends Schemas, TStateMap extends Record<string, Schema> = {}, TActor extends Actor = Actor, TLanes extends string = typeof DEFAULT_LANE, TActionStates extends Record<string, string> = Record<string, string>> extends BuilderBase<SliceBuilder<TSchemaReg, TEvents, TActions, TStateMap, TActor, TLanes, TActionStates>, TEvents, TActions, TActor, TLanes> {
     /**
      * Registers a state definition with the slice.
      *
@@ -2537,16 +2552,18 @@ export interface SliceBuilder<TSchemaReg extends SchemaRegister<TActions>, TEven
         [K in keyof TNewActions]: TNewState;
     }, TEvents & TNewEvents, TActions & TNewActions, TStateMap & {
         [K in TNewName]: TNewState;
-    }, TActor, TLanes>;
+    }, TActor, TLanes, TActionStates & {
+        [K in keyof TNewActions & string]: TNewName;
+    }>;
     /**
      * Declares a drain lane on this slice. Merged into the
      * parent Act's lane set by \`act().withSlice(slice)\`.
      */
-    withLane: <const TConfig extends LaneConfig>(config: TConfig) => SliceBuilder<TSchemaReg, TEvents, TActions, TStateMap, TActor, TLanes | TConfig["name"]>;
+    withLane: <const TConfig extends LaneConfig>(config: TConfig) => SliceBuilder<TSchemaReg, TEvents, TActions, TStateMap, TActor, TLanes | TConfig["name"], TActionStates>;
     /**
      * Builds and returns the Slice data structure.
      */
-    build: () => Slice<TSchemaReg, TEvents, TActions, TStateMap, TActor, TLanes>;
+    build: () => Slice<TSchemaReg, TEvents, TActions, TStateMap, TActor, TLanes, TActionStates>;
 }
 //# sourceMappingURL=builders.d.ts.map
 // === config.d.ts ===
@@ -5344,6 +5361,9 @@ export type SchemaRegister<TSchemaReg> = {
  *   methods narrow \`state_name\` to the actual set of registered states
  *   instead of accepting any \`string\`. Defaults to \`string\` so loose
  *   references like \`Registry<any, any, any>\` keep working.
+ * @template TActionStates - Each action's state name, by action name, filled
+ *   in by \`withState\` and \`withSlice\`, so \`registry.actions[action].name\` is
+ *   the state's literal name. Defaults to \`Record<string, string>\`.
  * @property actions - Map of action names to state definitions.
  * @property events - Map of event names to event registration info.
  * @property sensitive_fields - Lookup of the \`sensitive(...)\`-marked fields of
@@ -5378,9 +5398,9 @@ export type SchemaRegister<TSchemaReg> = {
  *   Exposed here for callers that want to layer their own warning
  *   policy on top.
  */
-export type Registry<TSchemaReg extends SchemaRegister<TActions>, TEvents extends Schemas, TActions extends Schemas, TStateNames extends string = string> = {
+export type Registry<TSchemaReg extends SchemaRegister<TActions>, TEvents extends Schemas, TActions extends Schemas, TStateNames extends string = string, TActionStates extends Record<string, string> = Record<string, string>> = {
     readonly actions: {
-        [TKey in keyof TActions]: State<TSchemaReg[TKey], TEvents, TActions>;
+        [TKey in keyof TActions]: State<TSchemaReg[TKey], TEvents, TActions, (TActionStates & Record<string, string>)[TKey & string]>;
     };
     readonly events: EventRegister<TEvents>;
     readonly sensitive_fields: (name: (keyof TActions | keyof TEvents) & string) => readonly string[];
@@ -6593,7 +6613,7 @@ import type { Context, MiddlewareHandler } from "hono";
 import { Hono } from "hono";
 import type { MergePath, TypedResponse } from "hono/types";
 import type { JSONParsed } from "hono/utils/types";
-import { type ActionResult, type ActionSelection, type ActSurface, type AppActions, type AppStateNames, type ResolverArgs, type SelectedActions } from "../api/dispatch.js";
+import { type ActionResult, type ActionSelection, type ActSurface, type AddressedActions, type AppActions, type AppStateNames, type ResolverArgs, type SelectedActions, type StreamPatterns } from "../api/dispatch.js";
 import { type ActorExtractor, type ApiError, type SseOptions } from "../api/index.js";
 /**
  * Hono context variables this subpath contributes. The generic on
@@ -6614,7 +6634,8 @@ export type ActMiddlewareVariables = {
  * - \`stream\` — stream-id resolver. Receives the action name, the
  *   validated body, and the Hono context; returns the target
  *   stream. Singleton aggregates return a constant; per-tenant
- *   aggregates pull from headers, path, or body.
+ *   aggregates pull from headers, path, or body. Optional when every
+ *   state is listed in the generator's \`streams\`.
  * - \`expectedVersion\` (optional) — optimistic-concurrency resolver.
  *   Hosts typically read it from an \`If-Match\` header on the
  *   request, or from the client's last-known snapshot. Returning
@@ -6635,7 +6656,7 @@ export type ActMiddlewareVariables = {
  */
 export type HonoOptions<TApp = ActSurface> = {
     readonly actor: ActorExtractor<Context>;
-    readonly stream: (...args: ResolverArgs<TApp, Context>) => string | Promise<string>;
+    readonly stream?: (...args: ResolverArgs<TApp, Context>) => string | Promise<string>;
     readonly expectedVersion?: (...args: ResolverArgs<TApp, Context>) => number | undefined | Promise<number | undefined>;
     readonly idempotency?: {
         readonly store: IdempotencyStore;
@@ -6725,19 +6746,21 @@ export declare function authenticated(extractor: ActorExtractor<Context>): Middl
  * @returns A Hono app covering every generated action under
  *   \`<basePath>/actions/<name>\`.
  */
-export declare function hono<TApp extends ActSurface = ActSurface, TBase extends string = "/api", const TSelection extends ActionSelection<TApp> | undefined = ActionSelection<TApp> | undefined>(app: TApp, options: HonoOptions<TApp> & {
+export declare function hono<TApp extends ActSurface = ActSurface, TBase extends string = "/api", const TSelection extends ActionSelection<TApp> | undefined = ActionSelection<TApp> | undefined, TStreams extends StreamPatterns<TApp> = {}>(app: TApp, options: HonoOptions<TApp> & {
     readonly basePath?: TBase;
     readonly actions?: TSelection;
+    readonly streams?: StreamPatterns<TApp> & TStreams;
     readonly sse: NonNullable<HonoOptions["sse"]>;
 }): Hono<{
     Variables: ActMiddlewareVariables;
-}, ActionRoutes<TApp, TBase, SelectedActions<TApp, TSelection>> & SseRoutes<TApp, TBase>, TBase>;
-export declare function hono<TApp extends ActSurface = ActSurface, TBase extends string = "/api", const TSelection extends ActionSelection<TApp> | undefined = ActionSelection<TApp> | undefined>(app: TApp, options: HonoOptions<TApp> & {
+}, ActionRoutes<TApp, TBase, SelectedActions<TApp, TSelection>, TStreams> & SseRoutes<TApp, TBase>, TBase>;
+export declare function hono<TApp extends ActSurface = ActSurface, TBase extends string = "/api", const TSelection extends ActionSelection<TApp> | undefined = ActionSelection<TApp> | undefined, TStreams extends StreamPatterns<TApp> = {}>(app: TApp, options: HonoOptions<TApp> & {
     readonly basePath?: TBase;
     readonly actions?: TSelection;
+    readonly streams?: StreamPatterns<TApp> & TStreams;
 }): Hono<{
     Variables: ActMiddlewareVariables;
-}, ActionRoutes<TApp, TBase, SelectedActions<TApp, TSelection>>, TBase>;
+}, ActionRoutes<TApp, TBase, SelectedActions<TApp, TSelection>, TStreams>, TBase>;
 /**
  * One \`GET <basePath>/sse/<state>?stream=<id>\` per state of \`TApp\`, with
  * \`sse\`: an event stream on \`200\`, {@link ApiError} on an error status.
@@ -6773,24 +6796,29 @@ type ErrorStatus = 400 | 401 | 409 | 410 | 412 | 422 | 500 | 503;
  * \`app.do\` returns (as JSON) on \`200\`, and {@link ApiError} on an error
  * status. \`hc<typeof api>\` and \`testClient(api)\` read it.
  */
-export type ActionRoutes<TApp, TBase extends string, TNames extends string = keyof AppActions<TApp> & string> = {
-    [K in TNames as MergePath<TBase, \`/actions/\${K}\`>]: {
+export type ActionRoutes<TApp, TBase extends string, TNames extends string = keyof AppActions<TApp> & string, TStreams = {}> = {
+    [K in TNames as MergePath<TBase, K extends AddressedActions<TApp, TStreams> ? \`/actions/\${K}/:stream\` : \`/actions/\${K}\`>]: {
         $post: {
-            input: {
-                json: AppActions<TApp>[K];
-            };
+            input: ActionRequest<TApp, TStreams, K>;
             output: JSONParsed<ActionResult<TApp, K>>;
             outputFormat: "json";
             status: 200;
         } | {
-            input: {
-                json: AppActions<TApp>[K];
-            };
+            input: ActionRequest<TApp, TStreams, K>;
             output: ApiError;
             outputFormat: "json";
             status: ErrorStatus;
         };
     };
+};
+/** A route's request: the body, and the stream in the path when the caller names it. */
+type ActionRequest<TApp, TStreams, K> = K extends AddressedActions<TApp, TStreams> ? {
+    json: AppActions<TApp>[K];
+    param: {
+        stream: string;
+    };
+} : {
+    json: AppActions<TApp>[K & keyof AppActions<TApp>];
 };
 export {};
 //# sourceMappingURL=index.d.ts.map"
@@ -6798,7 +6826,7 @@ export {};
 
 exports[`@rotorsoft/act-http — public API stability > stable public surface for ./openapi 1`] = `
 "// === index.d.ts ===
-import { type ActionSelection, type ActSurface } from "../api/dispatch.js";
+import { type ActionSelection, type ActSurface, type StreamPatterns } from "../api/dispatch.js";
 /**
  * Minimal OpenAPI 3.1 document type. The emitter targets the 3.1
  * spec; the type is intentionally a structural subset rather than
@@ -6836,8 +6864,10 @@ export type OpenAPIDocument = {
  *   request header carrying the expected stream version.
  *
  * \`openapi\` also takes \`actions\` (\`{ include }\` or \`{ exclude }\`, typed
- * against the app's action names), the same selection the Hono generator
- * takes, so the document describes exactly the routes it serves.
+ * against the app's action names) and \`streams\` (the caller-addressed states
+ * and their patterns), the same options the Hono generator takes, so the
+ * document describes exactly the routes it serves: an addressed action's
+ * path ends in a \`{stream}\` parameter, carrying \`pattern\` for a \`RegExp\`.
  */
 export type OpenAPIOptions = {
     readonly info: OpenAPIInfo;
@@ -6935,6 +6965,7 @@ export type OpenAPIComponents = {
  */
 export declare function openapi<TApp extends Pick<ActSurface, "registry">>(app: TApp, options: OpenAPIOptions & {
     readonly actions?: ActionSelection<TApp>;
+    readonly streams?: StreamPatterns<TApp>;
 }): OpenAPIDocument;
 //# sourceMappingURL=index.d.ts.map"
 `;
@@ -7824,7 +7855,7 @@ exports[`@rotorsoft/act-http — public API stability > stable public surface fo
 import { type Actor } from "@rotorsoft/act";
 import type { IdempotencyStore } from "@rotorsoft/act-ops/idempotency";
 import { type TRPCBuiltRouter, type TRPCDefaultErrorShape, type TRPCMiddlewareFunction, type TRPCMutationProcedure, type TRPCSubscriptionProcedure } from "@trpc/server";
-import { type ActionResult, type ActionSelection, type ActSurface, type AppActions, type AppState, type AppStateNames, type ResolverArgs, type SelectedActions } from "../api/dispatch.js";
+import { type ActionInput, type ActionResult, type ActionSelection, type ActSurface, type AppActions, type AppState, type AppStateNames, type ResolverArgs, type SelectedActions, type StreamPatterns } from "../api/dispatch.js";
 import { type ActorExtractor, type SseOptions, type SseSubscriptionFrame } from "../api/index.js";
 /**
  * Per-call options for {@link trpc}. The host supplies the three
@@ -7836,7 +7867,8 @@ import { type ActorExtractor, type SseOptions, type SseSubscriptionFrame } from 
  * - \`stream\` — stream-id resolver. Receives the action name, the
  *   validated action input, and the original tRPC context; returns
  *   the target stream. Singleton aggregates return a constant;
- *   per-tenant aggregates pull from input or context.
+ *   per-tenant aggregates pull from input or context. Optional when
+ *   every state is listed in the generator's \`streams\`.
  * - \`expectedVersion\` (optional) — optimistic-concurrency resolver.
  *   When set, the procedure threads the resolved value through
  *   \`target.expectedVersion\` so \`app.do\` refuses to commit if the
@@ -7864,7 +7896,7 @@ import { type ActorExtractor, type SseOptions, type SseSubscriptionFrame } from 
  */
 export type TrpcOptions<Ctx, TApp = ActSurface> = {
     readonly actor: ActorExtractor<Ctx>;
-    readonly stream: (...args: ResolverArgs<TApp, NoInfer<Ctx>>) => string | Promise<string>;
+    readonly stream?: (...args: ResolverArgs<TApp, NoInfer<Ctx>>) => string | Promise<string>;
     readonly expectedVersion?: (...args: ResolverArgs<TApp, NoInfer<Ctx>>) => number | undefined | Promise<number | undefined>;
     readonly idempotency?: {
         readonly store: IdempotencyStore;
@@ -7934,9 +7966,9 @@ type GeneratedRoot<Ctx extends object> = {
  * so \`createTRPCReact<typeof router>()\` sees \`PressKey\`, \`Clear\`, …
  * instead of an index signature, which trips tRPC React's collision check.
  */
-type ActionProcedures<TApp, TNames extends string> = {
+type ActionProcedures<TApp, TNames extends string, TStreams> = {
     [K in TNames]: TRPCMutationProcedure<{
-        input: AppActions<TApp>[K];
+        input: ActionInput<TApp, TStreams, K>;
         output: ActionResult<TApp, K>;
         meta: object;
     }>;
@@ -7954,7 +7986,7 @@ type SubscribeRouter<TApp> = {
     };
 };
 /** The router {@link trpc} builds: the actions, and the subscriptions with \`sse\`. */
-export type GeneratedRouter<Ctx extends object, TApp, TRecord, TNames extends string = keyof AppActions<TApp> & string> = TRPCBuiltRouter<GeneratedRoot<Ctx>, ActionProcedures<TApp, TNames> & TRecord>;
+export type GeneratedRouter<Ctx extends object, TApp, TRecord, TNames extends string = keyof AppActions<TApp> & string, TStreams = {}> = TRPCBuiltRouter<GeneratedRoot<Ctx>, ActionProcedures<TApp, TNames, TStreams> & TRecord>;
 /**
  * Build a typed tRPC router from a built \`Act\` instance.
  *
@@ -7998,13 +8030,15 @@ export type GeneratedRouter<Ctx extends object, TApp, TRecord, TNames extends st
  *   actions to generate.
  * @returns A tRPC router with one mutation per generated action.
  */
-export declare function trpc<Ctx extends object = object, TApp extends ActSurface = ActSurface, const TSelection extends ActionSelection<TApp> | undefined = ActionSelection<TApp> | undefined>(app: TApp, options: TrpcOptions<Ctx, TApp> & {
+export declare function trpc<Ctx extends object = object, TApp extends ActSurface = ActSurface, const TSelection extends ActionSelection<TApp> | undefined = ActionSelection<TApp> | undefined, TStreams extends StreamPatterns<TApp> = {}>(app: TApp, options: TrpcOptions<Ctx, TApp> & {
     readonly actions?: TSelection;
+    readonly streams?: StreamPatterns<TApp> & TStreams;
     readonly sse: SseOptions;
-}): GeneratedRouter<Ctx, TApp, SubscribeRouter<TApp>, SelectedActions<TApp, TSelection>>;
-export declare function trpc<Ctx extends object = object, TApp extends ActSurface = ActSurface, const TSelection extends ActionSelection<TApp> | undefined = ActionSelection<TApp> | undefined>(app: TApp, options: TrpcOptions<Ctx, TApp> & {
+}): GeneratedRouter<Ctx, TApp, SubscribeRouter<TApp>, SelectedActions<TApp, TSelection>, TStreams>;
+export declare function trpc<Ctx extends object = object, TApp extends ActSurface = ActSurface, const TSelection extends ActionSelection<TApp> | undefined = ActionSelection<TApp> | undefined, TStreams extends StreamPatterns<TApp> = {}>(app: TApp, options: TrpcOptions<Ctx, TApp> & {
     readonly actions?: TSelection;
-}): GeneratedRouter<Ctx, TApp, unknown, SelectedActions<TApp, TSelection>>;
+    readonly streams?: StreamPatterns<TApp> & TStreams;
+}): GeneratedRouter<Ctx, TApp, unknown, SelectedActions<TApp, TSelection>, TStreams>;
 export {};
 //# sourceMappingURL=index.d.ts.map"
 `;

@@ -142,6 +142,9 @@ interface BuilderBase<
  * @template TLanes - Union of declared lane names. Narrowed by
  *   `.withLane({name})` calls so `.to({lane})` and `ActOptions.onlyLanes`
  *   reject typos at compile time. Starts at `"default"`.
+ * @template TActionStates - Each action's state name, by action name, filled
+ *   in by `withState` and `withSlice`, so `registry.actions[action].name` is
+ *   the state's literal name. Defaults to `Record<string, string>`.
  *
  * @see {@link act} for usage examples
  * @see {@link Act} for the built orchestrator API
@@ -153,8 +156,17 @@ export interface ActBuilder<
   TStateMap extends Record<string, Schema> = {},
   TActor extends Actor = Actor,
   TLanes extends string = typeof DEFAULT_LANE,
+  TActionStates extends Record<string, string> = Record<string, string>,
 > extends BuilderBase<
-    ActBuilder<TSchemaReg, TEvents, TActions, TStateMap, TActor, TLanes>,
+    ActBuilder<
+      TSchemaReg,
+      TEvents,
+      TActions,
+      TStateMap,
+      TActor,
+      TLanes,
+      TActionStates
+    >,
     TEvents,
     TActions,
     TActor,
@@ -183,7 +195,8 @@ export interface ActBuilder<
     TActions & TNewActions,
     TStateMap & { [K in TNewName]: TNewState },
     TActor,
-    TLanes
+    TLanes,
+    TActionStates & { [K in keyof TNewActions & string]: TNewName }
   >;
   /**
    * Registers a slice with the builder.
@@ -202,6 +215,7 @@ export interface ActBuilder<
     TNewActions extends Schemas,
     TNewMap extends Record<string, Schema>,
     TNewLanes extends string,
+    TNewActionStates extends Record<string, string> = Record<string, string>,
   >(
     slice: Slice<
       TNewSchemaReg,
@@ -209,7 +223,8 @@ export interface ActBuilder<
       TNewActions,
       TNewMap,
       Actor,
-      TNewLanes
+      TNewLanes,
+      TNewActionStates
     >
   ) => ActBuilder<
     TSchemaReg & TNewSchemaReg,
@@ -217,7 +232,8 @@ export interface ActBuilder<
     TActions & TNewActions,
     TStateMap & TNewMap,
     TActor,
-    TLanes | TNewLanes
+    TLanes | TNewLanes,
+    TActionStates & TNewActionStates
   >;
   /**
    * Locks a custom actor type for this application.
@@ -251,7 +267,8 @@ export interface ActBuilder<
     TActions,
     TStateMap,
     TNewActor,
-    TLanes
+    TLanes,
+    TActionStates
   >;
   /**
    * Declares a drain lane. Lane name narrows `TLanes` so
@@ -276,7 +293,8 @@ export interface ActBuilder<
     TActions,
     TStateMap,
     TActor,
-    TLanes | TConfig["name"]
+    TLanes | TConfig["name"],
+    TActionStates
   >;
   /**
    * Builds and returns the Act orchestrator instance.
@@ -291,7 +309,7 @@ export interface ActBuilder<
    */
   build: (
     options?: ActOptions<TLanes>
-  ) => Act<TSchemaReg, TEvents, TActions, TStateMap, TActor>;
+  ) => Act<TSchemaReg, TEvents, TActions, TStateMap, TActor, TActionStates>;
 }
 
 /**
@@ -622,6 +640,9 @@ export type ActionBuilder<
  * @template TActions - Action schemas from this slice's states
  * @template TStateMap - Map of state names to state schemas
  * @template TActor - Actor type extending base Actor
+ * @template TActionStates - Each action's state name, by action name, filled
+ *   in by `withState` and `withSlice`, so `registry.actions[action].name` is
+ *   the state's literal name. Defaults to `Record<string, string>`.
  */
 export type Slice<
   TSchemaReg extends SchemaRegister<TActions>,
@@ -630,6 +651,7 @@ export type Slice<
   TStateMap extends Record<string, Schema> = {},
   TActor extends Actor = Actor,
   TLanes extends string = typeof DEFAULT_LANE,
+  TActionStates extends Record<string, string> = Record<string, string>,
 > = {
   readonly _tag: "Slice";
   readonly states: Map<string, State<any, any, any>>;
@@ -650,6 +672,7 @@ export type Slice<
   readonly _TActor?: TActor;
   /** @internal phantom field for type-level lane union tracking */
   readonly _TLanes?: TLanes;
+  readonly _A?: TActionStates;
 };
 
 /**
@@ -663,6 +686,9 @@ export type Slice<
  * @template TActions - Action schemas
  * @template TStateMap - Map of state names to state schemas
  * @template TActor - Actor type extending base Actor
+ * @template TActionStates - Each action's state name, by action name, filled
+ *   in by `withState` and `withSlice`, so `registry.actions[action].name` is
+ *   the state's literal name. Defaults to `Record<string, string>`.
  */
 export interface SliceBuilder<
   TSchemaReg extends SchemaRegister<TActions>,
@@ -671,8 +697,17 @@ export interface SliceBuilder<
   TStateMap extends Record<string, Schema> = {},
   TActor extends Actor = Actor,
   TLanes extends string = typeof DEFAULT_LANE,
+  TActionStates extends Record<string, string> = Record<string, string>,
 > extends BuilderBase<
-    SliceBuilder<TSchemaReg, TEvents, TActions, TStateMap, TActor, TLanes>,
+    SliceBuilder<
+      TSchemaReg,
+      TEvents,
+      TActions,
+      TStateMap,
+      TActor,
+      TLanes,
+      TActionStates
+    >,
     TEvents,
     TActions,
     TActor,
@@ -698,7 +733,8 @@ export interface SliceBuilder<
     TActions & TNewActions,
     TStateMap & { [K in TNewName]: TNewState },
     TActor,
-    TLanes
+    TLanes,
+    TActionStates & { [K in keyof TNewActions & string]: TNewName }
   >;
   /**
    * Declares a drain lane on this slice. Merged into the
@@ -712,10 +748,19 @@ export interface SliceBuilder<
     TActions,
     TStateMap,
     TActor,
-    TLanes | TConfig["name"]
+    TLanes | TConfig["name"],
+    TActionStates
   >;
   /**
    * Builds and returns the Slice data structure.
    */
-  build: () => Slice<TSchemaReg, TEvents, TActions, TStateMap, TActor, TLanes>;
+  build: () => Slice<
+    TSchemaReg,
+    TEvents,
+    TActions,
+    TStateMap,
+    TActor,
+    TLanes,
+    TActionStates
+  >;
 }
