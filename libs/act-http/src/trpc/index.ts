@@ -63,6 +63,7 @@ import {
 } from "@trpc/server";
 import { z } from "zod";
 import {
+  type ActionInput,
   type ActionResult,
   type ActionSelection,
   type ActSurface,
@@ -72,7 +73,9 @@ import {
   make_dispatch,
   type ResolverArgs,
   type SelectedActions,
+  type StreamPatterns,
   selected_actions,
+  stream_patterns,
 } from "../api/dispatch.js";
 import {
   type ActorExtractor,
@@ -95,7 +98,8 @@ import { sse_state_names } from "../api/sse-states.js";
  * - `stream` — stream-id resolver. Receives the action name, the
  *   validated action input, and the original tRPC context; returns
  *   the target stream. Singleton aggregates return a constant;
- *   per-tenant aggregates pull from input or context.
+ *   per-tenant aggregates pull from input or context. Optional when
+ *   every state is listed in the generator's `streams`.
  * - `expectedVersion` (optional) — optimistic-concurrency resolver.
  *   When set, the procedure threads the resolved value through
  *   `target.expectedVersion` so `app.do` refuses to commit if the
@@ -123,7 +127,7 @@ import { sse_state_names } from "../api/sse-states.js";
  */
 export type TrpcOptions<Ctx, TApp = ActSurface> = {
   readonly actor: ActorExtractor<Ctx>;
-  readonly stream: (
+  readonly stream?: (
     ...args: ResolverArgs<TApp, NoInfer<Ctx>>
   ) => string | Promise<string>;
   readonly expectedVersion?: (
@@ -259,9 +263,9 @@ type GeneratedRoot<Ctx extends object> = {
  * so `createTRPCReact<typeof router>()` sees `PressKey`, `Clear`, …
  * instead of an index signature, which trips tRPC React's collision check.
  */
-type ActionProcedures<TApp, TNames extends string> = {
+type ActionProcedures<TApp, TNames extends string, TStreams> = {
   [K in TNames]: TRPCMutationProcedure<{
-    input: AppActions<TApp>[K];
+    input: ActionInput<TApp, TStreams, K>;
     output: ActionResult<TApp, K>;
     meta: object;
   }>;
@@ -284,9 +288,10 @@ export type GeneratedRouter<
   TApp,
   TRecord,
   TNames extends string = keyof AppActions<TApp> & string,
+  TStreams = {},
 > = TRPCBuiltRouter<
   GeneratedRoot<Ctx>,
-  ActionProcedures<TApp, TNames> & TRecord
+  ActionProcedures<TApp, TNames, TStreams> & TRecord
 >;
 
 /**
@@ -338,17 +343,20 @@ export function trpc<
   const TSelection extends ActionSelection<TApp> | undefined =
     | ActionSelection<TApp>
     | undefined,
+  TStreams extends StreamPatterns<TApp> = {},
 >(
   app: TApp,
   options: TrpcOptions<Ctx, TApp> & {
     readonly actions?: TSelection;
+    readonly streams?: StreamPatterns<TApp> & TStreams;
     readonly sse: SseOptions;
   }
 ): GeneratedRouter<
   Ctx,
   TApp,
   SubscribeRouter<TApp>,
-  SelectedActions<TApp, TSelection>
+  SelectedActions<TApp, TSelection>,
+  TStreams
 >;
 export function trpc<
   Ctx extends object = object,
@@ -356,16 +364,35 @@ export function trpc<
   const TSelection extends ActionSelection<TApp> | undefined =
     | ActionSelection<TApp>
     | undefined,
+  TStreams extends StreamPatterns<TApp> = {},
 >(
   app: TApp,
-  options: TrpcOptions<Ctx, TApp> & { readonly actions?: TSelection }
-): GeneratedRouter<Ctx, TApp, unknown, SelectedActions<TApp, TSelection>>;
+  options: TrpcOptions<Ctx, TApp> & {
+    readonly actions?: TSelection;
+    readonly streams?: StreamPatterns<TApp> & TStreams;
+  }
+): GeneratedRouter<
+  Ctx,
+  TApp,
+  unknown,
+  SelectedActions<TApp, TSelection>,
+  TStreams
+>;
 export function trpc<Ctx extends object, TApp extends ActSurface>(
   app: TApp,
-  options: TrpcOptions<Ctx> & { readonly actions?: ActionSelection<unknown> }
+  options: TrpcOptions<Ctx> & {
+    readonly actions?: ActionSelection<unknown>;
+    readonly streams?: StreamPatterns<unknown>;
+  }
 ): unknown {
   const t = initTRPC.context<Ctx>().create();
   const dispatch = make_dispatch<Ctx>(app, options, options.idempotency?.store);
+  const patterns = stream_patterns(
+    app,
+    options.streams,
+    !!options.stream,
+    "trpc"
+  );
 
   // Run the actor extractor for a generated procedure, mapping a "throw to
   // deny" onto `UNAUTHORIZED` rather than a framework 500. Shared by
@@ -396,6 +423,7 @@ export function trpc<Ctx extends object, TApp extends ActSurface>(
     "trpc"
   )) {
     const action_schema = state.actions[action_name];
+    const matches = patterns.get(action_name);
     handlers[action_name] = t.procedure
       // Passthrough parser: tRPC's own `.input()` validation is deliberately
       // bypassed because a Zod failure there surfaces as a hardcoded
@@ -419,20 +447,32 @@ export function trpc<Ctx extends object, TApp extends ActSurface>(
           // The resolvers get the parsed value, but `app.do` gets the
           // raw `input`: it parses again itself, and a second parse of the
           // output would run every `.transform()` twice.
+          // A caller-addressed action takes `{ stream, payload }`, so the
+          // payload stays exactly the action's schema.
+          const envelope = matches
+            ? ((input ?? {}) as { stream?: unknown; payload?: unknown })
+            : undefined;
+          const payload = envelope ? envelope.payload : input;
           const validated = validate(
             action_name,
-            input as never,
+            payload as never,
             action_schema as never
           );
           const outcome = await dispatch(
             action_name,
             validated,
-            input,
+            payload,
             host_ctx,
             actor,
-            () => options.idempotency?.keyFrom(host_ctx)
+            () => options.idempotency?.keyFrom(host_ctx),
+            envelope && { stream: envelope.stream, matches: matches! }
           );
           if (outcome.kind === "done") return outcome.result;
+          if (outcome.kind === "invalid-stream")
+            throw new TRPCError({
+              code: "UNPROCESSABLE_CONTENT",
+              message: `INVALID_STREAM: "${outcome.stream}" is not a stream of ${state.name}`,
+            });
           throw new TRPCError(
             outcome.kind === "missing-key"
               ? { code: "BAD_REQUEST", message: "Idempotency-Key required" }

@@ -274,6 +274,32 @@ An action with [`.loads`](../concepts/state-management.md#rules-across-streams-l
 
 The semantics intentionally don't cache the original handler's result, which avoids the operational footgun of replaying potentially stale responses. A losing claim returns `{ deduped: true }`, but that alone doesn't say whether the original *succeeded* or is *still running*, and the generated routes answer the two differently. A duplicate of a key that already committed gets `409 CONFLICT`. A duplicate that arrives while the original is still running (typically a client that timed out and retried) gets a retryable `503` instead: the original may yet fail and release the key, and a client told "already used" would never retry, so the action would be lost ([#1741](https://github.com/Rotorsoft/act-root/issues/1741)). The receiver answers the same in-flight case with `503` too (#1700).
 
+## Addressing a stream
+
+A stream is the address of what an action changes: the payload says what to do, and the stream says to which invoice, client or ledger. The generators resolve it two ways.
+
+- **`stream`**, a resolver, for states whose stream the server knows: a constant for a singleton (`() => "settings"`), a tenant prefix from the context.
+- **`streams`**, for states the caller addresses one entity of: a pattern per state name, a `RegExp` or a predicate. Their actions take the stream where each transport puts addresses:
+  - tRPC: the input is `{ stream, payload }`, and the payload stays exactly the action's schema;
+  - Hono: `POST <base>/actions/<Action>/:stream`;
+  - OpenAPI: that path, with a `stream` path parameter carrying the `RegExp` as `pattern`.
+
+```ts no-check
+const router = trpc(app, {
+  actor: (ctx: Ctx) => ctx.user,
+  stream: () => "settings", // every state not listed below
+  streams: {
+    Invoice: /^invoice-[a-z0-9-]+$/,
+    Client: (stream) => stream.startsWith("client-"),
+  },
+});
+
+// The client addresses one invoice per call, typed:
+trpc.VoidInvoice.mutate({ stream: "invoice-acme-42", payload: { reason } });
+```
+
+A stream that doesn't match its state's pattern is refused before `app.do`: `422` with code `INVALID_STREAM` on Hono, `UNPROCESSABLE_CONTENT` on tRPC, so a client can't point `VoidInvoice` at a client's stream. Never put the address in the payload: an emit handler that spreads its payload would copy it onto every event. `stream` is optional when every state is in `streams`, and generation fails, naming the state, when a state is in neither.
+
 ## Authentication — the `actor` seam
 
 The package deliberately doesn't ship JWT verification, session store integration, or API-key validation. Auth is too varied — every team has its own choice — and bundling a specific implementation would make the package opinionated in the wrong direction.

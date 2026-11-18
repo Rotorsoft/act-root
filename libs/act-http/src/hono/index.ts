@@ -58,12 +58,15 @@ import {
   type ActionResult,
   type ActionSelection,
   type ActSurface,
+  type AddressedActions,
   type AppActions,
   type AppStateNames,
   make_dispatch,
   type ResolverArgs,
   type SelectedActions,
+  type StreamPatterns,
   selected_actions,
+  stream_patterns,
 } from "../api/dispatch.js";
 import {
   type ActorExtractor,
@@ -96,7 +99,8 @@ export type ActMiddlewareVariables = {
  * - `stream` — stream-id resolver. Receives the action name, the
  *   validated body, and the Hono context; returns the target
  *   stream. Singleton aggregates return a constant; per-tenant
- *   aggregates pull from headers, path, or body.
+ *   aggregates pull from headers, path, or body. Optional when every
+ *   state is listed in the generator's `streams`.
  * - `expectedVersion` (optional) — optimistic-concurrency resolver.
  *   Hosts typically read it from an `If-Match` header on the
  *   request, or from the client's last-known snapshot. Returning
@@ -117,7 +121,7 @@ export type ActMiddlewareVariables = {
  */
 export type HonoOptions<TApp = ActSurface> = {
   readonly actor: ActorExtractor<Context>;
-  readonly stream: (
+  readonly stream?: (
     ...args: ResolverArgs<TApp, Context>
   ) => string | Promise<string>;
   readonly expectedVersion?: (
@@ -242,16 +246,18 @@ export function hono<
   const TSelection extends ActionSelection<TApp> | undefined =
     | ActionSelection<TApp>
     | undefined,
+  TStreams extends StreamPatterns<TApp> = {},
 >(
   app: TApp,
   options: HonoOptions<TApp> & {
     readonly basePath?: TBase;
     readonly actions?: TSelection;
+    readonly streams?: StreamPatterns<TApp> & TStreams;
     readonly sse: NonNullable<HonoOptions["sse"]>;
   }
 ): Hono<
   { Variables: ActMiddlewareVariables },
-  ActionRoutes<TApp, TBase, SelectedActions<TApp, TSelection>> &
+  ActionRoutes<TApp, TBase, SelectedActions<TApp, TSelection>, TStreams> &
     SseRoutes<TApp, TBase>,
   TBase
 >;
@@ -261,20 +267,25 @@ export function hono<
   const TSelection extends ActionSelection<TApp> | undefined =
     | ActionSelection<TApp>
     | undefined,
+  TStreams extends StreamPatterns<TApp> = {},
 >(
   app: TApp,
   options: HonoOptions<TApp> & {
     readonly basePath?: TBase;
     readonly actions?: TSelection;
+    readonly streams?: StreamPatterns<TApp> & TStreams;
   }
 ): Hono<
   { Variables: ActMiddlewareVariables },
-  ActionRoutes<TApp, TBase, SelectedActions<TApp, TSelection>>,
+  ActionRoutes<TApp, TBase, SelectedActions<TApp, TSelection>, TStreams>,
   TBase
 >;
 export function hono<TApp extends ActSurface>(
   app: TApp,
-  options: HonoOptions & { readonly actions?: ActionSelection<unknown> }
+  options: HonoOptions & {
+    readonly actions?: ActionSelection<unknown>;
+    readonly streams?: StreamPatterns<unknown>;
+  }
 ): unknown {
   const base_path = options.basePath ?? "/api";
   const api = new Hono<{ Variables: ActMiddlewareVariables }>().basePath(
@@ -287,6 +298,12 @@ export function hono<TApp extends ActSurface>(
     app,
     options,
     options.idempotency?.store
+  );
+  const patterns = stream_patterns(
+    app,
+    options.streams,
+    !!options.stream,
+    "hono"
   );
 
   // Wire SSE subscriptions before the mutation routes so the
@@ -361,8 +378,10 @@ export function hono<TApp extends ActSurface>(
     "hono"
   )) {
     const schema = state.actions[action_name];
+    // A caller-addressed action names its stream in the path.
+    const matches = patterns.get(action_name);
     api.post(
-      `/actions/${action_name}`,
+      matches ? `/actions/${action_name}/:stream` : `/actions/${action_name}`,
       // Custom hook funnels body-schema failures through the same
       // ApiError envelope + 422 status an in-`do` ValidationError maps
       // to (ERROR_MAP.ValidationError). Without it, @hono/zod-validator
@@ -412,9 +431,18 @@ export function hono<TApp extends ActSurface>(
             raw,
             c,
             c.get("actor"),
-            () => key_from(c)
+            () => key_from(c),
+            matches && { stream: c.req.param("stream"), matches }
           );
           if (outcome.kind === "done") return c.json(outcome.result);
+          if (outcome.kind === "invalid-stream") {
+            const body: ApiError = {
+              error: "InvalidStream",
+              detail: `"${outcome.stream}" is not a stream of ${state.name}`,
+              code: "INVALID_STREAM",
+            };
+            return c.json(body, 422);
+          }
           if (outcome.kind === "missing-key") {
             const body: ApiError = {
               error: "BadRequest",
@@ -489,23 +517,35 @@ export type ActionRoutes<
   TApp,
   TBase extends string,
   TNames extends string = keyof AppActions<TApp> & string,
+  TStreams = {},
 > = {
-  [K in TNames as MergePath<TBase, `/actions/${K}`>]: {
+  [K in TNames as MergePath<
+    TBase,
+    K extends AddressedActions<TApp, TStreams>
+      ? `/actions/${K}/:stream`
+      : `/actions/${K}`
+  >]: {
     $post:
       | {
-          input: { json: AppActions<TApp>[K] };
+          input: ActionRequest<TApp, TStreams, K>;
           output: JSONParsed<ActionResult<TApp, K>>;
           outputFormat: "json";
           status: 200;
         }
       | {
-          input: { json: AppActions<TApp>[K] };
+          input: ActionRequest<TApp, TStreams, K>;
           output: ApiError;
           outputFormat: "json";
           status: ErrorStatus;
         };
   };
 };
+
+/** A route's request: the body, and the stream in the path when the caller names it. */
+type ActionRequest<TApp, TStreams, K> =
+  K extends AddressedActions<TApp, TStreams>
+    ? { json: AppActions<TApp>[K]; param: { stream: string } }
+    : { json: AppActions<TApp>[K & keyof AppActions<TApp>] };
 
 /**
  * Hono's json validator reads the body only for a JSON Content-Type

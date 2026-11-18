@@ -154,6 +154,63 @@ describe("trpc(app, options) — generated router", () => {
     );
   });
 
+  test("takes a caller-addressed state's stream from { stream, payload }", async ({
+    app,
+  }) => {
+    const do_spy = vi.spyOn(app, "do");
+    const router = trpc(app, {
+      ...default_options(),
+      streams: { Calculator: /^calc-\d+$/ },
+    });
+    const t = initTRPC.context<Ctx>().create();
+    const caller = t.createCallerFactory(router)(make_ctx());
+
+    await caller.PressKey({ stream: "calc-7", payload: { key: "5" } });
+    expect(do_spy).toHaveBeenCalledWith(
+      "PressKey",
+      { stream: "calc-7", actor: { id: "u-1", name: "alice" } },
+      { key: "5" }
+    );
+    // Other states keep resolving through `stream`.
+    await caller.OpenTicket({ title: "t" });
+    expect(do_spy).toHaveBeenLastCalledWith(
+      "OpenTicket",
+      expect.objectContaining({ stream: "tenant-acme" }),
+      { title: "t" }
+    );
+    // A stream outside the pattern, or none, is refused before app.do.
+    do_spy.mockClear();
+    await expect(
+      caller.PressKey({ stream: "ticket-1", payload: { key: "5" } })
+    ).rejects.toMatchObject({
+      code: "UNPROCESSABLE_CONTENT",
+      message: 'INVALID_STREAM: "ticket-1" is not a stream of Calculator',
+    });
+    await expect(
+      caller.PressKey({ payload: { key: "5" } } as never)
+    ).rejects.toMatchObject({ code: "UNPROCESSABLE_CONTENT" });
+    await expect(caller.PressKey(undefined as never)).rejects.toMatchObject({
+      code: "UNPROCESSABLE_CONTENT",
+    });
+    expect(do_spy).not.toHaveBeenCalled();
+  });
+
+  test("refuses at generation a state with no stream, or a pattern for an unregistered one", ({
+    app,
+  }) => {
+    const { stream: _, ...no_stream } = default_options();
+    expect(() =>
+      trpc(app, { ...no_stream, streams: { Calculator: () => true } })
+    ).toThrow(
+      'trpc: no stream for "Ticket": list the state in `streams`, or pass a `stream` resolver.'
+    );
+    expect(() =>
+      trpc(app, { ...default_options(), streams: { Ledger: /x/ } } as never)
+    ).toThrow(
+      'trpc: `streams` names "Ledger", which the app doesn\'t register.'
+    );
+  });
+
   test("maps a malformed body to 422 UNPROCESSABLE_CONTENT (parity with Hono/OpenAPI)", async ({
     app,
   }) => {

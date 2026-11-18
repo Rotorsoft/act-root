@@ -62,6 +62,9 @@ export type SchemaRegister<TSchemaReg> = {
  *   methods narrow `state_name` to the actual set of registered states
  *   instead of accepting any `string`. Defaults to `string` so loose
  *   references like `Registry<any, any, any>` keep working.
+ * @template TActionStates - Each action's state name, by action name, filled
+ *   in by `withState` and `withSlice`, so `registry.actions[action].name` is
+ *   the state's literal name. Defaults to `Record<string, string>`.
  * @property actions - Map of action names to state definitions.
  * @property events - Map of event names to event registration info.
  * @property sensitive_fields - Lookup of the `sensitive(...)`-marked fields of
@@ -101,9 +104,15 @@ export type Registry<
   TEvents extends Schemas,
   TActions extends Schemas,
   TStateNames extends string = string,
+  TActionStates extends Record<string, string> = Record<string, string>,
 > = {
   readonly actions: {
-    [TKey in keyof TActions]: State<TSchemaReg[TKey], TEvents, TActions>;
+    [TKey in keyof TActions]: State<
+      TSchemaReg[TKey],
+      TEvents,
+      TActions,
+      (TActionStates & Record<string, string>)[TKey & string]
+    >;
   };
   readonly events: EventRegister<TEvents>;
   readonly sensitive_fields: (

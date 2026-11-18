@@ -115,6 +115,9 @@ import type {
  * @template TActions Schemas for actions
  * @template TStateMap Map of state names to state schemas
  * @template TActor Actor type extending base Actor
+ * @template TActionStates Each action's state name, by action name, filled
+ *   in by `withState` and `withSlice`, so `registry.actions[action].name` is
+ *   the state's literal name. Defaults to `Record<string, string>`.
  */
 export class Act<
   TSchemaReg extends SchemaRegister<TActions>,
@@ -122,6 +125,7 @@ export class Act<
   TActions extends Schemas,
   TStateMap extends Record<string, Schema> = Record<string, never>,
   TActor extends Actor = Actor,
+  TActionStates extends Record<string, string> = Record<string, string>,
 > implements IAct<TEvents, TActions, TActor, TSchemaReg>
 {
   private _emitter = new EventEmitter();
@@ -149,7 +153,8 @@ export class Act<
     TSchemaReg,
     TEvents,
     TActions,
-    keyof TStateMap & string
+    keyof TStateMap & string,
+    TActionStates
   >;
   private readonly _states: Map<string, State<any, any, any>>;
   /**
@@ -316,7 +321,13 @@ export class Act<
 
   /** Use the {@link act} builder rather than constructing directly. */
   constructor(
-    registry: Registry<TSchemaReg, TEvents, TActions, keyof TStateMap & string>,
+    registry: Registry<
+      TSchemaReg,
+      TEvents,
+      TActions,
+      keyof TStateMap & string,
+      TActionStates
+    >,
     states: Map<string, State<any, any, any>> = new Map(),
     batch_handlers: Map<string, BatchHandler<any>> = new Map(),
     options: ActOptions = {},

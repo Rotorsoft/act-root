@@ -56,14 +56,15 @@ export type ActSurface = {
  * return `unknown`.
  */
 type AppRegistry<TApp> = TApp extends {
-  readonly registry: Registry<infer S, infer E, infer A, infer N>;
+  readonly registry: Registry<infer S, infer E, infer A, infer N, infer O>;
 }
-  ? { states: S; events: E; actions: A; names: N }
+  ? { states: S; events: E; actions: A; names: N; owners: O }
   : {
       states: Record<string, Schema>;
       events: Schemas;
       actions: Record<string, unknown>;
       names: string;
+      owners: Record<string, string>;
     };
 
 /** The payload each action of `TApp` takes, by action name. */
@@ -71,6 +72,69 @@ export type AppActions<TApp> = AppRegistry<TApp>["actions"];
 
 /** The state names of `TApp`. */
 export type AppStateNames<TApp> = AppRegistry<TApp>["names"];
+
+/**
+ * The states whose streams the caller names, each with the pattern a stream
+ * must match: a `RegExp`, or a predicate. Every other state resolves its
+ * stream through the generator's `stream` option.
+ */
+export type StreamPatterns<TApp> = {
+  readonly [N in AppStateNames<TApp>]?: RegExp | ((stream: string) => boolean);
+};
+
+/** The actions of `TApp` whose state is listed in `P`: the caller sends their stream. */
+export type AddressedActions<TApp, P> = {
+  [K in keyof AppActions<TApp> & string]: AppRegistry<TApp>["owners"][K &
+    keyof AppRegistry<TApp>["owners"]] extends keyof P
+    ? K
+    : never;
+}[keyof AppActions<TApp> & string];
+
+/**
+ * What a generated call for action `K` takes: the payload, or, when its
+ * state is caller-addressed, the stream and the payload apart, so the
+ * payload stays exactly the action's schema.
+ */
+export type ActionInput<TApp, P, K> =
+  K extends AddressedActions<TApp, P>
+    ? { stream: string; payload: AppActions<TApp>[K & keyof AppActions<TApp>] }
+    : AppActions<TApp>[K & keyof AppActions<TApp>];
+
+/**
+ * The stream patterns of the states `app`'s actions belong to, by action
+ * name, and refuses at generation a state that neither `patterns` nor a
+ * `stream` resolver covers, or a pattern for a state the app doesn't have.
+ */
+export function stream_patterns(
+  app: Pick<ActSurface, "registry">,
+  patterns: StreamPatterns<unknown> | undefined,
+  has_resolver: boolean,
+  transport: string
+): Map<string, (stream: string) => boolean> {
+  const by_action = new Map<string, (stream: string) => boolean>();
+  const states = new Set<string>();
+  const uncovered = new Set<string>();
+  for (const [action, state] of Object.entries(app.registry.actions)) {
+    states.add(state.name);
+    const pattern = patterns?.[state.name];
+    if (pattern)
+      by_action.set(
+        action,
+        pattern instanceof RegExp ? (s) => pattern.test(s) : pattern
+      );
+    else if (!has_resolver) uncovered.add(state.name);
+  }
+  const unknown = Object.keys(patterns ?? {}).filter((n) => !states.has(n));
+  if (unknown.length)
+    throw new Error(
+      `${transport}: \`streams\` names ${unknown.map((n) => `"${n}"`).join(", ")}, which the app doesn't register.`
+    );
+  if (uncovered.size)
+    throw new Error(
+      `${transport}: no stream for ${[...uncovered].map((n) => `"${n}"`).join(", ")}: list the state in \`streams\`, or pass a \`stream\` resolver.`
+    );
+  return by_action;
+}
 
 /** The state named `N` in `TApp`, as the SSE channel carries it. */
 export type AppState<TApp, N> = (TApp extends Act<any, any, any, infer M, any>
@@ -151,7 +215,7 @@ export type ResolverArgs<TApp, C> = {
 
 /** The target resolvers a generated transport takes, over its own context. */
 type TargetResolvers<C> = {
-  readonly stream: (
+  readonly stream?: (
     action_name: string,
     input: unknown,
     ctx: C
@@ -166,6 +230,7 @@ type TargetResolvers<C> = {
 /** What one generated action call came to; each transport maps the refusals. */
 export type Dispatched =
   | { kind: "done"; result: unknown }
+  | { kind: "invalid-stream"; stream: string }
   | { kind: "missing-key" }
   | { kind: "in-flight" }
   | { kind: "conflict" };
@@ -191,9 +256,21 @@ export function make_dispatch<C>(
     payload: unknown,
     ctx: C,
     actor: Actor,
-    key: () => string | undefined
+    key: () => string | undefined,
+    addressed?: { stream: unknown; matches: (stream: string) => boolean }
   ): Promise<Dispatched> => {
-    const stream = await resolvers.stream(action_name, input, ctx);
+    // A caller-addressed state takes the caller's stream, once it matches the
+    // state's pattern; every other state resolves it. `stream_patterns`
+    // refused a state with neither at generation.
+    if (
+      addressed &&
+      (typeof addressed.stream !== "string" ||
+        !addressed.matches(addressed.stream))
+    )
+      return { kind: "invalid-stream", stream: String(addressed.stream) };
+    const stream = addressed
+      ? (addressed.stream as string)
+      : await resolvers.stream!(action_name, input, ctx);
     const expected = await resolvers.expectedVersion?.(action_name, input, ctx);
     const target =
       expected === undefined

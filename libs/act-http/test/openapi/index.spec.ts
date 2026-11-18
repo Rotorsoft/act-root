@@ -79,6 +79,33 @@ describe("openapi(app, options) — doc emitter", () => {
     }
   });
 
+  test("documents a caller-addressed action's stream as a path parameter", ({
+    app,
+  }) => {
+    const doc = openapi(app, {
+      ...base_options(),
+      streams: { Calculator: /^calc-\d+$/, Ticket: () => true },
+    });
+    expect(Object.keys(doc.paths).sort()).toEqual([
+      "/api/actions/Clear/{stream}",
+      "/api/actions/OpenTicket/{stream}",
+      "/api/actions/PressKey/{stream}",
+    ]);
+    const param = (path: string) =>
+      doc.paths[path]?.post?.parameters?.find((p) => p.name === "stream");
+    expect(param("/api/actions/PressKey/{stream}")).toMatchObject({
+      in: "path",
+      required: true,
+      schema: { type: "string", pattern: "^calc-\\d+$" },
+    });
+    expect(param("/api/actions/OpenTicket/{stream}")?.schema).toEqual({
+      type: "string",
+    });
+    expect(() =>
+      openapi(app, { ...base_options(), streams: { Ledger: /x/ } } as never)
+    ).toThrow('openapi: `streams` names "Ledger"');
+  });
+
   test("documents only the selected actions", ({ app }) => {
     const doc = openapi(app, {
       ...base_options(),
