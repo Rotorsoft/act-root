@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v2.2.0](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v2.1.16...@rotorsoft/act-v2.2.0) (2026-11-18)
+
+
+### Features
+
+* **act-http:** let callers address an entity's stream, typed per state ([#2583](https://github.com/Rotorsoft/act-root/issues/2583)) ([1c831ed](https://github.com/Rotorsoft/act-root/commit/1c831ed30904e259d18efdf4a422bcb02d2e1edc)), closes [#2578](https://github.com/Rotorsoft/act-root/issues/2578)
+
 # [@rotorsoft/act-v2.1.16](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v2.1.15...@rotorsoft/act-v2.1.16) (2026-11-18)
 
 
