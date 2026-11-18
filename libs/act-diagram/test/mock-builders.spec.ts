@@ -161,7 +161,7 @@ describe("mock_state", () => {
     expect(built[0].actions.__emits_action1).toContain("Created");
   });
 
-  it("exercises dummy_arg Symbol access returning undefined (line 50-51)", () => {
+  it("exercises dummy_arg Symbol access returning undefined", () => {
     // When the handler accesses a Symbol property on dummy_arg,
     // the get trap returns undefined (not proxy_fn)
     const built: any[] = [];
@@ -185,7 +185,7 @@ describe("mock_state", () => {
     expect(built[0].actions.__emits_action1).toContain("Finished");
   });
 
-  it("exercises proxy_fn.get trap (line 42-43)", () => {
+  it("exercises proxy_fn.get trap", () => {
     // When handler accesses a property on proxy_fn (returned by dummy_arg.get),
     // proxy_fn.get returns deep_proxy
     const built: any[] = [];
@@ -307,7 +307,7 @@ describe("mock_slice", () => {
     expect(built[0].projections).toContain(fakeProj);
   });
 
-  it("withState(undefined) pushes null (line 196 nullish branch)", () => {
+  it("withState(undefined) pushes null", () => {
     const built: any[] = [];
     mock_slice((info) => built.push(info))
       .withState(undefined)
@@ -315,7 +315,7 @@ describe("mock_slice", () => {
     expect(built[0].states).toEqual([null]);
   });
 
-  it("withProjection(null) does not add to projections (line 192)", () => {
+  it("withProjection(null) does not add to projections", () => {
     const built: any[] = [];
     mock_slice((info) => built.push(info))
       .withProjection(null)
@@ -420,7 +420,7 @@ describe("mock_slice", () => {
     expect(built[0].reactions[0].dispatches).toContain("ActionFromData");
   });
 
-  it("capture_dispatches swallows rejected promise from async handler (line 155)", () => {
+  it("capture_dispatches swallows rejected promise from async handler", () => {
     const built: any[] = [];
     mock_slice((info) => built.push(info))
       .on("Evt")
@@ -435,7 +435,7 @@ describe("mock_slice", () => {
     expect(built[0].reactions[0].dispatches).toContain("CapturedAction");
   });
 
-  it("capture_dispatches mock_event returns empty string for unknown props (line 151)", () => {
+  it("capture_dispatches mock_event returns empty string for unknown props", () => {
     const built: any[] = [];
     mock_slice((info) => built.push(info))
       .on("Evt")
@@ -559,7 +559,7 @@ describe("mock_act", () => {
     expect(built[0].projections).toContain(fakeProj);
   });
 
-  it("withState(null) pushes null to states (line 273)", () => {
+  it("withState(null) pushes null to states", () => {
     const built: any[] = [];
     mock_act((info) => built.push(info))
       .withState(null)

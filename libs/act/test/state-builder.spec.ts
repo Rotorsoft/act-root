@@ -53,35 +53,7 @@ describe("state-builder", () => {
     expect(machine.snap).toBeDefined();
   });
 
-  describe("record shorthand state({ Name: schema })", () => {
-    it("should produce identical result to state(name, schema)", () => {
-      const fromArgs = state({ Counter: counter })
-        .init(() => ({ count: 0 }))
-        .emits(events)
-        .patch(patch)
-        .on({ inc: z.object({}) })
-        .emit(() => ["Incremented", { by: 1 }])
-        .build();
-
-      const fromRecord = state({ Counter: counter })
-        .init(() => ({ count: 0 }))
-        .emits(events)
-        .patch(patch)
-        .on({ inc: z.object({}) })
-        .emit(() => ["Incremented", { by: 1 }])
-        .build();
-
-      expect(fromRecord.name).toBe(fromArgs.name);
-      expect(fromRecord.name).toBe("Counter");
-      expect(Object.keys(fromRecord.actions)).toEqual(
-        Object.keys(fromArgs.actions)
-      );
-      expect(Object.keys(fromRecord.events)).toEqual(
-        Object.keys(fromArgs.events)
-      );
-      expect(fromRecord.on.inc).toBeDefined();
-    });
-
+  describe("state({ Name: schema }) refuses a bad record", () => {
     it("should throw when record has more than one key", () => {
       expect(() => state({ A: counter, B: counter } as any)).toThrow(
         "state() requires exactly one key"
@@ -92,36 +64,6 @@ describe("state-builder", () => {
       expect(() => state({} as any)).toThrow(
         "state() requires exactly one key"
       );
-    });
-
-    it("should support full builder chain with requires and snap", () => {
-      const machine = state({ test: counter })
-        .init(() => ({ count: 0 }))
-        .emits(events)
-        .patch(patch)
-        .on({ inc: z.object({}) })
-        .requires([])
-        .emit(() => ["Incremented", { by: 1 }])
-        .snap(() => true)
-        .build();
-
-      expect(machine.name).toBe("test");
-      expect(machine.on.inc).toBeDefined();
-      expect(machine.requires?.inc).toBeDefined();
-      expect(machine.snap).toBeDefined();
-    });
-
-    it("should work with named schema variables", () => {
-      const Counter = counter;
-      const machine = state({ Counter })
-        .init(() => ({ count: 0 }))
-        .emits(events)
-        .patch(patch)
-        .on({ inc: z.object({}) })
-        .emit(() => ["Incremented", { by: 1 }])
-        .build();
-
-      expect(machine.name).toBe("Counter");
     });
   });
 

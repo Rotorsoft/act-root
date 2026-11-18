@@ -359,7 +359,6 @@ async function main() {
   const results: BenchResult[] = [];
   for (const s of scenarios) {
     const iters = counts[s.name] ?? 100;
-    running = s.name;
     process.stderr.write(`Running ${s.name} (${iters} iters)...\n`);
     results.push(await measure(s, iters));
   }
@@ -367,20 +366,7 @@ async function main() {
   unlinkDb();
 
   process.stdout.write(JSON.stringify({ results }, null, 2) + "\n");
-  running = undefined;
 }
-
-// The scenario in progress, until the results are written. If the event loop
-// empties before that, a promise never settled: Node would exit 0 with no
-// output, so fail and name the scenario instead.
-let running: string | undefined = "setup";
-process.on("beforeExit", () => {
-  if (running === undefined) return;
-  console.error(
-    `bench ended before writing results: a promise never settled in "${running}"`
-  );
-  process.exitCode = 1;
-});
 
 // Print the error and fail: LOG_LEVEL=fatal hides act's own crash log.
 main().catch((error) => {

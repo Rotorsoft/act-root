@@ -336,7 +336,7 @@ const x = state({ X: z.object({}) }).init(() => ({})).emits({}).build();`,
     expect(result).toBeDefined();
   });
 
-  it("guard navigation with target_file finds const declaration (lines 195-215)", () => {
+  it("guard navigation with target_file finds const declaration", () => {
     const files: FileTab[] = [
       {
         path: "src/guards.ts",
@@ -365,7 +365,7 @@ export const mustBeAssigned: Precondition<{ assignedTo: string }, unknown> = {
     expect(result!.line).toBe(3);
   });
 
-  it("guard navigation with target_file falls back to description when no const found (lines 213-215)", () => {
+  it("guard navigation with target_file falls back to description when no const found", () => {
     const files: FileTab[] = [
       {
         path: "src/guards.ts",
@@ -391,7 +391,7 @@ export const mustBeAssigned: Precondition<{ assignedTo: string }, unknown> = {
     expect(result!.line).toBe(descLine);
   });
 
-  it("guard general search fallback to description when no const declaration before it (lines 270-271)", () => {
+  it("guard general search fallback to description when no const declaration before it", () => {
     const files: FileTab[] = [
       {
         path: "src/inline.ts",
@@ -413,7 +413,7 @@ export const mustBeAssigned: Precondition<{ assignedTo: string }, unknown> = {
     expect(result!.line).toBe(descLine);
   });
 
-  it("event navigation falls back to .emits() line when event name exists but not inline (lines 182-185)", () => {
+  it("event navigation falls back to .emits() line when event name exists but not inline", () => {
     const files: FileTab[] = [
       {
         path: "src/states.ts",
@@ -446,7 +446,7 @@ const x = "TicketOpened";`,
     expect(result!.line).toBe(emitsLine);
   });
 
-  it("findNonCommentMatch skips commented match and returns non-commented one (line 52)", () => {
+  it("findNonCommentMatch skips commented match and returns non-commented one", () => {
     // Exercises the false branch of isInsideComment check inside findNonCommentMatch
     const files: FileTab[] = [
       {
@@ -462,7 +462,7 @@ const TicketOpened = "event";`,
     expect(result!.line).toBe(2);
   });
 
-  it("event in target_file: name exists but no .emits() call (line 183 false)", () => {
+  it("event in target_file: name exists but no .emits() call", () => {
     const files: FileTab[] = [
       {
         path: "src/t.ts",
@@ -477,7 +477,7 @@ const TicketOpened = "event";`,
     expect(result!.line).toBe(1);
   });
 
-  it("guard in target_file: description not found (line 194 false)", () => {
+  it("guard in target_file: description not found", () => {
     const files: FileTab[] = [
       {
         path: "src/guards.ts",
@@ -493,7 +493,7 @@ const TicketOpened = "event";`,
     expect(result).toBeUndefined();
   });
 
-  it("action in target_file: no .on() block (line 220 false)", () => {
+  it("action in target_file: no .on() block", () => {
     const files: FileTab[] = [
       {
         path: "src/t.ts",
@@ -506,7 +506,7 @@ const TicketOpened = "event";`,
     expect(result!.line).toBe(1);
   });
 
-  it("action in target_file: action found after .on( (line 222 true)", () => {
+  it("action in target_file: action found after .on(", () => {
     const files: FileTab[] = [
       {
         path: "src/t.ts",
@@ -520,7 +520,7 @@ const MyAction = "declared later";`,
     expect(result).toBeDefined();
   });
 
-  it("action in target_file: action not after .on( (line 222 false)", () => {
+  it("action in target_file: action not after .on(", () => {
     const files: FileTab[] = [
       {
         path: "src/t.ts",
@@ -534,7 +534,7 @@ const x = builder.on({ Other: {} }).emit("E");`,
     expect(result!.line).toBe(1);
   });
 
-  it("generic search sorts test files after source files (line 246)", () => {
+  it("generic search sorts test files after source files", () => {
     const files: FileTab[] = [
       {
         path: "src/__tests__/helper.ts",
@@ -555,7 +555,7 @@ const x = builder.on({ Other: {} }).emit("E");`,
     expect(result!.file).toBe("src/app.ts");
   });
 
-  it("guard general search skips non-ts files (line 253)", () => {
+  it("guard general search skips non-ts files", () => {
     const files: FileTab[] = [
       {
         path: "src/data.json",
@@ -575,7 +575,7 @@ const x = builder.on({ Other: {} }).emit("E");`,
     expect(result!.file).toBe("src/guards.ts");
   });
 
-  it("guard general search finds const declaration when present (lines 265-268)", () => {
+  it("guard general search finds const declaration when present", () => {
     const files: FileTab[] = [
       {
         path: "src/guards.ts",
