@@ -100,6 +100,12 @@ export type TableBox = { table: Table; box: Box };
 export type Layout = {
   width: number;
   height: number;
+  /** the height the content needs before it is stretched to the stage */
+  natural: number;
+  /** the app as drawn, inside a group scaled by `app_view` about (ox, oy) */
+  app_view: { s: number; ox: number; oy: number };
+  /** the commit port on the stage, after the app's scale */
+  port: Pt;
   mode: Mode;
   callers: { node: Node; box: Box }[];
   app: AppLayout;
@@ -517,6 +523,33 @@ function app_layout(
   };
 }
 
+/** The app's geometry on the stage, after it is scaled about (ox, oy). */
+function scale_app(a: AppLayout, s: number, ox: number, oy: number): AppLayout {
+  const pt = (p: Pt): Pt => ({
+    x: ox + (p.x - ox) * s,
+    y: oy + (p.y - oy) * s,
+  });
+  const bx = (b: Box): Box => ({ ...pt(b), w: b.w * s, h: b.h * s });
+  return {
+    ...a,
+    box: bx(a.box),
+    gate: bx(a.gate),
+    layer: a.layer.map((l) => ({ ...l, box: bx(l.box) })),
+    layer_box: bx(a.layer_box),
+    chips: a.chips.map((c) => ({ ...c, box: bx(c.box) })),
+    states: a.states.map((st) => ({ ...st, box: bx(st.box) })),
+    slices: a.slices.map((sl) => ({ ...sl, box: bx(sl.box) })),
+    links: a.links.map((l) => ({
+      ...l,
+      a: pt(l.a),
+      b: pt(l.b),
+      pts: l.pts?.map(pt),
+    })),
+    cards: a.cards.map((c) => ({ ...c, box: bx(c.box) })),
+    port: pt(a.port),
+  };
+}
+
 export function layout(
   mode: Mode,
   view: View,
@@ -570,7 +603,7 @@ export function layout(
   }
 
   // the app
-  const appl = app_layout(
+  let appl = app_layout(
     app,
     nodes,
     world,
@@ -723,6 +756,8 @@ export function layout(
     return { stores, sy };
   };
   let { stores, sy } = build(0, 0);
+  let app_raw: AppLayout | undefined;
+  let app_view = { s: 1, ox: 0, oy: 0 };
   const natural = Math.max(sy, appl.box.y + appl.box.h + 12, ty, ly);
   if (!narrow && room > natural) {
     const spare = room - natural;
@@ -748,21 +783,37 @@ export function layout(
     const bottom = room - 12;
     for (const sb of stores.length === 1 ? stores : [])
       sb.box.h = bottom - sb.box.y;
-    const app_spare = bottom - (appl.box.y + appl.box.h);
-    if (app_spare > 40) {
-      const moved = app_layout(
-        app,
-        nodes,
-        world,
-        ax,
-        8 + Math.floor(app_spare / 2),
-        A,
-        layer,
-        narrow
-      );
-      Object.assign(appl, moved);
-      appl.box = { ...moved.box, y: 8, h: bottom - 8 };
-    } else appl.box.h = Math.max(appl.box.h, bottom - appl.box.y);
+    // the app's content grows to fill its frame: with height to spare, the action layer
+    // stands upright; then the whole app is laid out narrower and scaled up as a group
+    const top_y = appl.box.y;
+    const room_h = bottom - top_y;
+    let upright = false;
+    if (room_h > appl.box.h * 1.6) {
+      const tall = app_layout(app, nodes, world, ax, top_y, A, layer, true);
+      if (tall.box.h < room_h) {
+        appl = tall;
+        upright = true;
+      }
+    }
+    const fit_s = (w: number) => {
+      const raw = app_layout(app, nodes, world, ax, top_y, w, layer, upright);
+      return { raw, s: Math.min(A / w, room_h / Math.max(1, raw.box.h)) };
+    };
+    let best = { raw: appl, s: 1 };
+    for (let w = A; w >= Math.max(360, A / 1.6); w -= 20) {
+      const f = fit_s(w);
+      if (f.s > best.s) best = f;
+      if (f.s < A / w) break;
+    }
+    if (best.s > 1.04) {
+      best.raw.box.h = room_h / best.s;
+      app_raw = best.raw;
+      app_view = { s: best.s, ox: ax, oy: top_y };
+      appl = scale_app(best.raw, best.s, ax, top_y);
+    } else {
+      appl.box.h = Math.max(appl.box.h, room_h);
+      if (upright) app_raw = appl;
+    }
   }
 
   if (narrow)
@@ -1076,9 +1127,12 @@ export function layout(
   return {
     width,
     height,
+    natural,
     mode,
     callers,
-    app: appl,
+    app: app_raw ?? appl,
+    app_view,
+    port: appl.port,
     stores,
     tables,
     anchor,

@@ -34,7 +34,6 @@ export type { TourSpec } from "./types";
 
 const MOVE_MS = 820;
 const TRAIL = [1, 2, 3];
-const NAVBAR_PX = 60;
 const CAPTION_PX = 84;
 const BAR_PX = 46;
 /** every `</>` icon sits this far in from its element's top-right corner */
@@ -82,14 +81,21 @@ function schedule(moves: Move[]): { starts: number[]; total: number } {
 }
 
 
-type Fit = { mode: Mode; px: number; vh: number; full: boolean };
+type Fit = { mode: Mode; px: number; vh: number; full: boolean; top: number };
 function useFit(ref: React.RefObject<HTMLElement | null>): Fit {
-  const [fit, setFit] = useState<Fit>({ mode: "wide", px: 1280, vh: 800, full: false });
+  const [fit, setFit] = useState<Fit>({ mode: "wide", px: 1280, vh: 800, full: false, top: 60 });
   useBrowserLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
     const measure = () =>
-      setFit({ mode: el.clientWidth < 760 ? "narrow" : "wide", px: el.clientWidth, vh: window.innerHeight, full: document.fullscreenElement === el });
+      setFit({
+        mode: el.clientWidth < 760 ? "narrow" : "wide",
+        px: el.clientWidth,
+        vh: window.innerHeight,
+        full: document.fullscreenElement === el,
+        // where the tour starts on the page: under the navbar and any announcement
+        top: Math.round(el.getBoundingClientRect().top + window.scrollY),
+      });
     measure();
     const ro = new ResizeObserver(measure);
     ro.observe(el);
@@ -436,13 +442,20 @@ function Stage({
       {/* the one link between the two centers: commits go in, loads and reactions read back */}
       {lay.mode === "wide" && lay.stores[0] && (
         <g className={`${styles.bridge} ${area(store_on && layer_on)}`}>
-          <path d={`M${lay.app.port.x + 8},${lay.app.port.y - 5} L${lay.stores[0].box.x - 3},${lay.app.port.y - 5}`} markerEnd="url(#tour-arrow)" />
-          <path d={`M${lay.stores[0].box.x - 2},${lay.app.port.y + 6} L${lay.app.port.x + 9},${lay.app.port.y + 6}`} markerEnd="url(#tour-arrow)" />
+          <path d={`M${lay.port.x + 8},${lay.port.y - 5} L${lay.stores[0].box.x - 3},${lay.port.y - 5}`} markerEnd="url(#tour-arrow)" />
+          <path d={`M${lay.stores[0].box.x - 2},${lay.port.y + 6} L${lay.port.x + 9},${lay.port.y + 6}`} markerEnd="url(#tour-arrow)" />
         </g>
       )}
 
-      {/* the running Act app */}
-      <g className={styles.app}>
+      {/* the running Act app, scaled as one group to fill its frame */}
+      <g
+        className={styles.app}
+        transform={
+          lay.app_view.s !== 1
+            ? `translate(${lay.app_view.ox} ${lay.app_view.oy}) scale(${lay.app_view.s}) translate(${-lay.app_view.ox} ${-lay.app_view.oy})`
+            : undefined
+        }
+      >
         <rect x={a.box.x} y={a.box.y} width={a.box.w} height={a.box.h} rx={16} className={styles.appBox} />
         <text x={a.box.x + 12} y={a.box.y + 20} className={styles.appTitle}>
           Act app
@@ -454,7 +467,7 @@ function Stage({
         <rect x={a.layer_box.x} y={a.layer_box.y} width={a.layer_box.w} height={a.layer_box.h} rx={10} className={styles.layerBox} />
         <text x={a.layer_box.x + 8} y={a.layer_box.y + 14} className={styles.layerLabel}>
           action layer
-          {lay.mode === "wide" && <tspan className={styles.appSub}> · every refusal but ConcurrencyError happens here</tspan>}
+          {lay.mode === "wide" && a.layer_box.w > 640 && <tspan className={styles.appSub}> · every refusal but ConcurrencyError happens here</tspan>}
         </text>
         {a.layer.map(({ stage, box }, i) => {
           const next = a.layer[i + 1]?.box;
@@ -659,7 +672,7 @@ function Stage({
             <rect x={sb.box.x} y={sb.box.y} width={sb.box.w} height={sb.box.h} rx={14} className={styles.storeBox} />
             <text x={sb.field.x} y={sb.box.y + 19} className={styles.storeTitle}>
               Event store
-              <tspan className={styles.storeSub}> · {s.label}</tspan>
+              {sb.box.w > 760 && <tspan className={styles.storeSub}> · {s.label}</tspan>}
             </text>
             <text x={sb.field.x + sb.field.w} y={sb.box.y + (lay.mode === "narrow" ? 34 : 19)} className={styles.counter}>
               {s.status ? (
@@ -701,7 +714,7 @@ function Stage({
                 {/* a short stub from the commit port across the store's frame to the pill */}
                 <path
                   className={styles.bounceLink}
-                  d={`M${lay.app.port.x + 7},${lay.app.port.y} L${sb.box.x},${lay.app.port.y} L${sb.box.x},${sb.bounce.y + sb.bounce.h / 2} L${sb.bounce.x},${sb.bounce.y + sb.bounce.h / 2}`}
+                  d={`M${lay.port.x + 7},${lay.port.y} L${sb.box.x},${lay.port.y} L${sb.box.x},${sb.bounce.y + sb.bounce.h / 2} L${sb.bounce.x},${sb.bounce.y + sb.bounce.h / 2}`}
                 />
                 <rect x={sb.bounce.x} y={sb.bounce.y} width={sb.bounce.w} height={sb.bounce.h} rx={9} />
                 <text x={sb.bounce.x + 9} y={sb.bounce.y + 13} className={styles.ghostLine}>
@@ -932,12 +945,8 @@ export default function Tour({ spec }: { spec: TourSpec }) {
   const close_timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const box = useRef<HTMLDivElement>(null);
   const fit = useFit(box);
-  const units = fit.mode === "narrow" ? 420 : Math.max(1100, Math.min(2200, fit.px - 4));
-  // the stage fills the viewport under the navbar, above the caption band and the control bar
   // the stage takes the whole height but the control row; its bottom strip is kept for the subtitles
-  const per_px = units / Math.max(1, fit.px);
-  const cap_u = CAPTION_PX * per_px;
-  const room = Math.max(420, (fit.vh - (fit.full ? 0 : NAVBAR_PX) - BAR_PX) * per_px - cap_u);
+  const stage_px = Math.max(360, fit.vh - (fit.full ? 0 : fit.top) - BAR_PX);
 
   const frame = all[index]!;
   const chapter = spec.chapters[frame.chapter]!;
@@ -948,13 +957,19 @@ export default function Tour({ spec }: { spec: TourSpec }) {
   const layer = useMemo(() => (spec.pipelines.action ?? []).filter((s) => s !== "commit"), [spec]);
   const moves = step.moves ?? [];
   const { total } = schedule(moves);
-  const lay = useMemo(
-    () => {
+  // the stage's layout for the space it has: nothing sits small in a big box
+  const lay = useMemo(() => {
+    const at = (z: number) => {
+      const units = fit.mode === "narrow" ? 420 : Math.max(1100, Math.min(2200, (fit.px - 4) / z));
+      const per_px = units / Math.max(1, fit.px);
+      const cap = CAPTION_PX * per_px;
+      const room = stage_px * per_px - cap;
       const l = layout(fit.mode, view, scene.nodes, frame.world, app, layer, units, room);
-      return { ...l, height: l.height + cap_u };
-    },
-    [fit.mode, view, scene.nodes, frame.world, app, layer, units, room, cap_u]
-  );
+      return { l: { ...l, height: l.height + cap } };
+    };
+    // the app and the store each scale their own content to fill; the stage keeps its width
+    return at(1).l;
+  }, [fit.mode, fit.px, stage_px, view, scene.nodes, frame.world, app, layer]);
   const code = useMemo(() => {
     let c = scene.code;
     for (let i = 0; i <= frame.step; i++) c = scene.steps[i]!.code ?? c;

@@ -1432,10 +1432,14 @@
   margin: 0;
   max-width: min(1200px, 94%);
   padding: 6px 16px;
-  border-radius: 10px;
-  background: rgba(10, 14, 22, 0.8);
-  color: #f4f6fa;
-  font-size: clamp(1rem, 1.35vw, 1.4rem);
+  width: fit-content;
+  border-radius: 16px;
+  background: rgba(12, 16, 26, 0.55);
+  -webkit-backdrop-filter: blur(10px) saturate(1.2);
+  backdrop-filter: blur(10px) saturate(1.2);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18);
+  color: #f6f8fc;
+  font-size: clamp(1.05rem, 1.45vw, 1.55rem);
   font-weight: 500;
   line-height: 1.4;
   display: -webkit-box;
