@@ -656,11 +656,11 @@ export function layout(
       }
       // a small store gets only a strip; the room goes to the cells
       const field_h =
-        store.next_id < 300
+        (store.next_id < 300
           ? 24
           : view === "macro"
-            ? Math.round(Math.max(140, Math.min(300, S * 0.34))) + extra
-            : 48;
+            ? Math.round(Math.max(140, Math.min(300, S * 0.34)))
+            : 48) + extra;
       const field: Box = { x: sx, y: sy, w: S, h: field_h };
       sy += field_h + 4;
       const legend: Box = { x: sx, y: sy, w: S, h: 0 };
@@ -780,18 +780,16 @@ export function layout(
       const macro = view === "macro" && (world.stores[0]?.next_id ?? 0) >= 300;
       if (macro) ({ stores, sy } = build(0, Math.floor(spare)));
       else {
-        // the cells grow into the spare room, then what is left centers the content
+        // the cells grow into part of the spare room, then the field takes the rest above them
         const sb = stores[0]!;
         const rows = Math.ceil(
           (sb.cells.length + sb.gaps.length + 1) / sb.per_row
         );
-        ({ stores, sy } = build(0, 0, rows * 66 + spare * 0.85));
+        const big = (world.stores[0]?.next_id ?? 0) >= 300;
+        const cells_room = rows * 66 + spare * (big ? 0.4 : 0.6);
+        ({ stores, sy } = build(0, 0, cells_room));
         const left = Math.max(0, room - 12 - sy);
-        ({ stores, sy } = build(
-          Math.floor(left / 2),
-          0,
-          rows * 66 + spare * 0.85
-        ));
+        ({ stores, sy } = build(0, Math.floor(left), cells_room));
       }
     }
     // both centers run the stage's full height

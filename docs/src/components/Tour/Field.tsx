@@ -99,7 +99,7 @@ export default function Field({
   const canvas = useRef<HTMLCanvasElement>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
   const [tip, setTip] = useState<{ x: number; y: number; text: string } | undefined>();
-  const geo = useRef<{ pitch: number; cols: number; dots: Map<number, Dot> }>({ pitch: 8, cols: 1, dots: new Map() });
+  const geo = useRef<{ pitch: number; cols: number; oy: number; dots: Map<number, Dot> }>({ pitch: 8, cols: 1, oy: 4, dots: new Map() });
 
   useEffect(() => {
     const el = canvas.current?.parentElement;
@@ -141,11 +141,13 @@ export default function Field({
       cols = Math.max(1, Math.floor(W / pitch));
     }
     const r = Math.max(0.9, pitch * 0.34);
-    const pos = (id: number) => ({ x: G + (id % cols) * pitch + pitch / 2, y: 4 + Math.floor(id / cols) * pitch + pitch / 2 });
+    // a field taller than its dots need centers them, so a small log never hugs the top
+    const oy = Math.max(4, (size.h - Math.ceil(n / cols) * pitch) / 2);
+    const pos = (id: number) => ({ x: G + (id % cols) * pitch + pitch / 2, y: oy + Math.floor(id / cols) * pitch + pitch / 2 });
     const rows = Math.ceil(n / cols);
     const tick_every = Math.max(1, Math.ceil(18 / pitch));
     const bin = { x: size.w - 34, y: size.h - 22 };
-    geo.current = { pitch, cols, dots: new Map(dots.filter((d) => !d.leaving).map((d) => [d.id, d])) };
+    geo.current = { pitch, cols, oy, dots: new Map(dots.filter((d) => !d.leaving).map((d) => [d.id, d])) };
     const glow = new Map(store.glows.map((g) => [g.stream, g.worker]));
     const worker_list = [...new Set(store.glows.map((g) => g.worker))];
     const tour_ids = dots.filter((d) => d.tour && !d.leaving).map((d) => d.id);
@@ -172,7 +174,7 @@ export default function Field({
       ctx.font = "9px ui-monospace, monospace";
       ctx.textAlign = "right";
       for (let row = 0; row < rows; row += tick_every) {
-        const y = 4 + row * pitch + pitch / 2 + 3;
+        const y = oy + row * pitch + pitch / 2 + 3;
         ctx.fillText(`#${(row * cols).toLocaleString("en-US")}`, G - 5, y);
       }
       ctx.textAlign = "left";
@@ -334,9 +336,9 @@ export default function Field({
 
   const move = (e: React.MouseEvent) => {
     const rect = canvas.current!.getBoundingClientRect();
-    const { pitch, cols, dots } = geo.current;
+    const { pitch, cols, oy, dots } = geo.current;
     const col = Math.floor((e.clientX - rect.left - 40) / pitch);
-    const row = Math.floor((e.clientY - rect.top - 4) / pitch);
+    const row = Math.floor((e.clientY - rect.top - oy) / pitch);
     const d = col >= 0 && col < cols ? dots.get(row * cols + col) : undefined;
     onHover(d?.stream);
     setTip(d ? { x: e.clientX - rect.left, y: e.clientY - rect.top, text: `#${d.id} ${d.name} · ${d.stream} v${d.version}` } : undefined);
