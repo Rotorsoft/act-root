@@ -419,6 +419,20 @@ function Stage({
     return pipe.fail ? "skip" : "todo";
   };
   const commit_state = pipe?.name === "action" ? (pipe.at > 6 ? "done" : pipe.at === 6 ? (pipe.fail ? "fail" : "active") : "todo") : "idle";
+  // the store port's operations this step: commits go in; queries and the drain's reads come out
+  const ops = new Set((step.ops ?? []).map((o) => o.op));
+  const from_store = (x: string) => /^(log|store:|field:|cell:|stream:)/.test(x);
+  const port_on = {
+    commit: ops.has("commit") || commit_state === "active" || commit_state === "done",
+    query:
+      moves.some((m) => from_store(m.from) && !from_store(m.to)) ||
+      /\b(loads?|loaded|query|query_array|fetch(es)?|replays?|catches up|time-travel)\b/i.test(step.now) ||
+      ((pipe?.name === "reaction" || pipe?.name === "projection") && pipe.at === 2),
+    claim: ops.has("lease") || /\b(claims?|leases?)\b/i.test(step.now) || ((pipe?.name === "reaction" || pipe?.name === "projection") && pipe.at === 1),
+    ack: ops.has("ack") || /\backs?\b/i.test(step.now),
+    block: ops.has("block") || /\bblocks?\b/i.test(step.now),
+  };
+  const snap_read = port_on.query && /snapshot/i.test(step.now);
   const a = lay.app;
   // the areas this step works in glow; the rest fades back
   const touches = (x: string) => /^(log|store:|field:|cell:|stream:|port)/.test(x);
@@ -487,8 +501,13 @@ function Stage({
       {/* the one link between the two centers: commits go in, loads and reactions read back */}
       {lay.mode === "wide" && lay.stores[0] && (
         <g className={`${styles.bridge} ${area(store_on && layer_on)}`}>
-          <path d={`M${lay.port.x + 8},${lay.port.y - 5} L${lay.stores[0].box.x - 3},${lay.port.y - 5}`} markerEnd="url(#tour-arrow)" />
-          <path d={`M${lay.stores[0].box.x - 2},${lay.port.y + 6} L${lay.port.x + 9},${lay.port.y + 6}`} markerEnd="url(#tour-arrow)" />
+          {/* commits flow in along the top; reads flow back out along the bottom */}
+          <path d={`M${lay.port.x + 8},${lay.port.y - 5} L${lay.stores[0].box.x - 3},${lay.port.y - 5}`} markerEnd="url(#tour-arrow)" data-on={port_on.commit || undefined} />
+          <path
+            d={`M${lay.stores[0].box.x - 2},${lay.port.y + 6} L${lay.port.x + 9},${lay.port.y + 6}`}
+            markerEnd="url(#tour-arrow)"
+            data-on={port_on.query || port_on.claim || port_on.ack || port_on.block || undefined}
+          />
         </g>
       )}
 
@@ -562,7 +581,8 @@ function Stage({
             if (!s) return null;
             const text = `${w.stop.error} · nothing sent to the store`;
             const tw = text.length * 5.9 + 16;
-            const x = Math.min(s.box.x, a.layer_box.x + a.layer_box.w - tw);
+            // left of the port's labels, which share the bottom right of the layer
+            const x = Math.max(a.layer_box.x + 6, Math.min(s.box.x, a.layer_box.x + a.layer_box.w - tw - 150));
             return (
               <g className={`${styles.stopNote} ${styles.fresh}`}>
                 <rect x={x} y={a.layer_box.y + a.layer_box.h - 20} width={tw} height={16} rx={8} />
@@ -577,9 +597,18 @@ function Stage({
         <g className={styles.port} data-state={commit_state}>
           <circle cx={a.port.x} cy={a.port.y} r={7} />
           {!a.vertical && (
-            <text x={a.port.x - 4} y={a.port.y - 12} className={`${styles.portLabel} ${styles.right}`}>
-              commit
-            </text>
+            <>
+              <text x={a.port.x - 16} y={a.port.y - 12} className={`${styles.portLabel} ${styles.right}`} data-on={port_on.commit || undefined}>
+                commit ↘
+              </text>
+              <text x={a.port.x - 16} y={a.port.y + 22} className={`${styles.portLabel} ${styles.right}`} data-on={port_on.query || undefined}>
+                {snap_read ? "query · from snapshot ↖" : "query ↖"}
+              </text>
+              <text x={a.port.x - 16} y={a.port.y + 36} className={`${styles.portLabel} ${styles.portDrain} ${styles.right}`}>
+                <tspan data-on={port_on.claim || undefined}>claim</tspan> · <tspan data-on={port_on.ack || undefined}>ack</tspan> ·{" "}
+                <tspan data-on={port_on.block || undefined}>block</tspan>
+              </text>
+            </>
           )}
         </g>
 

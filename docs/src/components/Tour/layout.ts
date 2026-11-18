@@ -284,7 +284,7 @@ function app_layout(
         },
       });
     // a row of its own for a refusal note, under the stages
-    layer_h = 20 + CHIP_H + 8 + 20;
+    layer_h = 20 + CHIP_H + 8 + 34;
   }
   const layer_box: Box = {
     x: x + pad - 4,
