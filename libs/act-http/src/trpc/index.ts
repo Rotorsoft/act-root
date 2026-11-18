@@ -85,6 +85,7 @@ import {
   toApiError,
 } from "../api/index.js";
 import { SseConnectionCounter } from "../api/sse-counter.js";
+import { live_sources, run_live_subscription } from "../api/sse-live.js";
 import { SseOptionsSchema } from "../api/sse-options.js";
 import {
   run_settled_subscription,
@@ -92,6 +93,12 @@ import {
   sse_sources,
 } from "../api/sse-settled.js";
 import { sse_state_names } from "../api/sse-states.js";
+
+// A `$live` request: streams by state name, and whether to add the settled targets.
+const LiveRequestSchema = z.object({
+  streams: z.record(z.string(), z.array(z.string())).optional(),
+  settled: z.boolean().optional(),
+});
 
 /**
  * Per-call options for {@link trpc}. The host supplies the three
@@ -292,8 +299,33 @@ type SubscribeRouter<TApp, TSse = SseOptions> = {
           meta: object;
         }>;
       }
-    : {});
+    : {}) &
+    (TSse extends { readonly live: true }
+      ? {
+          $live: TRPCSubscriptionProcedure<{
+            input: LiveInput<TApp>;
+            output: AsyncIterable<LiveFrame<TApp>, void, any>;
+            meta: object;
+          }>;
+        }
+      : {});
 };
+
+/** What a `$live` subscription follows: streams by state name, and the settled targets. */
+export type LiveInput<TApp> = {
+  readonly streams?: { readonly [N in AppStateNames<TApp>]?: string[] };
+  readonly settled?: boolean;
+};
+
+/** A `$live` frame, typed by the state it carries, or the settled targets. */
+export type LiveFrame<TApp> =
+  | {
+      [N in AppStateNames<TApp>]: SseSubscriptionFrame<AppState<TApp, N>> & {
+        readonly state: N;
+        readonly stream: string;
+      };
+    }[AppStateNames<TApp>]
+  | SseSettledFrame;
 
 /** The router {@link trpc} builds: the actions, and the subscriptions with `sse`. */
 export type GeneratedRouter<
@@ -534,13 +566,48 @@ export function trpc<Ctx extends object, TApp extends ActSurface>(
         message: "max concurrent SSE subscriptions reached",
       });
     };
-    if (settled_source)
+    if (sse_config.live) {
+      const served = new Set(state_names);
+      const live_patterns = options.streams ?? {};
+      sse_handlers.$live = t.procedure
+        // Checked in the body, so a bad request is a 422, as Hono's is.
+        .input((raw: unknown) => raw)
+        .subscription(async function* ({ input, ctx, signal }) {
+          await resolve_actor(ctx as unknown as Ctx);
+          const request = LiveRequestSchema.safeParse(input ?? {});
+          const checked = request.success
+            ? live_sources(
+                request.data,
+                served,
+                live_patterns,
+                sse_config.maxStreamsPerSubscription
+              )
+            : { refused: "streams by state name, and settled" };
+          if ("refused" in checked)
+            throw new TRPCError({
+              code: "UNPROCESSABLE_CONTENT",
+              message: `INVALID_STREAM: ${checked.refused}`,
+            });
+          yield* run_live_subscription(
+            sse_config.channel,
+            checked.sources,
+            request.data!.settled ? settled_source : undefined,
+            sse_counter,
+            signal,
+            {
+              maxPending: sse_config.maxPendingPerConnection,
+              on_cap_exceeded: too_many,
+            }
+          );
+        });
+    }
+    if (sse_config.settled)
       sse_handlers.$settled = t.procedure.subscription(async function* ({
         ctx,
         signal,
       }) {
         await resolve_actor(ctx as unknown as Ctx);
-        yield* run_settled_subscription(settled_source, sse_counter, signal, {
+        yield* run_settled_subscription(settled_source!, sse_counter, signal, {
           maxPending: sse_config.maxPendingPerConnection,
           on_cap_exceeded: too_many,
         });

@@ -54,6 +54,10 @@ trpc(app, {
 
 `publish` and `settled` need `app.on`. `ActSurface` gains an optional `on`, and generation fails when either flag is set on a surface without it.
 
+### Amendment (#2585): `$live`, one subscription for many streams
+
+Each subscription is a connection, and a browser allows six per origin over HTTP/1.1, so a page that follows several streams and a list exhausts them. `sse` gains two more optional fields: `live?: boolean` adds `subscribe.$live` (tRPC) and `GET <base>/sse/$live` (Hono), taking `{ streams: { [State]?: string[] }; settled?: boolean }` (Hono: `?<State>=<stream>&settled=1`) and yielding the per-stream frames tagged with `state` and `stream`, plus `settled` frames on request; `maxStreamsPerSubscription?: number` (default 50, `[1, 1_000]`) bounds it. One `$live` takes one connection slot; a shared backlog that overflows gives the overflowing stream one `_resync` rather than dropping a frame; an open that names an unserved state, a stream outside its `streams` pattern, too many streams or nothing is refused (`422 INVALID_STREAM`). `$live` is reserved only with `live: true`. Rejected: an in-band protocol to add and remove streams on an open subscription (a new input re-subscribes, which tRPC does when the hook input changes); and dropping the oldest frame across streams on overflow, which would make one busy stream cost a quiet one its versions.
+
 ## Alternatives considered
 
 - **`streams` taking singletons too** (`Settings: "settings"`), as #2578 first proposed. It overlaps `stream`, which already resolves constants, and needs a "both passed" error. Patterns only keeps one way per case.

@@ -311,3 +311,46 @@ describe("the $settled subscription", () => {
     without.api.sse.$settled;
   });
 });
+
+describe("the $live subscription", () => {
+  const actor = () => ({ id: "a", name: "a" });
+  const channel = new BroadcastChannel();
+
+  it("takes streams by state name and narrows a frame's data by its state", () => {
+    const router = trpc(app, { actor, stream, sse: { channel, live: true } });
+    type In = inferRouterInputs<typeof router>["subscribe"]["$live"];
+    expectTypeOf<In>().toEqualTypeOf<{
+      readonly streams?: {
+        readonly Counter?: string[];
+        readonly Note?: string[];
+      };
+      readonly settled?: boolean;
+    }>();
+    type Frame =
+      inferRouterOutputs<
+        typeof router
+      >["subscribe"]["$live"] extends AsyncIterable<infer F>
+        ? F
+        : never;
+    const read = (frame: Frame) => {
+      if (frame.kind === "state" && frame.state === "Counter")
+        expectTypeOf(frame.data).toEqualTypeOf<
+          { n: number } & { _v: number }
+        >();
+      if (frame.kind === "settled")
+        expectTypeOf(frame.data.targets).toEqualTypeOf<string[]>();
+    };
+    expectTypeOf(read).toBeFunction();
+  });
+
+  it("is there only with live: true", () => {
+    const off = trpc(app, { actor, stream, sse: { channel } });
+    expectTypeOf<
+      keyof inferRouterOutputs<typeof off>["subscribe"]
+    >().toEqualTypeOf<"Counter" | "Note">();
+    const client = testClient(
+      hono(app, { actor, stream, sse: { channel, live: true } })
+    );
+    expectTypeOf(client.api.sse.$live.$get).toBeFunction();
+  });
+});

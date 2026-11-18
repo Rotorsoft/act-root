@@ -6533,6 +6533,18 @@ export type SseOptions = {
     readonly settled?: boolean;
     /** Told the number of open subscriptions after every open and close. */
     readonly onConnections?: (count: number) => void;
+    /**
+     * Add one subscription, \`$live\` (tRPC \`subscribe.$live\`, Hono
+     * \`GET <basePath>/sse/$live\`), that follows many streams, and optionally the
+     * settled targets, in one feed: one connection per page, whatever it shows.
+     * It takes one slot of {@link maxConnections}. Off by default.
+     */
+    readonly live?: boolean;
+    /**
+     * The most streams one \`$live\` subscription follows. Default \`50\`.
+     * Validated range \`[1, 1_000]\`.
+     */
+    readonly maxStreamsPerSubscription?: number;
 };
 /**
  * Default cap on concurrent open subscriptions per generator
@@ -6558,6 +6570,8 @@ export declare const DEFAULT_SSE_HEARTBEAT_MS = 30000;
  * \`_resync\` rather than being dropped silently.
  */
 export declare const DEFAULT_SSE_MAX_PENDING_PER_CONNECTION = 256;
+/** The most streams one \`$live\` subscription follows, by default. */
+export declare const DEFAULT_SSE_MAX_STREAMS_PER_SUBSCRIPTION = 50;
 /**
  * Frame yielded by the per-state SSE subscription generator. The
  * initial cached state (when present) arrives as \`kind: "state"\`;
@@ -6820,7 +6834,33 @@ export type SseRoutes<TApp, TBase extends string, TSse = unknown> = {
             status: 401 | 503;
         };
     };
+} : {}) & (TSse extends {
+    readonly live: true;
+} ? {
+    [P in MergePath<TBase, "/sse/$live">]: {
+        $get: {
+            input: {
+                query: LiveQuery<TApp>;
+            };
+            output: {};
+            outputFormat: "body";
+            status: 200;
+        } | {
+            input: {
+                query: LiveQuery<TApp>;
+            };
+            output: ApiError;
+            outputFormat: "json";
+            status: 401 | 422 | 503;
+        };
+    };
 } : {});
+/** A \`$live\` request's query: streams by state name, and \`settled: "1"\` for the targets. */
+export type LiveQuery<TApp> = {
+    [N in AppStateNames<TApp>]?: string | string[];
+} & {
+    settled?: "1" | "true";
+};
 /** Every status a generated action route answers with the error envelope. */
 type ErrorStatus = 400 | 401 | 409 | 410 | 412 | 422 | 500 | 503;
 /**
@@ -8062,8 +8102,30 @@ type SubscribeRouter<TApp, TSse = SseOptions> = {
             output: AsyncIterable<SseSettledFrame, void, any>;
             meta: object;
         }>;
+    } : {}) & (TSse extends {
+        readonly live: true;
+    } ? {
+        $live: TRPCSubscriptionProcedure<{
+            input: LiveInput<TApp>;
+            output: AsyncIterable<LiveFrame<TApp>, void, any>;
+            meta: object;
+        }>;
     } : {});
 };
+/** What a \`$live\` subscription follows: streams by state name, and the settled targets. */
+export type LiveInput<TApp> = {
+    readonly streams?: {
+        readonly [N in AppStateNames<TApp>]?: string[];
+    };
+    readonly settled?: boolean;
+};
+/** A \`$live\` frame, typed by the state it carries, or the settled targets. */
+export type LiveFrame<TApp> = {
+    [N in AppStateNames<TApp>]: SseSubscriptionFrame<AppState<TApp, N>> & {
+        readonly state: N;
+        readonly stream: string;
+    };
+}[AppStateNames<TApp>] | SseSettledFrame;
 /** The router {@link trpc} builds: the actions, and the subscriptions with \`sse\`. */
 export type GeneratedRouter<Ctx extends object, TApp, TRecord, TNames extends string = keyof AppActions<TApp> & string, TStreams = {}> = TRPCBuiltRouter<GeneratedRoot<Ctx>, ActionProcedures<TApp, TNames, TStreams> & TRecord>;
 /**

@@ -340,4 +340,55 @@ describe("hono sse — publish, $settled and onConnections", () => {
     expect(channel.state("t-1")).toEqual({ n: 2, _v: 0 });
     await vi.waitFor(() => expect(counts).toEqual([1, 0]));
   });
+
+  test("follows many streams and the settled targets at /sse/$live", async ({
+    app,
+  }) => {
+    const channel = new BroadcastChannel<{ _v: number; n: number }>();
+    const api = hono(app, {
+      actor: () => ({ id: "u-1", name: "alice" }),
+      stream: () => "t-1",
+      sse: { channel, publish: true, live: true },
+    });
+    const refused = await api.request("/api/sse/$live?Nope=t-1");
+    expect(refused.status).toBe(422);
+    expect(await refused.json()).toEqual({
+      error: "InvalidStream",
+      detail: 'no live state "Nope"',
+      code: "INVALID_STREAM",
+    });
+    const streams_only = await api.request("/api/sse/$live?Tally=t-1");
+    const first = read_sse_frames(streams_only, ["state"]);
+    await app.do(
+      "add",
+      { stream: "t-1", actor: { id: "u-1", name: "alice" } },
+      { by: 1 }
+    );
+    // The stream starts when its body is read: after the commit, so it opens
+    // on the cached state.
+    expect(JSON.parse((await first)[0]!.data)).toMatchObject({
+      state: "Tally",
+      stream: "t-1",
+    });
+    const res = await api.request(
+      "/api/sse/$live?Tally=t-2&Tally=t-3&settled=1"
+    );
+    expect(res.status).toBe(200);
+    const frames = read_sse_frames(res, ["patch", "settled"]);
+    await app.do(
+      "add",
+      { stream: "t-2", actor: { id: "u-1", name: "alice" } },
+      { by: 2 }
+    );
+    const [patch, settled] = await frames;
+    expect(patch!.event).toBe("patch");
+    expect(JSON.parse(patch!.data)).toMatchObject({
+      state: "Tally",
+      stream: "t-2",
+    });
+    expect(settled).toEqual({
+      event: "settled",
+      data: JSON.stringify({ targets: ["tally-view"] }),
+    });
+  });
 });

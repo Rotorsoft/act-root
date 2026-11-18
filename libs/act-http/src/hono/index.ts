@@ -76,6 +76,7 @@ import {
   toApiError,
 } from "../api/index.js";
 import { fire_and_forget, SseConnectionCounter } from "../api/sse-counter.js";
+import { live_sources, run_live_subscription } from "../api/sse-live.js";
 import { SseOptionsSchema } from "../api/sse-options.js";
 import { run_settled_subscription, sse_sources } from "../api/sse-settled.js";
 import { sse_state_names } from "../api/sse-states.js";
@@ -363,14 +364,57 @@ export function hono<TApp extends ActSurface>(
         }
       });
     };
-    if (settled_source)
+    if (sse_config.settled)
       api.get("/sse/$settled", (c) =>
         serve(c, (signal) =>
-          run_settled_subscription(settled_source, undefined, signal, {
+          run_settled_subscription(settled_source!, undefined, signal, {
             maxPending: sse_config.maxPendingPerConnection,
           })
         )
       );
+    if (sse_config.live) {
+      const served = new Set(state_names);
+      const live_patterns = options.streams ?? {};
+      // `?<State>=<stream>` once per stream, and `settled=1` for the targets.
+      api.get("/sse/$live", (c) => {
+        const { settled, ...streams } = c.req.queries();
+        const want_settled = settled?.[0] === "1" || settled?.[0] === "true";
+        const checked = live_sources(
+          { streams, settled: want_settled },
+          served,
+          live_patterns,
+          sse_config.maxStreamsPerSubscription
+        );
+        if ("refused" in checked) {
+          const body: ApiError = {
+            error: "InvalidStream",
+            detail: checked.refused,
+            code: "INVALID_STREAM",
+          };
+          return c.json(body, 422);
+        }
+        return serve(c, async function* (signal) {
+          for await (const frame of run_live_subscription(
+            sse_config.channel,
+            checked.sources,
+            want_settled ? settled_source : undefined,
+            undefined,
+            signal,
+            { maxPending: sse_config.maxPendingPerConnection }
+          ))
+            yield frame.kind === "settled"
+              ? frame
+              : {
+                  kind: frame.kind,
+                  data: {
+                    state: frame.state,
+                    stream: frame.stream,
+                    data: frame.data,
+                  },
+                };
+        });
+      });
+    }
     for (const state_name of state_names) {
       api.get(`/sse/${state_name}`, async (c) => {
         const stream_id = c.req.query("stream");
@@ -535,7 +579,31 @@ export type SseRoutes<TApp, TBase extends string, TSse = unknown> = {
             };
       };
     }
-  : {});
+  : {}) &
+  (TSse extends { readonly live: true }
+    ? {
+        [P in MergePath<TBase, "/sse/$live">]: {
+          $get:
+            | {
+                input: { query: LiveQuery<TApp> };
+                output: {};
+                outputFormat: "body";
+                status: 200;
+              }
+            | {
+                input: { query: LiveQuery<TApp> };
+                output: ApiError;
+                outputFormat: "json";
+                status: 401 | 422 | 503;
+              };
+        };
+      }
+    : {});
+
+/** A `$live` request's query: streams by state name, and `settled: "1"` for the targets. */
+export type LiveQuery<TApp> = {
+  [N in AppStateNames<TApp>]?: string | string[];
+} & { settled?: "1" | "true" };
 
 /** Every status a generated action route answers with the error envelope. */
 type ErrorStatus = 400 | 401 | 409 | 410 | 412 | 422 | 500 | 503;
