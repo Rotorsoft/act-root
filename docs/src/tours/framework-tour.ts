@@ -490,9 +490,9 @@ const chapters: Chapter[] = [
             focus: ["store:"],
           },
           {
-            now: "Actors at the edge: people and automations",
-            say: "At the left edge are the actors: people like Maya, and quiet helpers like the drain.",
-            focus: ["maya", "drain"],
+            now: "Actors at the edge: the people who call the app",
+            say: "At the left edge are the actors: the people outside the app who call it, like Maya.",
+            focus: ["maya"],
           },
           {
             now: "The running Act app and its action layer",
@@ -501,8 +501,8 @@ const chapters: Chapter[] = [
           },
           {
             now: "Slices: states, reactions and projections",
-            say: "Below it live the slices: states with their actions and events, and the reactions and projections that answer them.",
-            focus: ["ticket", "assign", "proj"],
+            say: "Below it live the slices: states with their actions and events, and the reactions and projections that answer them. Under those runs the drain, Act's own worker inside the app, picking up new events and handing them to reactions.",
+            focus: ["ticket", "assign", "proj", "drain"],
           },
           {
             now: "The event store: one log, a dot per event",
@@ -1379,7 +1379,7 @@ const all = await app.query_array({});
           {
             now: "Drain leases `assign:ticket-4831` and fetches {#t31-open}",
             pipe: { name: "reaction", at: 2 },
-            say: "The **drain** claims targets that have work, each under a **lease**, and fetches the events past the target's watermark, which is −1 here.",
+            say: "The **drain**, Act's own worker inside the app, claims targets that have work, each under a **lease**. It fetches the events past the target's watermark, which is −1 here.",
             moves: [
               {
                 from: "drain",

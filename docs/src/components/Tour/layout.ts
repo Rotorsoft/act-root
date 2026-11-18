@@ -16,7 +16,15 @@ export type Pt = { x: number; y: number };
 
 /** An element of the app: an action, an event, a reaction, … with its code, if any. */
 export type Chip = {
-  kind: "action" | "event" | "reaction" | "projection" | "lane" | "op" | "port";
+  kind:
+    | "action"
+    | "event"
+    | "reaction"
+    | "projection"
+    | "lane"
+    | "op"
+    | "port"
+    | "worker";
   name: string;
   label: string;
   box: Box;
@@ -50,6 +58,8 @@ export type AppLayout = {
   /** arrows: action → state, state → event, event → reaction or projection */
   links: { a: Pt; b: Pt; kind: "in" | "out" | "listen"; pts?: Pt[] }[];
   cards: { node: Node; box: Box; lines: string[] }[];
+  /** the drain: Act's own worker inside the app, with its stages; it reads through the store port */
+  drain?: { box: Box; title: string; stages: { stage: string; box: Box }[] };
   port: Pt;
 };
 
@@ -147,7 +157,10 @@ export function short(v: unknown): string {
   return String(v);
 }
 
-const CALLERS = new Set(["actor", "worker", "external"]);
+// only what calls the app from outside: people and outside systems; workers run inside it
+const CALLERS = new Set(["actor", "external"]);
+/** the drain's stages, as the reaction pipeline names them */
+export const DRAIN_STAGES = ["correlate", "claim", "fetch", "handle", "ack"];
 
 /** Places chips left to right, wrapping inside `w`; returns the height used. */
 function flow(
@@ -492,6 +505,47 @@ function app_layout(
         iw
       ) + 8;
 
+  // the drain: Act's own worker, inside the app, under the reactions it feeds
+  let drain: AppLayout["drain"];
+  const workers = nodes.filter((n) => n.kind === "worker");
+  const reacts = app.slices.some(
+    (sl) => (sl.reactions?.length ?? 0) + (sl.projections?.length ?? 0) > 0
+  );
+  if (workers.length || reacts) {
+    const top = cy;
+    cy += 20;
+    if (workers.length)
+      cy +=
+        flow(
+          chips,
+          workers.map((n) => ({
+            kind: "worker" as const,
+            name: n.id,
+            label: `⚙ ${n.label}`,
+          })),
+          x + pad + 6,
+          cy,
+          iw - 12
+        ) + 6;
+    const dstages: { stage: string; box: Box }[] = [];
+    if (reacts) {
+      const n = DRAIN_STAGES.length;
+      const sw = (iw - 12 - arrow * (n - 1)) / n;
+      for (const [i, stage] of DRAIN_STAGES.entries())
+        dstages.push({
+          stage,
+          box: { x: x + pad + 6 + i * (sw + arrow), y: cy, w: sw, h: CHIP_H },
+        });
+      cy += CHIP_H + 8;
+    }
+    drain = {
+      box: { x: x + pad, y: top, w: iw, h: cy - top },
+      title: reacts ? "drain" : "runtime",
+      stages: dstages,
+    };
+    cy += 8 + sp.block * 0.3;
+  }
+
   // state cards for scene nodes not shown inside a state
   for (const n of nodes.filter(
     (n) =>
@@ -534,6 +588,7 @@ function app_layout(
     links,
     cards,
     port,
+    drain,
   };
 }
 
@@ -560,6 +615,11 @@ function scale_app(a: AppLayout, s: number, ox: number, oy: number): AppLayout {
       pts: l.pts?.map(pt),
     })),
     cards: a.cards.map((c) => ({ ...c, box: bx(c.box) })),
+    drain: a.drain && {
+      ...a.drain,
+      box: bx(a.drain.box),
+      stages: a.drain.stages.map((d) => ({ ...d, box: bx(d.box) })),
+    },
     port: pt(a.port),
   };
 }
@@ -902,6 +962,7 @@ export function layout(
       action: ["action", "op"],
       reaction: ["reaction"],
       projection: ["projection"],
+      worker: ["worker"],
     };
     for (const k of kinds[node.kind] ?? []) {
       const c = chip(k, node.label) ?? chip(k, node.id);
@@ -1144,6 +1205,7 @@ export function layout(
       return chip("reaction", node.label) ?? chip("reaction", node.id);
     if (node.kind === "projection")
       return chip("projection", node.label) ?? chip("projection", node.id);
+    if (node.kind === "worker") return chip("worker", node.id);
     if (node.kind === "store")
       return appl.chips.find(
         (x) => x.kind === "port" && x.label.startsWith(node.label)

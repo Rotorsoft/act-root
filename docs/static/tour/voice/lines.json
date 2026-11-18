@@ -28,8 +28,8 @@
     "text": "Let's watch it remember."
   },
   {
-    "key": "8e03c6f173b0",
-    "text": "At the left edge are the actors: people like Maya, and quiet helpers like the drain."
+    "key": "2673e024e455",
+    "text": "At the left edge are the actors: the people outside the app who call it, like Maya."
   },
   {
     "key": "6e679373734b",
@@ -42,6 +42,10 @@
   {
     "key": "40633e21cc37",
     "text": "Below it live the slices: states with their actions and events, and the reactions and projections that answer them."
+  },
+  {
+    "key": "81282091b03a",
+    "text": "Under those runs the drain, Act's own worker inside the app, picking up new events and handing them to reactions."
   },
   {
     "key": "cd37376ca6bc",
@@ -432,8 +436,12 @@
     "text": "The assign reaction names its own target stream for this ticket, which is subscribed, with work marked up to event 1912."
   },
   {
-    "key": "e56904f12665",
-    "text": "The drain claims targets that have work, each under a lease, and fetches the events past the target's watermark, which is minus 1 here."
+    "key": "0f6e7152a797",
+    "text": "The drain, Act's own worker inside the app, claims targets that have work, each under a lease."
+  },
+  {
+    "key": "6500e77305cd",
+    "text": "It fetches the events past the target's watermark, which is minus 1 here."
   },
   {
     "key": "18e519d5ebbd",

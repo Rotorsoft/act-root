@@ -439,6 +439,19 @@ function Stage({
     block: ops.has("block") || /\bblocks?\b/i.test(step.now),
   };
   const snap_read = port_on.query && /snapshot/i.test(step.now);
+  // the drain's stages light from the reaction or projection pipeline the step walks
+  const drain_pipe = pipe && (pipe.name === "reaction" || pipe.name === "projection") ? pipe : undefined;
+  const drain_names = drain_pipe ? (pipelines[drain_pipe.name] ?? []) : [];
+  const drain_state = (stage: string) => {
+    if (!drain_pipe) return "idle";
+    // a projection projects and writes where a reaction handles
+    const i = drain_names.findIndex((n) => n === stage || (stage === "handle" && (n === "project" || n === "write")));
+    if (i < 0) return "idle";
+    if (i < drain_pipe.at) return "done";
+    if (i === drain_pipe.at) return drain_pipe.fail ? "fail" : "active";
+    return drain_pipe.fail ? "skip" : "todo";
+  };
+  const drain_on = !!drain_pipe || port_on.claim || port_on.ack || port_on.block || [...(lit?.nodes ?? [])].some((id) => lay.chip_of(id)?.kind === "worker");
   const a = lay.app;
   // the areas this step works in glow; the rest fades back
   const touches = (x: string) => /^(log|store:|field:|cell:|stream:|port)/.test(x);
@@ -641,6 +654,37 @@ function Stage({
             )}
           </g>
         ))}
+        {/* the drain: Act's own worker inside the app, picking up events and handing them to reactions */}
+        {a.drain && (
+          <g className={`${styles.drain} ${drain_on ? styles.glow : lit ? styles.soft : ""}`}>
+            <rect x={a.drain.box.x} y={a.drain.box.y} width={a.drain.box.w} height={a.drain.box.h} rx={10} />
+            <text x={a.drain.box.x + 8} y={a.drain.box.y + 14} className={styles.drainTitle}>
+              {a.drain.title}
+              <tspan className={styles.appSub}>{a.drain.stages.length ? " · Act's own worker" : " · inside the app"}</tspan>
+            </text>
+            {a.drain.stages.map(({ stage, box }, i) => {
+              const st = drain_state(stage);
+              const next = a.drain!.stages[i + 1]?.box;
+              return (
+                <g key={stage} className={styles.stage} data-state={st}>
+                  {next && <line className={styles.pipeLink} x1={box.x + box.w} y1={box.y + box.h / 2} x2={next.x} y2={next.y + next.h / 2} markerEnd="url(#tour-arrow)" />}
+                  <rect x={box.x} y={box.y} width={box.w} height={box.h} rx={9} />
+                  <text x={box.x + box.w / 2} y={box.y + 13} style={{ fontSize: Math.min(11, (11 * (box.w - 10)) / Math.max(1, text_width(stage, 11, 500))) }}>
+                    {stage}
+                  </text>
+                  {(st === "done" || st === "fail") && (
+                    <g className={styles.stageMark}>
+                      <circle cx={box.x + 3} cy={box.y + 2} r={6} />
+                      <text x={box.x + 3} y={box.y + 5}>
+                        {st === "done" ? "✓" : "✕"}
+                      </text>
+                    </g>
+                  )}
+                </g>
+              );
+            })}
+          </g>
+        )}
         {a.links.filter((l) => l.kind === "listen").map((l, i) => (
           <path
             key={`link-${i}`}

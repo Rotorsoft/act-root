@@ -25,8 +25,12 @@ fold, state check, then the commit port) and the slices with their states, actio
 events, reactions and projections. The app's content scales up as one group to fill its
 frame, and stands the action layer upright when it has height to spare. One link joins the
 two: commits go in through the port, loads and reactions read back out. **Actors** are
-small icons at the left edge (a person for people, a gear for automations), and read models
-sit under them.
+small icons at the left edge, and only things outside the app that call it: people (Maya,
+Ana, Bo, Lee) and outside systems. A reaction calling `app.do` is the app acting on itself,
+not an actor. The **drain** is drawn inside the app, under the slices, as Act's own worker:
+its stages (correlate, claim, fetch, handle, ack) light as a reaction or projection walks
+them, and its reads and claims go out through the store port. Workers, lanes, processes
+and scoped apps sit in that component too. Read models sit under the actors.
 
 Code never shows on the stage. Every element with code behind it carries a `</>` icon in
 the same top-right slot, which opens the snippet, the API and the doc and test links.

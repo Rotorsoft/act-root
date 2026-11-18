@@ -1814,3 +1814,26 @@
   font-weight: 800;
   text-anchor: middle;
 }
+
+/* the drain, inside the app */
+.drain > rect {
+  fill: color-mix(in srgb, var(--dg-reaction) 6%, transparent);
+  stroke: color-mix(in srgb, var(--dg-reaction) 55%, transparent);
+  stroke-dasharray: 4 3;
+}
+.drainTitle {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  fill: var(--dg-reaction) !important;
+}
+.glow.drain > rect {
+  stroke: var(--dg-reaction);
+  stroke-width: 2;
+  filter: drop-shadow(0 0 10px color-mix(in srgb, var(--dg-reaction) 45%, transparent));
+}
+.chip[data-kind="worker"] > rect {
+  fill: color-mix(in srgb, var(--dg-reaction) 10%, var(--act-surface-1, #fff));
+  stroke: color-mix(in srgb, var(--dg-reaction) 70%, transparent);
+}
