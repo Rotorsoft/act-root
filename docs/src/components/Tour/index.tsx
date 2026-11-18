@@ -27,7 +27,7 @@ import {
 import Field, { stream_hue } from "./Field";
 import { type Box, type Chip, data_lines, type Layout, layout, type Mode, short, type View } from "./layout";
 import styles from "./styles.module.css";
-import type { AppSpec, Link as DocLink, Move, Step, TourSpec } from "./types";
+import type { AppSpec, Link as DocLink, Move, Step, TourSpec, VoiceLine } from "./types";
 import useBaseUrl from "@docusaurus/useBaseUrl";
 import { Ambient } from "./music";
 import { type Cell, census, type Frame, type Frames, card_speech, fill, fmt, frames as fold, sentences, step_speech, type Target, type World } from "./world";
@@ -36,12 +36,10 @@ export type { TourSpec } from "./types";
 
 const MOVE_MS = 820;
 const TRAIL = [1, 2, 3];
-/** clip keys that failed to load, so each is tried once */
-const missing_clips = new Set<string>();
 /** how long a chapter's title card shows between chapters */
 const CARD_MS = 2400;
-/** the narration's rate at 1×: a touch slower than the default */
-const RATE = 0.95;
+/** an empty wav: played inside the Play click, it lets the narrator's element play later */
+const SILENCE = "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=";
 const SENTENCE_GAP_MS = 280;
 const STEP_GAP_MS = 750;
 const CAPTION_PX = 84;
@@ -56,21 +54,6 @@ const PALETTE = 8;
 
 const useBrowserLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
 
-
-/** How natural a voice is likely to sound: neural and premium voices first, in the page's language. */
-function voice_rank(v: SpeechSynthesisVoice, lang: string): number {
-  const n = v.name;
-  let score = 0;
-  if (/natural|neural/i.test(n)) score += 50;
-  if (/premium|enhanced/i.test(n)) score += 40;
-  if (/google us english/i.test(n)) score += 35;
-  if (/online/i.test(n)) score += 30;
-  if (/\b(ava|samantha|zoe|aria|jenny|allison|evan)\b/i.test(n)) score += 10;
-  if (/compact|espeak|eloquence/i.test(n)) score -= 40;
-  if (v.lang === lang) score += 100;
-  else if (v.lang.split("-")[0] === lang.split("-")[0]) score += 60;
-  return score;
-}
 
 /** A caption in plain words: code spans lose their chips (a call keeps its name), bold stays. */
 function plain(text: string): ReactNode[] {
@@ -1065,7 +1048,7 @@ function Popover({ tip, width, left, onClose }: { tip: OpenTip; width: number; l
   );
 }
 
-export default function Tour({ spec }: { spec: TourSpec }) {
+export default function Tour({ spec, voice }: { spec: TourSpec; voice: readonly VoiceLine[] }) {
   const all = useMemo(() => fold(spec), [spec]);
   const colors = useMemo(() => stream_colors(all), [all]);
   const [index, setIndex] = useState(0);
@@ -1083,32 +1066,16 @@ export default function Tour({ spec }: { spec: TourSpec }) {
   const [cue, setCue] = useState(-1);
   const [card, setCard] = useState<string | undefined>();
   const [, setHydrated] = useState(false);
-  // rendered narration: lines.json maps each spoken sentence to its clip's key
+  // the recorded narration: each spoken sentence maps to its clip's key, bundled with the page
   const voice_dir = useBaseUrl("/tour/voice/");
-  const [voice_keys, setVoiceKeys] = useState<Map<string, string>>(() => new Map());
-  useEffect(() => {
-    let live = true;
-    fetch(`${voice_dir}lines.json`)
-      .then((r) => (r.ok ? r.json() : []))
-      .then((rows: { key: string; text: string }[]) => live && setVoiceKeys(new Map(rows.map((r) => [r.text, r.key]))))
-      .catch(() => undefined);
-    return () => {
-      live = false;
-    };
-  }, [voice_dir]);
+  const voice_keys = useMemo(() => new Map(voice.map((r) => [r.text, r.key])), [voice]);
+  // one element speaks every clip, unlocked by the first Play click
+  const speaker = useRef<HTMLAudioElement | undefined>(undefined);
   const music = true;
   const music_level = 0.6;
   const ambient = useRef<Ambient | undefined>(undefined);
-  const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
-  const [voice_name, setVoiceName] = useState<string>("");
-  const pick_voice = useCallback(
-    (): SpeechSynthesisVoice | undefined => voices.find((v) => v.name === voice_name) ?? voices[0],
-    [voices, voice_name]
-  );
-
 
   const menu_ref = useRef<HTMLDivElement>(null);
-  const [voice, setVoice] = useState(false);
   const [tip, setTip] = useState<OpenTip | undefined>();
   const [hover, setHover] = useState<string | undefined>();
   const close_timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -1154,22 +1121,6 @@ export default function Tour({ spec }: { spec: TourSpec }) {
     can_measure = true;
     setHydrated(true);
     setReduce(window.matchMedia("(prefers-reduced-motion: reduce)").matches);
-    const can = typeof window !== "undefined" && "speechSynthesis" in window;
-    setVoice(can);
-    if (can) {
-      // the voice list arrives late in some browsers
-      const load = () => {
-        const lang = document.documentElement.lang || navigator.language || "en-US";
-        setVoices([...window.speechSynthesis.getVoices()].sort((a, b) => voice_rank(b, lang) - voice_rank(a, lang)));
-      };
-      load();
-      window.speechSynthesis.addEventListener?.("voiceschanged", load);
-    }
-    try {
-      setVoiceName(window.localStorage.getItem("act-tour-voice") ?? "");
-    } catch {
-      // storage can be blocked; the best voice is picked instead
-    }
     const id = window.location.hash.slice(1);
     const at = spec.chapters.findIndex((c) => c.id === id);
     if (at > 0) setIndex(all.findIndex((f) => f.chapter === at));
@@ -1195,14 +1146,12 @@ export default function Tour({ spec }: { spec: TourSpec }) {
   // the pacing: the token travels, then each sentence is spoken (or shown for its length), then the next step
   useEffect(() => {
     // stepping still runs the step's captions once, without a voice and without moving on
-    if (!playing && voice) window.speechSynthesis.cancel();
     let cancelled = false;
     const timers: ReturnType<typeof setTimeout>[] = [];
-    let clip: HTMLAudioElement | undefined;
     const last = index >= all.length - 1 || all[index + 1]!.chapter !== frame.chapter;
     const audible = playing && sound && !muted;
 
-    // say one sentence: its rendered clip when there is one, else the browser's voice, else a timed pause
+    // say one sentence with its recorded clip; a line the speaker can't play shows silently for its length
     const say = (text: string, done: () => void) => {
       let ended = false;
       const finish = () => {
@@ -1211,40 +1160,20 @@ export default function Tour({ spec }: { spec: TourSpec }) {
         ambient.current?.duck(false);
         done();
       };
-      const synth = () => {
-        if (!voice) return void timers.push(setTimeout(finish, Math.max(1800, text.length * 55) / speed));
-        const u = new SpeechSynthesisUtterance(text);
-        u.rate = speed * RATE;
-        const v = pick_voice();
-        if (v) {
-          u.voice = v;
-          u.lang = v.lang;
-        } else u.lang = "en-US";
-        u.onstart = () => ambient.current?.duck(true);
-        u.onend = finish;
-        u.onerror = finish;
-        // a watchdog moves on if the voice never reports the end
-        timers.push(setTimeout(finish, (3000 + text.length * 110) / speed));
-        window.speechSynthesis.speak(u);
+      const quiet = () => {
+        if (!ended && !cancelled) timers.push(setTimeout(finish, Math.max(1800, text.length * 55) / speed));
       };
       const key = voice_keys.get(text);
-      if (!key || missing_clips.has(key)) return synth();
-      const a = new Audio(`${voice_dir}${key}.m4a`);
-      a.playbackRate = speed;
-      a.preservesPitch = true;
-      clip = a;
+      const a = speaker.current;
+      if (!key || !a) return quiet();
       a.onplay = () => ambient.current?.duck(true);
       a.onended = finish;
-      // no clip rendered for this line yet: the browser's voice reads it instead, once
-      let fell = false;
-      const fallback = () => {
-        if (fell || ended || cancelled) return;
-        fell = true;
-        missing_clips.add(key);
-        synth();
-      };
-      a.onerror = fallback;
-      void a.play().catch(fallback);
+      a.onerror = quiet;
+      a.src = `${voice_dir}${key}.m4a`;
+      a.defaultPlaybackRate = speed;
+      a.playbackRate = speed;
+      a.preservesPitch = true;
+      a.play().catch(quiet);
     };
 
     const advance = () => {
@@ -1277,11 +1206,14 @@ export default function Tour({ spec }: { spec: TourSpec }) {
     return () => {
       cancelled = true;
       for (const t of timers) clearTimeout(t);
-      if (voice) window.speechSynthesis.cancel();
-      clip?.pause();
+      const a = speaker.current;
+      if (a) {
+        a.onplay = a.onended = a.onerror = null;
+        a.pause();
+      }
       ambient.current?.duck(false);
     };
-  }, [playing, index, all, frame.chapter, speech, total, reduce, go, voice, sound, muted, speed, pick_voice, spec, first, voice_keys, voice_dir]);
+  }, [playing, index, all, frame.chapter, speech, total, reduce, go, sound, muted, speed, spec, first, voice_keys, voice_dir]);
 
   useEffect(() => {
     if (!menu) return;
@@ -1307,6 +1239,11 @@ export default function Tour({ spec }: { spec: TourSpec }) {
     if (!ambient.current && typeof AudioContext !== "undefined") ambient.current = new Ambient();
     // start (and resume) the music inside the click itself, where the browser allows it
     if (!playing && music) ambient.current?.start();
+    // and unlock the narrator's element the same way, so its clips may play later
+    if (!speaker.current && typeof Audio !== "undefined") {
+      speaker.current = new Audio(SILENCE);
+      speaker.current.play().catch(() => undefined);
+    }
     if (!playing && !muted) setSound(true);
     setPlaying((p) => !p);
   };

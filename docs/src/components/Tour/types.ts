@@ -310,3 +310,6 @@ export type TourSpec = {
   stores: { name: string; label: string }[];
   chapters: Chapter[];
 };
+
+/** one recorded sentence of the narration: its text and the key of its clip, `static/tour/voice/<key>.m4a` */
+export type VoiceLine = { key: string; text: string };

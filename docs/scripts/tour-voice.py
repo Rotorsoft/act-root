@@ -1,6 +1,6 @@
 """Render the tour's narration with Kokoro, a local neural voice.
 
-Reads docs/static/tour/voice/lines.json (written by tour-lines.mjs) and writes
+Reads docs/src/tours/framework-tour.voice.json (written by tour-lines.mjs) and writes
 one docs/static/tour/voice/<key>.m4a per line that doesn't have a clip yet, so a
 re-run only renders the lines that changed. Clips no line names are deleted.
 
@@ -22,7 +22,9 @@ import tempfile
 import soundfile as sf
 from kokoro_onnx import Kokoro
 
-VOICE_DIR = pathlib.Path(__file__).resolve().parent.parent / "static" / "tour" / "voice"
+DOCS = pathlib.Path(__file__).resolve().parent.parent
+VOICE_DIR = DOCS / "static" / "tour" / "voice"
+LINES = DOCS / "src" / "tours" / "framework-tour.voice.json"
 
 
 def main() -> None:
@@ -36,7 +38,7 @@ def main() -> None:
     model = pathlib.Path(args.model)
     kokoro = Kokoro(str(model / "kokoro-v1.0.onnx"), str(model / "voices-v1.0.bin"))
     lang = "en-gb" if args.voice.startswith("b") else "en-us"
-    lines = json.loads((VOICE_DIR / "lines.json").read_text())
+    lines = json.loads(LINES.read_text())
 
     keep = set()
     rendered = 0

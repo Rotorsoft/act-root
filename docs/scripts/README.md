@@ -48,10 +48,13 @@ the block was never meant to compile on its own.
 
 The tour at `/tour` speaks each sentence from a pre-rendered clip in
 `docs/static/tour/voice/<key>.m4a`, where `key` is the first 12 hex characters
-of the sentence's sha1. A missing clip falls back to the browser's voice.
+of the sentence's sha1. The page bundles the sentence-to-key list,
+`src/tours/framework-tour.voice.json`. A line without a clip shows its caption
+in silence, and `tour:lines --check` (run by the docs build) fails until it is
+recorded.
 
 ```bash
-pnpm -F docs tour:lines   # write static/tour/voice/lines.json from the tour spec
+pnpm -F docs tour:lines   # write src/tours/framework-tour.voice.json from the tour spec
 .venv/bin/python docs/scripts/tour-voice.py --model <dir>   # render new lines with Kokoro
 ```
 

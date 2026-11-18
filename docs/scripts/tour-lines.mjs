@@ -1,16 +1,16 @@
 #!/usr/bin/env node
 /**
- * Writes static/tour/voice/lines.json: every sentence the tour's narrator says,
+ * Writes src/tours/framework-tour.voice.json: every sentence the tour's narrator says,
  * one entry per caption sentence of every step plus one per chapter title card,
  * as [{ key, text }]. The key is the first 12 hex digits of the text's sha1, so
- * a renderer only needs to make clips for new or edited lines: the player plays
- * static/tour/voice/<key>.m4a when it exists and falls back to the browser's
- * voice when it doesn't.
+ * a renderer only needs to make clips for new or edited lines. The page bundles
+ * the file and plays static/tour/voice/<key>.m4a for each line.
  *
- *   node scripts/tour-lines.mjs        (from docs/, Node with type stripping)
+ *   node scripts/tour-lines.mjs           (from docs/, Node with type stripping)
+ *   node scripts/tour-lines.mjs --check   fails when the file is stale or a line has no clip
  */
 import { createHash } from "node:crypto";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -32,8 +32,18 @@ for (const [i, c] of spec.chapters.entries()) {
   lines.set(text, key(text));
 }
 
-const out = join(here, "../static/tour/voice/lines.json");
-mkdirSync(dirname(out), { recursive: true });
+const out = join(here, "../src/tours/framework-tour.voice.json");
+const clips = join(here, "../static/tour/voice");
 const rows = [...lines].map(([text, k]) => ({ key: k, text }));
-writeFileSync(out, `${JSON.stringify(rows, null, 2)}\n`);
+const json = `${JSON.stringify(rows, null, 2)}\n`;
+
+if (process.argv.includes("--check")) {
+  const problems = [];
+  if (!existsSync(out) || readFileSync(out, "utf8") !== json) problems.push(`${out} is stale: run pnpm -F docs tour:lines`);
+  for (const { key: k, text } of rows)
+    if (!existsSync(join(clips, `${k}.m4a`))) problems.push(`no clip ${k}.m4a for "${text}": render it with scripts/tour-voice.py`);
+  for (const p of problems) console.error(p);
+  process.exit(problems.length ? 1 : 0);
+}
+writeFileSync(out, json);
 console.log(`${rows.length} lines → ${out}`);
