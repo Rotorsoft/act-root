@@ -205,9 +205,11 @@ function Tokens({ moves, lay, run, reduce }: { moves: Move[]; lay: Layout; run: 
 }
 
 let measure_ctx: CanvasRenderingContext2D | null | undefined;
+// text is measured only after the page has hydrated, so the server's render and the first client render match
+let can_measure = false;
 /** Fits a label to a width: the whole name when it fits, else cut with an ellipsis. */
 function fit_text(text: string, width: number, size: number, weight = 600): string {
-  if (measure_ctx === undefined) measure_ctx = typeof document !== "undefined" ? document.createElement("canvas").getContext("2d") : null;
+  if (can_measure && measure_ctx === undefined) measure_ctx = document.createElement("canvas").getContext("2d");
   const ctx = measure_ctx;
   const w = (t: string) => {
     if (!ctx) return t.length * size * 0.6;
@@ -989,6 +991,7 @@ export default function Tour({ spec }: { spec: TourSpec }) {
   const [speed, setSpeed] = useState(1);
   const [cue, setCue] = useState(-1);
   const [card, setCard] = useState<string | undefined>();
+  const [, setHydrated] = useState(false);
   const music = true;
   const music_level = 0.6;
   const ambient = useRef<Ambient | undefined>(undefined);
@@ -1047,6 +1050,8 @@ export default function Tour({ spec }: { spec: TourSpec }) {
   const pointing = new Set(step.ui ?? []);
 
   useEffect(() => {
+    can_measure = true;
+    setHydrated(true);
     setReduce(window.matchMedia("(prefers-reduced-motion: reduce)").matches);
     const can = typeof window !== "undefined" && "speechSynthesis" in window;
     setVoice(can);
