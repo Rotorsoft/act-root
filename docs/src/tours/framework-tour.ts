@@ -9,8 +9,8 @@ import type {
 
 /**
  * The framework tour: every capability of Act shown as what it does to the
- * event store. The storyboard, with a doc page and a test behind every claim,
- * is docs/flows/framework-tour.script.md; keep the two in step.
+ * event store. The design notes (the screen, the narration, what was left out)
+ * are in docs/flows/framework-tour.script.md; every spoken line lives here.
  */
 
 const GH = "https://github.com/Rotorsoft/act-root/blob/master/";
@@ -1313,7 +1313,7 @@ const all = await app.query_array({});
   .withState(Ticket)
   .on("TicketOpened")
     .do(async function assign(event, stream, app) {
-      await app.do("AssignTicket", { stream: event.stream, actor: bot }, { agent: "bo" });
+      await app.do("AssignTicket", { stream: event.stream, actor: bot }, { agentId: "bo" });
     })
     .to((event) => ({ target: \`assign:\${event.stream}\`, source: event.stream }))
   .build();`,
@@ -1414,7 +1414,7 @@ const all = await app.query_array({});
                   {
                     stream: "ticket-4831",
                     name: "TicketAssigned",
-                    data: { agent: "bo" },
+                    data: { agentId: "bo" },
                     cause: "t31-open",
                     ref: "t31-asg",
                   },
@@ -1591,7 +1591,7 @@ test("assigns a new ticket", async ({ app }) => {
                   {
                     stream: "ticket-4832",
                     name: "TicketAssigned",
-                    data: { agent: "ana" },
+                    data: { agentId: "ana" },
                     cause: "t32-open",
                     ref: "t32-asg",
                   },
@@ -1603,7 +1603,7 @@ test("assigns a new ticket", async ({ app }) => {
                   {
                     stream: "ticket-4833",
                     name: "TicketAssigned",
-                    data: { agent: "bo" },
+                    data: { agentId: "bo" },
                     cause: "t33-open",
                     ref: "t33-asg",
                   },
@@ -1968,7 +1968,7 @@ app.on("error", ({ error, circuit }) => metrics.increment("store_error", { circu
                   {
                     stream: "ticket-4821",
                     name: "TicketAssigned",
-                    data: { agent: "ana", escalateAfter: "10:00" },
+                    data: { agentId: "ana", escalateAfter: "10:00" },
                     ref: "t21-asg",
                   },
                 ],
@@ -2037,7 +2037,7 @@ app.on("error", ({ error, circuit }) => metrics.increment("store_error", { circu
                   {
                     stream: "ticket-4822",
                     name: "TicketAssigned",
-                    data: { agent: "bo", escalateAfter: "11:00" },
+                    data: { agentId: "bo", escalateAfter: "11:00" },
                     ref: "t22-asg",
                   },
                 ],
@@ -2094,7 +2094,7 @@ app.on("error", ({ error, circuit }) => metrics.increment("store_error", { circu
     const { closeAfter } = event.data;
     if (!closeAfter) return;
     if (Date.now() < closeAfter.getTime()) throw new DeferSignal({ at: closeAfter });
-    await app.do("CloseTicket", { stream: event.stream, actor: timers }, {});
+    await app.do("CloseTicket", { stream: event.stream, actor: timers }, { reason: "timed out" });
   })`,
             ops: [{ op: "state", node: "ticket", data: null }],
           },
@@ -2192,19 +2192,19 @@ act().withState(Ticket).withProjection(Tickets).build();`,
                 op: "row",
                 table: "tickets",
                 key: "ticket-4831",
-                values: { status: "open", agent: "bo" },
+                values: { status: "open", agentId: "bo" },
               },
               {
                 op: "row",
                 table: "tickets",
                 key: "ticket-4832",
-                values: { status: "escalated", agent: "ana" },
+                values: { status: "escalated", agentId: "ana" },
               },
               {
                 op: "row",
                 table: "tickets",
                 key: "ticket-4833",
-                values: { status: "escalated", agent: "bo" },
+                values: { status: "escalated", agentId: "bo" },
               },
               { op: "scan", from: "start" },
               { op: "project", table: "tickets", prefix: "ticket" },
@@ -2239,7 +2239,7 @@ act().withState(Ticket).withProjection(Tickets).build();`,
                 op: "row",
                 table: "tickets",
                 key: "ticket-4831",
-                values: { status: "open", agent: "bo", messages: 1 },
+                values: { status: "open", agentId: "bo", messages: 1 },
               },
 
               { op: "ack", target: "tickets", at: "t31-m1" },
@@ -2299,19 +2299,19 @@ await app.reset(["tickets"]); // or a filter: app.reset({ stream: "^proj-" })`,
                 op: "row",
                 table: "tickets",
                 key: "ticket-4831",
-                values: { status: "open", agent: "bo", messages: 1 },
+                values: { status: "open", agentId: "bo", messages: 1 },
               },
               {
                 op: "row",
                 table: "tickets",
                 key: "ticket-4832",
-                values: { status: "escalated", agent: "ana" },
+                values: { status: "escalated", agentId: "ana" },
               },
               {
                 op: "row",
                 table: "tickets",
                 key: "ticket-4833",
-                values: { status: "escalated", agent: "bo" },
+                values: { status: "escalated", agentId: "bo" },
               },
               { op: "scan", from: "start" },
               { op: "project", table: "tickets", prefix: "ticket" },
