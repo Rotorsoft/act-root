@@ -85,15 +85,18 @@ export function sse_sources(
     readonly channel: BroadcastChannel<any>;
     readonly publish: boolean;
     readonly settled: boolean;
+    readonly live: boolean;
   },
   transport: string
 ): SettledSource | undefined {
-  if (!config.publish && !config.settled) return undefined;
+  if (!config.publish && !config.settled && !config.live) return undefined;
   if (!app.on || !app.off)
     throw new Error(
-      `${transport}: \`sse.publish\` and \`sse.settled\` listen to the app's lifecycle events; pass the built Act.`
+      `${transport}: \`sse.publish\`, \`sse.settled\` and \`sse.live\` listen to the app's lifecycle events; pass the built Act.`
     );
   if (config.publish)
     publishCommits(app as unknown as CommitSource, config.channel);
-  return config.settled ? (app as unknown as SettledSource) : undefined;
+  return config.settled || config.live
+    ? (app as unknown as SettledSource)
+    : undefined;
 }

@@ -443,6 +443,26 @@ trpc.subscribe.$settled.useSubscription(undefined, {
 
 It counts against `maxConnections` like the state subscriptions, and a frame waiting for a slow client takes the next settle's targets too, so none is lost. `onConnections: (count) => …` is told the number of open subscriptions after every open and close, for a host that reacts when the last client leaves.
 
+### One connection per page: `$live`
+
+Every subscription is its own connection, and a browser opens at most six to one origin over HTTP/1.1, which is what a plain Node server speaks. A page that follows three streams and a list holds four of them, and a second tab stalls. Pass `live: true` for one subscription that carries all of a page's sources: `subscribe.$live` on tRPC, `GET <basePath>/sse/$live` on Hono.
+
+```ts no-check
+trpc.subscribe.$live.useSubscription(
+  { streams: { Book: ["book-2026"], TaxYear: ["taxyear-2026"] }, settled: true },
+  {
+    onData: (frame) => {
+      if (frame.kind === "settled") return refetchLists(frame.data.targets);
+      // frame.state names the state, so frame.data is typed by it
+      applyToCache(frame.state, frame.stream, frame);
+    },
+  }
+);
+// Hono: GET /api/sse/$live?Book=book-2026&TaxYear=taxyear-2026&settled=1
+```
+
+`streams` is keyed by state name, and each frame carries `state` and `stream` beside the usual `state` / `patch` frame, so `applyPatchMessage` applies it per stream as before; `settled: true` adds the `$settled` frames. One `$live` takes one slot of `maxConnections` however many streams it follows, up to `maxStreamsPerSubscription` (default 50). Its streams share one backlog of `maxPendingPerConnection` frames: when it's full, the stream that overflows swaps its pending frames for one `_resync`, so its versions never skip silently and the other streams keep theirs. An open is refused with `422 INVALID_STREAM` (tRPC `UNPROCESSABLE_CONTENT`) for a state the API doesn't serve, a stream outside its state's `streams` pattern, one stream listed under two states, more streams than the limit, or nothing at all; a refused open takes no slot. To follow different sources, open a new `$live` (tRPC re-subscribes when the hook's input changes).
+
 ### What the generator owns
 
 For every subscription, on every open:
@@ -472,7 +492,7 @@ Out-of-range knobs throw `ZodError` at transport construction — misconfigurati
 
 ### Why SSE, not WebSocket
 
-Projection patches are one-way (server → client) and rebuildable from the event log — exactly the workload SSE was designed for. SSE rides plain HTTP, traverses corporate proxies cleanly, auto-reconnects on disconnect, needs no protocol upgrade. WebSocket would buy duplex we don't use; long-polling would burn round-trips. The `BroadcastChannel` primitive at `@rotorsoft/act-http/sse` was already shipping this contract — the new generator wiring just lifts it into the auto-generated transport.
+Projection patches are one-way (server → client) and rebuildable from the event log — exactly the workload SSE was designed for. SSE rides plain HTTP, traverses corporate proxies cleanly, auto-reconnects on disconnect, needs no protocol upgrade. WebSocket would buy duplex we don't use; long-polling would burn round-trips. The `BroadcastChannel` primitive at `@rotorsoft/act-http/sse` was already shipping this contract — the new generator wiring just lifts it into the auto-generated transport. The cost is connections: each SSE subscription holds one, and over HTTP/1.1 a browser allows six per origin, shared with every query and mutation. Follow a page's sources with one [`$live`](#one-connection-per-page-live) rather than one subscription each, or serve over HTTP/2, which multiplexes them.
 
 ### Horizontal scaling
 

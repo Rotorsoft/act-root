@@ -461,4 +461,78 @@ describe("sse publish, $settled and onConnections", () => {
     expect((await pending).value).toMatchObject({ kind: "settled" });
     await first.return?.(undefined);
   });
+
+  test("follows many streams and the settled targets in one $live", async ({
+    app,
+  }) => {
+    const channel = new BroadcastChannel<{ _v: number; n: number }>();
+    const counts: number[] = [];
+    const router = trpc(app, {
+      actor: (ctx: Ctx) => ({ id: ctx.actorId, name: ctx.actorId }),
+      stream: () => "t-1",
+      streams: { Tally: /^t-\d+$/ },
+      sse: {
+        channel,
+        publish: true,
+        live: true,
+        onConnections: (n) => counts.push(n),
+      },
+    });
+    const t = initTRPC.context<Ctx>().create();
+    const caller = t.createCallerFactory(router)({ actorId: "u-1" });
+    const iter = await caller.subscribe.$live({
+      streams: { Tally: ["t-1", "t-2"] },
+      settled: true,
+    });
+    const abort = new AbortController();
+    const frames = take_frames(iter as never, 2, abort);
+    await app.do("add", { stream: "t-2", actor }, { by: 5 });
+    expect(await frames).toEqual([
+      expect.objectContaining({ kind: "patch", state: "Tally", stream: "t-2" }),
+      { kind: "settled", data: { targets: ["tally-view"] } },
+    ]);
+    expect(counts).toEqual([1, 0]);
+
+    // Without settled, only the streams.
+    const streams_only = (
+      await caller.subscribe.$live({ streams: { Tally: ["t-1"] } })
+    )[Symbol.asyncIterator]();
+    const next = streams_only.next();
+    // It subscribes once the actor resolves.
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    await app.do("add", { stream: "t-1", actor }, { by: 1 });
+    expect((await next).value).toMatchObject({ kind: "patch", stream: "t-1" });
+    await streams_only.return?.(undefined);
+
+    // A state listed with no streams names none, as the typed input allows.
+    const settled_only = (
+      await caller.subscribe.$live({
+        streams: { Tally: undefined },
+        settled: true,
+      })
+    )[Symbol.asyncIterator]();
+    const settle = settled_only.next();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    await app.do("add", { stream: "t-3", actor }, { by: 1 });
+    expect((await settle).value).toEqual({
+      kind: "settled",
+      data: { targets: ["tally-view"] },
+    });
+    await settled_only.return?.(undefined);
+
+    // A refused open commits nothing and takes no slot.
+    for (const input of [
+      undefined,
+      { streams: { Tally: ["x-1"] } },
+      { streams: { Nope: ["t-1"] } },
+      {},
+      { streams: "t-1" },
+    ])
+      await expect(
+        (await caller.subscribe.$live(input as never))
+          [Symbol.asyncIterator]()
+          .next()
+      ).rejects.toMatchObject({ code: "UNPROCESSABLE_CONTENT" });
+    expect(counts).toEqual([1, 0, 1, 0, 1, 0]);
+  });
 });

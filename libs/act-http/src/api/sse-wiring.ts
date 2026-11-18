@@ -85,6 +85,18 @@ export type SseOptions = {
   readonly settled?: boolean;
   /** Told the number of open subscriptions after every open and close. */
   readonly onConnections?: (count: number) => void;
+  /**
+   * Add one subscription, `$live` (tRPC `subscribe.$live`, Hono
+   * `GET <basePath>/sse/$live`), that follows many streams, and optionally the
+   * settled targets, in one feed: one connection per page, whatever it shows.
+   * It takes one slot of {@link maxConnections}. Off by default.
+   */
+  readonly live?: boolean;
+  /**
+   * The most streams one `$live` subscription follows. Default `50`.
+   * Validated range `[1, 1_000]`.
+   */
+  readonly maxStreamsPerSubscription?: number;
 };
 
 /**
@@ -113,6 +125,9 @@ export const DEFAULT_SSE_HEARTBEAT_MS = 30_000;
  * `_resync` rather than being dropped silently.
  */
 export const DEFAULT_SSE_MAX_PENDING_PER_CONNECTION = 256;
+
+/** The most streams one `$live` subscription follows, by default. */
+export const DEFAULT_SSE_MAX_STREAMS_PER_SUBSCRIPTION = 50;
 
 /**
  * Frame yielded by the per-state SSE subscription generator. The

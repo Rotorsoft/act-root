@@ -100,24 +100,42 @@ describe("sse_sources", () => {
 
   it("needs nothing when neither publish nor settled is on", () => {
     expect(
-      sse_sources(bare, { channel, publish: false, settled: false }, "trpc")
+      sse_sources(
+        bare,
+        { channel, publish: false, settled: false, live: false },
+        "trpc"
+      )
     ).toBeUndefined();
   });
 
   it("refuses publish or settled on a surface without lifecycle events", () => {
     expect(() =>
-      sse_sources(bare, { channel, publish: true, settled: false }, "hono")
-    ).toThrow("hono: `sse.publish` and `sse.settled` listen to the app's");
+      sse_sources(
+        bare,
+        { channel, publish: true, settled: false, live: false },
+        "hono"
+      )
+    ).toThrow(
+      "hono: `sse.publish`, `sse.settled` and `sse.live` listen to the app's"
+    );
   });
 
   it("starts publication, and returns the app as the settled source", () => {
     const source = make_source();
     const app = { ...bare, on: source.on, off: source.off };
     expect(
-      sse_sources(app, { channel, publish: true, settled: false }, "trpc")
+      sse_sources(
+        app,
+        { channel, publish: true, settled: false, live: false },
+        "trpc"
+      )
     ).toBeUndefined();
     expect(
-      sse_sources(app, { channel, publish: false, settled: true }, "trpc")
+      sse_sources(
+        app,
+        { channel, publish: false, settled: true, live: false },
+        "trpc"
+      )
     ).toBe(app);
   });
 });

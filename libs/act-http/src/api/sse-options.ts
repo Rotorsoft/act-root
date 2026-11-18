@@ -3,6 +3,7 @@ import {
   DEFAULT_SSE_HEARTBEAT_MS,
   DEFAULT_SSE_MAX_CONNECTIONS,
   DEFAULT_SSE_MAX_PENDING_PER_CONNECTION,
+  DEFAULT_SSE_MAX_STREAMS_PER_SUBSCRIPTION,
 } from "./sse-wiring.js";
 
 // The numeric knobs on `SseOptions`, parsed once when `hono(...)` or
@@ -28,4 +29,11 @@ export const SseOptionsSchema = z.object({
     .default(DEFAULT_SSE_MAX_PENDING_PER_CONNECTION),
   publish: z.boolean().default(false),
   settled: z.boolean().default(false),
+  live: z.boolean().default(false),
+  maxStreamsPerSubscription: z
+    .number()
+    .int()
+    .min(1)
+    .max(1_000)
+    .default(DEFAULT_SSE_MAX_STREAMS_PER_SUBSCRIPTION),
 });
