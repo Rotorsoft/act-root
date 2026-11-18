@@ -178,12 +178,17 @@ function column(
   items: Omit<Chip, "box">[],
   x: number,
   y: number,
-  w: number
+  w: number,
+  gap = 4
 ): number {
   for (const [i, it] of items.entries())
-    chips.push({ ...it, box: { x, y: y + i * (CHIP_H + 4), w, h: CHIP_H } });
-  return items.length ? items.length * (CHIP_H + 4) - 4 : 0;
+    chips.push({ ...it, box: { x, y: y + i * (CHIP_H + gap), w, h: CHIP_H } });
+  return items.length ? items.length * (CHIP_H + gap) - gap : 0;
 }
+
+/** Extra room an app frame spreads between its rows and blocks, to fill its height. */
+type Spread = { row: number; block: number };
+const TIGHT: Spread = { row: 4, block: 0 };
 
 function app_layout(
   app: AppSpec,
@@ -193,7 +198,9 @@ function app_layout(
   y: number,
   w: number,
   layer: string[],
-  narrow: boolean
+  narrow: boolean,
+  sp: Spread = TIGHT,
+  upright = narrow
 ): AppLayout {
   const code = app.code ?? {};
   const chips: Chip[] = [];
@@ -247,7 +254,7 @@ function app_layout(
 
   // the action layer: one ordered pipe, across on a wide stage, down on a phone
   const layer_top = cy;
-  const vertical = narrow;
+  const vertical = upright;
   const arrow = 12;
   const stages: AppLayout["layer"] = [];
   let layer_h: number;
@@ -289,7 +296,7 @@ function app_layout(
   const port: Pt = vertical
     ? { x: x + w - 12, y: (last?.y ?? cy) + CHIP_H / 2 }
     : { x: x + w, y: (last?.y ?? cy) + CHIP_H / 2 };
-  cy += layer_h + 10;
+  cy += layer_h + 10 + sp.block * 0.4;
 
   // the states that scene nodes fold, by state name: their values replace the field list
   const by_state = new Map<string, Node[]>();
@@ -330,14 +337,16 @@ function app_layout(
         })),
         x + pad + 6,
         cy,
-        aw
+        aw,
+        sp.row
       );
       const eh = column(
         chips,
         st.events.map((e) => ({ kind: "event" as const, name: e, label: e })),
         ex,
         cy,
-        ew
+        ew,
+        sp.row
       );
       let iy = cy;
       let box: Box = { x: sx, y: cy, w: sw, h: 0 };
@@ -351,7 +360,12 @@ function app_layout(
           w: sw,
           h:
             instances.length === 1
-              ? Math.max(ih, Math.min(Math.max(ah, eh), ih + 20))
+              ? Math.max(
+                  ih,
+                  sp.row > 4
+                    ? Math.max(ah, eh)
+                    : Math.min(Math.max(ah, eh), ih + 20)
+                )
               : ih,
         };
         states.push({
@@ -397,7 +411,7 @@ function app_layout(
           kind: "out",
         });
       }
-      cy += h + 6;
+      cy += h + 6 + sp.block / 2;
     }
     const listeners: Omit<Chip, "box">[] = [
       ...(sl.reactions ?? []).map((r) => ({
@@ -415,7 +429,7 @@ function app_layout(
     ];
     if (listeners.length) {
       const before = chips.length;
-      cy += 12;
+      cy += 12 + sp.block * 0.3;
       cy += flow(chips, listeners, x + pad + 6, cy, iw - 12) + 6;
       for (const c of chips.slice(before)) {
         const proj = sl.projections?.find((p) => p.name === c.name);
@@ -461,7 +475,7 @@ function app_layout(
       box: { x: x + pad, y: top, w: iw, h: cy - top },
       code: code[`slice:${sl.name}`],
     });
-    cy += 8;
+    cy += 8 + sp.block;
   }
   if (app.lanes?.length)
     cy +=
@@ -783,37 +797,32 @@ export function layout(
     const bottom = room - 12;
     for (const sb of stores.length === 1 ? stores : [])
       sb.box.h = bottom - sb.box.y;
-    // the app's content grows to fill its frame: with height to spare, the action layer
-    // stands upright; then the whole app is laid out narrower and scaled up as a group
+    // the app's content grows to fill its frame. The action layer runs across the top
+    // unless the frame is taller than wide; the whole app is laid out narrower and scaled
+    // up as a group, then its rows and blocks spread into whatever height is left
     const top_y = appl.box.y;
     const room_h = bottom - top_y;
-    let upright = false;
-    if (room_h > appl.box.h * 1.6) {
-      const tall = app_layout(app, nodes, world, ax, top_y, A, layer, true);
-      if (tall.box.h < room_h) {
-        appl = tall;
-        upright = true;
-      }
+    const upright = narrow;
+    const at = (w: number, sp: Spread) =>
+      app_layout(app, nodes, world, ax, top_y, w, layer, narrow, sp, upright);
+    let best = { w: A, s: 1 };
+    for (let w = A; w >= Math.max(380, A / 1.5); w -= 20) {
+      const s = Math.min(A / w, room_h / Math.max(1, at(w, TIGHT).box.h));
+      if (s > best.s) best = { w, s };
+      if (s < A / w) break;
     }
-    const fit_s = (w: number) => {
-      const raw = app_layout(app, nodes, world, ax, top_y, w, layer, upright);
-      return { raw, s: Math.min(A / w, room_h / Math.max(1, raw.box.h)) };
-    };
-    let best = { raw: appl, s: 1 };
-    for (let w = A; w >= Math.max(360, A / 1.6); w -= 20) {
-      const f = fit_s(w);
-      if (f.s > best.s) best = f;
-      if (f.s < A / w) break;
+    const goal = room_h / best.s;
+    let sp = TIGHT;
+    for (let t = 1; t <= 16; t++) {
+      const next = { row: 4 + t * 2.5, block: t * 4 };
+      if (at(best.w, next).box.h > goal) break;
+      sp = next;
     }
-    if (best.s > 1.04) {
-      best.raw.box.h = room_h / best.s;
-      app_raw = best.raw;
-      app_view = { s: best.s, ox: ax, oy: top_y };
-      appl = scale_app(best.raw, best.s, ax, top_y);
-    } else {
-      appl.box.h = Math.max(appl.box.h, room_h);
-      if (upright) app_raw = appl;
-    }
+    const raw = at(best.w, sp);
+    raw.box.h = goal;
+    app_raw = raw;
+    app_view = { s: best.s, ox: ax, oy: top_y };
+    appl = best.s > 1.001 ? scale_app(raw, best.s, ax, top_y) : raw;
   }
 
   if (narrow)
