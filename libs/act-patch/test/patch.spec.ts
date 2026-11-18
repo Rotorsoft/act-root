@@ -32,6 +32,15 @@ describe("patch", () => {
       const result = patch<Schema>({}, { config: { feature: true } });
       expect(result).toEqual({ config: { feature: true } });
     });
+
+    it("keeps merging a record that holds a key named constructor", () => {
+      let state: Schema = { counts: {} };
+      for (const word of ["hello", "constructor", "world"])
+        state = patch<Schema>(state, { counts: { [word]: 1 } });
+      expect(state).toEqual({
+        counts: { hello: 1, constructor: 1, world: 1 },
+      });
+    });
   });
 
   describe("primitive replacement", () => {

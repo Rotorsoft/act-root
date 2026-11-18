@@ -1,3 +1,4 @@
+import { is_plain } from "./plain.js";
 import type { DeepPartial, Schema } from "./types.js";
 
 /**
@@ -72,15 +73,7 @@ export const delta = <S extends Schema>(
     }
     if (Object.is(a, b)) continue;
 
-    const aIsPlain =
-      typeof a === "object" &&
-      a !== null &&
-      (a.constructor === Object || a.constructor === undefined);
-    const bIsPlain =
-      typeof b === "object" &&
-      b !== null &&
-      (b.constructor === Object || b.constructor === undefined);
-    if (aIsPlain && bIsPlain) {
+    if (is_plain(a) && is_plain(b)) {
       const sub = delta(b as Schema, a as Schema);
       if (Object.keys(sub).length > 0) out[k] = sub;
       continue;

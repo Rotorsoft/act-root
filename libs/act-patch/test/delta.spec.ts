@@ -21,6 +21,12 @@ describe("delta", () => {
       expect(delta<Schema>({ a: 1, b: 2 }, { a: 1, b: 2 })).toEqual({});
     });
 
+    it("diffs into a record that holds a key named constructor", () => {
+      const before = { counts: { constructor: 1, a: 1 } };
+      const after = { counts: { constructor: 1, a: 2 } };
+      expect(delta<Schema>(before, after)).toEqual({ counts: { a: 2 } });
+    });
+
     it("computes nested delta (3+ levels)", () => {
       const before = { l1: { l2: { l3: { val: "old", keep: true } } } };
       const after = { l1: { l2: { l3: { val: "new", keep: true } } } };
