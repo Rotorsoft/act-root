@@ -481,25 +481,10 @@ describe("sse_state_names", () => {
           close: { name: "Ticket", actions: {} },
           press: { name: "Calculator", actions: {} },
         },
+        sensitive_fields: () => [],
       },
     };
     expect(sse_state_names(app, "hono")).toEqual(["Ticket", "Calculator"]);
-  });
-
-  it("treats a bare surface without the sensitive lookup as having none", () => {
-    const app = {
-      do: async () => [],
-      registry: {
-        actions: {
-          open: {
-            name: "Ticket",
-            actions: {},
-            events: { Opened: z.object({}) },
-          },
-        },
-      },
-    };
-    expect(sse_state_names(app, "trpc")).toEqual(["Ticket"]);
   });
 
   describe("a state only reached through .loads", () => {

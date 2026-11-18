@@ -19,7 +19,7 @@ export function sse_state_names(app: ActSurface, transport: string): string[] {
   }
   for (const [name, events] of names) {
     const sensitive = Object.keys(events).filter(
-      (event) => (app.registry.sensitive_fields?.(event) ?? []).length > 0
+      (event) => app.registry.sensitive_fields(event).length > 0
     );
     if (sensitive.length)
       throw new Error(

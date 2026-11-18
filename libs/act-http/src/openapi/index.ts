@@ -677,8 +677,7 @@ export function openapi<TApp extends Pick<ActSurface, "registry">>(
   const base_path = options.basePath ?? DEFAULT_BASE_PATH;
   const paths: Record<string, OpenAPIPathItem> = {};
   const state_schemas: Record<string, Record<string, unknown>> = {};
-  const sensitive_of = (name: string) =>
-    app.registry.sensitive_fields?.(name) ?? [];
+  const sensitive_of = (name: string) => app.registry.sensitive_fields(name);
 
   for (const [action_name, state] of Object.entries(app.registry.actions)) {
     const zod_schema = state.actions[action_name] as z.ZodType;

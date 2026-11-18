@@ -523,6 +523,7 @@ describe("openapi — typed action responses", () => {
       {
         registry: {
           actions: { Ping: { name: "Pinger", actions: { Ping: ZodEmpty } } },
+          sensitive_fields: () => [],
         },
       },
       base_options()

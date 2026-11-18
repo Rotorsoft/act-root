@@ -122,6 +122,12 @@ Two things that rewrite doesn't show:
 - **Why:** Postgres stores priority as `int`, so a fraction or a value past 2,147,483,647 failed every `subscribe` there and stopped correlate. InMemory and SQLite accepted it.
 - **How to update:** use whole numbers. A dynamic resolver's priority is checked at correlate instead; see [Priority lanes](../architecture/priority-lanes.md).
 
+### An action and an event can't share a name
+
+- **What changed:** since 2.1.14, an action named like any event in the app, in its own state or another, throws at build (`Action and event share the name "…"`).
+- **Why:** the registry answers questions by name for both, such as which fields are sensitive, so one name has to mean one schema.
+- **How to update:** rename one of the two. A command and the fact it records read differently anyway: `RegisterUser` and `UserRegistered`. Renaming an event that's already stored takes a [versioned event name](../architecture/event-schema-evolution.md), so rename the action.
+
 ### act-http's snake_case SSE aliases are gone
 
 - **What changed:** the deprecated aliases in `@rotorsoft/act-http/sse` are removed.
