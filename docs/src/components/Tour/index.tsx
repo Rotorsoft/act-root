@@ -24,7 +24,7 @@ import {
   useRef,
   useState,
 } from "react";
-import Field from "./Field";
+import Field, { stream_hue } from "./Field";
 import { type Box, type Chip, data_lines, type Layout, layout, type Mode, short, type View } from "./layout";
 import styles from "./styles.module.css";
 import type { AppSpec, Link as DocLink, Move, Step, TourSpec } from "./types";
@@ -254,6 +254,7 @@ function CellView({
   selected,
   active,
   onSelect,
+  onHover,
 }: {
   cell: Cell;
   box: Box;
@@ -265,6 +266,7 @@ function CellView({
   selected: boolean;
   active: boolean;
   onSelect: (uid: number) => void;
+  onHover?: (stream: string | undefined) => void;
 }) {
   const state = cell.leaving ? styles.leaving : cell.fresh ? styles.fresh : cell.moved ? styles.moved : "";
   const label = cell.kind === "event" ? cell.name : cell.kind === "snapshot" ? "◆ snapshot" : "⊘ tombstone";
@@ -279,6 +281,9 @@ function CellView({
         tabIndex={0}
         aria-label={`event #${cell.id}, ${cell.name} on ${cell.stream} version ${cell.version}`}
         onClick={() => onSelect(cell.uid)}
+        onMouseEnter={() => onHover?.(cell.stream)}
+        onMouseLeave={() => onHover?.(undefined)}
+        style={{ "--sh": `hsl(${stream_hue(cell.stream)} ${active ? "72% 48%" : "26% 62%"})` } as CSSProperties}
         onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && onSelect(cell.uid)}
       >
         <rect width={box.w} height={box.h} rx={7} />
@@ -711,6 +716,7 @@ function Stage({
                 selected={selected === cell.uid}
                 active={!!lit?.cells.has(cell.uid) || hover === cell.stream || (!!cell.fresh && !cell.leaving)}
                 onSelect={onSelect}
+                onHover={setHover}
               />
             ))}
             {sb.gaps.map((g) => (
@@ -1236,6 +1242,7 @@ export default function Tour({ spec }: { spec: TourSpec }) {
               enter={animate && !reduce ? total : 0}
               reduce={reduce || !animate}
               hover={hover}
+              focus={lit ? [...lit.streams] : undefined}
               onHover={setHover}
             />
           </div>

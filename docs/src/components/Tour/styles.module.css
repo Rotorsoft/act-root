@@ -1628,9 +1628,8 @@
 
 /* the store in one neutral tone; the active cell in the accent */
 .cell {
-  --s: var(--dg-line) !important;
+  --s: var(--sh, var(--dg-line)) !important;
 }
-.cell.active,
 .cell.selected {
   --s: var(--dg-action) !important;
 }

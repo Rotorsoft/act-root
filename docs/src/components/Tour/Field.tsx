@@ -67,6 +67,13 @@ function dots_of(store: Store, base: BaseEvent[]): Dot[] {
   return out;
 }
 
+/** Each stream's own hue, stable across steps: the field shades a stream by it. */
+export function stream_hue(stream: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < stream.length; i++) h = Math.imul(h ^ stream.charCodeAt(i), 16777619);
+  return (h >>> 0) % 360;
+}
+
 const ease = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2);
 
 export default function Field({
@@ -76,6 +83,7 @@ export default function Field({
   enter,
   reduce,
   hover,
+  focus,
   onHover,
 }: {
   store: Store;
@@ -84,6 +92,8 @@ export default function Field({
   enter: number;
   reduce: boolean;
   hover?: string;
+  /** the streams the current step acts on: lit in full color, the rest dimmed */
+  focus?: string[];
   onHover: (stream: string | undefined) => void;
 }) {
   const canvas = useRef<HTMLCanvasElement>(null);
@@ -141,7 +151,7 @@ export default function Field({
     const tour_ids = dots.filter((d) => d.tour && !d.leaving).map((d) => d.id);
     // one neutral tone for every dot; the scene's streams (or the hovered one) in one accent
     const neutral = v("--act-text-muted", "#7a8394");
-    const focus = new Set(hover ? [hover] : dots.filter((d) => d.tour && !d.leaving).map((d) => d.stream));
+    const lit = new Set(hover ? [hover] : (focus ?? []));
 
     const T = 900;
     const delay = reduce ? 0 : enter;
@@ -214,9 +224,11 @@ export default function Field({
           if (t >= 1) continue;
         }
         const g = glow.get(d.stream);
-        const on = focus.has(d.stream) || !!g;
-        const dim = on ? 1 : focus.size || glow.size ? 0.32 : 0.62;
-        const tone = on ? accent : neutral;
+        const on = lit.has(d.stream) || !!g;
+        // every stream in its own muted hue; the lit ones in full color, the rest dimmed
+        const hue = stream_hue(d.stream);
+        const dim = on ? 1 : lit.size || glow.size ? 0.25 : 0.7;
+        const tone = d.kind === "event" || d.kind === "snapshot" ? (on ? `hsl(${hue} 72% 48%)` : `hsl(${hue} 26% 60%)`) : on ? accent : neutral;
         ctx.globalAlpha = alpha * dim;
         const rr = r * scale * (on ? 1.2 : 1);
         if (g) {
@@ -233,7 +245,7 @@ export default function Field({
           ctx.globalAlpha = alpha * dim;
         } else if (on) {
           ctx.globalAlpha = 0.22 * alpha;
-          ctx.fillStyle = accent;
+          ctx.fillStyle = tone;
           ctx.beginPath();
           ctx.arc(p.x, p.y, rr * 2, 0, Math.PI * 2);
           ctx.fill();
@@ -318,7 +330,7 @@ export default function Field({
     raf = requestAnimationFrame(draw);
     return () => cancelAnimationFrame(raf);
     // a new run replays the step's motion
-  }, [store, base, run, enter, reduce, hover, size]);
+  }, [store, base, run, enter, reduce, hover, size, focus?.join("|")]);
 
   const move = (e: React.MouseEvent) => {
     const rect = canvas.current!.getBoundingClientRect();
