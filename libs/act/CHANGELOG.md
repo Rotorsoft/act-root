@@ -1,3 +1,11 @@
+# [@rotorsoft/act-v2.1.16](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v2.1.15...@rotorsoft/act-v2.1.16) (2026-11-18)
+
+
+### Bug Fixes
+
+* **act:** check a load's asOf and every query bound, and finish shutdown when a disposer fails ([#2577](https://github.com/Rotorsoft/act-root/issues/2577)) ([ebaa25c](https://github.com/Rotorsoft/act-root/commit/ebaa25c0e8626470b8385d15fa553aba9aeb32d0)), closes [#2572](https://github.com/Rotorsoft/act-root/issues/2572) [#2573](https://github.com/Rotorsoft/act-root/issues/2573)
+* **act:** find sensitive fields in an event declared as an intersection, z.lazy or pipe ([#2575](https://github.com/Rotorsoft/act-root/issues/2575)) ([c9117c3](https://github.com/Rotorsoft/act-root/commit/c9117c3b97daaf50c99ceba4651616ff84e44c15)), closes [#2570](https://github.com/Rotorsoft/act-root/issues/2570)
+
 # [@rotorsoft/act-v2.1.15](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v2.1.14...@rotorsoft/act-v2.1.15) (2026-11-18)
 
 
