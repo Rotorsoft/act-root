@@ -162,20 +162,7 @@ Two structurally-equal-but-distinct values (e.g. two `Date` instances with the s
 
 ## Benchmarks
 
-Run with `pnpm bench:micro libs/act-patch/bench/patch.micro.bench.ts`. Inline reference implementations of RFC 6902 and 7396 are tested with equivalent operations on the same fixtures. Apple M4 Max, Node 22:
-
-| Benchmark | Act Patch | Merge Patch (7396) | JSON Patch (6902) |
-|---|---:|---:|---:|
-| no-op (empty) | **21.5M** ops/s | 12.5M ops/s | 2.4M ops/s |
-| shallow single-key (5 keys) | 16.3M ops/s | **23.4M** ops/s | 2.2M ops/s |
-| deep 3-level | **3.0M** ops/s | 2.6M ops/s | 957K ops/s |
-| delete | 4.6M ops/s | **5.1M** ops/s | 1.7M ops/s |
-| array replacement | **13.0M** ops/s | 12.8M ops/s | 2.9M ops/s |
-| sequential 10 patches | 1.1M ops/s | **1.4M** ops/s | 237K ops/s |
-| wide object (100 keys) | **221K** ops/s | 61K ops/s | 159K ops/s |
-| large state (1000 keys, 10-key patch) | **20.9K** ops/s | 4.0K ops/s | 7.4K ops/s |
-
-Act Patch matches or beats Merge Patch on small objects and dominates on wide/large states (3.5–5.2× faster) thanks to structural sharing and a hybrid copy strategy (V8-optimized spread for small objects, prototype-free two-pass enumeration for larger ones). JSON Patch is consistently the slowest due to deep-clone + path parsing overhead.
+Run `pnpm bench:micro libs/act-patch/bench/patch.micro.bench.ts` to compare it with reference implementations of RFC 7396 and 6902 on the same fixtures.
 
 ## Compatibility
 

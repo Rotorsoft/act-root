@@ -47,10 +47,7 @@ import { DEFAULT_LANE, SNAP_EVENT } from "../types/index.js";
 
 /** What one pass over an event's schema resolves. @internal */
 export type EventTags = {
-  /**
-   * Keys marked `sensitive(...)`, top level (and across union variants), with
-   * the schema each declares.
-   */
+  /** Keys marked `sensitive(...)`, with the schema each declares (see `pii_schemas`). */
   readonly sensitive: Readonly<Record<string, z.ZodType>>;
   /**
    * Revives the dates in a stored `data` payload, or `undefined` when the
@@ -65,13 +62,8 @@ export type EventTags = {
 };
 
 /**
- * Resolve an event's schema in a single pass.
- *
- * Sensitive markers are read at the top level only — the documented carve-out
- * (`internal/sensitive.ts`), since the write path splits whole top-level keys. A union
- * event has no top-level shape, so its variants are walked and unioned: a key
- * sensitive in any variant must be split, because the stored payload could be
- * that variant.
+ * Resolve an event's schema in a single pass. Its sensitive fields come from
+ * `pii_schemas`, which owns how far the marker reaches.
  *
  * @internal
  */
