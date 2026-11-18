@@ -34,4 +34,5 @@ jobs:
       # snippet check skips anyway.
       - run: pnpm -F docs check:snippets
       - run: pnpm -F docs check:snippets:selftest
+      - run: pnpm -F docs check:tour
       - run: pnpm -F docs build:all

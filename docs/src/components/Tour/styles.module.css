@@ -1,0 +1,1839 @@
+/* The framework tour. Concept colors are the shared --dg-* tokens; the stream
+   palette below only tells streams apart. */
+
+.tour {
+  --t-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --t-s0: #2f6fdf;
+  --t-s1: #0f9a8a;
+  --t-s2: #c2389a;
+  --t-s3: #8a9a14;
+  --t-s4: #6a4fd6;
+  --t-s5: #b8611f;
+  --t-s6: #1f8fc4;
+  --t-s7: #c23a3a;
+  position: relative;
+  outline: none;
+}
+[data-theme="dark"] .tour {
+  --t-s0: #6e9cff;
+  --t-s1: #3fd0bd;
+  --t-s2: #f07ccc;
+  --t-s3: #c3d55a;
+  --t-s4: #a995ff;
+  --t-s5: #f2a05d;
+  --t-s6: #5ec4f2;
+  --t-s7: #ff7b7b;
+}
+/* full screen: the stage and the control row fill the display */
+.tour:fullscreen,
+.tour:-webkit-full-screen {
+  width: 100vw;
+  height: 100vh;
+  max-width: none;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  background: var(--act-surface-1, var(--ifm-background-color));
+}
+
+/* the top bar */
+.top {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.top h2 {
+  margin: 0;
+  font-size: clamp(1.1rem, 1.6vw, 1.45rem);
+}
+.menuWrap {
+  position: relative;
+}
+.menuButton,
+.full,
+.panelToggle {
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--act-border-strong, var(--ifm-color-emphasis-300));
+  border-radius: 8px;
+  background: var(--act-surface-1, var(--ifm-background-surface-color));
+  color: var(--ifm-font-color-base);
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+.full {
+  margin-left: auto;
+  width: 34px;
+  padding: 0;
+}
+.menu {
+  position: absolute;
+  z-index: 30;
+  top: 38px;
+  left: 0;
+  width: min(360px, 90vw);
+  max-height: 70vh;
+  overflow-y: auto;
+  margin: 0;
+  padding: 6px;
+  list-style: none;
+  border: 1px solid var(--act-border-strong, var(--ifm-color-emphasis-300));
+  border-radius: 12px;
+  background: var(--act-surface-1, var(--ifm-background-surface-color));
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+}
+.menu button {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: 0.86rem;
+  text-align: left;
+  cursor: pointer;
+}
+.menu button:hover {
+  background: var(--act-surface-2, rgba(127, 127, 127, 0.1));
+}
+.menu button.current {
+  background: color-mix(in srgb, var(--dg-action) 14%, transparent);
+  font-weight: 600;
+}
+.menu small {
+  display: block;
+  font-weight: 400;
+  color: var(--act-text-muted, var(--ifm-color-emphasis-600));
+  font-size: 0.72rem;
+}
+.num {
+  flex: none;
+  width: 1.5em;
+  color: var(--act-text-muted, var(--ifm-color-emphasis-600));
+  font-variant-numeric: tabular-nums;
+}
+.audience,
+.viewTag {
+  padding: 1px 8px;
+  border-radius: 99px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+.audience {
+  background: color-mix(in srgb, var(--dg-reaction) 14%, transparent);
+  color: var(--dg-reaction);
+}
+.viewTag {
+  background: color-mix(in srgb, var(--dg-store) 14%, transparent);
+  color: var(--dg-store);
+}
+
+/* Now / Next */
+.nowNext {
+  margin-bottom: 8px;
+  padding: 10px 14px;
+  border: 1px solid color-mix(in srgb, var(--dg-action) 45%, transparent);
+  border-left: 5px solid var(--dg-action);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--dg-action) 7%, var(--act-surface-1, transparent));
+}
+.nowNext p {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  margin: 0;
+}
+.now {
+  font-size: 1.12rem;
+  font-weight: 600;
+  line-height: 1.4;
+  animation: nowIn 0.45s var(--t-ease);
+}
+.cue {
+  font-weight: 400;
+  color: var(--dg-action);
+}
+.nowNext .sayLine {
+  display: block;
+  margin: 4px 0 0 52px;
+  font-size: 0.92rem;
+  line-height: 1.45;
+  color: var(--act-text-muted, var(--ifm-color-emphasis-700));
+}
+.nowNext .next {
+  margin-top: 6px;
+  font-size: 0.88rem;
+  color: var(--act-text-muted, var(--ifm-color-emphasis-600));
+}
+.tag {
+  flex: none;
+  min-width: 42px;
+  padding: 1px 7px;
+  border-radius: 99px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-align: center;
+  text-transform: uppercase;
+}
+.now .tag {
+  background: var(--dg-action);
+  color: #fff;
+}
+.next .tag {
+  border: 1px solid var(--act-border-strong, var(--ifm-color-emphasis-300));
+}
+.codeIcon {
+  flex: none;
+  align-self: center;
+  margin-left: auto;
+  width: 30px;
+  height: 30px;
+  border: 1.5px solid var(--dg-action);
+  border-radius: 50%;
+  background: var(--act-surface-1, transparent);
+  color: var(--dg-action);
+  font-family: var(--ifm-font-family-monospace);
+  font-size: 0.64rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+.codeIcon:hover,
+.codeIcon:focus-visible {
+  background: var(--dg-action);
+  color: #fff;
+}
+@keyframes nowIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+/* the pipeline strip */
+.pipe {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+  min-height: 30px;
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+}
+.pipe[data-empty] {
+  opacity: 0.45;
+}
+.pipe li {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+  padding: 2px 10px;
+  border: 1px solid var(--act-border-strong, var(--ifm-color-emphasis-300));
+  border-radius: 99px;
+  font-size: 0.8rem;
+  color: var(--act-text-muted, var(--ifm-color-emphasis-600));
+  transition: background 0.3s, color 0.3s, border-color 0.3s;
+}
+.pipe li + li:not(.pipeName) {
+  position: relative;
+  margin-left: 14px;
+}
+.pipe li + li:not(.pipeName)::before {
+  content: "→";
+  position: absolute;
+  left: -15px;
+  color: var(--act-text-muted, var(--ifm-color-emphasis-500));
+  font-weight: 400;
+}
+.pipe li.pipeName + li:not(.pipeName) {
+  margin-left: 0;
+}
+.pipe li.pipeName + li:not(.pipeName)::before {
+  content: none;
+}
+.pipe li span {
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+.pipe .pipeName {
+  border: 0;
+  padding-left: 0;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.pipe li[data-state="done"] {
+  border-color: var(--dg-good);
+  color: var(--dg-good);
+}
+.pipe li[data-state="active"] {
+  border-color: var(--dg-action);
+  background: var(--dg-action);
+  color: #fff;
+  font-weight: 600;
+  animation: stagePulse 1.6s ease-in-out infinite;
+}
+.pipe li[data-state="fail"] {
+  border-color: var(--dg-bad);
+  background: var(--dg-bad);
+  color: #fff;
+  font-weight: 600;
+}
+.pipe li[data-state="skip"] {
+  opacity: 0.4;
+  text-decoration: line-through;
+}
+@keyframes stagePulse {
+  50% {
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--dg-action) 25%, transparent);
+  }
+}
+
+/* the stage */
+.stageWrap {
+  position: relative;
+  background: var(--act-surface-1, var(--ifm-background-surface-color));
+  overflow: hidden;
+}
+.svg {
+  position: relative;
+  z-index: 2;
+  display: block;
+  width: 100%;
+  height: auto;
+  font-family: var(--ifm-font-family-base);
+  font-size: 12px;
+  pointer-events: none;
+}
+.svg [role="button"],
+.svg .chip,
+.svg .subRow,
+.svg .streamRow {
+  pointer-events: auto;
+}
+.svg text {
+  fill: var(--ifm-font-color-base);
+}
+.bandLabel,
+.sectionTitle,
+.laneHead,
+.trackLabel {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  fill: var(--act-text-muted, #6b7486) !important;
+}
+.laneHead {
+  fill: var(--dg-reaction) !important;
+}
+.trackLabel {
+  font-size: 9.5px;
+}
+
+.node[data-kind="actor"] { --k: var(--dg-actor); }
+.node[data-kind="worker"] { --k: var(--dg-reaction); }
+.node[data-kind="external"] { --k: var(--dg-external); }
+.node > rect {
+  fill: color-mix(in srgb, var(--k) 13%, var(--act-surface-1, #fff));
+  stroke: var(--k);
+  stroke-width: 1.5;
+}
+.node[data-kind="worker"] > rect {
+  stroke-dasharray: 5 3;
+}
+.node.focus > rect,
+.chip.focus > rect,
+.stateCard.focus > rect {
+  stroke-width: 3;
+  filter: drop-shadow(0 0 6px color-mix(in srgb, var(--k, var(--dg-action)) 55%, transparent));
+}
+.nodeLabel {
+  font-size: 13px;
+  font-weight: 650;
+  text-anchor: middle;
+}
+.nodeSub {
+  font-size: 10.5px;
+  text-anchor: middle;
+  fill: var(--act-text-muted, #6b7486) !important;
+  font-family: var(--ifm-font-family-monospace);
+}
+
+/* the Act app */
+.appBox {
+  fill: color-mix(in srgb, var(--dg-action) 4%, var(--act-surface-1, #fff));
+  stroke: color-mix(in srgb, var(--dg-action) 55%, transparent);
+  stroke-width: 2;
+}
+.appTitle {
+  font-size: 14px;
+  font-weight: 800;
+  fill: var(--dg-action) !important;
+}
+.appSub {
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 400;
+  font-size: 11px;
+  font-family: var(--ifm-font-family-monospace);
+  fill: var(--act-text-muted, #6b7486) !important;
+}
+.layerBox {
+  fill: color-mix(in srgb, var(--dg-action) 7%, transparent);
+  stroke: color-mix(in srgb, var(--dg-action) 35%, transparent);
+  stroke-dasharray: 4 3;
+}
+.layerLabel {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  fill: var(--dg-action) !important;
+}
+.stage rect {
+  fill: var(--act-surface-1, #fff);
+  stroke: var(--act-border-strong, #c9ced8);
+  transition: fill 0.3s, stroke 0.3s;
+}
+.stage text {
+  font-size: 10.5px;
+  text-anchor: middle;
+  fill: var(--act-text-muted, #6b7486) !important;
+}
+.stage[data-state="done"] rect {
+  stroke: var(--dg-good);
+}
+.stage[data-state="done"] text {
+  fill: var(--dg-good) !important;
+}
+.stage[data-state="active"] rect {
+  fill: var(--dg-action);
+  stroke: var(--dg-action);
+  animation: svgPulse 1.4s ease-in-out infinite;
+}
+.stage[data-state="active"] text,
+.stage[data-state="fail"] text {
+  fill: #fff !important;
+  font-weight: 700;
+}
+.stage[data-state="fail"] rect {
+  fill: var(--dg-bad);
+  stroke: var(--dg-bad);
+}
+.stage[data-state="skip"] {
+  opacity: 0.4;
+}
+.stopNote rect {
+  fill: color-mix(in srgb, var(--dg-bad) 14%, var(--act-surface-1, #fff));
+  stroke: var(--dg-bad);
+}
+.stopNote text {
+  font-size: 10px;
+  font-weight: 700;
+  fill: var(--dg-bad) !important;
+}
+.port circle {
+  fill: var(--act-surface-1, #fff);
+  stroke: var(--dg-store);
+  stroke-width: 2.5;
+}
+.port[data-state="active"] circle,
+.port[data-state="done"] circle {
+  fill: var(--dg-good);
+  stroke: var(--dg-good);
+}
+.port[data-state="fail"] circle {
+  fill: var(--dg-bad);
+  stroke: var(--dg-bad);
+}
+.portLabel {
+  font-size: 9.5px;
+  font-weight: 700;
+  text-anchor: start;
+  fill: var(--dg-store) !important;
+}
+.slice > rect {
+  fill: none;
+  stroke: color-mix(in srgb, var(--dg-note) 60%, transparent);
+  stroke-dasharray: 2 3;
+}
+.slice > text {
+  font-size: 10px;
+  font-weight: 700;
+  fill: var(--act-text-muted, #6b7486) !important;
+}
+.chip[data-kind="action"],
+.chip[data-kind="op"] { --k: var(--dg-action); }
+.chip[data-kind="event"] { --k: var(--dg-event); }
+.chip[data-kind="state"] { --k: var(--dg-state); }
+.chip[data-kind="reaction"] { --k: var(--dg-reaction); }
+.chip[data-kind="projection"] { --k: var(--dg-projection); }
+.chip[data-kind="lane"] { --k: var(--dg-reaction); }
+.chip[data-kind="port"] { --k: var(--dg-store); }
+.chip > rect {
+  fill: color-mix(in srgb, var(--k) 12%, var(--act-surface-1, #fff));
+  stroke: var(--k);
+  stroke-width: 1.2;
+  transition: stroke-width 0.3s, opacity 0.3s;
+}
+.chip[data-kind="event"] > rect {
+  stroke-dasharray: 3 2;
+}
+.chip[data-kind="state"] > rect {
+  fill: color-mix(in srgb, var(--k) 24%, var(--act-surface-1, #fff));
+}
+.chip > text {
+  font-size: 11px;
+  font-weight: 600;
+}
+.chip[data-kind="port"] > text {
+  font-family: var(--ifm-font-family-monospace);
+  font-weight: 400;
+  font-size: 10.5px;
+}
+.soft {
+  opacity: 0.3;
+}
+.stateCard > rect {
+  fill: color-mix(in srgb, var(--dg-state) 8%, var(--act-surface-1, #fff));
+  stroke: color-mix(in srgb, var(--dg-state) 70%, transparent);
+  stroke-dasharray: 3 3;
+}
+.stateCard {
+  --k: var(--dg-state);
+}
+.cardTitle {
+  font-size: 11px;
+  font-weight: 700;
+}
+.cardLine {
+  font-family: var(--ifm-font-family-monospace);
+  font-size: 10.5px;
+}
+.stateVer {
+  font-size: 11px;
+  text-anchor: end;
+  fill: var(--dg-state) !important;
+  font-weight: 700;
+}
+.tipIcon {
+  cursor: pointer;
+  outline: none;
+}
+.tipIcon circle {
+  fill: var(--act-surface-1, #fff);
+  stroke: var(--dg-action);
+  stroke-width: 1.2;
+}
+.tipIcon text {
+  font-family: var(--ifm-font-family-monospace);
+  font-size: 6.5px;
+  font-weight: 800;
+  text-anchor: middle;
+  fill: var(--dg-action) !important;
+}
+.tipIcon:hover circle,
+.tipIcon:focus-visible circle {
+  fill: var(--dg-action);
+}
+.tipIcon:hover text,
+.tipIcon:focus-visible text {
+  fill: #fff !important;
+}
+
+/* the read models */
+.table > rect {
+  fill: color-mix(in srgb, var(--dg-projection) 7%, var(--act-surface-1, #fff));
+  stroke: color-mix(in srgb, var(--dg-projection) 60%, transparent);
+}
+.tableTitle {
+  font-size: 11px;
+  font-weight: 800;
+  fill: var(--dg-projection) !important;
+}
+.table text {
+  font-family: var(--ifm-font-family-monospace);
+  font-size: 10.5px;
+}
+.rowKey {
+  font-weight: 700;
+  fill: var(--dg-projection) !important;
+}
+.rowFresh {
+  animation: rowIn 0.6s var(--t-ease) var(--enter, 0ms) backwards;
+}
+@keyframes rowIn {
+  from {
+    opacity: 0;
+    transform: translateX(-10px);
+  }
+}
+
+/* the store */
+.storeBox {
+  fill: color-mix(in srgb, var(--dg-store) 5%, transparent);
+  stroke: color-mix(in srgb, var(--dg-store) 55%, transparent);
+  stroke-width: 1.5;
+}
+.store[data-tone="bad"] .storeBox {
+  stroke: var(--dg-bad);
+  stroke-dasharray: 6 4;
+  fill: color-mix(in srgb, var(--dg-bad) 7%, transparent);
+}
+.storeTitle {
+  font-size: 13px;
+  font-weight: 800;
+  fill: var(--dg-store) !important;
+}
+.storeSub {
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+  fill: var(--act-text-muted, #6b7486) !important;
+}
+.counter {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  text-anchor: end;
+  fill: var(--act-text-muted, #6b7486) !important;
+}
+.storeStatus[data-tone="bad"] { fill: var(--dg-bad) !important; font-weight: 700; }
+.storeStatus[data-tone="good"] { fill: var(--dg-good) !important; font-weight: 700; }
+.storeStatus[data-tone="warn"] { fill: var(--dg-state) !important; font-weight: 700; }
+.fieldBox {
+  fill: none;
+  stroke: color-mix(in srgb, var(--dg-store) 30%, transparent);
+}
+.fieldHint {
+  font-size: 9.5px;
+  text-anchor: end;
+  fill: var(--act-text-muted, #6b7486) !important;
+}
+.fieldWrap {
+  position: absolute;
+  z-index: 1;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--dg-store) 4%, var(--act-surface-1, #fff));
+}
+.field {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.fieldTip {
+  position: absolute;
+  z-index: 5;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: var(--ifm-font-color-base);
+  color: var(--ifm-background-color);
+  font-family: var(--ifm-font-family-monospace);
+  font-size: 0.72rem;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.muted {
+  fill: var(--act-text-muted, #6b7486) !important;
+  font-style: italic;
+}
+.right {
+  text-anchor: end;
+}
+
+.cellPos {
+  transition: transform 0.6s var(--t-ease);
+}
+.cell {
+  cursor: pointer;
+  transform-box: fill-box;
+  transform-origin: center;
+  outline: none;
+}
+.cell[data-color="0"], .streamRow[data-color="0"] { --s: var(--t-s0); }
+.cell[data-color="1"], .streamRow[data-color="1"] { --s: var(--t-s1); }
+.cell[data-color="2"], .streamRow[data-color="2"] { --s: var(--t-s2); }
+.cell[data-color="3"], .streamRow[data-color="3"] { --s: var(--t-s3); }
+.cell[data-color="4"], .streamRow[data-color="4"] { --s: var(--t-s4); }
+.cell[data-color="5"], .streamRow[data-color="5"] { --s: var(--t-s5); }
+.cell[data-color="6"], .streamRow[data-color="6"] { --s: var(--t-s6); }
+.cell[data-color="7"], .streamRow[data-color="7"] { --s: var(--t-s7); }
+.cell > rect:first-child {
+  fill: color-mix(in srgb, var(--dg-event) 10%, var(--act-surface-1, #fff));
+  stroke: color-mix(in srgb, var(--dg-event) 70%, transparent);
+  stroke-width: 1.2;
+}
+.cell[data-kind="snapshot"] > rect:first-child {
+  fill: color-mix(in srgb, var(--dg-state) 16%, var(--act-surface-1, #fff));
+  stroke: var(--dg-state);
+  stroke-dasharray: 4 2;
+}
+.cell[data-kind="tombstone"] > rect:first-child {
+  fill: color-mix(in srgb, var(--dg-line) 22%, var(--act-surface-1, #fff));
+  stroke: var(--dg-line);
+}
+.cell:hover > rect:first-child,
+.cell:focus-visible > rect:first-child,
+.cell.selected > rect:first-child {
+  stroke-width: 2.4;
+}
+.cell.selected > rect:first-child {
+  stroke: var(--dg-action);
+}
+.stripe {
+  fill: var(--s);
+}
+.cellId {
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.cellVer {
+  font-size: 11px;
+  font-weight: 700;
+  text-anchor: end;
+  fill: var(--s) !important;
+}
+.cellName {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.cellStream {
+  font-size: 9.5px;
+  fill: var(--s) !important;
+  font-family: var(--ifm-font-family-monospace);
+}
+.pii {
+  font-size: 9px;
+  text-anchor: end;
+  fill: var(--dg-external) !important;
+  font-weight: 700;
+}
+.pii.shredded {
+  fill: var(--dg-bad) !important;
+}
+.dim {
+  opacity: 0.25;
+  transition: opacity 0.4s;
+}
+.ghost rect {
+  fill: color-mix(in srgb, var(--dg-bad) 8%, var(--act-surface-1, #fff));
+  stroke: var(--dg-bad);
+  stroke-dasharray: 5 3;
+  stroke-width: 1.4;
+}
+.ghost text {
+  fill: var(--dg-bad) !important;
+}
+/* a bounced commit: it reaches the store's edge, turns back, then fades; it never enters the log */
+.ghost > * {
+  animation: bounce 4.5s var(--t-ease) var(--enter, 0ms) both;
+}
+@keyframes bounce {
+  0% {
+    opacity: 0;
+    transform: translateX(-36px);
+  }
+  12% {
+    opacity: 1;
+    transform: translateX(4px);
+  }
+  20% {
+    transform: translateX(-8px);
+  }
+  28%,
+  75% {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  100% {
+    opacity: 0.35;
+  }
+}
+.ghostLine {
+  font-family: var(--ifm-font-family-monospace);
+  font-size: 9.5px;
+  fill: var(--dg-bad) !important;
+}
+.ghostError {
+  font-size: 9.5px;
+  font-weight: 700;
+}
+.flag rect {
+  fill: var(--dg-action);
+}
+.flag[data-tone="bad"] rect { fill: var(--dg-bad); }
+.flag[data-tone="good"] rect { fill: var(--dg-good); }
+.flag[data-tone="warn"] rect { fill: var(--dg-state); }
+.flag text {
+  font-size: 9.5px;
+  font-weight: 700;
+  fill: #fff !important;
+}
+
+/* subscriptions */
+.subRow text {
+  font-size: 11px;
+}
+.subName {
+  font-family: var(--ifm-font-family-monospace);
+  font-weight: 700;
+}
+.subCol {
+  font-family: var(--ifm-font-family-monospace);
+  font-size: 10.5px !important;
+  fill: var(--act-text-muted, #6b7486) !important;
+}
+.rowBg {
+  fill: transparent;
+  transition: fill 0.4s;
+}
+.subRow.focus .rowBg {
+  fill: color-mix(in srgb, var(--dg-reaction) 8%, transparent);
+  stroke: var(--dg-reaction);
+  stroke-width: 1.2;
+}
+.badge text {
+  font-size: 10px !important;
+  font-weight: 700;
+}
+.badge[data-state="idle"] rect { fill: color-mix(in srgb, var(--dg-note) 14%, transparent); stroke: var(--dg-note); }
+.badge[data-state="idle"] text { fill: var(--dg-note) !important; }
+.badge[data-state="work"] rect { fill: color-mix(in srgb, var(--dg-action) 14%, transparent); stroke: var(--dg-action); }
+.badge[data-state="work"] text { fill: var(--dg-action) !important; }
+.badge[data-state="leased"] rect { fill: color-mix(in srgb, var(--dg-reaction) 16%, transparent); stroke: var(--dg-reaction); }
+.badge[data-state="leased"] text { fill: var(--dg-reaction) !important; }
+.badge[data-state="due"] rect,
+.badge[data-state="retry"] rect { fill: color-mix(in srgb, var(--dg-state) 16%, transparent); stroke: var(--dg-state); }
+.badge[data-state="due"] text,
+.badge[data-state="retry"] text { fill: var(--dg-state) !important; }
+.badge[data-state="blocked"] rect { fill: var(--dg-bad); stroke: var(--dg-bad); }
+.badge[data-state="blocked"] text { fill: #fff !important; }
+.leaseBar {
+  fill: var(--dg-reaction);
+  transform-box: fill-box;
+  transform-origin: left;
+  animation: lease 6s linear forwards;
+}
+@keyframes lease {
+  to {
+    transform: scaleX(0.05);
+  }
+}
+.trackLine,
+.checkTrack line {
+  stroke: var(--act-border-strong, #c9ced8);
+  stroke-width: 2;
+}
+.checkFill {
+  fill: color-mix(in srgb, var(--dg-reaction) 45%, transparent);
+}
+.backlog {
+  fill: color-mix(in srgb, var(--dg-action) 45%, transparent);
+}
+.subRow[data-state="blocked"] .trackLine {
+  stroke: var(--dg-bad);
+}
+.subRow[data-state="blocked"] .backlog {
+  fill: color-mix(in srgb, var(--dg-bad) 50%, transparent);
+}
+.marker {
+  transition: transform 0.8s var(--t-ease) var(--enter, 0ms);
+}
+.marker path {
+  fill: var(--dg-reaction);
+}
+.marker .markHollow {
+  fill: var(--act-surface-1, #fff);
+  stroke: var(--dg-action);
+  stroke-width: 1.5;
+}
+.watermark circle {
+  fill: var(--dg-reaction);
+  stroke: var(--act-surface-1, #fff);
+  stroke-width: 1.5;
+}
+.subRow[data-state="blocked"] .watermark circle {
+  fill: var(--dg-bad);
+}
+
+.streamRow text {
+  font-family: var(--ifm-font-family-monospace);
+  font-size: 11px;
+}
+.dot {
+  fill: var(--s);
+}
+
+/* tokens */
+.token circle {
+  fill: var(--dg-action);
+  stroke: var(--act-surface-1, #fff);
+  stroke-width: 2;
+  filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.35));
+}
+.token[data-tone="good"] circle { fill: var(--dg-good); }
+.token[data-tone="bad"] circle { fill: var(--dg-bad); }
+.token[data-tone="warn"] circle { fill: var(--dg-state); }
+.token[data-tone="muted"] circle { fill: var(--dg-line); }
+.token text {
+  font-size: 10.5px;
+  font-weight: 700;
+  paint-order: stroke;
+  stroke: var(--act-surface-1, #fff);
+  stroke-width: 3px;
+  fill: var(--ifm-font-color-base) !important;
+}
+
+/* what changed in this step */
+.fresh {
+  animation: enter 0.55s var(--t-ease) var(--enter, 0ms) backwards;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.leaving {
+  animation: leave 0.7s ease-in var(--enter, 0ms) forwards;
+}
+.moved > rect:first-child {
+  animation: flash 1s ease var(--enter, 0ms);
+}
+.fresh > rect:first-child,
+.subRow.fresh .rowBg {
+  animation: landPulse 0.9s ease-out calc(var(--enter, 0ms) + 450ms) 2;
+}
+.subRow[data-state="blocked"].fresh .rowBg {
+  animation-name: blockPulse;
+}
+@keyframes enter {
+  from {
+    opacity: 0;
+    transform: translateY(-12px) scale(0.9);
+  }
+}
+@keyframes leave {
+  40% {
+    opacity: 0.8;
+    filter: saturate(0) brightness(0.9);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(0.7) translateY(8px);
+  }
+}
+@keyframes flash {
+  30% {
+    fill: color-mix(in srgb, var(--dg-action) 35%, var(--act-surface-1, #fff));
+  }
+}
+@keyframes landPulse {
+  50% {
+    stroke: var(--dg-action);
+    stroke-width: 3.5;
+  }
+}
+@keyframes blockPulse {
+  50% {
+    fill: color-mix(in srgb, var(--dg-bad) 40%, transparent);
+  }
+}
+@keyframes svgPulse {
+  50% {
+    opacity: 0.75;
+  }
+}
+.off {
+  opacity: 0.2;
+  transition: opacity 0.35s;
+}
+
+/* the controls and the panels under the stage */
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0 6px;
+}
+.controls > button:not(.panelToggle) {
+  min-width: 38px;
+  height: 34px;
+  border: 1px solid var(--act-border-strong, var(--ifm-color-emphasis-300));
+  border-radius: 8px;
+  background: var(--act-surface-1, var(--ifm-background-surface-color));
+  color: var(--ifm-font-color-base);
+  font: inherit;
+  font-size: 1.1rem;
+  cursor: pointer;
+}
+.controls > button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.controls > button.play {
+  min-width: 78px;
+  background: var(--dg-action);
+  border-color: var(--dg-action);
+  color: #fff;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+.count {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.82rem;
+  color: var(--act-text-muted, var(--ifm-color-emphasis-600));
+}
+.panels {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(0, 0.7fr) minmax(0, 1.3fr);
+  gap: 16px;
+}
+.tour[data-mode="narrow"] .panels {
+  grid-template-columns: minmax(0, 1fr);
+}
+.stepsBox h4,
+.feedBox summary {
+  margin: 4px 0 6px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--act-text-muted, var(--ifm-color-emphasis-600));
+}
+.feedBox summary {
+  cursor: pointer;
+}
+.steps,
+.feed {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 190px;
+  overflow-y: auto;
+}
+.steps li button,
+.feed li button {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  width: 100%;
+  padding: 3px 8px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: 0.84rem;
+  line-height: 1.35;
+  text-align: left;
+  cursor: pointer;
+}
+.steps li button:hover,
+.feed li button:hover {
+  background: var(--act-surface-2, rgba(127, 127, 127, 0.1));
+}
+.stepMark {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 1.5px solid var(--act-border-strong, var(--ifm-color-emphasis-400));
+  font-size: 0.7rem;
+  font-weight: 700;
+  line-height: 17px;
+  text-align: center;
+}
+.steps li[data-state="done"] {
+  color: var(--act-text-muted, var(--ifm-color-emphasis-600));
+}
+.steps li[data-state="done"] .stepMark {
+  border-color: var(--dg-good);
+  background: var(--dg-good);
+  color: #fff;
+}
+.steps li[data-state="now"] button {
+  background: color-mix(in srgb, var(--dg-action) 12%, transparent);
+  font-weight: 600;
+}
+.steps li[data-state="now"] .stepMark {
+  border-color: var(--dg-action);
+  background: var(--dg-action);
+  color: #fff;
+}
+.steps li[data-state="todo"] {
+  opacity: 0.5;
+}
+.feed li button {
+  font-size: 0.8rem;
+  padding: 2px 8px;
+}
+.feedStep {
+  flex: none;
+  min-width: 18px;
+  color: var(--act-text-muted, var(--ifm-color-emphasis-500));
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.feedNow button {
+  background: color-mix(in srgb, var(--dg-action) 10%, transparent);
+  font-weight: 600;
+}
+.hint {
+  color: var(--act-text-muted, var(--ifm-color-emphasis-600));
+  font-size: 0.78rem;
+}
+
+/* the code tooltip */
+.tip {
+  position: absolute;
+  z-index: 40;
+  padding: 10px 12px;
+  border: 1px solid var(--dg-action);
+  border-radius: 12px;
+  background: var(--act-surface-1, var(--ifm-background-surface-color));
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.25);
+  font-size: 0.84rem;
+}
+.tipHead {
+  display: flex;
+  align-items: center;
+  margin-bottom: 6px;
+}
+.tipHead button {
+  margin-left: auto;
+  border: 0;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+}
+.tipCode :global(.theme-code-block) {
+  margin: 0 0 8px;
+  font-size: 0.74rem;
+}
+.tipCode pre,
+.tipCode code,
+.tipCode :global(.token-line) {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.api {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 0 0 6px;
+}
+.api code {
+  font-size: 0.72rem;
+}
+.tipLinks {
+  margin: 0;
+  font-size: 0.8rem;
+}
+
+.inspector {
+  position: absolute;
+  z-index: 6;
+  right: 10px;
+  bottom: 10px;
+  max-width: min(420px, calc(100% - 20px));
+  padding: 10px 12px;
+  border: 1px solid var(--dg-action);
+  border-radius: 10px;
+  background: var(--act-surface-1, var(--ifm-background-surface-color));
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18);
+  font-size: 0.8rem;
+}
+.inspectorHead {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  margin-bottom: 6px;
+}
+.inspectorHead button {
+  margin-left: auto;
+  border: 0;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+}
+.inspector dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 10px;
+  margin: 0;
+}
+.inspector dt {
+  color: var(--act-text-muted, var(--ifm-color-emphasis-600));
+}
+.inspector dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.tour[data-mode="narrow"] .now {
+  font-size: 1rem;
+}
+.tour[data-mode="narrow"] .nowNext .sayLine {
+  margin-left: 0;
+}
+.tour[data-mode="narrow"] .pipe li {
+  font-size: 0.74rem;
+  padding: 1px 8px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .now,
+  .pipe li[data-state="active"],
+  .stage[data-state="active"] rect,
+  .fresh,
+  .leaving,
+  .ghost > *,
+  .rowFresh,
+  .moved > rect:first-child,
+  .fresh > rect:first-child,
+  .subRow.fresh .rowBg,
+  .leaseBar {
+    animation: none;
+  }
+  .leaving {
+    opacity: 0.2;
+  }
+  .cellPos,
+  .marker {
+    transition: none;
+  }
+}
+
+/* the app's structure */
+.pipeLink,
+.link {
+  fill: none;
+  stroke: color-mix(in srgb, var(--dg-action) 55%, transparent);
+  stroke-width: 1.3;
+}
+.link[data-kind="out"] {
+  stroke: color-mix(in srgb, var(--dg-event) 60%, transparent);
+}
+.link[data-kind="listen"] {
+  stroke: color-mix(in srgb, var(--dg-reaction) 60%, transparent);
+  stroke-dasharray: 3 2;
+}
+.arrowHead {
+  fill: var(--dg-note);
+}
+.stateBox {
+  --k: var(--dg-state);
+}
+.stateBox > rect {
+  fill: color-mix(in srgb, var(--dg-state) 14%, var(--act-surface-1, #fff));
+  stroke: var(--dg-state);
+  stroke-width: 1.4;
+}
+.stateBox.focus > rect {
+  stroke-width: 3;
+  filter: drop-shadow(0 0 6px color-mix(in srgb, var(--dg-state) 55%, transparent));
+}
+.fieldLine {
+  font-family: var(--ifm-font-family-monospace);
+  font-size: 10px;
+  fill: var(--act-text-muted, #6b7486) !important;
+}
+
+/* the field's legend */
+.legend text {
+  font-size: 9.5px;
+  fill: var(--act-text-muted, #6b7486) !important;
+}
+.legend [data-k="k0"] .legendDot { fill: var(--t-s0); }
+.legend [data-k="k1"] .legendDot { fill: var(--t-s1); }
+.legend [data-k="k2"] .legendDot { fill: var(--t-s2); }
+.legend [data-k="k3"] .legendDot { fill: var(--t-s3); }
+.legend [data-k="pii"] .legendDot { fill: var(--dg-note); }
+.legendPii {
+  fill: var(--dg-external);
+}
+.legendRing {
+  fill: none;
+  stroke: var(--dg-state);
+  stroke-width: 1.4;
+}
+.legendTomb {
+  fill: var(--dg-line);
+}
+
+/* subscriptions: the column header and the lane chip */
+.colHead {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  fill: var(--act-text-muted, #6b7486) !important;
+}
+.laneChip rect {
+  fill: color-mix(in srgb, var(--dg-reaction) 12%, transparent);
+  stroke: color-mix(in srgb, var(--dg-reaction) 60%, transparent);
+}
+.laneChip text {
+  font-size: 9.5px !important;
+  font-weight: 600;
+  fill: var(--dg-reaction) !important;
+}
+
+/* the route a token takes, drawn in as it travels */
+.route {
+  fill: none;
+  stroke: var(--dg-action);
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0.45;
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: draw 0.8s cubic-bezier(0.45, 0.05, 0.35, 1) forwards;
+}
+.route[data-tone="bad"] { stroke: var(--dg-bad); }
+.route[data-tone="good"] { stroke: var(--dg-good); }
+@keyframes draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+/* the streams panel */
+.streamsBox h4 {
+  margin: 4px 0 6px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--act-text-muted, var(--ifm-color-emphasis-600));
+}
+.streamList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 190px;
+  overflow-y: auto;
+  font-size: 0.8rem;
+}
+.streamList li {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  padding: 2px 6px;
+  border-radius: 6px;
+  cursor: default;
+}
+.streamList li:hover {
+  background: var(--act-surface-2, rgba(127, 127, 127, 0.1));
+}
+.streamList li[data-color="0"] { --s: var(--t-s0); }
+.streamList li[data-color="1"] { --s: var(--t-s1); }
+.streamList li[data-color="2"] { --s: var(--t-s2); }
+.streamList li[data-color="3"] { --s: var(--t-s3); }
+.streamList li[data-color="4"] { --s: var(--t-s4); }
+.streamList li[data-color="5"] { --s: var(--t-s5); }
+.streamList li[data-color="6"] { --s: var(--t-s6); }
+.streamList li[data-color="7"] { --s: var(--t-s7); }
+.swatch {
+  flex: none;
+  width: 9px;
+  height: 9px;
+  border-radius: 3px;
+  background: var(--s);
+}
+.streamMeta {
+  margin-left: auto;
+  color: var(--act-text-muted, var(--ifm-color-emphasis-600));
+  font-variant-numeric: tabular-nums;
+}
+@media (prefers-reduced-motion: reduce) {
+  .route {
+    animation: none;
+    stroke-dashoffset: 0;
+  }
+}
+
+.bounceLink {
+  stroke: var(--dg-bad);
+  stroke-width: 1.5;
+  stroke-dasharray: 3 2;
+  fill: none;
+}
+
+/* actors: icons at the edge */
+.actor { --k: var(--dg-actor); }
+.actor[data-kind="worker"] { --k: var(--dg-reaction); }
+.actor[data-kind="external"] { --k: var(--dg-external); }
+.actorDisc {
+  fill: color-mix(in srgb, var(--k) 12%, var(--act-surface-1, #fff));
+  stroke: color-mix(in srgb, var(--k) 70%, transparent);
+  stroke-width: 1.4;
+}
+.actor.focus .actorDisc {
+  stroke-width: 2.6;
+  filter: drop-shadow(0 0 7px color-mix(in srgb, var(--k) 60%, transparent));
+}
+.actorIcon > * {
+  fill: var(--k);
+}
+.gear {
+  fill: var(--k) !important;
+}
+.gearHole {
+  fill: var(--act-surface-1, #fff) !important;
+}
+.globe {
+  fill: none !important;
+  stroke: var(--k);
+  stroke-width: 1.4;
+}
+.actorLabel {
+  font-size: 9.5px;
+  font-weight: 600;
+  text-anchor: middle;
+}
+.bridge path {
+  fill: none;
+  stroke: color-mix(in srgb, var(--dg-store) 70%, transparent);
+  stroke-width: 2;
+}
+.trackState {
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+/* captions: subtitles inside the stage, over the strip the layout keeps free */
+.captions {
+  position: absolute;
+  z-index: 8;
+  left: 0;
+  right: 0;
+  bottom: 10px;
+  display: flex;
+  justify-content: center;
+  padding: 0 16px;
+  pointer-events: none;
+  text-align: center;
+}
+.captions p {
+  margin: 0;
+  max-width: min(1200px, 94%);
+  padding: 6px 16px;
+  width: fit-content;
+  border-radius: 16px;
+  background: rgba(12, 16, 26, 0.55);
+  -webkit-backdrop-filter: blur(10px) saturate(1.2);
+  backdrop-filter: blur(10px) saturate(1.2);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18);
+  color: #f6f8fc;
+  font-size: clamp(1.05rem, 1.45vw, 1.55rem);
+  font-weight: 500;
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  animation: captionIn 0.35s var(--t-ease);
+}
+.captions p b {
+  color: #fff;
+}
+@keyframes captionIn {
+  from {
+    opacity: 0;
+  }
+}
+
+/* the one slim control bar */
+/* the one control row under the stage */
+.bar {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 8px;
+  align-items: center;
+  height: 46px;
+  padding: 0 10px;
+  border-top: 1px solid var(--act-border, var(--ifm-color-emphasis-200));
+  background: var(--act-surface-1, var(--ifm-background-surface-color));
+}
+.bar button,
+.bar select {
+  height: 34px;
+  min-width: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--act-border-strong, var(--ifm-color-emphasis-300));
+  border-radius: 8px;
+  background: var(--act-surface-1, var(--ifm-background-surface-color));
+  color: var(--ifm-font-color-base);
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+.bar button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.bar .menuButton {
+  max-width: min(46vw, 420px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.transport {
+  display: flex;
+  gap: 6px;
+  margin: 0 auto;
+}
+.transport .play {
+  min-width: 64px;
+  background: var(--dg-action);
+  border-color: var(--dg-action);
+  color: #fff;
+}
+.toggles {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.toggles .on {
+  border-color: var(--dg-action);
+  background: color-mix(in srgb, var(--dg-action) 14%, transparent);
+  color: var(--dg-action);
+  font-weight: 700;
+}
+.bar .codeIcon {
+  width: 34px;
+  padding: 0;
+  border-radius: 50%;
+  font-size: 0.62rem;
+}
+.menuWrap .menu {
+  top: auto;
+  bottom: 40px;
+}
+/* chapter 0 points at a control */
+.pointing {
+  animation: point 1.2s ease-in-out infinite;
+  border-color: var(--dg-action) !important;
+}
+@keyframes point {
+  50% {
+    box-shadow: 0 0 0 5px color-mix(in srgb, var(--dg-action) 35%, transparent);
+  }
+}
+
+/* the transcript, behind one icon */
+.transcript {
+  position: absolute;
+  z-index: 9;
+  top: 8px;
+  right: 8px;
+  bottom: 8px;
+  width: min(420px, calc(100% - 16px));
+  overflow-y: auto;
+  padding: 10px 12px;
+  border: 1px solid var(--act-border-strong, var(--ifm-color-emphasis-300));
+  border-radius: 12px;
+  background: var(--act-surface-1, var(--ifm-background-surface-color));
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.25);
+}
+.transcriptHead {
+  display: flex;
+  align-items: center;
+  margin-bottom: 6px;
+}
+.transcriptHead button {
+  margin-left: auto;
+  border: 0;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+}
+.transcript ol {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.transcript li button {
+  display: block;
+  width: 100%;
+  margin-bottom: 4px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: 0.82rem;
+  text-align: left;
+  cursor: pointer;
+}
+.transcript li button:hover {
+  background: var(--act-surface-2, rgba(127, 127, 127, 0.1));
+}
+.transcript li[data-state="now"] button {
+  background: color-mix(in srgb, var(--dg-action) 12%, transparent);
+}
+.transcript li[data-state="todo"] {
+  opacity: 0.6;
+}
+.transcript b {
+  display: block;
+  margin-bottom: 2px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .captions p,
+  .pointing {
+    animation: none;
+  }
+}
+
+/* the area a step works in glows softly */
+.glow .layerBox,
+.storeOn .storeBox {
+  stroke: var(--dg-action);
+  stroke-width: 2;
+  filter: drop-shadow(0 0 10px color-mix(in srgb, var(--dg-action) 45%, transparent));
+  transition: filter 0.35s, stroke 0.35s;
+}
+.glow,
+.store,
+.bridge {
+  transition: opacity 0.35s;
+}
+.particle {
+  fill: var(--dg-action);
+  filter: drop-shadow(0 0 4px color-mix(in srgb, var(--dg-action) 80%, transparent));
+}
+.particle[data-tone="good"] { fill: var(--dg-good); }
+.particle[data-tone="bad"] { fill: var(--dg-bad); }
+.particle[data-tone="warn"] { fill: var(--dg-state); }
+.particle[data-tone="muted"] { fill: var(--dg-line); }
+.token circle {
+  filter: drop-shadow(0 0 6px color-mix(in srgb, var(--dg-action) 70%, transparent));
+}
+
+/* the store in one neutral tone; the active cell in the accent */
+.cell {
+  --s: var(--sh, var(--dg-line)) !important;
+}
+.cell.selected {
+  --s: var(--dg-action) !important;
+}
+
+/* where the lens skips ids */
+.gap rect {
+  fill: none;
+  stroke: var(--dg-line);
+  stroke-dasharray: 3 3;
+  opacity: 0.6;
+}
+.gap text {
+  text-anchor: middle;
+  font-size: 13px;
+  fill: var(--act-text-muted, #6b7486) !important;
+}
+.gap .gapIds {
+  font-family: var(--ifm-font-family-monospace);
+  font-size: 9.5px;
+}
+
+/* the chapter button and the tour's progress, segmented by chapter */
+.bar {
+  position: relative;
+}
+.progress {
+  position: absolute;
+  top: -1px;
+  left: 0;
+  right: 0;
+  display: flex;
+  gap: 2px;
+  height: 3px;
+}
+.progress span {
+  position: relative;
+  flex-basis: 0;
+  background: color-mix(in srgb, var(--dg-line) 30%, transparent);
+}
+.progress span[data-now] {
+  background: color-mix(in srgb, var(--dg-action) 25%, transparent);
+}
+.progress i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: var(--dg-action);
+  transition: width 0.4s var(--t-ease);
+}
+.bar .menuButton {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  max-width: min(52vw, 520px);
+  font-weight: 600;
+}
+.menuTitle {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+.menuStep {
+  color: var(--act-text-muted, var(--ifm-color-emphasis-600));
+  font-weight: 400;
+  white-space: nowrap;
+}
+.menuLabel {
+  white-space: nowrap;
+}
+/* the chapter menu: a panel that always fits, the current chapter in view */
+.bar .menu {
+  position: absolute;
+  top: auto;
+  bottom: 44px;
+  left: 0;
+  width: min(440px, calc(100vw - 16px));
+  max-height: min(70vh, calc(100vh - 120px));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.bar .menu[data-mode="narrow"] {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  width: 100%;
+  max-height: 70vh;
+  border-radius: 16px 16px 0 0;
+}
+/* a title card between chapters */
+.card {
+  position: absolute;
+  z-index: 9;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  padding: 18px 30px;
+  border-radius: 18px;
+  background: rgba(12, 16, 26, 0.62);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  color: #fff;
+  font-size: clamp(1.3rem, 2.2vw, 2.1rem);
+  font-weight: 700;
+  animation: captionIn 0.5s var(--t-ease);
+}
+.voiceSelect {
+  max-width: 170px;
+}
+.volume {
+  width: 70px;
+  accent-color: var(--dg-action);
+}
+.tour[data-mode="narrow"] .voiceSelect,
+.tour[data-mode="narrow"] .volume,
+.tour[data-mode="narrow"] .menuTitle,
+.tour[data-mode="narrow"] .menuStep {
+  display: none;
+}
+.bar .menu button {
+  height: auto;
+  min-height: 36px;
+  border: 0;
+  align-items: flex-start;
+}
+
+/* the store port's operations: dim until a step uses them */
+.portLabel {
+  opacity: 0.35;
+  transition: opacity 0.3s;
+}
+.portLabel[data-on],
+.portDrain tspan[data-on] {
+  opacity: 1;
+  fill: var(--dg-action) !important;
+  font-weight: 800;
+}
+.portDrain[data-on] {
+  opacity: 1;
+}
+.portDrain {
+  opacity: 1;
+}
+.portDrain tspan {
+  opacity: 0.35;
+}
+.portDrain tspan[data-on] {
+  fill: var(--dg-reaction) !important;
+}
+.bridge path {
+  opacity: 0.45;
+}
+.bridge path[data-on] {
+  opacity: 1;
+  stroke: var(--dg-action);
+  stroke-dasharray: 7 5;
+  animation: portFlow 0.7s linear infinite;
+}
+@keyframes portFlow {
+  to {
+    stroke-dashoffset: -12;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bridge path[data-on] {
+    animation: none;
+  }
+}
+
+/* a stage's done or failed badge, on its corner */
+.stageMark circle {
+  fill: var(--dg-good);
+  stroke: var(--act-surface-1, #fff);
+  stroke-width: 1.5;
+}
+.stage[data-state="fail"] .stageMark circle {
+  fill: var(--dg-bad);
+}
+.svg .stage .stageMark text {
+  fill: #fff !important;
+  font-size: 8px !important;
+  font-weight: 800;
+  text-anchor: middle;
+}
+
+/* the drain, inside the app */
+.drain > rect {
+  fill: color-mix(in srgb, var(--dg-reaction) 6%, transparent);
+  stroke: color-mix(in srgb, var(--dg-reaction) 55%, transparent);
+  stroke-dasharray: 4 3;
+}
+.drainTitle {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  fill: var(--dg-reaction) !important;
+}
+.glow.drain > rect {
+  stroke: var(--dg-reaction);
+  stroke-width: 2;
+  filter: drop-shadow(0 0 10px color-mix(in srgb, var(--dg-reaction) 45%, transparent));
+}
+.chip[data-kind="worker"] > rect {
+  fill: color-mix(in srgb, var(--dg-reaction) 10%, var(--act-surface-1, #fff));
+  stroke: color-mix(in srgb, var(--dg-reaction) 70%, transparent);
+}

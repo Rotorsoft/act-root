@@ -5,6 +5,8 @@
   "scripts": {
     "build:all": "node scripts/flows.mjs build && typedoc --options typedoc.json && docusaurus build",
     "flows": "node scripts/flows.mjs build",
+    "tour:lines": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/tour-lines.mjs",
+    "check:tour": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/tour-lines.mjs --check",
     "flows:video": "node scripts/flows.mjs video",
     "snippets:extract": "node scripts/check-snippets.mjs",
     "check:snippets": "node scripts/check-snippets.mjs --check",
