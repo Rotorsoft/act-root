@@ -1,3 +1,10 @@
+# [@rotorsoft/act-http-v2.4.0](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-http-v2.3.0...@rotorsoft/act-http-v2.4.0) (2026-11-18)
+
+
+### Features
+
+* **act-http:** publish commits, a $settled subscription, and a connection count over SSE ([#2584](https://github.com/Rotorsoft/act-root/issues/2584)) ([712db32](https://github.com/Rotorsoft/act-root/commit/712db32d42691a8f5c5755412ac1932f8928a56a)), closes [#2580](https://github.com/Rotorsoft/act-root/issues/2580)
+
 # [@rotorsoft/act-http-v2.3.0](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-http-v2.2.0...@rotorsoft/act-http-v2.3.0) (2026-11-18)
 
 
