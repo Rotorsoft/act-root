@@ -406,39 +406,38 @@ describe("sse publish, $settled and onConnections", () => {
     .on({ Added })
     .do(async function view() {})
     .build();
-  const live = fixture(act().withState(Tally).withProjection(View));
+  const test = fixture(act().withState(Tally).withProjection(View));
   const actor = { id: "u-1", name: "u-1" };
 
-  live(
-    "publishes commits, and yields the targets each settle advanced",
-    async ({ app }) => {
-      const channel = new BroadcastChannel<{ _v: number; n: number }>();
-      const counts: number[] = [];
-      const router = trpc(app, {
-        actor: (ctx: Ctx) => ({ id: ctx.actorId, name: ctx.actorId }),
-        stream: () => "t-1",
-        sse: {
-          channel,
-          publish: true,
-          settled: true,
-          onConnections: (n) => counts.push(n),
-        },
-      });
-      const t = initTRPC.context<Ctx>().create();
-      const caller = t.createCallerFactory(router)({ actorId: "u-1" });
-      const iter = await caller.subscribe.$settled();
-      const abort = new AbortController();
-      const frames = take_frames(iter as never, 1, abort);
-      await app.do("add", { stream: "t-1", actor }, { by: 3 });
-      expect(channel.state("t-1")).toEqual({ n: 3, _v: 0 });
-      expect(await frames).toEqual([
-        { kind: "settled", data: { targets: ["tally-view"] } },
-      ]);
-      expect(counts).toEqual([1, 0]);
-    }
-  );
+  test("publishes commits, and yields the targets each settle advanced", async ({
+    app,
+  }) => {
+    const channel = new BroadcastChannel<{ _v: number; n: number }>();
+    const counts: number[] = [];
+    const router = trpc(app, {
+      actor: (ctx: Ctx) => ({ id: ctx.actorId, name: ctx.actorId }),
+      stream: () => "t-1",
+      sse: {
+        channel,
+        publish: true,
+        settled: true,
+        onConnections: (n) => counts.push(n),
+      },
+    });
+    const t = initTRPC.context<Ctx>().create();
+    const caller = t.createCallerFactory(router)({ actorId: "u-1" });
+    const iter = await caller.subscribe.$settled();
+    const abort = new AbortController();
+    const frames = take_frames(iter as never, 1, abort);
+    await app.do("add", { stream: "t-1", actor }, { by: 3 });
+    expect(channel.state("t-1")).toEqual({ n: 3, _v: 0 });
+    expect(await frames).toEqual([
+      { kind: "settled", data: { targets: ["tally-view"] } },
+    ]);
+    expect(counts).toEqual([1, 0]);
+  });
 
-  live("refuses $settled past the connection cap", async ({ app }) => {
+  test("refuses $settled past the connection cap", async ({ app }) => {
     const router = trpc(app, {
       actor: (ctx: Ctx) => ({ id: ctx.actorId, name: ctx.actorId }),
       stream: () => "t-1",

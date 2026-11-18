@@ -309,36 +309,35 @@ describe("hono sse — publish, $settled and onConnections", () => {
     .on({ Added })
     .do(async function view() {})
     .build();
-  const live = fixture(act().withState(Tally).withProjection(View));
+  const test = fixture(act().withState(Tally).withProjection(View));
 
-  live(
-    "streams the targets each settle advanced at /sse/$settled",
-    async ({ app }) => {
-      const channel = new BroadcastChannel<{ _v: number; n: number }>();
-      const counts: number[] = [];
-      const api = hono(app, {
-        actor: () => ({ id: "u-1", name: "alice" }),
-        stream: () => "t-1",
-        sse: {
-          channel,
-          publish: true,
-          settled: true,
-          onConnections: (n) => counts.push(n),
-        },
-      });
-      const res = await api.request("/api/sse/$settled");
-      expect(res.status).toBe(200);
-      const frames = read_sse_frames(res, ["settled"]);
-      await app.do(
-        "add",
-        { stream: "t-1", actor: { id: "u-1", name: "alice" } },
-        { by: 2 }
-      );
-      expect(await frames).toEqual([
-        { event: "settled", data: JSON.stringify({ targets: ["tally-view"] }) },
-      ]);
-      expect(channel.state("t-1")).toEqual({ n: 2, _v: 0 });
-      await vi.waitFor(() => expect(counts).toEqual([1, 0]));
-    }
-  );
+  test("streams the targets each settle advanced at /sse/$settled", async ({
+    app,
+  }) => {
+    const channel = new BroadcastChannel<{ _v: number; n: number }>();
+    const counts: number[] = [];
+    const api = hono(app, {
+      actor: () => ({ id: "u-1", name: "alice" }),
+      stream: () => "t-1",
+      sse: {
+        channel,
+        publish: true,
+        settled: true,
+        onConnections: (n) => counts.push(n),
+      },
+    });
+    const res = await api.request("/api/sse/$settled");
+    expect(res.status).toBe(200);
+    const frames = read_sse_frames(res, ["settled"]);
+    await app.do(
+      "add",
+      { stream: "t-1", actor: { id: "u-1", name: "alice" } },
+      { by: 2 }
+    );
+    expect(await frames).toEqual([
+      { event: "settled", data: JSON.stringify({ targets: ["tally-view"] }) },
+    ]);
+    expect(channel.state("t-1")).toEqual({ n: 2, _v: 0 });
+    await vi.waitFor(() => expect(counts).toEqual([1, 0]));
+  });
 });
