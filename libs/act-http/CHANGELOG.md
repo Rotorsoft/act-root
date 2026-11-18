@@ -1,3 +1,10 @@
+# [@rotorsoft/act-http-v2.1.9](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-http-v2.1.8...@rotorsoft/act-http-v2.1.9) (2026-11-18)
+
+
+### Bug Fixes
+
+* **act-http:** require the sensitive-field lookup; note the name rule ([#2569](https://github.com/Rotorsoft/act-root/issues/2569)) ([cc90ba8](https://github.com/Rotorsoft/act-root/commit/cc90ba8d39fcee4185737a1b6a09d1064efdc3f2)), closes [#2557](https://github.com/Rotorsoft/act-root/issues/2557) [#2558](https://github.com/Rotorsoft/act-root/issues/2558)
+
 # [@rotorsoft/act-http-v2.1.8](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-http-v2.1.7...@rotorsoft/act-http-v2.1.8) (2026-11-16)
 
 
