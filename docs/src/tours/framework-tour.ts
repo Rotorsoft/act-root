@@ -1398,9 +1398,9 @@ const all = await app.query_array({});
             pipe: { name: "reaction", at: 3 },
             say: "The handler calls `app.do` to assign the ticket. That action **inherits** the event that woke it: the same correlation, with `TicketOpened` as its cause.",
             moves: [
-              { from: "assign", to: "AssignTicket", label: "app.do" },
+              { from: "assign", to: "gate", label: "app.do" },
               {
-                from: "AssignTicket",
+                from: "gate",
                 to: "cell:t31-asg",
                 label: "commit",
                 tone: "good",
@@ -1420,6 +1420,7 @@ const all = await app.query_array({});
                 ],
               },
             ],
+            focus: ["AssignTicket"],
           },
           {
             now: "Drain acks `assign:ticket-4831` at {#t31-open} and releases the lease",
@@ -1999,9 +2000,9 @@ app.on("error", ({ error, circuit }) => metrics.increment("store_error", { circu
                 to: "target:escalate:ticket-4821",
                 label: "claim at 10:00",
               },
-              { from: "esc", to: "EscalateTicket", label: "app.do" },
+              { from: "esc", to: "gate", label: "app.do" },
               {
-                from: "EscalateTicket",
+                from: "gate",
                 to: "cell:t21-esc",
                 label: "commit",
                 tone: "good",
@@ -2023,6 +2024,7 @@ app.on("error", ({ error, circuit }) => metrics.increment("store_error", { circu
               { op: "ack", target: "escalate:ticket-4821", at: "t21-asg" },
               { op: "checkpoint", at: "t21-esc" },
             ],
+            focus: ["EscalateTicket"],
           },
           {
             now: "{#t22-asg} `TicketAssigned` (escalate at 11:00), then {#t22-closed} `TicketClosed` by Bo",

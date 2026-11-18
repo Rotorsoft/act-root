@@ -201,7 +201,8 @@ function Tokens({ moves, lay, run, reduce }: { moves: Move[]; lay: Layout; run: 
         >
           <circle r={7} />
           {m.label && (
-            <text x={11} y={4}>
+            // above and right of the token, clear of the chip it passes
+            <text x={9} y={-11}>
               {m.label}
             </text>
           )}

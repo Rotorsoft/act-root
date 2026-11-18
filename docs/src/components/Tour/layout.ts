@@ -1054,7 +1054,16 @@ export function layout(
         else app_in(bb, b);
       }
     } else if (ra === "app" && rb === "store") {
-      if (from_pipe && has_layer) out.push(pipe_start(), pipe_end(), port);
+      // out of app.do: down into the action layer, along it, out of the port
+      if (from === "gate" && has_layer)
+        out.push(
+          center(appl.gate),
+          { x: center(appl.gate).x, y: pipe_start().y },
+          pipe_start(),
+          pipe_end(),
+          port
+        );
+      else if (from_pipe && has_layer) out.push(pipe_start(), pipe_end(), port);
       else {
         app_out_right(ab, a);
         out.push({ x: rx, y: port.y }, port);
@@ -1097,6 +1106,16 @@ export function layout(
         { x: gx, y: lane_y },
         { x: gx, y: b.y },
         b
+      );
+    } else if (ra === "app" && to === "gate") {
+      // a reaction calls app.do: out to the app's left lane, up it, and in at the gate
+      const g = center(appl.gate);
+      out.push(
+        ab ? { x: ab.x, y: a.y } : a,
+        { x: lx2, y: a.y },
+        { x: lx2, y: g.y },
+        { x: appl.gate.x, y: g.y },
+        g
       );
     } else {
       // within one region: an elbow, never a diagonal
