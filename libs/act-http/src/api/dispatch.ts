@@ -43,8 +43,8 @@ export type ActSurface = {
         >;
       }
     >;
-    /** The sensitive fields of an action or event. Without it, SSE refuses a state with events, and OpenAPI marks no field write-only. */
-    sensitive_fields?(name: string): readonly string[];
+    /** The sensitive fields of an action or event, as a built Act's registry answers. */
+    sensitive_fields(name: string): readonly string[];
   };
   do(action: string, target: Target, payload: unknown): Promise<unknown>;
 };
