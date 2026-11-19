@@ -126,7 +126,7 @@ describe("BroadcastChannel", () => {
   });
 
   it("refuses a cacheSize that would never evict or never keep a state", () => {
-    for (const cacheSize of [Number.NaN, 0, -1])
+    for (const cacheSize of [Number.NaN, Number.POSITIVE_INFINITY, 0, -1])
       expect(() => new BroadcastChannel<TestState>({ cacheSize })).toThrow();
     expect(() => new BroadcastChannel<TestState>()).not.toThrow();
   });

@@ -20,6 +20,8 @@ Most Act apps reach beyond their own process eventually — POSTing committed ev
 pnpm add @rotorsoft/act-http
 ```
 
+`zod` is a peer dependency, the one `@rotorsoft/act` already uses, so act-http and your app share one copy. The browser half of `/sse` (`applyPatchMessage`, the wire types) doesn't load zod at all.
+
 Three independent subpath exports:
 
 | Import path | What you get |

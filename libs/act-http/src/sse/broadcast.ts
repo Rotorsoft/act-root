@@ -1,5 +1,4 @@
 import { patch as apply_patch, type Patch } from "@rotorsoft/act-patch";
-import { z } from "zod";
 import { resync_frame } from "./frames.js";
 import { StateCache } from "./state-cache.js";
 import type { BroadcastState, PatchMessage, Subscriber } from "./types.js";
@@ -110,9 +109,9 @@ const tag_overlay_keys = <S extends object>(
 
 // `size > NaN` is always false, so a NaN cache never evicts and grows with
 // every stream ever published; 0 drops each state right after publishing it.
-const BroadcastOptionsSchema = z.object({
-  cacheSize: z.number().min(1).default(50),
-});
+// Checked without zod: this module is what a browser bundle imports for
+// `applyPatchMessage`, and must not pull a schema library in with it.
+const DEFAULT_CACHE_SIZE = 50;
 
 /**
  * Server-side broadcast channel for incremental state sync over SSE.
@@ -185,9 +184,11 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
      */
     onSubscriberError?: (error: unknown, streamId: string) => void;
   }) {
-    const { cacheSize } = BroadcastOptionsSchema.parse({
-      cacheSize: options?.cacheSize,
-    });
+    const cacheSize = options?.cacheSize ?? DEFAULT_CACHE_SIZE;
+    if (!Number.isFinite(cacheSize) || cacheSize < 1)
+      throw new RangeError(
+        `BroadcastChannel: cacheSize must be a number of at least 1, got ${cacheSize}`
+      );
     this.state_cache = new StateCache<S>(cacheSize, (streamId, dropped) =>
       this.on_cache_evict(streamId, dropped)
     );

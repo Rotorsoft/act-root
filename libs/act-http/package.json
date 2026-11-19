@@ -2,7 +2,7 @@
   "name": "@rotorsoft/act-http",
   "type": "module",
   "version": "2.4.0",
-  "description": "HTTP integrations for act apps — webhooks, SSE, and tRPC, Hono and OpenAPI APIs generated from the registry",
+  "description": "HTTP integrations for act apps \u2014 webhooks, SSE, and tRPC, Hono and OpenAPI APIs generated from the registry",
   "keywords": [
     "typescript",
     "http",
@@ -101,7 +101,8 @@
     "@trpc/server": ">=11.28.0",
     "express": "^5.3.0",
     "fastify": "^5.12.8",
-    "hono": "^4.13.18"
+    "hono": "^4.13.18",
+    "zod": "^4.6.7"
   },
   "peerDependenciesMeta": {
     "@rotorsoft/act-ops": {
