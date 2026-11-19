@@ -22,8 +22,10 @@ function* walk(dir) {
 }
 
 // Test names by repo-relative path, from it/test/describe calls and calls
-// of a test function the file declares from `fixture(...)` or `sandbox(...)`.
-const fixture = /\bconst\s+(\w+)\s*=\s*(?:fixture|sandbox)\(/g;
+// of a test function the file declares as `const <name> = fixture(...)`.
+// A typed declaration or a fixture imported under another name isn't seen,
+// which fails a correct citation rather than passing a wrong one.
+const fixture = /\bconst\s+(\w+)\s*=\s*fixture\(/g;
 const call_of = (fns) =>
   new RegExp(
     `\\b(?:${fns.join("|")})(?:\\.\\w+(?:\\([^)]*\\))?)*\\(\\s*(["'\`])((?:\\\\.|(?!\\1).)*?)\\1`,
