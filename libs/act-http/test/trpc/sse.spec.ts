@@ -58,9 +58,7 @@ const default_options = (
   sse: { channel, ...sse_overrides },
 });
 
-type SubscriptionFrame =
-  | { kind: "state"; data: unknown }
-  | { kind: "patch"; data: unknown };
+type SubscriptionFrame = { kind: "state" | "patch" | "settled"; data: unknown };
 
 /**
  * Drain the first `n` frames from an async-iterable subscription.
@@ -458,7 +456,7 @@ describe("sse publish, $settled and onConnections", () => {
     const caller = t.createCallerFactory(router)({ actorId: "u-1" });
     const iter = await caller.subscribe.$settled();
     const abort = new AbortController();
-    const frames = take_frames(iter as never, 1, abort);
+    const frames = take_frames(iter, 1, abort);
     await app.do("add", { stream: "t-1", actor }, { by: 3 });
     expect(channel.state("t-1")).toEqual({ n: 3, _v: 0 });
     expect(await frames).toEqual([
@@ -515,7 +513,7 @@ describe("sse publish, $settled and onConnections", () => {
       settled: true,
     });
     const abort = new AbortController();
-    const frames = take_frames(iter as never, 2, abort);
+    const frames = take_frames(iter, 2, abort);
     await app.do("add", { stream: "t-2", actor }, { by: 5 });
     expect(await frames).toEqual([
       expect.objectContaining({ kind: "patch", state: "Tally", stream: "t-2" }),
@@ -566,19 +564,26 @@ describe("sse publish, $settled and onConnections", () => {
     expect(counts).toEqual([1, 0, 1, 0, 1, 0]);
   });
 
-  test("yields a target that advanced on a retry, outside the settle loop", async () => {
+  describe("a target that advances on a retry", () => {
     let attempts = 0;
     async function flaky() {
       if (++attempts === 1) throw new Error("transient");
     }
-    const retrying = act()
-      .withState(Tally)
-      .on("Added")
-      .do(flaky, { maxRetries: 3, backoff: { strategy: "fixed", baseMs: 20 } })
-      .to("tally-retry")
-      .build();
-    try {
-      const router = trpc(retrying, {
+    const test = fixture(
+      act()
+        .withState(Tally)
+        .on("Added")
+        .do(flaky, {
+          maxRetries: 3,
+          backoff: { strategy: "fixed", baseMs: 20 },
+        })
+        .to("tally-retry")
+    );
+
+    test("yields a target that advanced on a retry, outside the settle loop", async ({
+      app,
+    }) => {
+      const router = trpc(app, {
         actor: (ctx: Ctx) => ({ id: ctx.actorId, name: ctx.actorId }),
         stream: () => "t-1",
         sse: { channel: new BroadcastChannel(), settled: true },
@@ -587,15 +592,13 @@ describe("sse publish, $settled and onConnections", () => {
       const caller = t.createCallerFactory(router)({ actorId: "u-1" });
       const iter = await caller.subscribe.$settled();
       const abort = new AbortController();
-      const frames = take_frames(iter as never, 1, abort);
-      await retrying.do("add", { stream: "t-1", actor }, { by: 1 });
+      const frames = take_frames(iter, 1, abort);
+      await app.do("add", { stream: "t-1", actor }, { by: 1 });
       // The first attempt fails in settle; the backoff's own drain acks it.
       expect(await frames).toEqual([
         { kind: "settled", data: { targets: ["tally-retry"] } },
       ]);
       expect(attempts).toBe(2);
-    } finally {
-      await retrying.shutdown();
-    }
+    });
   });
 });
