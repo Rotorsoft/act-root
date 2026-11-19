@@ -62,6 +62,7 @@ import {
   type AppActions,
   type AppStateNames,
   make_dispatch,
+  matches_stream,
   type ResolverArgs,
   type SelectedActions,
   type StreamPatterns,
@@ -78,7 +79,7 @@ import {
 import { fire_and_forget, SseConnectionCounter } from "../api/sse-counter.js";
 import { live_sources, run_live_subscription } from "../api/sse-live.js";
 import { SseOptionsSchema } from "../api/sse-options.js";
-import { run_settled_subscription, sse_sources } from "../api/sse-settled.js";
+import { sse_sources } from "../api/sse-settled.js";
 import { sse_state_names } from "../api/sse-states.js";
 
 /**
@@ -367,9 +368,15 @@ export function hono<TApp extends ActSurface>(
     if (sse_config.settled)
       api.get("/sse/$settled", (c) =>
         serve(c, (signal) =>
-          run_settled_subscription(settled_source!, undefined, signal, {
-            maxPending: sse_config.maxPendingPerConnection,
-          })
+          // A `$live` that follows no stream yields only the settled frames.
+          run_live_subscription(
+            sse_config.channel,
+            [],
+            settled_source,
+            undefined,
+            signal,
+            { maxPending: sse_config.maxPendingPerConnection }
+          )
         )
       );
     if (sse_config.live) {
@@ -425,6 +432,15 @@ export function hono<TApp extends ActSurface>(
             code: "BAD_REQUEST",
           };
           return c.json(body, 400);
+        }
+        // A caller-addressed state's stream must match its pattern here too.
+        if (!matches_stream(options.streams?.[state_name], stream_id)) {
+          const body: ApiError = {
+            error: "InvalidStream",
+            detail: `"${stream_id}" is not a stream of ${state_name}`,
+            code: "INVALID_STREAM",
+          };
+          return c.json(body, 422);
         }
         // `serve` holds the slot, so the shared loop runs without accounting.
         return serve(c, (signal) =>

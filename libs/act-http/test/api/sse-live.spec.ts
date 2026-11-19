@@ -17,9 +17,13 @@ const settled_source = () => {
       emitter.on(event, listener),
     off: (event: string, listener: (arg: unknown) => void) =>
       emitter.off(event, listener),
+    // A drain that advanced these targets.
     settle: (...streams: string[]) =>
-      emitter.emit("settled", { acked: streams.map((stream) => ({ stream })) }),
-    listeners: () => emitter.listenerCount("settled"),
+      emitter.emit(
+        "acked",
+        streams.map((stream) => ({ stream }))
+      ),
+    listeners: () => emitter.listenerCount("acked"),
   };
   return source as typeof source & SettledSource;
 };

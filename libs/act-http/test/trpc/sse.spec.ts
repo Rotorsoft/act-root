@@ -393,6 +393,36 @@ describe("trpc sse — a state with sensitive events", () => {
   });
 });
 
+describe("a caller-addressed state's subscription", () => {
+  test("opens only a stream that matches the state's pattern", async ({
+    app,
+  }) => {
+    const channel = new BroadcastChannel<{ _v: number; display: string }>();
+    channel.publish("calc-1", { _v: 0, display: "1" }, [{ display: "1" }]);
+    const router = trpc(app, {
+      actor: (ctx: Ctx) => ({ id: ctx.actorId, name: ctx.actorId }),
+      stream: () => "calc-1",
+      streams: { Calculator: /^calc-\d+$/ },
+      sse: { channel },
+    });
+    const t = initTRPC.context<Ctx>().create();
+    const caller = t.createCallerFactory(router)({ actorId: "u-1" });
+    const refused = (await caller.subscribe.Calculator({ stream: "ticket-1" }))[
+      Symbol.asyncIterator
+    ]();
+    await expect(refused.next()).rejects.toMatchObject({
+      code: "UNPROCESSABLE_CONTENT",
+      message: 'INVALID_STREAM: "ticket-1" is not a stream of Calculator',
+    });
+    // Control: a matching stream opens on its cached state.
+    const opened = (await caller.subscribe.Calculator({ stream: "calc-1" }))[
+      Symbol.asyncIterator
+    ]();
+    expect((await opened.next()).value).toMatchObject({ kind: "state" });
+    await opened.return?.(undefined);
+  });
+});
+
 describe("sse publish, $settled and onConnections", () => {
   const Added = z.object({ by: z.number() });
   const Tally = state({ Tally: z.object({ n: z.number() }) })
@@ -534,5 +564,38 @@ describe("sse publish, $settled and onConnections", () => {
           .next()
       ).rejects.toMatchObject({ code: "UNPROCESSABLE_CONTENT" });
     expect(counts).toEqual([1, 0, 1, 0, 1, 0]);
+  });
+
+  test("yields a target that advanced on a retry, outside the settle loop", async () => {
+    let attempts = 0;
+    async function flaky() {
+      if (++attempts === 1) throw new Error("transient");
+    }
+    const retrying = act()
+      .withState(Tally)
+      .on("Added")
+      .do(flaky, { maxRetries: 3, backoff: { strategy: "fixed", baseMs: 20 } })
+      .to("tally-retry")
+      .build();
+    try {
+      const router = trpc(retrying, {
+        actor: (ctx: Ctx) => ({ id: ctx.actorId, name: ctx.actorId }),
+        stream: () => "t-1",
+        sse: { channel: new BroadcastChannel(), settled: true },
+      });
+      const t = initTRPC.context<Ctx>().create();
+      const caller = t.createCallerFactory(router)({ actorId: "u-1" });
+      const iter = await caller.subscribe.$settled();
+      const abort = new AbortController();
+      const frames = take_frames(iter as never, 1, abort);
+      await retrying.do("add", { stream: "t-1", actor }, { by: 1 });
+      // The first attempt fails in settle; the backoff's own drain acks it.
+      expect(await frames).toEqual([
+        { kind: "settled", data: { targets: ["tally-retry"] } },
+      ]);
+      expect(attempts).toBe(2);
+    } finally {
+      await retrying.shutdown();
+    }
   });
 });

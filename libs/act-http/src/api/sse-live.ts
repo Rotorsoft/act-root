@@ -1,6 +1,7 @@
 import type { BroadcastChannel } from "../sse/broadcast.js";
 import { resync_frame } from "../sse/frames.js";
 import type { PatchMessage } from "../sse/types.js";
+import { matches_stream } from "./dispatch.js";
 import type { SettledSource, SseSettledFrame } from "./sse-settled.js";
 import type { SseAccounting } from "./sse-wiring.js";
 import { DEFAULT_SSE_MAX_PENDING_PER_CONNECTION } from "./sse-wiring.js";
@@ -69,10 +70,8 @@ export async function* run_live_subscription(
     pending.push({ kind: "patch", ...source, data: resync_frame() });
     wake();
   };
-  const on_settled = (drain: {
-    readonly acked: readonly { stream: string }[];
-  }) => {
-    const targets = [...new Set(drain.acked.map((l) => l.stream))];
+  const on_acked = (acked: readonly { stream: string }[]) => {
+    const targets = [...new Set(acked.map((l) => l.stream))];
     if (!targets.length) return;
     let last = pending.length - 1;
     while (last >= 0 && pending[last]!.kind !== "settled") last--;
@@ -89,7 +88,7 @@ export async function* run_live_subscription(
   const unsubscribes = sources.map((source) =>
     channel.subscribe(source.stream, (msg) => enqueue_patch(source, msg))
   );
-  settled?.on("settled", on_settled);
+  settled?.on("acked", on_acked);
   signal?.addEventListener("abort", wake);
   try {
     for (const source of sources) {
@@ -109,7 +108,7 @@ export async function* run_live_subscription(
   } finally {
     signal?.removeEventListener("abort", wake);
     for (const unsubscribe of unsubscribes) unsubscribe();
-    settled?.off("settled", on_settled);
+    settled?.off("acked", on_acked);
     if (acquired) accounting?.release();
   }
 }
@@ -141,8 +140,7 @@ export function live_sources(
       const matches =
         typeof stream === "string" &&
         stream.length > 0 &&
-        (!pattern ||
-          (pattern instanceof RegExp ? pattern.test(stream) : pattern(stream)));
+        matches_stream(pattern, stream);
       if (!matches)
         return { refused: `"${String(stream)}" is not a stream of ${state}` };
       const listed = sources.get(stream);

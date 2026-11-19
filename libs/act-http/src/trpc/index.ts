@@ -71,6 +71,7 @@ import {
   type AppState,
   type AppStateNames,
   make_dispatch,
+  matches_stream,
   type ResolverArgs,
   type SelectedActions,
   type StreamPatterns,
@@ -87,11 +88,7 @@ import {
 import { SseConnectionCounter } from "../api/sse-counter.js";
 import { live_sources, run_live_subscription } from "../api/sse-live.js";
 import { SseOptionsSchema } from "../api/sse-options.js";
-import {
-  run_settled_subscription,
-  type SseSettledFrame,
-  sse_sources,
-} from "../api/sse-settled.js";
+import { type SseSettledFrame, sse_sources } from "../api/sse-settled.js";
 import { sse_state_names } from "../api/sse-states.js";
 
 // A `$live` request: streams by state name, and whether to add the settled targets.
@@ -442,7 +439,8 @@ export function trpc<Ctx extends object, TApp extends ActSurface>(
 
   // Run the actor extractor for a generated procedure, mapping a "throw to
   // deny" onto `UNAUTHORIZED` rather than a framework 500. Shared by
-  // mutations and subscriptions, so a denied caller gets neither. It runs
+  // mutations and subscriptions, so a denied caller gets neither, and a
+  // subscription resolves it before it takes a slot or yields a frame. It runs
   // inline rather than as `t.procedure.use(authenticated(...))`: the
   // middleware threads tRPC's internal `Unwrap` type into each procedure,
   // which the d.ts emitter can't name portably (its file name is hashed
@@ -607,22 +605,31 @@ export function trpc<Ctx extends object, TApp extends ActSurface>(
         signal,
       }) {
         await resolve_actor(ctx as unknown as Ctx);
-        yield* run_settled_subscription(settled_source!, sse_counter, signal, {
-          maxPending: sse_config.maxPendingPerConnection,
-          on_cap_exceeded: too_many,
-        });
+        // A `$live` that follows no stream yields only the settled frames.
+        yield* run_live_subscription(
+          sse_config.channel,
+          [],
+          settled_source,
+          sse_counter,
+          signal,
+          {
+            maxPending: sse_config.maxPendingPerConnection,
+            on_cap_exceeded: too_many,
+          }
+        );
       });
     for (const state_name of state_names) {
       sse_handlers[state_name] = t.procedure
         .input(z.object({ stream: z.string().min(1) }))
         .subscription(async function* ({ input, ctx, signal }) {
-          // Step 1 of the documented subscription contract: the actor
-          // extractor runs before a slot is taken or a frame is yielded,
-          // so a denying extractor denies the open. Hono gets this from
-          // the `authenticated` middleware it mounts across `/api/*`;
-          // this generator is where the same rule lives for tRPC, which
-          // resolves the actor inline rather than through middleware.
           await resolve_actor(ctx as unknown as Ctx);
+          // A caller-addressed state's stream must match its pattern here
+          // too, or another state's stream would arrive typed as this one.
+          if (!matches_stream(options.streams?.[state_name], input.stream))
+            throw new TRPCError({
+              code: "UNPROCESSABLE_CONTENT",
+              message: `INVALID_STREAM: "${input.stream}" is not a stream of ${state_name}`,
+            });
           yield* runSseSubscription(
             sse_config.channel,
             input.stream,

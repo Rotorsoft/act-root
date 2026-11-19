@@ -49,17 +49,11 @@ export type ActSurface = {
   do(action: string, target: Target, payload: unknown): Promise<unknown>;
   /**
    * The app's lifecycle events, which `sse.publish` (`committed`) and
-   * `sse.settled` (`settled`) listen to. A built Act has them; a surface
-   * without them can't use those two options.
+   * `sse.settled` and `sse.live` (`acked`) listen to. A built Act has them; a surface
+   * without them can't use those options.
    */
-  on?(
-    event: "committed" | "settled",
-    listener: (arg: unknown) => void
-  ): unknown;
-  off?(
-    event: "committed" | "settled",
-    listener: (arg: unknown) => void
-  ): unknown;
+  on?(event: "committed" | "acked", listener: (arg: unknown) => void): unknown;
+  off?(event: "committed" | "acked", listener: (arg: unknown) => void): unknown;
 };
 
 /**
@@ -113,6 +107,14 @@ export type ActionInput<TApp, P, K> =
     ? { stream: string; payload: AppActions<TApp>[K & keyof AppActions<TApp>] }
     : AppActions<TApp>[K & keyof AppActions<TApp>];
 
+/** Whether `stream` matches a state's pattern; a state without one takes any. */
+export const matches_stream = (
+  pattern: RegExp | ((stream: string) => boolean) | undefined,
+  stream: string
+): boolean =>
+  !pattern ||
+  (pattern instanceof RegExp ? pattern.test(stream) : pattern(stream));
+
 /**
  * The stream patterns of the states `app`'s actions belong to, by action
  * name, and refuses at generation a state that neither `patterns` nor a
@@ -130,11 +132,7 @@ export function stream_patterns(
   for (const [action, state] of Object.entries(app.registry.actions)) {
     states.add(state.name);
     const pattern = patterns?.[state.name];
-    if (pattern)
-      by_action.set(
-        action,
-        pattern instanceof RegExp ? (s) => pattern.test(s) : pattern
-      );
+    if (pattern) by_action.set(action, (s) => matches_stream(pattern, s));
     else if (!has_resolver) uncovered.add(state.name);
   }
   const unknown = Object.keys(patterns ?? {}).filter((n) => !states.has(n));
