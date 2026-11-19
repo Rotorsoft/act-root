@@ -7,7 +7,8 @@
  * same barrel pulls Node's `AsyncLocalStorage` into every client bundle.
  * This walks each entry's import graph, `@rotorsoft/*` builds and
  * `import("literal")` chunks included, and fails on any `node:` builtin or
- * bare Node module.
+ * bare Node module, on zod (imported, or inlined by a build that forgot to
+ * keep it external), and when the files it reaches outgrow the entry's budget.
  *
  * Runs against `dist/`, so `pnpm build` must come first.
  *
@@ -29,8 +30,14 @@ const BROWSER_ENTRIES = [
   {
     entry: "libs/act-http/dist/sse/index.js",
     why: "applyPatchMessage + wire types — see docs/docs/concepts/real-time.md",
+    // Unminified bytes of every file it reaches: ~13.5 KB today, ~750 KB when
+    // a build inlined zod (#2587).
+    budget: 20_000,
   },
 ];
+
+/** Packages a browser entry must not reach: the app ships its own copy. */
+const SERVER_ONLY = ["zod"];
 
 const NODE_BUILTINS = new Set([
   ...builtinModules,
@@ -66,7 +73,7 @@ const resolve_workspace = (spec) => {
 
 const violations = [];
 
-for (const { entry, why } of BROWSER_ENTRIES) {
+for (const { entry, why, budget } of BROWSER_ENTRIES) {
   const start = join(ROOT, entry);
   if (!existsSync(start)) {
     violations.push(`${entry} — not built; run \`pnpm build\` first`);
@@ -78,7 +85,18 @@ for (const { entry, why } of BROWSER_ENTRIES) {
     if (seen.has(file)) return;
     seen.add(file);
     const source = readFileSync(file, "utf8");
+    bytes += Buffer.byteLength(source);
+    if (source.includes("zod/v4"))
+      violations.push(
+        `${entry} reaches an inlined zod\n    in ${[...trail].join(" → ")}\n    (${why})`
+      );
     for (const spec of specifiers(source)) {
+      if (SERVER_ONLY.some((p) => spec === p || spec.startsWith(`${p}/`))) {
+        violations.push(
+          `${entry} reaches "${spec}"\n    via ${[...trail, spec].join(" → ")}\n    (${why})`
+        );
+        continue;
+      }
       if (NODE_BUILTINS.has(spec)) {
         violations.push(
           `${entry} reaches Node builtin "${spec}"\n    via ${[...trail, spec].join(" → ")}\n    (${why})`
@@ -98,11 +116,18 @@ for (const { entry, why } of BROWSER_ENTRIES) {
       if (workspace && existsSync(workspace)) walk(workspace, [...trail, spec]);
     }
   };
+  let bytes = 0;
   walk(start, [entry]);
+  if (bytes > budget)
+    violations.push(
+      `${entry} reaches ${bytes} bytes, over its ${budget}-byte budget\n    (${why})`
+    );
 }
 
 if (violations.length) {
-  console.error("Browser-facing entry points must not import Node APIs:\n");
+  console.error(
+    "Browser-facing entry points must not import Node APIs or server-only packages, or outgrow their budget:\n"
+  );
   for (const v of violations) console.error(`  ✗ ${v}\n`);
   console.error(
     "Keep server-only code out of these entry points: a bundler follows every\n" +
@@ -112,5 +137,5 @@ if (violations.length) {
 }
 
 console.log(
-  `browser-safe: ${BROWSER_ENTRIES.length} entry point(s) carry no Node dependency`
+  `browser-safe: ${BROWSER_ENTRIES.length} entry point(s) carry no Node dependency or zod, within budget`
 );
