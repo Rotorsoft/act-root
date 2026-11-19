@@ -7,8 +7,9 @@
  * same barrel pulls Node's `AsyncLocalStorage` into every client bundle.
  * This walks each entry's import graph, `@rotorsoft/*` builds and
  * `import("literal")` chunks included, and fails on any `node:` builtin or
- * bare Node module, on zod (imported, or inlined by a build that forgot to
- * keep it external), and when the files it reaches outgrow the entry's budget.
+ * bare Node module, on an imported zod, and when the files it reaches outgrow
+ * the entry's budget (an inlined zod, from a build that forgot to keep it
+ * external, is ~750 KB).
  *
  * Runs against `dist/`, so `pnpm build` must come first.
  *
@@ -85,11 +86,9 @@ for (const { entry, why, budget } of BROWSER_ENTRIES) {
     if (seen.has(file)) return;
     seen.add(file);
     const source = readFileSync(file, "utf8");
+    // An inlined zod (~750 KB) blows the budget; an imported one is caught
+    // below by name.
     bytes += Buffer.byteLength(source);
-    if (source.includes("zod/v4"))
-      violations.push(
-        `${entry} reaches an inlined zod\n    in ${[...trail].join(" → ")}\n    (${why})`
-      );
     for (const spec of specifiers(source)) {
       if (SERVER_ONLY.some((p) => spec === p || spec.startsWith(`${p}/`))) {
         violations.push(
@@ -103,13 +102,9 @@ for (const { entry, why, budget } of BROWSER_ENTRIES) {
         );
         continue;
       }
+      // Built imports name their file, `.js` included.
       if (spec.startsWith(".")) {
-        const rel = resolve(dirname(file), spec);
-        for (const candidate of [rel, `${rel}.js`, join(rel, "index.js")])
-          if (existsSync(candidate) && !candidate.endsWith("/")) {
-            walk(candidate, [...trail, spec]);
-            break;
-          }
+        walk(resolve(dirname(file), spec), [...trail, spec]);
         continue;
       }
       const workspace = resolve_workspace(spec);

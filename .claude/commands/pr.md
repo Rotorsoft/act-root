@@ -14,7 +14,7 @@ Open a pull request for the current branch following the Act project conventions
 4. Compose the PR body in the one shape below.
    - **Title**: under 70 chars, conventional-commits format matching the dominant commit type on the branch.
    - **Body**: `Closes #N.` if applicable, one plain sentence saying what happened, then the four questions in "Write it in plain language", each as a `##` section when it has more than a sentence.
-   - **Test plan**: only what was checked beyond CI (CI runs typecheck, lint, tests with 100% coverage, build and the stability snapshot): manual runs, probes, a docs build.
+   - **Test plan**: only what was checked beyond CI (CI runs typecheck, lint, tests with 100% coverage, build, the stability snapshot and the repo checks): manual runs, probes, a docs build. A local full suite is not a test plan item.
    - **Stability charter**: one line, additive or breaking, with the charter-covered files touched; skip it when none changed. If the PR adds public surface (new export, builder method, port method, lifecycle event, new field on an exported type), link its `rfcs/NNNN-*.md` there.
 5. Open with `gh pr create --title ... --body "$(cat <<'EOF' ... EOF)"` and HEREDOC the body so Markdown formatting survives.
 6. Print the resulting URL.

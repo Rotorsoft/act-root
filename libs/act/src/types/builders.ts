@@ -142,9 +142,7 @@ interface BuilderBase<
  * @template TLanes - Union of declared lane names. Narrowed by
  *   `.withLane({name})` calls so `.to({lane})` and `ActOptions.onlyLanes`
  *   reject typos at compile time. Starts at `"default"`.
- * @template TActionStates - Each action's state name, by action name, filled
- *   in by `withState` and `withSlice`, so `registry.actions[action].name` is
- *   the state's literal name. Defaults to `Record<string, string>`.
+ * @template TActionStates - Each action's state name; see `Registry`.
  *
  * @see {@link act} for usage examples
  * @see {@link Act} for the built orchestrator API
@@ -640,9 +638,7 @@ export type ActionBuilder<
  * @template TActions - Action schemas from this slice's states
  * @template TStateMap - Map of state names to state schemas
  * @template TActor - Actor type extending base Actor
- * @template TActionStates - Each action's state name, by action name, filled
- *   in by `withState` and `withSlice`, so `registry.actions[action].name` is
- *   the state's literal name. Defaults to `Record<string, string>`.
+ * @template TActionStates - Each action's state name; see `Registry`.
  */
 export type Slice<
   TSchemaReg extends SchemaRegister<TActions>,
@@ -672,6 +668,7 @@ export type Slice<
   readonly _TActor?: TActor;
   /** @internal phantom field for type-level lane union tracking */
   readonly _TLanes?: TLanes;
+  /** @internal phantom field for type-level action → state tracking */
   readonly _A?: TActionStates;
 };
 
@@ -686,9 +683,7 @@ export type Slice<
  * @template TActions - Action schemas
  * @template TStateMap - Map of state names to state schemas
  * @template TActor - Actor type extending base Actor
- * @template TActionStates - Each action's state name, by action name, filled
- *   in by `withState` and `withSlice`, so `registry.actions[action].name` is
- *   the state's literal name. Defaults to `Record<string, string>`.
+ * @template TActionStates - Each action's state name; see `Registry`.
  */
 export interface SliceBuilder<
   TSchemaReg extends SchemaRegister<TActions>,

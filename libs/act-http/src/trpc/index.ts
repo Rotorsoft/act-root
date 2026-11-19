@@ -494,21 +494,10 @@ export function trpc<Ctx extends object, TApp extends ActSurface>(
       .input((raw: unknown) => raw)
       .mutation(async ({ input, ctx }) => {
         const host_ctx = ctx as unknown as Ctx;
-        // Resolve the actor first, mirroring Hono's `authenticated` middleware:
-        // a "throw to deny" from the extractor is 401 UNAUTHORIZED, not a 500.
-        // The actor step is auth — distinct from a framework error inside
-        // `app.do`, which the main try below maps via `to_trpc_error`.
         const actor: Actor = await resolve_actor(host_ctx);
         try {
-          // Validate the payload before the stream / expectedVersion resolvers
-          // see it, mirroring Hono's zValidator-then-handler order. `validate`
-          // throws the framework `ValidationError`, which `to_trpc_error` maps
-          // to 422 / UNPROCESSABLE_CONTENT with the shared ApiError envelope.
-          // The resolvers get the parsed value, but `app.do` gets the
-          // raw `input`: it parses again itself, and a second parse of the
-          // output would run every `.transform()` twice.
-          // A caller-addressed action takes `{ stream, payload }`, so the
-          // payload stays exactly the action's schema.
+          // The resolvers see the parsed payload; `make_dispatch` hands
+          // `app.do` the raw one. An addressed action takes `{ stream, payload }`.
           const envelope = matches
             ? ((input ?? {}) as { stream?: unknown; payload?: unknown })
             : undefined;
