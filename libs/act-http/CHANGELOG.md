@@ -1,3 +1,10 @@
+# [@rotorsoft/act-http-v2.5.1](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-http-v2.5.0...@rotorsoft/act-http-v2.5.1) (2026-11-19)
+
+
+### Bug Fixes
+
+* **act-http:** keep zod external, and out of the browser half of /sse ([#2588](https://github.com/Rotorsoft/act-root/issues/2588)) ([487b91c](https://github.com/Rotorsoft/act-root/commit/487b91c5558cc959dec843fbdece2ca5905acf47)), closes [#2587](https://github.com/Rotorsoft/act-root/issues/2587)
+
 # [@rotorsoft/act-http-v2.5.0](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-http-v2.4.0...@rotorsoft/act-http-v2.5.0) (2026-11-18)
 
 
