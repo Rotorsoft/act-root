@@ -298,7 +298,7 @@ const router = trpc(app, {
 trpc.VoidInvoice.mutate({ stream: "invoice-acme-42", payload: { reason } });
 ```
 
-A stream that doesn't match its state's pattern is refused before `app.do`: `422` with code `INVALID_STREAM` on Hono, `UNPROCESSABLE_CONTENT` on tRPC, so a client can't point `VoidInvoice` at a client's stream. Never put the address in the payload: an emit handler that spreads its payload would copy it onto every event. `stream` is optional when every state is in `streams`, and generation fails, naming the state, when a state is in neither.
+A stream that doesn't match its state's pattern is refused before `app.do`: `422` with code `INVALID_STREAM` on Hono, `UNPROCESSABLE_CONTENT` on tRPC, so a client can't point `VoidInvoice` at a client's stream. The state's subscriptions (`subscribe.<State>`, `$live`) refuse such a stream the same way. Never put the address in the payload: an emit handler that spreads its payload would copy it onto every event. `stream` is optional when every state is in `streams`, and generation fails, naming the state, when a state is in neither.
 
 ## Authentication — the `actor` seam
 
@@ -431,7 +431,7 @@ const api = hono(app, {
 
 ### Lists and dashboards: `$settled`
 
-`subscribe.<State>` serves screens that render one stream. A list or a dashboard reads a projection, which catches up when the app settles, after the commit: refetched on a patch, it reads stale rows. Pass `settled: true` for one more subscription, `subscribe.$settled` on tRPC and `GET <basePath>/sse/$settled` on Hono, which yields `{ kind: "settled", data: { targets } }` each time the app settles with targets that advanced, the projections and reactions a drain acked. Refetch the views fed by those targets:
+`subscribe.<State>` serves screens that render one stream. A list or a dashboard reads a projection, which catches up when the app settles, after the commit: refetched on a patch, it reads stale rows. Pass `settled: true` for one more subscription, `subscribe.$settled` on tRPC and `GET <basePath>/sse/$settled` on Hono, which yields `{ kind: "settled", data: { targets } }` each time a drain advances targets (the projections and reactions it acked), whether settle, a retry's backoff, a deferred wake or a lane's cycle ran it. An API process built with `drain: false` drains nothing, so it yields none. Refetch the views fed by those targets:
 
 ```ts no-check
 trpc.subscribe.$settled.useSubscription(undefined, {
@@ -461,7 +461,7 @@ trpc.subscribe.$live.useSubscription(
 // Hono: GET /api/sse/$live?Book=book-2026&TaxYear=taxyear-2026&settled=1
 ```
 
-`streams` is keyed by state name, and each frame carries `state` and `stream` beside the usual `state` / `patch` frame, so `applyPatchMessage` applies it per stream as before; `settled: true` adds the `$settled` frames. One `$live` takes one slot of `maxConnections` however many streams it follows, up to `maxStreamsPerSubscription` (default 50). Its streams share one backlog of `maxPendingPerConnection` frames: when it's full, the stream that overflows swaps its pending frames for one `_resync`, so its versions never skip silently and the other streams keep theirs. An open is refused with `422 INVALID_STREAM` (tRPC `UNPROCESSABLE_CONTENT`) for a state the API doesn't serve, a stream outside its state's `streams` pattern, one stream listed under two states, more streams than the limit, or nothing at all; a refused open takes no slot. To follow different sources, open a new `$live` (tRPC re-subscribes when the hook's input changes).
+`streams` is keyed by state name, and each frame carries `state` and `stream` beside the usual `state` / `patch` frame, so `applyPatchMessage` applies it per stream as before; `settled: true` adds the `$settled` frames. One `$live` takes one slot of `maxConnections` however many streams it follows, up to `maxStreamsPerSubscription` (default 50). Its streams share one backlog of `maxPendingPerConnection` frames: when it's full, the stream that overflows swaps its pending frames for one `_resync`, so its versions never skip silently and the other streams keep theirs. An open is refused with `422 INVALID_STREAM` (tRPC `UNPROCESSABLE_CONTENT`) for a state the API doesn't serve, a stream outside its state's `streams` pattern, one stream listed under two states, more streams than the limit, or nothing at all (Hono ignores query keys that name no served state); a refused open takes no slot. To follow different sources, open a new `$live` (tRPC re-subscribes when the hook's input changes).
 
 ### What the generator owns
 
@@ -496,7 +496,7 @@ Projection patches are one-way (server → client) and rebuildable from the even
 
 ### Horizontal scaling
 
-SSE doesn't multiplex across processes. Each worker enforces its own `maxConnections` cap. For deployments where active viewers exceed the per-process ceiling, operators run multiple processes behind a **sticky** load balancer (one subscriber per process, no failover for an open connection) and let the channel publication run per-worker as well. There is no cross-process channel; the `BroadcastChannel` is in-memory.
+SSE doesn't multiplex across processes. Each worker enforces its own `maxConnections` cap. For deployments where active viewers exceed the per-process ceiling, operators run multiple processes behind a **sticky** load balancer (one subscriber per process, no failover for an open connection) and let the channel publication run per-worker as well. There is no cross-process channel; the `BroadcastChannel` is in-memory. So a viewer connected to one worker sees that worker's commits (`publish`) and drains (`$settled`, `$live`) only: another worker's commits reach it as `notified`, which nothing publishes. Route a viewer to the worker that serves its writes, or bridge `notified` to `channel.publish` (a commit there carries no snapshot, so load the stream first).
 
 ## Deployment recipes
 

@@ -3,7 +3,7 @@
  * The settled frames themselves come from the `$live` loop (sse-live.spec).
  */
 import { EventEmitter } from "node:events";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { type SettledSource, sse_sources } from "../../src/api/sse-settled.js";
 import { BroadcastChannel } from "../../src/sse/index.js";
 

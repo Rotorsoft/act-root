@@ -30,7 +30,7 @@ export type SseLiveFrame =
 
 /**
  * One `$live` subscription: the patches of every source stream and, with a
- * settled source, the targets each settle advanced, in one feed that takes
+ * settled source, the targets each drain advanced, in one feed that takes
  * one slot of the connection cap.
  *
  * Every source starts with its cached state, when the channel has one. The

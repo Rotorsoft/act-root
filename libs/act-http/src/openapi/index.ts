@@ -375,10 +375,10 @@ function strip_json_schema_meta(
  * matching property `writeOnly: true` + `format: password`. Actions with no
  * sensitive fields pass through untouched (the zero-cost common path).
  *
- * The registry only reports top-level keys of a `z.object`, and Zod's
- * JSON Schema emit always renders those as members of `properties` — so
- * once `fields` is non-empty, `body_schema.properties[field]` is
- * guaranteed present. No defensive fallback needed.
+ * The registry reports the keys of the objects an action's payload is made of
+ * (through unions, intersections, lazies and pipes), and Zod's JSON Schema
+ * emit renders each as a member of `properties`, so once `fields` is
+ * non-empty, `body_schema.properties[field]` is present.
  *
  * @internal
  */

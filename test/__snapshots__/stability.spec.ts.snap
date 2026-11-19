@@ -6454,20 +6454,18 @@ import type { BroadcastState, PatchMessage } from "../sse/types.js";
 /**
  * SSE wiring options shared by the auto-generated \`trpc\` and \`hono\`
  * transports. When supplied, each transport emits one streaming
- * subscription per registered state name, all reading from the same
- * host-supplied {@link BroadcastChannel}.
+ * subscription per registered state name, plus \`$settled\` and \`$live\` when
+ * asked, all reading from the same host-supplied {@link BroadcastChannel}.
  *
- * The host owns publication: every \`app.do(...)\` call site must
- * forward the resulting snapshots to \`channel.publish(...)\` for
- * subscribers to see updates. The framework deliberately doesn't
- * auto-publish because the derived state usually needs app-specific
- * overlays (presence, computed fields) that only the host can supply.
+ * With {@link publish}, the generator publishes every commit to the
+ * channel; without it, the host does, which it needs when the published
+ * state carries app-specific overlays (presence, computed fields).
  *
  * Defaults are sized for typical business-app dashboards (dozens to
- * hundreds of human viewers per process). Both numeric knobs are
- * validated at transport-function construction; out-of-range values
- * throw \`ZodError\` immediately so misconfiguration surfaces at startup
- * instead of at first connection.
+ * hundreds of human viewers per process). The numeric knobs are validated
+ * at transport-function construction; out-of-range values throw \`ZodError\`
+ * immediately so misconfiguration surfaces at startup instead of at first
+ * connection.
  */
 export type SseOptions = {
     /**
@@ -6526,7 +6524,8 @@ export type SseOptions = {
     /**
      * Add one subscription, \`$settled\` (tRPC \`subscribe.$settled\`, Hono
      * \`GET <basePath>/sse/$settled\`), yielding \`{ kind: "settled", data: {
-     * targets } }\` each time the app settles with targets that advanced: the
+     * targets } }\` each time a drain advances targets (settle, a retry, a
+     * deferred wake or a lane's cycle): the
      * signal a list or dashboard fed by a projection refetches on. It counts
      * against {@link maxConnections}. Off by default.
      */

@@ -373,14 +373,15 @@ describe("hono sse — publish, $settled and onConnections", () => {
       stream: () => "t-1",
       sse: { channel, publish: true, live: true },
     });
+    // A key that names no served state is ignored; naming nothing is refused.
     const refused = await api.request("/api/sse/$live?Nope=t-1");
     expect(refused.status).toBe(422);
     expect(await refused.json()).toEqual({
       error: "InvalidStream",
-      detail: 'no live state "Nope"',
+      detail: "name at least one stream, or settled",
       code: "INVALID_STREAM",
     });
-    const streams_only = await api.request("/api/sse/$live?Tally=t-1");
+    const streams_only = await api.request("/api/sse/$live?Tally=t-1&_=123");
     const first = read_sse_frames(streams_only, ["state"]);
     await app.do(
       "add",

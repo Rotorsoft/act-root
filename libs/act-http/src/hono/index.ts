@@ -61,6 +61,7 @@ import {
   type AddressedActions,
   type AppActions,
   type AppStateNames,
+  invalid_stream,
   make_dispatch,
   matches_stream,
   type ResolverArgs,
@@ -383,8 +384,13 @@ export function hono<TApp extends ActSurface>(
       const served = new Set(state_names);
       const live_patterns = options.streams ?? {};
       // `?<State>=<stream>` once per stream, and `settled=1` for the targets.
+      // Other query keys are ignored, as REST APIs do: a cache-buster or a
+      // tracking parameter must not refuse the open.
       api.get("/sse/$live", (c) => {
-        const { settled, ...streams } = c.req.queries();
+        const { settled, ...query } = c.req.queries();
+        const streams = Object.fromEntries(
+          Object.entries(query).filter(([key]) => served.has(key))
+        );
         const want_settled = settled?.[0] === "1" || settled?.[0] === "true";
         const checked = live_sources(
           { streams, settled: want_settled },
@@ -392,14 +398,8 @@ export function hono<TApp extends ActSurface>(
           live_patterns,
           sse_config.maxStreamsPerSubscription
         );
-        if ("refused" in checked) {
-          const body: ApiError = {
-            error: "InvalidStream",
-            detail: checked.refused,
-            code: "INVALID_STREAM",
-          };
-          return c.json(body, 422);
-        }
+        if ("refused" in checked)
+          return c.json(invalid_stream(checked.refused).body, 422);
         return serve(c, async function* (signal) {
           for await (const frame of run_live_subscription(
             sse_config.channel,
@@ -434,14 +434,12 @@ export function hono<TApp extends ActSurface>(
           return c.json(body, 400);
         }
         // A caller-addressed state's stream must match its pattern here too.
-        if (!matches_stream(options.streams?.[state_name], stream_id)) {
-          const body: ApiError = {
-            error: "InvalidStream",
-            detail: `"${stream_id}" is not a stream of ${state_name}`,
-            code: "INVALID_STREAM",
-          };
-          return c.json(body, 422);
-        }
+        if (!matches_stream(options.streams?.[state_name], stream_id))
+          return c.json(
+            invalid_stream(`"${stream_id}" is not a stream of ${state_name}`)
+              .body,
+            422
+          );
         // `serve` holds the slot, so the shared loop runs without accounting.
         return serve(c, (signal) =>
           runSseSubscription(sse_config.channel, stream_id, undefined, signal, {
@@ -515,38 +513,8 @@ export function hono<TApp extends ActSurface>(
             matches && { stream: c.req.param("stream"), matches }
           );
           if (outcome.kind === "done") return c.json(outcome.result);
-          if (outcome.kind === "invalid-stream") {
-            const body: ApiError = {
-              error: "InvalidStream",
-              detail: `"${outcome.stream}" is not a stream of ${state.name}`,
-              code: "INVALID_STREAM",
-            };
-            return c.json(body, 422);
-          }
-          if (outcome.kind === "missing-key") {
-            const body: ApiError = {
-              error: "BadRequest",
-              detail: "Idempotency-Key required",
-              code: "BAD_REQUEST",
-            };
-            return c.json(body, 400);
-          }
-          if (outcome.kind === "in-flight") {
-            const body: ApiError = {
-              error: "ServiceUnavailable",
-              detail:
-                "Idempotency-Key in flight; the original request has not finished, retry later",
-              code: "IN_FLIGHT",
-            };
-            c.header("Retry-After", "1");
-            return c.json(body, 503);
-          }
-          const body: ApiError = {
-            error: "Conflict",
-            detail: "Idempotency-Key already used; original result not cached",
-            code: "CONFLICT",
-          };
-          return c.json(body, 409);
+          if (outcome.status === 503) c.header("Retry-After", "1");
+          return c.json(outcome.body, outcome.status);
         } catch (err) {
           const { status, body } = toApiError(err);
           // Hono types narrow `status` to its known status-number union;
