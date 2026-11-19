@@ -34,7 +34,7 @@ case "$file_path" in
     exit 0 ;;
 esac
 
-# Repo root holds tsconfig.workspace.json, whose `paths` map @rotorsoft/*
+# Repo root holds tsconfig.workspace.json, whose `paths` (from tsconfig.paths.json) map @rotorsoft/*
 # and @act/* to source. Type-checking against it resolves cross-package
 # imports to `src`, so an edit checks without building any dependency.
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
