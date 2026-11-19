@@ -231,8 +231,8 @@ function to_trpc_error(err: unknown): TRPCError {
 }
 
 /**
- * Minimal status → tRPC code map. Only the statuses
- * {@link ERROR_MAP} produces (plus 500) appear here; anything else
+ * Minimal status → tRPC code map. Only the statuses {@link ERROR_MAP}
+ * and the generated refusals produce (plus 500) appear here; anything else
  * collapses to `INTERNAL_SERVER_ERROR`.
  *
  * @internal

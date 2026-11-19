@@ -441,7 +441,7 @@ trpc.subscribe.$settled.useSubscription(undefined, {
 });
 ```
 
-It counts against `maxConnections` like the state subscriptions, and a frame waiting for a slow client takes the next settle's targets too, so none is lost. `onConnections: (count) => …` is told the number of open subscriptions after every open and close, for a host that reacts when the last client leaves.
+A settle that drains several lanes, or in several passes, sends one frame per drain that advanced something, so debounce the refetches a frame triggers. It counts against `maxConnections` like the state subscriptions, and a frame waiting for a slow client takes the next settle's targets too, so none is lost. `onConnections: (count) => …` is told the number of open subscriptions after every open and close, for a host that reacts when the last client leaves.
 
 ### One connection per page: `$live`
 
