@@ -429,6 +429,8 @@ const api = hono(app, {
 //   new EventSource("/api/sse/Ticket?stream=ticket-42")
 ```
 
+[Real-time recipes](real-time-recipes.md) shows each option below on a real screen, with the client code.
+
 ### Lists and dashboards: `$settled`
 
 `subscribe.<State>` serves screens that render one stream. A list or a dashboard reads a projection, which catches up when the app settles, after the commit: refetched on a patch, it reads stale rows. Pass `settled: true` for one more subscription, `subscribe.$settled` on tRPC and `GET <basePath>/sse/$settled` on Hono, which yields `{ kind: "settled", data: { targets } }` each time a drain advances targets (the projections and reactions it acked), whether settle, a retry's backoff, a deferred wake or a lane's cycle ran it. An API process built with `drain: false` drains nothing, so it yields none. Refetch the views fed by those targets:
