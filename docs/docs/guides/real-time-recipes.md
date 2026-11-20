@@ -16,6 +16,7 @@ The generated APIs push live state to the browser over SSE (server-sent events, 
 | One record (a ticket, an invoice) | `subscribe.<State>` with its stream | `sse: { channel, publish: true }` |
 | A list or dashboard read from a projection | `subscribe.$settled`, then refetch | add `settled: true` |
 | Several records, a list, or both, on one page | `subscribe.$live` | add `live: true` |
+| Only part of the app | the states the generated actions reach | `actions: { include }` or `{ exclude }`, `streams` |
 | Who's viewing or typing | the same subscriptions, plus `channel.overlay(...)` | nothing new |
 
 Every subscription first sends the stream's cached state, when the channel has one (`kind: "state"`), then one `kind: "patch"` frame per commit. Apply each patch with `applyPatchMessage`; when it answers `behind`, the client missed something (a dropped connection, or a backlog that overflowed into a `_resync`), so reopen the subscription for a fresh state.
@@ -77,7 +78,7 @@ export const router = trpc(app, {
   actor: (ctx: Ctx) => ctx.user,
   stream: () => "unused", // every state below is addressed by the caller
   streams: { Ticket: /^ticket-\d+$/, Customer: /^customer-\d+$/ },
-  // Customer's action is hand-written (recipe 4), so SSE never serves it.
+  // Customer's action is hand-written (recipe 5), so SSE never serves it.
   actions: { exclude: ["ChangeEmail"] },
   sse: {
     channel,
@@ -159,6 +160,29 @@ function OpenTicketsList() {
 
 `targets` names what each drain advanced: projections by their target name, reactions by the streams they write to. A frame waiting for a slow client absorbs the next settle's targets, so a list never misses that it changed.
 
+### A projection with one target per record
+
+A projection without a fixed target routes each event with `.to(...)`, and every target it writes shows up in `targets` under that name. Here one board per team (say `TicketOpened` also carries a `team`), so each team's screen refetches only when its own board moved:
+
+```ts no-check
+const Boards = projection()
+  .on({ TicketOpened })
+  .do(async function addToBoard({ data }) {
+    /* insert the row into the team's board */
+  })
+  .to(({ data }) => ({ target: `board-${data.team}` }))
+  .build();
+
+// Client, on the ops team's screen:
+trpc.subscribe.$settled.useSubscription(undefined, {
+  onData: ({ data }) => {
+    if (data.targets.includes("board-ops")) refetchBoard("ops");
+  },
+});
+```
+
+The same names arrive on a `$live` opened with `settled: true`, so a page that follows tickets and a board still needs one connection.
+
 ## 3. A page that shows several things
 
 A browser opens at most six connections to one origin over HTTP/1.1, which is what a plain Node server speaks. A page with a ticket, its customer's other ticket and the open list holds three subscriptions; two such tabs and a third stalls. `$live` carries all of a page's sources on one connection:
@@ -195,7 +219,54 @@ source.addEventListener("settled", (e) => refetchLists(JSON.parse(e.data).target
 
 One `$live` takes one slot of `maxConnections` and follows up to `maxStreamsPerSubscription` streams (default 50). Its streams share one backlog: when a stream overflows it, that stream's pending frames give way to one `_resync`, which `applyPatchMessage` reports as `behind`, and the other streams keep theirs. To change what the page follows, open a new `$live` with the new list and close the old one.
 
-## 4. Keeping a sensitive state off the channel
+## 4. Serving only part of the app
+
+SSE serves the states the generated actions reach: each action's own state, and the states it loads. Choose the actions, and the subscriptions follow.
+
+```ts
+import { act, state } from "@rotorsoft/act";
+import { BroadcastChannel } from "@rotorsoft/act-http/sse";
+import { trpc } from "@rotorsoft/act-http/trpc";
+import { z } from "zod";
+
+const Ticket = state({ Ticket: z.object({ title: z.string() }) })
+  .init(() => ({ title: "" }))
+  .emits({ TicketOpened: z.object({ title: z.string() }) })
+  .patch({ TicketOpened: ({ data }) => ({ title: data.title }) })
+  .on({ OpenTicket: z.object({ title: z.string() }) })
+  .emit((data) => ["TicketOpened", data])
+  .build();
+
+// Internal notes: written by staff tools, never shown to customers.
+const Note = state({ Note: z.object({ text: z.string() }) })
+  .init(() => ({ text: "" }))
+  .emits({ Noted: z.object({ text: z.string() }) })
+  .patch({ Noted: ({ data }) => ({ text: data.text }) })
+  .on({ AddNote: z.object({ text: z.string() }) })
+  .emit((data) => ["Noted", data])
+  .build();
+
+const app = act().withState(Ticket).withState(Note).build();
+type Ctx = { user: { id: string; name: string } };
+
+// The customer-facing API: only OpenTicket, so only Ticket is served, and
+// a Note commit never reaches this channel.
+export const customerRouter = trpc(app, {
+  actor: (ctx: Ctx) => ctx.user,
+  stream: () => "unused",
+  streams: { Ticket: /^ticket-\d+$/ },
+  actions: { include: ["OpenTicket"] },
+  sse: { channel: new BroadcastChannel(), publish: true, live: true },
+});
+// customerRouter has OpenTicket, subscribe.Ticket and subscribe.$live; no
+// AddNote, no subscribe.Note.
+```
+
+- **`include`** generates only the listed actions; **`exclude`** generates every action but those. Either way, a state no generated action reaches gets no `subscribe.<State>`, `$live` refuses it (`no live state "Note"`), and `publish` sends none of its commits.
+- **`streams`** says which streams belong to a state. `subscribe.Ticket` and `$live` refuse any other stream when they open, with `INVALID_STREAM: "note-1" is not a stream of Ticket`, so a client can't read a note through the ticket subscription by guessing its stream name.
+- **A staff API on the same app** is a second generator with its own channel and the full action set. Each channel only carries what its own API serves.
+
+## 5. Keeping a sensitive state off the channel
 
 The channel caches one state per stream, folded with whichever actor committed last, and sends it to every subscriber. A state whose events declare `sensitive(...)` fields would hand one person's email to everyone, so generating `sse` refuses it at build.
 
@@ -214,7 +285,7 @@ export const appRouter = t.mergeRouters(router, customerRouter);
 
 `actions: { include: [...] }` works the same way from the other side: only the listed actions are generated, and only the states they reach are served.
 
-## 5. Presence and other changes without an event
+## 6. Presence and other changes without an event
 
 Who's viewing a ticket is not an event; it changes the screen, not the record. Send it with `channel.overlay`, next to `publish: true`. The overlay merges into the cached state without changing its version, and a caught-up client applies it through the same `applyPatchMessage`:
 
@@ -233,7 +304,7 @@ function viewing(stream: string, user: string, on: boolean) {
 
 The overlay survives the next commit, so a client that reconnects sees the same viewers. Write your own `committed` listener instead of `publish: true` only when every commit must carry computed fields the state doesn't have.
 
-## 6. Capacity
+## 7. Capacity
 
 Each generator counts its open subscriptions. The defaults fit a business app with up to a few hundred viewers per process:
 
@@ -258,7 +329,7 @@ sse: {
 
 The subscription past the cap is refused (`503` on Hono, `TOO_MANY_REQUESTS` on tRPC), never left hanging. Over HTTP/2 the browser's six-connection limit goes away, but `$live` still saves a slot and a heartbeat per stream.
 
-## 7. More than one server process
+## 8. More than one server process
 
 The channel lives in memory. A viewer connected to one process sees that process's commits and drains only. Run the processes behind a load balancer with sticky sessions, and route a viewer to the process that serves its writes. To see writes made elsewhere, bridge the app's `notified` lifecycle event into `channel.publish`: the notification carries no snapshot, so load the stream first. [Horizontal scaling](auto-generated-api.md#horizontal-scaling) has the details.
 
