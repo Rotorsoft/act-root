@@ -52,3 +52,17 @@ export {
   type SseOptions,
   type SseSubscriptionFrame,
 } from "./sse-wiring.js";
+export type {
+  ActionInput,
+  ActionResult,
+  ActionSelection,
+  ActSurface,
+  AddressedActions,
+  AppActions,
+  AppState,
+  AppStateNames,
+  ResolverArgs,
+  SelectedActions,
+  SseSettledFrame,
+  StreamPatterns,
+} from "./types.js";

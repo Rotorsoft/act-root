@@ -132,6 +132,24 @@ describe("check lane", () => {
   });
 });
 
+describe("timer delays", () => {
+  // Node runs a timer above 2^31 − 1 ms after 1 ms, so a delay past it would
+  // fire at once instead of never; the limit itself still schedules.
+  const limit = 2_147_483_647;
+  it("refuses a delay Node can't schedule, and takes the limit", () => {
+    for (const [kind, bag] of [
+      ["lane", (ms: number) => ({ name: "slow", cycleMs: ms })],
+      ["settle", (ms: number) => ({ debounceMs: ms })],
+      ["shutdown", (ms: number) => ({ graceMs: ms })],
+      ["act", (ms: number) => ({ settleDebounceMs: ms })],
+      ["poll", (ms: number) => ({ frequency: ms })],
+    ] as const) {
+      expect(() => check(kind, bag(limit + 1) as never)).toThrow();
+      expect(() => check(kind, bag(limit) as never)).not.toThrow();
+    }
+  });
+});
+
 describe("check drain / settle", () => {
   it("accept valid knobs (0 allowed)", () => {
     const d = { streamLimit: 10, eventLimit: 100, leaseMillis: 0 };
