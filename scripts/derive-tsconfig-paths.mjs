@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Writes the `@rotorsoft/*` `paths` in `tsconfig.workspace.json` from each
+ * Writes the `@rotorsoft/*` `paths` in `tsconfig.paths.json` from each
  * lib's `exports`, so tsc and vitest (which derives its aliases from them)
  * resolve every published subpath to source. A pattern takes one `*`, so
  * subpaths such as `@rotorsoft/act-http/sse` must be listed one by one.
@@ -18,7 +18,7 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const LIBS_DIR = join(ROOT, "libs");
-const TSCONFIG = join(ROOT, "tsconfig.workspace.json");
+const TSCONFIG = join(ROOT, "tsconfig.paths.json");
 
 const UI_PACKAGES = new Set(["@rotorsoft/act-diagram"]);
 
@@ -106,18 +106,18 @@ if (check) {
   const lines = diff_paths(expected, read_actual());
   if (lines.length > 0) {
     console.error(
-      "tsconfig.workspace.json `paths` are out of sync with package `exports`:\n"
+      "tsconfig.paths.json `paths` are out of sync with package `exports`:\n"
     );
     console.error(lines.join("\n"));
     console.error("\nRun `pnpm paths:sync` to regenerate, then commit.");
     process.exit(1);
   }
-  console.log("tsconfig.workspace.json `paths` are in sync with package `exports`.");
+  console.log("tsconfig.paths.json `paths` are in sync with package `exports`.");
 } else {
   const cfg = JSON.parse(readFileSync(TSCONFIG, "utf8"));
   cfg.compilerOptions.paths = expected;
   writeFileSync(TSCONFIG, `${JSON.stringify(cfg, null, 2)}\n`);
   console.log(
-    `Wrote ${Object.keys(expected).length} \`paths\` entries to tsconfig.workspace.json.`
+    `Wrote ${Object.keys(expected).length} \`paths\` entries to tsconfig.paths.json.`
   );
 }

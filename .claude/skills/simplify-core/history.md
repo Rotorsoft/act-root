@@ -8,24 +8,24 @@ Least recently run goes next. A lens with no accepted proposal in its last three
 
 | lens | last run | runs | accepted | status |
 |---|---|---|---|---|
-| Public surface | 2026-11-15 | 12 | 2 | active (58 root exports; 2 importable internals left in act-http `/api` (#2524), 13 non-importable declarations in the snapshot (#2525)) |
-| Dead code (tool) | 2026-11-15 | 13 | 12 | active (knip: 38 files, 19 exports, 19 types, all known or in #2525) |
+| Public surface | 2026-11-19 | 13 | 3 | active (58 root exports; act-http 33 runtime values / 11 entries; 1 non-importable default (#2595); the RFC-2578 types the generators name aren't walked by the snapshot, the maintainer's call) |
+| Dead code (tool) | 2026-11-19 | 14 | 12 | active (knip 46 files / 19 exports / 27 types, all known; act-http src clean) |
 | Hotspots (tool) | 2026-10-20 | 5 | 1 | retired 2026-10-20: two runs with no proposal; every branch in the hot functions (correlate, action, drain) is a separate rule |
-| File budget | 2026-11-15 | 13 | 2 | active (9 over 300 code lines; the `types/builders.ts` split re-measured to 274 (#2527)) |
-| Comment noise | 2026-11-15 | 13 | 11 | active (0 stacked docs, 1 orphan block; 2 stale comments from #2514 (#2529, #2528)) |
+| File budget | 2026-11-19 | 14 | 2 | active (9 over 300 code lines: `types/builders.ts` 272 → 308 from #2583's type parameter, earned) |
+| Comment noise | 2026-11-19 | 14 | 12 | active (trpc 40% comments, cut (#2595); `TActionStates` doc pasted 5×; 2 stale passages on publication (#2592)) |
 | Concepts and options | 2026-11-18 | 14 | 5 | active (18 core bags through one `check`, 9 satellite bags inline; `query` limit unchecked (#2556); #2537's action/event name rule is a new concept, the maintainer's call (#2558)) |
 | Core or decorator? | 2026-10-15 | 3 | 0 | retired 2026-10-15: three runs, findings only (PII, audit, breaker, lanes stay; priority is a major-version question) |
-| DRY across adapters and builders | 2026-11-15 | 13 | 18 | active (one validation pattern since #2514; no new copies across stores, builders or transports) |
+| DRY across adapters and builders | 2026-11-19 | 14 | 20 | active (act-http: 3 subscription loops → 2, refusals 2 copies → 1 (#2593); no new copies across stores or builders) |
 | Reading path | 2026-11-18 | 13 | 3 | active (do/settle unchanged: 13 files, ~33 names; restore 8 files (+`projection-fold.ts` from #2531), ~18 names) |
 | Newcomer test (quarterly) | 2026-11-15 | 3 | 0 | retired 2026-11-15: three runs, no proposal (21 concepts, 3 imports, unchanged; the package.json crash is fixed; `SLEEP_MS` waits 100 ms per call (#2521)) |
 | Tests by concept | 2026-11-18 | 13 | 24 | active (Postgres down: 4 runs 11.7–11.8 s without act-pg; 0 tests near a framework default; six repeats (#2560), 65 line-number names (#2563)) |
 | Mutation evidence (monthly, CI) | never | 0 | 0 | retired: setup removed (#1805), see baselines below |
 | Packages earn their place | 2026-10-15 | 4 | 0 | retired 2026-10-15: four runs, no proposal (removal is ruled out; act-tck churn is the snapshot, now P2026-10-15p-1) |
-| Infra | 2026-11-15 | 13 | 2 | active (299 runs since 11-12, 2 red; the perf job's silent exit 0 is act's crash handler (#2518)) |
+| Infra | 2026-11-19 | 14 | 4 | active (142 runs, 4 red; one generated paths file (#2594); perf and stress jobs stop building (#2595)) |
 | One source of truth | 2026-11-18 | 14 | 11 | active (one public sensitive-field lookup; the marker's reach in five places (#2562); the tour script a second, drifted copy (#2559); SSE fails open without the lookup (#2557)) |
 | Examples | 2026-11-18 | 13 | 6 | active (recipes + packages 37 files / 260 tests; tour tips 47 of 49 compile (fixed in #2564); no-check snippets 160 of 213, 0 API errors; act-patch README numbers (#2561)) |
-| Process | 2026-11-15 | 12 | 9 | active (15 of 19 merges from master hand-resolved behavior-contracts.md (#2519); `/release-check` named in 0 of 36 PR bodies) |
-| Feature interactions | 2026-11-15 | 13 | 20 | active (restore keeps the fold caches reset drops (#2517); bad resolver output has two policies now) |
+| Process | 2026-11-19 | 13 | 10 | active (19 PRs, 4 red runs: an MDX brace, a fixture-named test, two perf reds from #2555's cause; `check:contracts` added to /release-check (#2601)) |
+| Feature interactions | 2026-11-19 | 14 | 20 | active (6 probed: `$settled` misses non-settle drains (#2589), per-state subscriptions skip `streams` (#2590); per-state as a one-stream `$live` (#2596) and SSE refused for any sensitive state (#2599) are the maintainer's call) |
 
 ## Interaction register
 
@@ -141,7 +141,6 @@ Sound proposals that missed a run's cut. The next run ranks these before looking
 - Design finding: the defer wake's "drain until a pass leases nothing" loop repeats settle's loop without correlate (the background-copies-foreground smell); routing it through settle adds `settled` events and a correlate per wake, so it doesn't subtract today.
 - Resolved by #1959 (P2026-10-17d-2 → #1949): a local `do()` arms lanes but schedules nothing, while a remote commit (`_wire_notify`) already schedules settle; 22 copies of `app.on("committed", () => app.settle())` in 17 files exist only to close that gap, and no framework in the field asks for it (Marten, Emmett, Axon, Propulsion run processors on their own). Changing it changes what apps observe.
 
-- Workflow and Renovate comments cut to their why: workflow comment lines 164 → 43, `renovate.json` 5.1 → 2.8 KB (ticket-history rule descriptions). Same kind as #2075, outside core. (P2026-10-23p-2)
 - The next major fixes once on its integration branch and merges into it without squashing: the 2.0 window fixed every audit round twice (#2337/#2336, #2357/#2359, #2379/#2380), merged master into `v2` four times (the duplicated test of #2386), and needed separate version PRs only because a squash flattens footers. Fewer words in CONTRIBUTING; 1.x waits for a backport. (P2026-11-10p-5)
 
 ## Self-changes
@@ -236,46 +235,7 @@ Runs before the last three are one line each (with their tickets where the entry
 - 2026-11-12 — full run (four specialists: reading path, one source of truth, examples, concepts and options). Tickets: #2440–#2447, and #2439 (RFC 2411's plan).
 - 2026-11-12 (second) — full run (four specialists: public surface + file budget, process + infra, feature interactions + field, DRY + dead code + comment noise). Tickets: #2460–#2467.
 
-### 2026-11-14 — full run (four specialists: tests by concept, concepts and options + field, reading path + one source of truth, examples)
-
-| metric | 2026-11-12 (second) | now | why |
-|---|---|---|---|
-| core lines (libs/act/src) | 18691 | 18726 | #2469, #2482–#2484, #2487 |
-| ticket refs in core source | 2 | 0 | #2469 |
-| files over 300 code lines | 10 | 9 | #2465 (restore types to `types/restore.ts`) |
-| CI workflows / lines | 5 / 579 | 5 / 580 | #2461 (`libs/*/README.md` in the `ci` filter) |
-| docs lines | 9959 | 9973 | the wave 31 fixes' docs |
-| everything else | | unchanged | 59 runtime exports, 41% (28% / 14%) comments, 237 spec files, CLAUDE.md 15 KB |
-
-Audit: #2469, #2470, #2471, #2481 (wave 31 record) and the wave 31 fixes #2482–#2490 since the last run. `scan` took four guards in two weeks (#2459, #2482, #2484, #2487); each is its own rule, not one cancelling another (backlog d-4). #2483 shipped with five stale passages, a stale log line and tests that couldn't fail: a fix on a fix in the same feature, found by this run.
-
-Decisions on P2026-11-12b*: D1 (#2460) rejected and the guard removed: keeping rules in core is a practice the adapters follow, not a test. D2 and 1–4 shipped (#2461 → #2470, #2462/#2464/#2465 → #2469, #2463 → #2470); 5 and 6 shipped (#2466, #2467 → #2471).
-
-Promises kept: #2462 −4 → −4; #2463 −85 → −85; #2465 put `types/action.ts` under the budget (files over 300 code lines 10 → 9); #2466 188 KB → 55 KB.
-
-Verified in the main loop before ranking: every doc defect against its code (`close-cycle.ts:647-650` for the bare `app.close` resume, `close-cycle.md:234`, `error-handling.md:183`, `act.ts:473`, `extension-points.md:170`, `csv.ts:81`, `priority-lanes.md:8`, the archival example's signature and key); `AuditOptions.page_size` read nowhere; `batch_size` reaching the stores unchecked; the autoclose retry tests green with the parked row's wake removed (and red after the rewrite in #2501).
-
-My own defects (#2482, #2483), fixed in #2501, not ticketed: five stale passages and a log line on the autoclose retry and `drop_snapshots`; the recipes' bare `app.close([{ stream }])` resume, which truncates without archiving; the retry tests' wake commit.
-
-Proposals, ticketed when the reports were in. Defects first:
-- D1. Restore `batch_size` is unvalidated; `-1` keeps one event of a wiped store → #2491.
-- D2. `AuditOptions.page_size` does nothing (the maintainer's call), and a NaN audit threshold reports a clean store → #2492.
-- D3. A receiver's `verify.maxAgeSeconds` isn't checked when the middleware is built → #2493.
-- D4. Three passages that contradict the code (`csv.ts` comment, `.priority(n)`, a no-check snippet) → #2494.
-Simplifications:
-- 1 (o-1). Rewrite config-validation.md to say what the code does (−55%), with a naming question → #2495.
-- 2 (o-2). One name, `check_*`, for validators that only throw → #2496.
-- 3 (t-2). Drop the priority.spec blocks the TCK and classify.spec already run (−256 lines, 14 tests) → #2497.
-- 4 (t-3–t-5). Wait on outcomes in the notify and restore tests; two small concept moves → #2498.
-- 5 (d-1–d-3, e2). One write-up each for the archive contract, autoclose, `ScanOptions` and restore paging (≈ −4.5 KB) → #2499.
-- 6 (e-1). The scaffold skill builds timers with `.defer`, not a polling interval → #2500.
-Backlog: d-4 (`scan` to `internal/restore.ts`), e-q (park quiet `keep` streams, needs a probe).
-
-Findings, not proposed: the tRPC `webhookMiddleware` is typed `any`, against the end-to-end typing rule; a shared cross-package validation helper would be new surface; the Postgres test schemas are named per checkout, so concurrent `pnpm test` runs in one tree can collide.
-
-Lens metrics: 4 of 4 full runs green at 14.2–15.2 s, 0 tests near a framework default; option checks 12, in four shapes and five names; numeric options still accepting NaN 3 (low impact) plus #2491–#2493; recipes 55 tests, packages 205; no-check snippets type-checked 160 of 213; reading path do/settle 13 files, restore 7.
-
-Tickets: #2491–#2500, and #2501 (my own fixes).
+- 2026-11-14 — full run (four specialists: tests by concept, concepts and options + field, reading path + one source of truth, examples). Tickets: #2491–#2500, and #2501 (my own fixes).
 
 ### 2026-11-15 — full run (four specialists: public surface + dead code + comment noise, file budget + DRY, feature interactions + field, process + infra + newcomer)
 
@@ -336,9 +296,9 @@ Verified in the main loop before ranking: the `query` limit (5 events: `limit: 2
 My own defects, fixed in PRs the user approved: the tour's two code tips (#2564) and #2554's guard (reverted in #2565). The run started those fixes on a branch before asking, against step 6; the permission check stopped the commit.
 
 Proposals, ticketed when the reports were in. Defects first:
-- D1 (concepts). `app.query` / `query_array` don't check `limit`, which #2541 ("every query limit") missed: a fix on a fix → #2556.
-- D2 (reading). act-http SSE fails open for an app object without `registry.sensitive_fields`, a regression from #2537 → #2557 (the maintainer's call).
-- D3 (concepts). #2537's action/event name rule refuses apps that ran on 2.1.13, in a patch → #2558 (the maintainer's call).
+- D1 (concepts). `app.query` / `query_array` don't check `limit`, which #2541 ("every query limit") missed: a fix on a fix → #2556 → #2568.
+- D2 (reading). act-http SSE fails open for an app object without `registry.sensitive_fields`, a regression from #2537 → #2557 → #2569 (the maintainer chose fail closed, then a required lookup).
+- D3 (concepts). #2537's action/event name rule refuses apps that ran on 2.1.13, in a patch → #2558 → #2569 (the maintainer kept the rule; a migration note added).
 - D4 (examples). Two tour code tips don't compile against the tour's schemas → #2564.
 Simplifications:
 - 1 (r-1, e-1). Cut the tour script's chapter tables (−395) → #2559 → #2564.
@@ -352,4 +312,31 @@ Findings, not proposed: nothing type-checks the tour's code strings (a gate woul
 
 Lens metrics: Postgres was down (Docker off), so 4 full runs at 11.7–11.8 s without act-pg and no local coverage gate; recipes + packages 260 tests; tour tips 47/49; no-check snippets 160/213, `@example` 82/99, scaffold 77/92 parse with 0 API errors; NaN-accepting numeric inputs 2; reading path do/settle 13 files, restore 8.
 
-Tickets: #2556–#2563. PRs: #2564, #2565, #2566.
+Tickets: #2556–#2563. PRs: #2564–#2566, #2568, #2569. The maintainer left the time-travel test link out of the tour.
+
+### 2026-11-19 — full run (four specialists: public surface + dead code + comment noise, file budget + DRY, feature interactions + field, process + infra)
+
+| metric | 2026-11-18 | now | why |
+|---|---|---|---|
+| core lines (libs/act/src) | 18619 | 18708 | #2575 (`parts_of`), #2577 (load bounds, disposer containment), #2583 (`TActionStates`) |
+| files over 300 code lines | 8 | 9 | `types/builders.ts` 272 → 308: #2583's seventh generic on every builder return, earned |
+| spec files | 237 | 240 | `sse/publish`, `api/sse-settled`, `api/sse-live` specs |
+| docs lines | 9998 | 10087 | the RFC 2578 guide sections |
+| everything else | | unchanged | 58 runtime exports, 41% (28% / 14%) comments, 5 workflows / 581 lines, CLAUDE.md 15 KB |
+
+Audit: the 11-18 fixes (#2564–#2569), debug wave 32 (#2575–#2577), RFC 2578 (#2581–#2586) and #2588 since the last run. Most findings are in my own code from those PRs: a feature (`publish`) that left the passages naming the old owner (#2584), a second copy of a loop shipped one PR before its generalization (#2584 → #2586), a fix to one of three configs (#2555). #2567's last commit was pushed after its merge and lost; its corrections are in this entry.
+
+Decisions on P2026-11-18*: all shipped (#2564–#2566, #2568, #2569, and #2567 for the record).
+
+Verified in the main loop before ranking: `$settled` listens to `settled` (only `act.ts:574` emits it) while drains emit `acked` (`act.ts:465`), and the retry test times out on the old code; the per-state subscription's input has no pattern check; `packages/tsconfig.base.json` maps no act subpath, and `tsx` from `recipes/` and `packages/wolfdesk` loads one `ConcurrencyError` after the fix; `vite.config.ts` parses `tsconfig.workspace.json`'s `paths` directly (missed by the specialist's simulation, fixed in #2603); `tsc -p libs/act-pg`'s two errors are on master too (the specialist's claim that the paths file clears them didn't hold).
+
+Proposals and defects, all mine except where noted, ticketed and shipped as three PRs the maintainer asked for:
+- D1 → #2589 (`$settled` misses drains outside settle), D2 → #2590 (per-state subscriptions skip `streams`), D3 → #2592 (stale publication docs), with 1 → #2593 (one feed loop, one refusal table), #2597 (Hono `$live` query keys) and #2598 (scaling docs, a stale comment): PR #2602.
+- D4 → #2591 (packages/recipes subpaths, #2555's sibling) with 2 → #2594 (one generated paths file): PR #2603.
+- 3 → #2595 (one `TActionStates` doc, an `@internal` phantom, an unexportable default, tRPC comments, no build in the perf and stress jobs) with #2600 (browser check, one detector per failure) and #2601 (`check:contracts` sees fixture-named tests; `/release-check` runs it): PR #2604, stacked on #2602.
+The maintainer's call: #2596 (per-state subscription as a one-stream `$live`, one overflow policy), #2599 (SSE refused for any sensitive state, even one `actions` excludes).
+Backlog: P2026-10-23p-2 dropped (#2144 did the workflows; renovate's rule descriptions are its reasons).
+
+Lens metrics: act-http 33 runtime values over 11 entries; knip 46 / 19 / 27, all known; trpc comments 40%; 3 subscription loops → 2, refusal copies 2 → 1; interactions probed 6 (2 defects); 19 PRs, 142 runs, 4 red; path lists 3 → 1.
+
+Tickets: #2589–#2601. PRs: #2602, #2603, #2604.

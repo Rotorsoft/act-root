@@ -1,7 +1,7 @@
 /**
  * Root vitest config. Imports of `@rotorsoft/*` resolve to source, not
  * `dist/`, through `resolve.alias`, derived from the `paths` in
- * `tsconfig.workspace.json` (which `pnpm paths:sync` generates from each
+ * `tsconfig.paths.json` (which `pnpm paths:sync` generates from each
  * package's `exports`), so tsc and vitest resolve the same way. An alias
  * wins over `exports`; native tsconfig paths don't, and would load a
  * subpath from `dist` beside the bare package from `src`: two copies of
@@ -21,7 +21,7 @@ const root = import.meta.dirname;
 // Each key becomes an anchored regex (so `@rotorsoft/act` doesn't match
 // `@rotorsoft/act/x`), and exact keys come before wildcards so they win.
 const { compilerOptions } = JSON.parse(
-  readFileSync(resolve(root, "tsconfig.workspace.json"), "utf8")
+  readFileSync(resolve(root, "tsconfig.paths.json"), "utf8")
 ) as { compilerOptions: { paths?: Record<string, string[]> } };
 const paths = compilerOptions.paths ?? {};
 const to_alias = ([key, [target]]: [string, string[]]) => ({

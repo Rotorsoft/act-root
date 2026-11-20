@@ -95,7 +95,7 @@ jobs:
       - run: pnpm install
       # The pre-commit hook checks only staged files; this checks them all.
       - run: pnpm lint
-      # Subpath `exports` and tsconfig.workspace.json paths must match (`pnpm paths:sync`).
+      # Subpath `exports` and tsconfig.paths.json must match (`pnpm paths:sync`).
       - run: pnpm paths:check
       # Every test the behavior-contracts page cites must exist by its exact name.
       - run: pnpm check:contracts
