@@ -1,6 +1,6 @@
 import type { BroadcastChannel } from "../sse/broadcast.js";
-import { is_version_neutral, resync_frame } from "../sse/frames.js";
 import type { BroadcastState, PatchMessage } from "../sse/types.js";
+import { run_live_subscription } from "./sse-live.js";
 
 /**
  * SSE wiring options shared by the auto-generated `trpc` and `hono`
@@ -53,15 +53,10 @@ export type SseOptions = {
    * broadcast frames. A consumer that stalls (slow client, paused
    * tab) can't drain frames as fast as a busy stream publishes them;
    * without a bound the backlog grows until the process runs out of
-   * memory. When the backlog is full the oldest **version-keyed** frame
-   * is dropped to make room for the newest: the consumer sees the
-   * version gap, reports `behind`, and refetches, so it still converges
-   * on current state having skipped intermediate versions it was too
-   * slow to see.
-   *
-   * Version-neutral frames (`_overlay`, `_resync`) are never dropped
-   * silently — they create no gap to notice, so a backlog made only of
-   * them collapses into a single `_resync` instead.
+   * memory. When a patch finds the backlog full, the stream's pending
+   * frames give way to one `_resync`: the consumer refetches and converges
+   * on current state, and no frame is lost silently. Every subscription
+   * (`subscribe.<State>`, `$settled`, `$live`) follows this one policy.
    *
    * Default `256`. Validated range `[1, 100_000]`.
    */
@@ -117,11 +112,8 @@ export const DEFAULT_SSE_HEARTBEAT_MS = 30_000;
  * Default cap on the per-connection undelivered-frame backlog. Sized
  * so a briefly-stalled consumer on a busy stream keeps recent history
  * without letting a permanently-wedged client pin unbounded memory.
- * At overflow the oldest version-keyed frame is dropped: it is a full
- * version-keyed patch, so the consumer sees the gap and converges on
- * current state regardless of which intermediate versions it missed.
- * Version-neutral frames create no gap, so they collapse into a
- * `_resync` rather than being dropped silently.
+ * At overflow the stream's pending frames give way to one `_resync`, so
+ * the consumer refetches instead of missing versions silently.
  */
 export const DEFAULT_SSE_MAX_PENDING_PER_CONNECTION = 256;
 
@@ -166,9 +158,9 @@ export type RunSseOptions = {
    */
   readonly on_cap_exceeded?: () => never;
   /**
-   * Upper bound on the per-connection undelivered-frame backlog. When
-   * the backlog reaches this many frames the oldest is dropped to make
-   * room for the newest (drop-oldest). Defaults to
+   * Upper bound on the per-connection undelivered-frame backlog. When a
+   * patch finds it full, the stream's pending frames give way to one
+   * `_resync`, and the client refetches. Defaults to
    * {@link DEFAULT_SSE_MAX_PENDING_PER_CONNECTION} when omitted.
    */
   readonly maxPending?: number;
@@ -193,78 +185,16 @@ export async function* runSseSubscription<S extends { _v: number } = any>(
   signal: AbortSignal | undefined,
   options?: RunSseOptions
 ): AsyncGenerator<SseSubscriptionFrame<S>> {
-  // Track whether we actually reserved a slot. Releasing in `finally`
-  // unconditionally would decrement the counter below the true open
-  // count when acquire() fails without an `on_cap_exceeded` handler —
-  // inflating the effective cap over time. Only release what we
-  // acquired.
-  let acquired = false;
-  if (accounting) {
-    acquired = accounting.acquire();
-    if (!acquired && options?.on_cap_exceeded) {
-      options.on_cap_exceeded();
-    }
-  }
-  const max_pending =
-    options?.maxPending ?? DEFAULT_SSE_MAX_PENDING_PER_CONNECTION;
-  const pending: PatchMessage<S>[] = [];
-  let resolve_wait: (() => void) | null = null;
-  const unsubscribe = channel.subscribe(stream_id, (msg) => {
-    enqueue(msg);
-    resolve_wait?.();
-  });
-  /**
-   * Bound the per-connection backlog: a stalled consumer (slow client,
-   * paused tab) can't drain as fast as a busy stream publishes, so a frame
-   * has to go.
-   *
-   * Which frame is not arbitrary. A version-keyed patch can be dropped
-   * safely — the client sees the version gap, reports `behind`, and
-   * refetches. A version-neutral frame (`_overlay`, `_resync`) carries no
-   * versions at all, so dropping one leaves no gap to notice and the update
-   * is lost silently. So: evict the oldest version-keyed frame if
-   * there is one, and only if the whole backlog is version-neutral collapse
-   * it into the single frame that says "you missed something".
-   */
-  const enqueue = (msg: PatchMessage<S>) => {
-    if (pending.length < max_pending) {
-      pending.push(msg);
-      return;
-    }
-    const versioned = pending.findIndex((m) => !is_version_neutral(m));
-    if (versioned >= 0) {
-      pending.splice(versioned, 1);
-      pending.push(msg);
-      return;
-    }
-    // Every pending frame is version-neutral. Collapsing them into one
-    // resync loses no signal — a resync supersedes anything it replaces,
-    // including `msg` when the cap leaves no room for it.
-    pending.splice(0, pending.length, resync_frame<S>());
-    if (pending.length < max_pending) pending.push(msg);
-  };
-
-  const on_abort = () => resolve_wait?.();
-  signal?.addEventListener("abort", on_abort);
-  try {
-    const cached = channel.state(stream_id);
-    if (cached !== undefined) {
-      yield { kind: "state", data: cached };
-    }
-    while (!signal?.aborted) {
-      if (pending.length === 0) {
-        await new Promise<void>((resolve) => {
-          resolve_wait = resolve;
-        });
-        if (signal?.aborted) break;
-      }
-      const msg = pending.shift() as PatchMessage<S>;
-      // The frame type resolves `PatchMessage<S>` only once `S` is known.
-      yield { kind: "patch", data: msg as never };
-    }
-  } finally {
-    signal?.removeEventListener("abort", on_abort);
-    unsubscribe();
-    if (acquired) accounting?.release();
-  }
+  // One stream is a `$live` of one: the same backlog, and the same `_resync`
+  // when it overflows.
+  // The frame type resolves `PatchMessage<S>` only once `S` is known.
+  for await (const frame of run_live_subscription(
+    channel,
+    [{ state: "", stream: stream_id }],
+    undefined,
+    accounting,
+    signal,
+    options
+  ))
+    yield { kind: frame.kind, data: frame.data } as SseSubscriptionFrame<S>;
 }

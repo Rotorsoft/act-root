@@ -6,7 +6,11 @@ type CommittedSnapshot = {
   readonly state: unknown;
   readonly version: number;
   readonly patch?: unknown;
-  readonly event?: { readonly stream: string; readonly version: number };
+  readonly event?: {
+    readonly name: string;
+    readonly stream: string;
+    readonly version: number;
+  };
 };
 
 /**
@@ -36,6 +40,9 @@ const publishers = new WeakMap<object, WeakMap<object, () => void>>();
  * gap; the state carries `_v`, the stream's version. `committed` fires once
  * per stream a commit appended to, so each call publishes one stream.
  *
+ * With `events`, only commits of those event names are published: a state
+ * the channel doesn't serve, a sensitive one above all, never reaches it.
+ *
  * Calling it again for the same app and channel publishes nothing more and
  * returns the same disposer.
  *
@@ -43,16 +50,20 @@ const publishers = new WeakMap<object, WeakMap<object, () => void>>();
  */
 export function publishCommits(
   app: CommitSource,
-  channel: BroadcastChannel<any>
+  // `any`: one channel carries every state
+  channel: BroadcastChannel<any>,
+  options?: { readonly events?: Iterable<string> }
 ): () => void {
   const of_app = publishers.get(app) ?? new WeakMap<object, () => void>();
   publishers.set(app, of_app);
   const existing = of_app.get(channel);
   if (existing) return existing;
+  const events = options?.events && new Set(options.events);
   const listener = (snapshots: CommittedSnapshot[]) => {
     // Fired only with committed snapshots: each carries its patch, and the
-    // last one and its event exist.
+    // last one and its event exist. One call is one stream, of one state.
     const last = snapshots.at(-1)!;
+    if (events && !events.has(last.event!.name)) return;
     const patches = snapshots.map((s) => s.patch as object);
     if (last.version > last.event!.version) patches.push({});
     channel.publish(

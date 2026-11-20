@@ -81,7 +81,7 @@ import { fire_and_forget, SseConnectionCounter } from "../api/sse-counter.js";
 import { live_sources, run_live_subscription } from "../api/sse-live.js";
 import { SseOptionsSchema } from "../api/sse-options.js";
 import { sse_sources } from "../api/sse-settled.js";
-import { sse_state_names } from "../api/sse-states.js";
+import { sse_states } from "../api/sse-states.js";
 
 /**
  * Hono context variables this subpath contributes. The generic on
@@ -325,8 +325,12 @@ export function hono<TApp extends ActSurface>(
       sse_config.maxConnections,
       options.sse.onConnections
     );
-    const state_names = sse_state_names(app, "hono");
-    const settled_source = sse_sources(app, sse_config, "hono");
+    const { names: state_names, events: served_events } = sse_states(
+      app,
+      options.actions,
+      "hono"
+    );
+    const settled_source = sse_sources(app, sse_config, served_events, "hono");
     // One event stream: take a slot (503 when the cap is full, before any
     // header is written), keep the connection alive with a heartbeat, write
     // each frame, and free the slot when the client goes away.

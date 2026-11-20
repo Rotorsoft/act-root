@@ -6494,15 +6494,10 @@ export type SseOptions = {
      * broadcast frames. A consumer that stalls (slow client, paused
      * tab) can't drain frames as fast as a busy stream publishes them;
      * without a bound the backlog grows until the process runs out of
-     * memory. When the backlog is full the oldest **version-keyed** frame
-     * is dropped to make room for the newest: the consumer sees the
-     * version gap, reports \`behind\`, and refetches, so it still converges
-     * on current state having skipped intermediate versions it was too
-     * slow to see.
-     *
-     * Version-neutral frames (\`_overlay\`, \`_resync\`) are never dropped
-     * silently — they create no gap to notice, so a backlog made only of
-     * them collapses into a single \`_resync\` instead.
+     * memory. When a patch finds the backlog full, the stream's pending
+     * frames give way to one \`_resync\`: the consumer refetches and converges
+     * on current state, and no frame is lost silently. Every subscription
+     * (\`subscribe.<State>\`, \`$settled\`, \`$live\`) follows this one policy.
      *
      * Default \`256\`. Validated range \`[1, 100_000]\`.
      */
@@ -6555,11 +6550,8 @@ export declare const DEFAULT_SSE_HEARTBEAT_MS = 30000;
  * Default cap on the per-connection undelivered-frame backlog. Sized
  * so a briefly-stalled consumer on a busy stream keeps recent history
  * without letting a permanently-wedged client pin unbounded memory.
- * At overflow the oldest version-keyed frame is dropped: it is a full
- * version-keyed patch, so the consumer sees the gap and converges on
- * current state regardless of which intermediate versions it missed.
- * Version-neutral frames create no gap, so they collapse into a
- * \`_resync\` rather than being dropped silently.
+ * At overflow the stream's pending frames give way to one \`_resync\`, so
+ * the consumer refetches instead of missing versions silently.
  */
 export declare const DEFAULT_SSE_MAX_PENDING_PER_CONNECTION = 256;
 /**
@@ -6602,9 +6594,9 @@ export type RunSseOptions = {
      */
     readonly on_cap_exceeded?: () => never;
     /**
-     * Upper bound on the per-connection undelivered-frame backlog. When
-     * the backlog reaches this many frames the oldest is dropped to make
-     * room for the newest (drop-oldest). Defaults to
+     * Upper bound on the per-connection undelivered-frame backlog. When a
+     * patch finds it full, the stream's pending frames give way to one
+     * \`_resync\`, and the client refetches. Defaults to
      * {@link DEFAULT_SSE_MAX_PENDING_PER_CONNECTION} when omitted.
      */
     readonly maxPending?: number;
@@ -7794,6 +7786,7 @@ type CommittedSnapshot = {
     readonly version: number;
     readonly patch?: unknown;
     readonly event?: {
+        readonly name: string;
         readonly stream: string;
         readonly version: number;
     };
@@ -7814,12 +7807,17 @@ export type CommitSource = {
  * gap; the state carries \`_v\`, the stream's version. \`committed\` fires once
  * per stream a commit appended to, so each call publishes one stream.
  *
+ * With \`events\`, only commits of those event names are published: a state
+ * the channel doesn't serve, a sensitive one above all, never reaches it.
+ *
  * Calling it again for the same app and channel publishes nothing more and
  * returns the same disposer.
  *
  * @returns A function that stops publishing.
  */
-export declare function publishCommits(app: CommitSource, channel: BroadcastChannel<any>): () => void;
+export declare function publishCommits(app: CommitSource, channel: BroadcastChannel<any>, options?: {
+    readonly events?: Iterable<string>;
+}): () => void;
 export {};
 //# sourceMappingURL=publish.d.ts.map
 // === state-cache.d.ts ===

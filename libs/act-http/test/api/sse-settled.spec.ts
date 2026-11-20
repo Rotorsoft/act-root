@@ -30,6 +30,7 @@ describe("sse_sources", () => {
       sse_sources(
         bare,
         { channel, publish: false, settled: false, live: false },
+        new Set(),
         "trpc"
       )
     ).toBeUndefined();
@@ -40,6 +41,7 @@ describe("sse_sources", () => {
       sse_sources(
         bare,
         { channel, publish: true, settled: false, live: false },
+        new Set(),
         "hono"
       )
     ).toThrow(
@@ -54,6 +56,7 @@ describe("sse_sources", () => {
       sse_sources(
         app,
         { channel, publish: true, settled: false, live: false },
+        new Set(),
         "trpc"
       )
     ).toBeUndefined();
@@ -61,6 +64,7 @@ describe("sse_sources", () => {
       sse_sources(
         app,
         { channel, publish: false, settled: true, live: false },
+        new Set(),
         "trpc"
       )
     ).toBe(app);
