@@ -21,14 +21,25 @@ function* walk(dir) {
   }
 }
 
-// Test names by repo-relative path, from it/test/describe calls.
-const call =
-  /\b(?:it|test|describe)(?:\.\w+(?:\([^)]*\))?)*\(\s*(["'`])((?:\\.|(?!\1).)*?)\1/gs;
+// Test names by repo-relative path, from it/test/describe calls and calls
+// of a test function the file declares as `const <name> = fixture(...)`.
+// A typed declaration or a fixture imported under another name isn't seen,
+// which fails a correct citation rather than passing a wrong one.
+const fixture = /\bconst\s+(\w+)\s*=\s*fixture\(/g;
+const call_of = (fns) =>
+  new RegExp(
+    `\\b(?:${fns.join("|")})(?:\\.\\w+(?:\\([^)]*\\))?)*\\(\\s*(["'\`])((?:\\\\.|(?!\\1).)*?)\\1`,
+    "gs"
+  );
 const names = new Map();
 for (const dir of ["libs", "packages", "recipes"])
   for (const file of walk(join(root, dir))) {
+    const source = readFileSync(file, "utf8");
+    const fns = ["it", "test", "describe"];
+    for (const [, name] of source.matchAll(fixture))
+      if (!fns.includes(name)) fns.push(name);
     const found = new Set();
-    for (const m of readFileSync(file, "utf8").matchAll(call))
+    for (const m of source.matchAll(call_of(fns)))
       found.add(m[2].replace(/\\(.)/g, "$1"));
     names.set(relative(root, file), found);
   }

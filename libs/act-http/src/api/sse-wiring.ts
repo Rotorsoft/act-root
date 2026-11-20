@@ -125,9 +125,6 @@ export const DEFAULT_SSE_HEARTBEAT_MS = 30_000;
  */
 export const DEFAULT_SSE_MAX_PENDING_PER_CONNECTION = 256;
 
-/** The most streams one `$live` subscription follows, by default. */
-export const DEFAULT_SSE_MAX_STREAMS_PER_SUBSCRIPTION = 50;
-
 /**
  * Frame yielded by the per-state SSE subscription generator. The
  * initial cached state (when present) arrives as `kind: "state"`;

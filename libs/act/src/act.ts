@@ -115,9 +115,7 @@ import type {
  * @template TActions Schemas for actions
  * @template TStateMap Map of state names to state schemas
  * @template TActor Actor type extending base Actor
- * @template TActionStates Each action's state name, by action name, filled
- *   in by `withState` and `withSlice`, so `registry.actions[action].name` is
- *   the state's literal name. Defaults to `Record<string, string>`.
+ * @template TActionStates Each action's state name; see {@link Registry}.
  */
 export class Act<
   TSchemaReg extends SchemaRegister<TActions>,

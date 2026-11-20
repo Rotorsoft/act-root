@@ -43,9 +43,7 @@ import type { Actor, AsOf, AuditCategory, AuditFinding, AuditOptions, BatchHandl
  * @template TActions Schemas for actions
  * @template TStateMap Map of state names to state schemas
  * @template TActor Actor type extending base Actor
- * @template TActionStates Each action's state name, by action name, filled
- *   in by \`withState\` and \`withSlice\`, so \`registry.actions[action].name\` is
- *   the state's literal name. Defaults to \`Record<string, string>\`.
+ * @template TActionStates Each action's state name; see {@link Registry}.
  */
 export declare class Act<TSchemaReg extends SchemaRegister<TActions>, TEvents extends Schemas, TActions extends Schemas, TStateMap extends Record<string, Schema> = Record<string, never>, TActor extends Actor = Actor, TActionStates extends Record<string, string> = Record<string, string>> implements IAct<TEvents, TActions, TActor, TSchemaReg> {
     private _emitter;
@@ -2119,9 +2117,7 @@ interface BuilderBase<Self, TEvents extends Schemas, TActions extends Schemas, T
  * @template TLanes - Union of declared lane names. Narrowed by
  *   \`.withLane({name})\` calls so \`.to({lane})\` and \`ActOptions.onlyLanes\`
  *   reject typos at compile time. Starts at \`"default"\`.
- * @template TActionStates - Each action's state name, by action name, filled
- *   in by \`withState\` and \`withSlice\`, so \`registry.actions[action].name\` is
- *   the state's literal name. Defaults to \`Record<string, string>\`.
+ * @template TActionStates - Each action's state name; see \`Registry\`.
  *
  * @see {@link act} for usage examples
  * @see {@link Act} for the built orchestrator API
@@ -2499,9 +2495,7 @@ export type ActionBuilder<TState extends Schema, TEvents extends Schemas, TActio
  * @template TActions - Action schemas from this slice's states
  * @template TStateMap - Map of state names to state schemas
  * @template TActor - Actor type extending base Actor
- * @template TActionStates - Each action's state name, by action name, filled
- *   in by \`withState\` and \`withSlice\`, so \`registry.actions[action].name\` is
- *   the state's literal name. Defaults to \`Record<string, string>\`.
+ * @template TActionStates - Each action's state name; see \`Registry\`.
  */
 export type Slice<TSchemaReg extends SchemaRegister<TActions>, TEvents extends Schemas, TActions extends Schemas, TStateMap extends Record<string, Schema> = {}, TActor extends Actor = Actor, TLanes extends string = typeof DEFAULT_LANE, TActionStates extends Record<string, string> = Record<string, string>> = {
     readonly _tag: "Slice";
@@ -2523,6 +2517,7 @@ export type Slice<TSchemaReg extends SchemaRegister<TActions>, TEvents extends S
     readonly _TActor?: TActor;
     /** @internal phantom field for type-level lane union tracking */
     readonly _TLanes?: TLanes;
+    /** @internal phantom field for type-level action → state tracking */
     readonly _A?: TActionStates;
 };
 /**
@@ -2536,9 +2531,7 @@ export type Slice<TSchemaReg extends SchemaRegister<TActions>, TEvents extends S
  * @template TActions - Action schemas
  * @template TStateMap - Map of state names to state schemas
  * @template TActor - Actor type extending base Actor
- * @template TActionStates - Each action's state name, by action name, filled
- *   in by \`withState\` and \`withSlice\`, so \`registry.actions[action].name\` is
- *   the state's literal name. Defaults to \`Record<string, string>\`.
+ * @template TActionStates - Each action's state name; see \`Registry\`.
  */
 export interface SliceBuilder<TSchemaReg extends SchemaRegister<TActions>, TEvents extends Schemas, TActions extends Schemas, TStateMap extends Record<string, Schema> = {}, TActor extends Actor = Actor, TLanes extends string = typeof DEFAULT_LANE, TActionStates extends Record<string, string> = Record<string, string>> extends BuilderBase<SliceBuilder<TSchemaReg, TEvents, TActions, TStateMap, TActor, TLanes, TActionStates>, TEvents, TActions, TActor, TLanes> {
     /**
@@ -6569,8 +6562,6 @@ export declare const DEFAULT_SSE_HEARTBEAT_MS = 30000;
  * \`_resync\` rather than being dropped silently.
  */
 export declare const DEFAULT_SSE_MAX_PENDING_PER_CONNECTION = 256;
-/** The most streams one \`$live\` subscription follows, by default. */
-export declare const DEFAULT_SSE_MAX_STREAMS_PER_SUBSCRIPTION = 50;
 /**
  * Frame yielded by the per-state SSE subscription generator. The
  * initial cached state (when present) arrives as \`kind: "state"\`;
