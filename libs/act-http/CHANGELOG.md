@@ -1,3 +1,10 @@
+# [@rotorsoft/act-http-v2.5.2](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-http-v2.5.1...@rotorsoft/act-http-v2.5.2) (2026-11-20)
+
+
+### Bug Fixes
+
+* **act-http:** settled frames follow every drain, subscriptions check streams, one feed loop ([#2602](https://github.com/Rotorsoft/act-root/issues/2602)) ([f6c0c6a](https://github.com/Rotorsoft/act-root/commit/f6c0c6a75c239cc8f4f71c9a2db1fb4c47471660)), closes [#2589](https://github.com/Rotorsoft/act-root/issues/2589) [#2590](https://github.com/Rotorsoft/act-root/issues/2590) [#2592](https://github.com/Rotorsoft/act-root/issues/2592) [#2593](https://github.com/Rotorsoft/act-root/issues/2593) [#2597](https://github.com/Rotorsoft/act-root/issues/2597) [#2598](https://github.com/Rotorsoft/act-root/issues/2598)
+
 # [@rotorsoft/act-http-v2.5.1](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-http-v2.5.0...@rotorsoft/act-http-v2.5.1) (2026-11-19)
 
 
