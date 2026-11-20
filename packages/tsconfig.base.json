@@ -1,4 +1,5 @@
 {
+  "extends": "../tsconfig.paths.json",
   "compilerOptions": {
     "target": "ES2022",
     "module": "nodenext",
@@ -15,31 +16,6 @@
     "resolveJsonModule": true,
     "noEmit": false,
     "jsx": "react-jsx",
-    "types": ["node", "vitest/globals"],
-    "paths": {
-      "@rotorsoft/act-http/webhook": ["../libs/act-http/src/webhook/index.ts"],
-      "@rotorsoft/act-http/sse": ["../libs/act-http/src/sse/index.ts"],
-      "@rotorsoft/act-http/receiver/trpc": [
-        "../libs/act-http/src/receiver/trpc/index.ts"
-      ],
-      "@rotorsoft/act-http/receiver/express": [
-        "../libs/act-http/src/receiver/express/index.ts"
-      ],
-      "@rotorsoft/act-http/receiver/fastify": [
-        "../libs/act-http/src/receiver/fastify/index.ts"
-      ],
-      "@rotorsoft/act-http/receiver/hono": [
-        "../libs/act-http/src/receiver/hono/index.ts"
-      ],
-      "@rotorsoft/act-http/receiver": [
-        "../libs/act-http/src/receiver/index.ts"
-      ],
-      "@rotorsoft/act-ops/idempotency": [
-        "../libs/act-ops/src/idempotency/index.ts"
-      ],
-      "@rotorsoft/act-ops/receiver": ["../libs/act-ops/src/receiver/index.ts"],
-      "@rotorsoft/*": ["../libs/*/src/index.ts"],
-      "@act/*": ["./*/src/index.ts"]
-    }
+    "types": ["node", "vitest/globals"]
   }
 }
