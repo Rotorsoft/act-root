@@ -3,6 +3,7 @@
 - **Issue:** #1196
 - **Author:** Roger Torres
 - **Created:** 2026-07-11
+- **Superseded in part by #2596:** the bound stays, but an overflow now swaps the stream's pending frames for one `_resync` instead of dropping the oldest frame, the policy `$live` and `$settled` use.
 
 ## Motivation
 
