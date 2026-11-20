@@ -17,6 +17,7 @@ The generated APIs push live state to the browser over SSE (server-sent events, 
 | A list or dashboard read from a projection | `subscribe.$settled`, then refetch | add `settled: true` |
 | Several records, a list, or both, on one page | `subscribe.$live` | add `live: true` |
 | Only part of the app | the states the generated actions reach | `actions: { include }` or `{ exclude }`, `streams` |
+| Only one stream, or a few | `subscribe.<State>` or one `$live` | a predicate in `streams`, or your own publisher |
 | Who's viewing or typing | the same subscriptions, plus `channel.overlay(...)` | nothing new |
 
 Every subscription first sends the stream's cached state, when the channel has one (`kind: "state"`), then one `kind: "patch"` frame per commit. Apply each patch with `applyPatchMessage`; when it answers `behind`, the client missed something (a dropped connection, or a backlog that overflowed into a `_resync`), so reopen the subscription for a fresh state.
@@ -78,7 +79,7 @@ export const router = trpc(app, {
   actor: (ctx: Ctx) => ctx.user,
   stream: () => "unused", // every state below is addressed by the caller
   streams: { Ticket: /^ticket-\d+$/, Customer: /^customer-\d+$/ },
-  // Customer's action is hand-written (recipe 5), so SSE never serves it.
+  // Customer's action is hand-written (recipe 6), so SSE never serves it.
   actions: { exclude: ["ChangeEmail"] },
   sse: {
     channel,
@@ -266,7 +267,66 @@ export const customerRouter = trpc(app, {
 - **`streams`** says which streams belong to a state. `subscribe.Ticket` and `$live` refuse any other stream when they open, with `INVALID_STREAM: "note-1" is not a stream of Ticket`, so a client can't read a note through the ticket subscription by guessing its stream name.
 - **A staff API on the same app** is a second generator with its own channel and the full action set. Each channel only carries what its own API serves.
 
-## 5. Keeping a sensitive state off the channel
+## 5. Only one stream, or a few
+
+Three separate questions, each with its own answer.
+
+**The page follows a few streams.** One `$live` names them all, from any states, on one connection:
+
+```ts no-check
+trpc.subscribe.$live.useSubscription(
+  { streams: { Ticket: ["ticket-1", "ticket-2"], Settings: ["settings"] } },
+  { onData: (frame) => apply(frame.stream, frame) }
+);
+// Hono: /api/sse/$live?Ticket=ticket-1&Ticket=ticket-2&Settings=settings
+```
+
+**The server allows only those streams.** A predicate in `streams` limits a state to a fixed set, or to a lookup that changes at runtime. Its subscriptions refuse every other stream, and so do its actions: a state in `streams` takes its stream from the caller, so only those streams can be written through the API either.
+
+**Only those streams are broadcast.** `publish` chooses by state, not by stream. To broadcast a few streams of a state, leave `publish` off and publish them yourself, with the same version contract the built-in publisher keeps:
+
+```ts
+import { act, state } from "@rotorsoft/act";
+import { BroadcastChannel } from "@rotorsoft/act-http/sse";
+import { trpc } from "@rotorsoft/act-http/trpc";
+import { z } from "zod";
+
+const Ticket = state({ Ticket: z.object({ title: z.string() }) })
+  .init(() => ({ title: "" }))
+  .emits({ TicketOpened: z.object({ title: z.string() }) })
+  .patch({ TicketOpened: ({ data }) => ({ title: data.title }) })
+  .on({ OpenTicket: z.object({ title: z.string() }) })
+  .emit((data) => ["TicketOpened", data])
+  .build();
+
+const app = act().withState(Ticket).build();
+const channel = new BroadcastChannel();
+const featured = new Set(["ticket-1", "ticket-2", "ticket-3"]);
+
+export const router = trpc(app, {
+  actor: (ctx: { user: { id: string; name: string } }) => ctx.user,
+  // Only the featured tickets can be written or followed through this API.
+  streams: { Ticket: (stream) => featured.has(stream) },
+  sse: { channel }, // no `publish`: the listener below publishes
+});
+
+app.on("committed", Ticket, (snaps) => {
+  // Fired only with committed snapshots: the last one and its event exist.
+  const last = snaps.at(-1)!;
+  const stream = last.event!.stream;
+  if (!featured.has(stream)) return;
+  const patches = snaps.map((s) => s.patch ?? {});
+  // A `.snap` took the next version: send it as an empty patch.
+  if (last.version > last.event!.version) patches.push({});
+  channel.publish(stream, { ...last.state, _v: last.version }, patches);
+});
+```
+
+Use the predicate alone when the API should only reach those streams, the listener alone when the API writes every ticket but only some are shown live, or both, as here.
+
+A state without a pattern, whose stream comes from the `stream` resolver, takes any stream on its subscription except one another state's pattern claims: `subscribe.Settings` in the `$live` example can't open `ticket-1`, so a ticket never arrives typed as settings.
+
+## 6. Keeping a sensitive state off the channel
 
 The channel caches one state per stream, folded with whichever actor committed last, and sends it to every subscriber. A state whose events declare `sensitive(...)` fields would hand one person's email to everyone, so generating `sse` refuses it at build.
 
@@ -285,7 +345,7 @@ export const appRouter = t.mergeRouters(router, customerRouter);
 
 `actions: { include: [...] }` works the same way from the other side: only the listed actions are generated, and only the states they reach are served.
 
-## 6. Presence and other changes without an event
+## 7. Presence and other changes without an event
 
 Who's viewing a ticket is not an event; it changes the screen, not the record. Send it with `channel.overlay`, next to `publish: true`. The overlay merges into the cached state without changing its version, and a caught-up client applies it through the same `applyPatchMessage`:
 
@@ -304,7 +364,7 @@ function viewing(stream: string, user: string, on: boolean) {
 
 The overlay survives the next commit, so a client that reconnects sees the same viewers. Write your own `committed` listener instead of `publish: true` only when every commit must carry computed fields the state doesn't have.
 
-## 7. Capacity
+## 8. Capacity
 
 Each generator counts its open subscriptions. The defaults fit a business app with up to a few hundred viewers per process:
 
@@ -329,7 +389,7 @@ sse: {
 
 The subscription past the cap is refused (`503` on Hono, `TOO_MANY_REQUESTS` on tRPC), never left hanging. Over HTTP/2 the browser's six-connection limit goes away, but `$live` still saves a slot and a heartbeat per stream.
 
-## 8. More than one server process
+## 9. More than one server process
 
 The channel lives in memory. A viewer connected to one process sees that process's commits and drains only. Run the processes behind a load balancer with sticky sessions, and route a viewer to the process that serves its writes. To see writes made elsewhere, bridge the app's `notified` lifecycle event into `channel.publish`: the notification carries no snapshot, so load the stream first. [Horizontal scaling](auto-generated-api.md#horizontal-scaling) has the details.
 

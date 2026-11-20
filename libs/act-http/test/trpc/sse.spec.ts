@@ -637,3 +637,54 @@ describe("sse for the actions an API generates", () => {
     expect(channel.state("c-1")).toMatchObject({ display: "1" });
   });
 });
+
+describe("a resolver state's subscription", () => {
+  const Settings = state({ Settings: z.object({ theme: z.string() }) })
+    .init(() => ({ theme: "" }))
+    .emits({ Themed: z.object({ theme: z.string() }) })
+    .patch({ Themed: ({ data }) => ({ theme: data.theme }) })
+    .on({ SetTheme: z.object({ theme: z.string() }) })
+    .emit((data) => ["Themed", data])
+    .build();
+  const two_test = fixture(act().withState(Calculator).withState(Settings));
+
+  two_test(
+    "refuses a stream another state's pattern claims",
+    async ({ app }) => {
+      const channel = new BroadcastChannel<any>();
+      channel.publish("calc-1", { _v: 0, display: "1" }, [{ display: "1" }]);
+      channel.publish("settings", { _v: 0, theme: "dark" }, [
+        { theme: "dark" },
+      ]);
+      const router = trpc(app, {
+        actor: (ctx: Ctx) => ({ id: ctx.actorId, name: ctx.actorId }),
+        stream: () => "settings",
+        streams: { Calculator: /^calc-\d+$/ },
+        sse: { channel, live: true },
+      });
+      const t = initTRPC.context<Ctx>().create();
+      const caller = t.createCallerFactory(router)({ actorId: "u-1" });
+      const refused = (await caller.subscribe.Settings({ stream: "calc-1" }))[
+        Symbol.asyncIterator
+      ]();
+      await expect(refused.next()).rejects.toMatchObject({
+        message: 'INVALID_STREAM: "calc-1" is not a stream of Settings',
+      });
+      const live = (
+        await caller.subscribe.$live({ streams: { Settings: ["calc-1"] } })
+      )[Symbol.asyncIterator]();
+      await expect(live.next()).rejects.toMatchObject({
+        message: 'INVALID_STREAM: "calc-1" is not a stream of Settings',
+      });
+      // Control: its own stream opens on its cached state.
+      const opened = (await caller.subscribe.Settings({ stream: "settings" }))[
+        Symbol.asyncIterator
+      ]();
+      expect((await opened.next()).value).toMatchObject({
+        kind: "state",
+        data: { theme: "dark" },
+      });
+      await opened.return?.(undefined);
+    }
+  );
+});

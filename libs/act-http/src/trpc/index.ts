@@ -71,8 +71,8 @@ import {
   type AppState,
   type AppStateNames,
   invalid_stream,
+  is_stream_of,
   make_dispatch,
-  matches_stream,
   type Refused,
   type ResolverArgs,
   type SelectedActions,
@@ -610,9 +610,7 @@ export function trpc<Ctx extends object, TApp extends ActSurface>(
         .input(z.object({ stream: z.string().min(1) }))
         .subscription(async function* ({ input, ctx, signal }) {
           await resolve_actor(ctx as unknown as Ctx);
-          // A caller-addressed state's stream must match its pattern here
-          // too, or another state's stream would arrive typed as this one.
-          if (!matches_stream(options.streams?.[state_name], input.stream))
+          if (!is_stream_of(state_name, input.stream, options.streams))
             throw refused_error(
               invalid_stream(
                 `"${input.stream}" is not a stream of ${state_name}`
