@@ -1,3 +1,10 @@
+# [@rotorsoft/act-http-v2.5.4](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-http-v2.5.3...@rotorsoft/act-http-v2.5.4) (2026-11-20)
+
+
+### Bug Fixes
+
+* **act-http:** real-time recipes, and a resolver state's subscription refuses another state's stream ([#2613](https://github.com/Rotorsoft/act-root/issues/2613)) ([b01d25e](https://github.com/Rotorsoft/act-root/commit/b01d25e86a8e9cb7f326e6a5d7670904eccee00f)), closes [#2589](https://github.com/Rotorsoft/act-root/issues/2589) [#2590](https://github.com/Rotorsoft/act-root/issues/2590) [#2592](https://github.com/Rotorsoft/act-root/issues/2592) [#2593](https://github.com/Rotorsoft/act-root/issues/2593) [#2597](https://github.com/Rotorsoft/act-root/issues/2597) [#2598](https://github.com/Rotorsoft/act-root/issues/2598) [#2595](https://github.com/Rotorsoft/act-root/issues/2595) [#2600](https://github.com/Rotorsoft/act-root/issues/2600) [#2601](https://github.com/Rotorsoft/act-root/issues/2601) [#2596](https://github.com/Rotorsoft/act-root/issues/2596) [#2599](https://github.com/Rotorsoft/act-root/issues/2599) [#2614](https://github.com/Rotorsoft/act-root/issues/2614)
+
 # [@rotorsoft/act-http-v2.5.3](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-http-v2.5.2...@rotorsoft/act-http-v2.5.3) (2026-11-20)
 
 
