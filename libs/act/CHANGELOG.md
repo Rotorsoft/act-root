@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v2.2.1](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v2.2.0...@rotorsoft/act-v2.2.1) (2026-11-20)
+
+
+### Bug Fixes
+
+* sandbox frees its ports on a failed build, timers capped, act-http/api exports its types ([#2612](https://github.com/Rotorsoft/act-root/issues/2612)) ([e8ffc60](https://github.com/Rotorsoft/act-root/commit/e8ffc601b949702f3e454db8b06078e859afaa64)), closes [#2607](https://github.com/Rotorsoft/act-root/issues/2607) [#2608](https://github.com/Rotorsoft/act-root/issues/2608) [#2609](https://github.com/Rotorsoft/act-root/issues/2609) [#2610](https://github.com/Rotorsoft/act-root/issues/2610)
+
 # [@rotorsoft/act-v2.2.0](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v2.1.16...@rotorsoft/act-v2.2.0) (2026-11-18)
 
 

@@ -1,3 +1,11 @@
+# [@rotorsoft/act-http-v2.5.3](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-http-v2.5.2...@rotorsoft/act-http-v2.5.3) (2026-11-20)
+
+
+### Bug Fixes
+
+* **act-http:** one SSE overflow policy, and SSE only for the states the generated actions reach ([#2611](https://github.com/Rotorsoft/act-root/issues/2611)) ([7f7f85c](https://github.com/Rotorsoft/act-root/commit/7f7f85c19cc4a7ee8befc56072650006c0f376c0)), closes [#2589](https://github.com/Rotorsoft/act-root/issues/2589) [#2590](https://github.com/Rotorsoft/act-root/issues/2590) [#2592](https://github.com/Rotorsoft/act-root/issues/2592) [#2593](https://github.com/Rotorsoft/act-root/issues/2593) [#2597](https://github.com/Rotorsoft/act-root/issues/2597) [#2598](https://github.com/Rotorsoft/act-root/issues/2598) [#2595](https://github.com/Rotorsoft/act-root/issues/2595) [#2600](https://github.com/Rotorsoft/act-root/issues/2600) [#2601](https://github.com/Rotorsoft/act-root/issues/2601) [#2596](https://github.com/Rotorsoft/act-root/issues/2596) [#2599](https://github.com/Rotorsoft/act-root/issues/2599)
+* sandbox frees its ports on a failed build, timers capped, act-http/api exports its types ([#2612](https://github.com/Rotorsoft/act-root/issues/2612)) ([e8ffc60](https://github.com/Rotorsoft/act-root/commit/e8ffc601b949702f3e454db8b06078e859afaa64)), closes [#2607](https://github.com/Rotorsoft/act-root/issues/2607) [#2608](https://github.com/Rotorsoft/act-root/issues/2608) [#2609](https://github.com/Rotorsoft/act-root/issues/2609) [#2610](https://github.com/Rotorsoft/act-root/issues/2610)
+
 # [@rotorsoft/act-http-v2.5.2](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-http-v2.5.1...@rotorsoft/act-http-v2.5.2) (2026-11-20)
 
 
