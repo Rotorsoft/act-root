@@ -2,11 +2,7 @@ import type { BroadcastChannel } from "../sse/broadcast.js";
 import { type CommitSource, publishCommits } from "../sse/publish.js";
 import type { ActSurface } from "./dispatch.js";
 
-/** A settled frame: the targets a drain advanced. */
-export type SseSettledFrame = {
-  readonly kind: "settled";
-  readonly data: { readonly targets: string[] };
-};
+export type { SseSettledFrame } from "./types.js";
 
 /**
  * What the settled frames need from an app: `acked`, which every drain emits

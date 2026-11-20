@@ -79,12 +79,16 @@ const AuditOptionsSchema = z.object({
     .optional(),
 });
 
+// A timer's delay. Node runs a timer below 1 ms, above 2^31 − 1 ms or NaN
+// every millisecond, so every delay a bag sets a timer from is held to this.
+const TimerMsSchema = z.number().min(0).max(2_147_483_647);
+
 // Lane — `.withLane({...})`, per-lane overrides of the drain budget.
 const LaneConfigSchema = z.object({
   name: z.string().min(1),
   leaseMillis: z.number().min(0).optional(),
   streamLimit: z.number().int().min(0).optional(),
-  cycleMs: z.number().min(0).optional(),
+  cycleMs: TimerMsSchema.optional(),
 });
 
 // Page — the `limit` and bounds of every query: `app.query`, `app.load`'s
@@ -101,10 +105,9 @@ const PageOptionsSchema = z.object({
   created_after: z.date().optional(),
 });
 
-// Poll — `app.start_correlations`' frequency. Node runs a timer below 1 ms,
-// above 2^31 − 1 ms or NaN every millisecond.
+// Poll — `app.start_correlations`' frequency.
 const PollOptionsSchema = z.object({
-  frequency: z.number().min(0).max(2_147_483_647),
+  frequency: TimerMsSchema,
 });
 
 // Drain / Settle — the knobs of `app.drain(...)` and `app.settle(...)`.
@@ -123,7 +126,7 @@ const DrainOptionsSchema = z.object({
 });
 
 const SettleOptionsSchema = DrainOptionsSchema.extend({
-  debounceMs: z.number().min(0).optional(),
+  debounceMs: TimerMsSchema.optional(),
   correlate: PageOptionsSchema.optional(),
   // `0` runs no passes; `Infinity` is the documented default (no cap), which
   // an integer check alone would refuse.
@@ -143,14 +146,14 @@ export const MAX_SHUTDOWN_GRACE_MS = 30_000;
 
 // `0` stops scheduling and returns without waiting.
 const ShutdownOptionsSchema = z.object({
-  graceMs: z.number().min(0).optional(),
+  graceMs: TimerMsSchema.optional(),
 });
 
 // Act — the scalar knobs of `act().build(options)`. The autoclose window and
 // the circuit breaker are their own bags below.
 const ActOptionsSchema = z.object({
   maxSubscribedStreams: z.number().int().min(1).optional(),
-  settleDebounceMs: z.number().int().min(0).optional(),
+  settleDebounceMs: TimerMsSchema.int().optional(),
   autoSettle: z.boolean().optional(),
 });
 

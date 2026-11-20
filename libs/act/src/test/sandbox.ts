@@ -57,10 +57,18 @@ export async function sandbox<TApp>(
   const cache = options.cache ? await options.cache() : new InMemoryCache();
   await store.seed();
 
-  const app = builder.build({
-    ...options.actOptions,
-    scoped: { store, cache },
-  });
+  let app: TApp;
+  try {
+    app = builder.build({
+      ...options.actOptions,
+      scoped: { store, cache },
+    });
+  } catch (error) {
+    // Nothing owns the ports yet: free them before the build's error goes up.
+    await store.dispose();
+    await cache.dispose();
+    throw error;
+  }
 
   let _disposed: Promise<void> | undefined;
   const dispose = (): Promise<void> => {

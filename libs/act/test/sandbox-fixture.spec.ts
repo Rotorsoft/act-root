@@ -76,6 +76,22 @@ describe("sandbox", () => {
     await dispose();
   });
 
+  it("disposes its ports when the build throws", async () => {
+    const store = new InMemoryStore();
+    const cache = new InMemoryCache();
+    const store_dispose = vi.spyOn(store, "dispose");
+    const cache_dispose = vi.spyOn(cache, "dispose");
+    await expect(
+      sandbox(counterBuilder, {
+        store: () => store,
+        cache: () => cache,
+        actOptions: { maxSubscribedStreams: Number.NaN },
+      })
+    ).rejects.toThrow();
+    expect(store_dispose).toHaveBeenCalledOnce();
+    expect(cache_dispose).toHaveBeenCalledOnce();
+  });
+
   it("passes through actOptions", async () => {
     const { app, dispose } = await sandbox(counterBuilder, {
       actOptions: { settleDebounceMs: 0 },
