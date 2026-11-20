@@ -9,6 +9,7 @@ import type {
 } from "@rotorsoft/act";
 import type { IdempotencyStore } from "@rotorsoft/act-ops/idempotency";
 import type { ZodType } from "zod";
+import type { ApiError } from "./errors.js";
 import { withIdempotency } from "./idempotency.js";
 import { track_in_flight } from "./in-flight.js";
 
@@ -49,17 +50,11 @@ export type ActSurface = {
   do(action: string, target: Target, payload: unknown): Promise<unknown>;
   /**
    * The app's lifecycle events, which `sse.publish` (`committed`) and
-   * `sse.settled` (`settled`) listen to. A built Act has them; a surface
-   * without them can't use those two options.
+   * `sse.settled` and `sse.live` (`acked`) listen to. A built Act has them; a surface
+   * without them can't use those options.
    */
-  on?(
-    event: "committed" | "settled",
-    listener: (arg: unknown) => void
-  ): unknown;
-  off?(
-    event: "committed" | "settled",
-    listener: (arg: unknown) => void
-  ): unknown;
+  on?(event: "committed" | "acked", listener: (arg: unknown) => void): unknown;
+  off?(event: "committed" | "acked", listener: (arg: unknown) => void): unknown;
 };
 
 /**
@@ -113,6 +108,14 @@ export type ActionInput<TApp, P, K> =
     ? { stream: string; payload: AppActions<TApp>[K & keyof AppActions<TApp>] }
     : AppActions<TApp>[K & keyof AppActions<TApp>];
 
+/** Whether `stream` matches a state's pattern; a state without one takes any. */
+export const matches_stream = (
+  pattern: RegExp | ((stream: string) => boolean) | undefined,
+  stream: string
+): boolean =>
+  !pattern ||
+  (pattern instanceof RegExp ? pattern.test(stream) : pattern(stream));
+
 /**
  * The stream patterns of the states `app`'s actions belong to, by action
  * name, and refuses at generation a state that neither `patterns` nor a
@@ -130,11 +133,7 @@ export function stream_patterns(
   for (const [action, state] of Object.entries(app.registry.actions)) {
     states.add(state.name);
     const pattern = patterns?.[state.name];
-    if (pattern)
-      by_action.set(
-        action,
-        pattern instanceof RegExp ? (s) => pattern.test(s) : pattern
-      );
+    if (pattern) by_action.set(action, (s) => matches_stream(pattern, s));
     else if (!has_resolver) uncovered.add(state.name);
   }
   const unknown = Object.keys(patterns ?? {}).filter((n) => !states.has(n));
@@ -240,13 +239,44 @@ type TargetResolvers<C> = {
   ) => number | undefined | Promise<number | undefined>;
 };
 
-/** What one generated action call came to; each transport maps the refusals. */
-export type Dispatched =
-  | { kind: "done"; result: unknown }
-  | { kind: "invalid-stream"; stream: string }
-  | { kind: "missing-key" }
-  | { kind: "in-flight" }
-  | { kind: "conflict" };
+/** A refused call: its status and the {@link ApiError} each transport sends. */
+export type Refused = {
+  kind: "refused";
+  status: 400 | 409 | 422 | 503;
+  body: ApiError;
+};
+
+/** What one generated action call came to. */
+export type Dispatched = { kind: "done"; result: unknown } | Refused;
+
+const refused = (
+  status: Refused["status"],
+  error: string,
+  code: string,
+  detail: string
+): Refused => ({ kind: "refused", status, body: { error, detail, code } });
+
+/** A stream the caller named that its state doesn't serve. */
+export const invalid_stream = (detail: string) =>
+  refused(422, "InvalidStream", "INVALID_STREAM", detail);
+const MISSING_KEY = refused(
+  400,
+  "BadRequest",
+  "BAD_REQUEST",
+  "Idempotency-Key required"
+);
+const IN_FLIGHT = refused(
+  503,
+  "ServiceUnavailable",
+  "IN_FLIGHT",
+  "Idempotency-Key in flight; the original request has not finished, retry later"
+);
+const CONFLICT = refused(
+  409,
+  "Conflict",
+  "CONFLICT",
+  "Idempotency-Key already used; original result not cached"
+);
 
 /**
  * One generated action call: resolve the target from the validated input,
@@ -270,7 +300,10 @@ export function make_dispatch<C>(
     ctx: C,
     actor: Actor,
     key: () => string | undefined,
-    addressed?: { stream: unknown; matches: (stream: string) => boolean }
+    addressed?: {
+      stream: unknown;
+      matches: (stream: string) => boolean;
+    }
   ): Promise<Dispatched> => {
     // A caller-addressed state takes the caller's stream, once it matches the
     // state's pattern; every other state resolves it. `stream_patterns`
@@ -280,7 +313,9 @@ export function make_dispatch<C>(
       (typeof addressed.stream !== "string" ||
         !addressed.matches(addressed.stream))
     )
-      return { kind: "invalid-stream", stream: String(addressed.stream) };
+      return invalid_stream(
+        `"${String(addressed.stream)}" is not a stream of ${app.registry.actions[action_name]!.name}`
+      );
     const stream = addressed
       ? (addressed.stream as string)
       : await resolvers.stream!(action_name, input, ctx);
@@ -292,9 +327,9 @@ export function make_dispatch<C>(
     const run = () => app.do(action_name, target, payload);
     if (!tracker) return { kind: "done", result: await run() };
     const k = key();
-    if (!k) return { kind: "missing-key" };
+    if (!k) return MISSING_KEY;
     const outcome = await withIdempotency(tracker.store, k, run);
     if (!outcome.deduped) return { kind: "done", result: outcome.result };
-    return { kind: tracker.in_flight(k) ? "in-flight" : "conflict" };
+    return tracker.in_flight(k) ? IN_FLIGHT : CONFLICT;
   };
 }

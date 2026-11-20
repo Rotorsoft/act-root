@@ -70,7 +70,10 @@ import {
   type AppActions,
   type AppState,
   type AppStateNames,
+  invalid_stream,
   make_dispatch,
+  matches_stream,
+  type Refused,
   type ResolverArgs,
   type SelectedActions,
   type StreamPatterns,
@@ -87,11 +90,7 @@ import {
 import { SseConnectionCounter } from "../api/sse-counter.js";
 import { live_sources, run_live_subscription } from "../api/sse-live.js";
 import { SseOptionsSchema } from "../api/sse-options.js";
-import {
-  run_settled_subscription,
-  type SseSettledFrame,
-  sse_sources,
-} from "../api/sse-settled.js";
+import { type SseSettledFrame, sse_sources } from "../api/sse-settled.js";
 import { sse_state_names } from "../api/sse-states.js";
 
 // A `$live` request: streams by state name, and whether to add the settled targets.
@@ -232,8 +231,8 @@ function to_trpc_error(err: unknown): TRPCError {
 }
 
 /**
- * Minimal status → tRPC code map. Only the statuses
- * {@link ERROR_MAP} produces (plus 500) appear here; anything else
+ * Minimal status → tRPC code map. Only the statuses {@link ERROR_MAP}
+ * and the generated refusals produce (plus 500) appear here; anything else
  * collapses to `INTERNAL_SERVER_ERROR`.
  *
  * @internal
@@ -256,9 +255,23 @@ function status_to_trpc_code(status: number): TRPCError["code"] {
       return "PRECONDITION_FAILED";
     case 422:
       return "UNPROCESSABLE_CONTENT";
+    case 503:
+      return "SERVICE_UNAVAILABLE";
     default:
       return "INTERNAL_SERVER_ERROR";
   }
+}
+
+// A refusal as a `TRPCError`; tRPC has one code for both 422s, so an invalid
+// stream names its own in the message.
+function refused_error({ status, body }: Refused): TRPCError {
+  return new TRPCError({
+    code: status_to_trpc_code(status),
+    message:
+      body.code === "INVALID_STREAM"
+        ? `${body.code}: ${body.detail}`
+        : body.detail,
+  });
 }
 
 /** The root types of the router {@link trpc} builds over `Ctx`. */
@@ -442,7 +455,8 @@ export function trpc<Ctx extends object, TApp extends ActSurface>(
 
   // Run the actor extractor for a generated procedure, mapping a "throw to
   // deny" onto `UNAUTHORIZED` rather than a framework 500. Shared by
-  // mutations and subscriptions, so a denied caller gets neither. It runs
+  // mutations and subscriptions, so a denied caller gets neither, and a
+  // subscription resolves it before it takes a slot or yields a frame. It runs
   // inline rather than as `t.procedure.use(authenticated(...))`: the
   // middleware threads tRPC's internal `Unwrap` type into each procedure,
   // which the d.ts emitter can't name portably (its file name is hashed
@@ -514,26 +528,7 @@ export function trpc<Ctx extends object, TApp extends ActSurface>(
             envelope && { stream: envelope.stream, matches: matches! }
           );
           if (outcome.kind === "done") return outcome.result;
-          if (outcome.kind === "invalid-stream")
-            throw new TRPCError({
-              code: "UNPROCESSABLE_CONTENT",
-              message: `INVALID_STREAM: "${outcome.stream}" is not a stream of ${state.name}`,
-            });
-          throw new TRPCError(
-            outcome.kind === "missing-key"
-              ? { code: "BAD_REQUEST", message: "Idempotency-Key required" }
-              : outcome.kind === "in-flight"
-                ? {
-                    code: "SERVICE_UNAVAILABLE",
-                    message:
-                      "Idempotency-Key in flight; the original request has not finished, retry later",
-                  }
-                : {
-                    code: "CONFLICT",
-                    message:
-                      "Idempotency-Key already used; original result not cached",
-                  }
-          );
+          throw refused_error(outcome);
         } catch (err) {
           if (err instanceof TRPCError) throw err;
           throw to_trpc_error(err);
@@ -584,10 +579,7 @@ export function trpc<Ctx extends object, TApp extends ActSurface>(
               )
             : { refused: "streams by state name, and settled" };
           if ("refused" in checked)
-            throw new TRPCError({
-              code: "UNPROCESSABLE_CONTENT",
-              message: `INVALID_STREAM: ${checked.refused}`,
-            });
+            throw refused_error(invalid_stream(checked.refused));
           yield* run_live_subscription(
             sse_config.channel,
             checked.sources,
@@ -607,22 +599,32 @@ export function trpc<Ctx extends object, TApp extends ActSurface>(
         signal,
       }) {
         await resolve_actor(ctx as unknown as Ctx);
-        yield* run_settled_subscription(settled_source!, sse_counter, signal, {
-          maxPending: sse_config.maxPendingPerConnection,
-          on_cap_exceeded: too_many,
-        });
+        // A `$live` that follows no stream yields only the settled frames.
+        yield* run_live_subscription(
+          sse_config.channel,
+          [],
+          settled_source,
+          sse_counter,
+          signal,
+          {
+            maxPending: sse_config.maxPendingPerConnection,
+            on_cap_exceeded: too_many,
+          }
+        );
       });
     for (const state_name of state_names) {
       sse_handlers[state_name] = t.procedure
         .input(z.object({ stream: z.string().min(1) }))
         .subscription(async function* ({ input, ctx, signal }) {
-          // Step 1 of the documented subscription contract: the actor
-          // extractor runs before a slot is taken or a frame is yielded,
-          // so a denying extractor denies the open. Hono gets this from
-          // the `authenticated` middleware it mounts across `/api/*`;
-          // this generator is where the same rule lives for tRPC, which
-          // resolves the actor inline rather than through middleware.
           await resolve_actor(ctx as unknown as Ctx);
+          // A caller-addressed state's stream must match its pattern here
+          // too, or another state's stream would arrive typed as this one.
+          if (!matches_stream(options.streams?.[state_name], input.stream))
+            throw refused_error(
+              invalid_stream(
+                `"${input.stream}" is not a stream of ${state_name}`
+              )
+            );
           yield* runSseSubscription(
             sse_config.channel,
             input.stream,

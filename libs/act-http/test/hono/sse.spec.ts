@@ -296,6 +296,29 @@ describe("hono sse — a state with sensitive events", () => {
   });
 });
 
+describe("hono sse — a caller-addressed state's subscription", () => {
+  test("opens only a stream that matches the state's pattern", async ({
+    app,
+  }) => {
+    const api = hono(app, {
+      actor: () => ({ id: "u-1", name: "alice" }),
+      stream: () => "calc-1",
+      streams: { Calculator: /^calc-\d+$/ },
+      sse: { channel: new BroadcastChannel() },
+    });
+    const refused = await api.request("/api/sse/Calculator?stream=ticket-1");
+    expect(refused.status).toBe(422);
+    expect(await refused.json()).toEqual({
+      error: "InvalidStream",
+      detail: '"ticket-1" is not a stream of Calculator',
+      code: "INVALID_STREAM",
+    });
+    const opened = await api.request("/api/sse/Calculator?stream=calc-1");
+    expect(opened.status).toBe(200);
+    await opened.body?.cancel();
+  });
+});
+
 describe("hono sse — publish, $settled and onConnections", () => {
   const Added = z.object({ by: z.number() });
   const Tally = state({ Tally: z.object({ n: z.number() }) })
@@ -350,14 +373,15 @@ describe("hono sse — publish, $settled and onConnections", () => {
       stream: () => "t-1",
       sse: { channel, publish: true, live: true },
     });
+    // A key that names no served state is ignored; naming nothing is refused.
     const refused = await api.request("/api/sse/$live?Nope=t-1");
     expect(refused.status).toBe(422);
     expect(await refused.json()).toEqual({
       error: "InvalidStream",
-      detail: 'no live state "Nope"',
+      detail: "name at least one stream, or settled",
       code: "INVALID_STREAM",
     });
-    const streams_only = await api.request("/api/sse/$live?Tally=t-1");
+    const streams_only = await api.request("/api/sse/$live?Tally=t-1&_=123");
     const first = read_sse_frames(streams_only, ["state"]);
     await app.do(
       "add",
