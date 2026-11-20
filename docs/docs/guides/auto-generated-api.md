@@ -298,7 +298,7 @@ const router = trpc(app, {
 trpc.VoidInvoice.mutate({ stream: "invoice-acme-42", payload: { reason } });
 ```
 
-A stream that doesn't match its state's pattern is refused before `app.do`: `422` with code `INVALID_STREAM` on Hono, `UNPROCESSABLE_CONTENT` on tRPC, so a client can't point `VoidInvoice` at a client's stream. The state's subscriptions (`subscribe.<State>`, `$live`) refuse such a stream the same way. Never put the address in the payload: an emit handler that spreads its payload would copy it onto every event. `stream` is optional when every state is in `streams`, and generation fails, naming the state, when a state is in neither.
+A stream that doesn't match its state's pattern is refused before `app.do`: `422` with code `INVALID_STREAM` on Hono, `UNPROCESSABLE_CONTENT` on tRPC, so a client can't point `VoidInvoice` at a client's stream. The state's subscriptions (`subscribe.<State>`, `$live`) refuse such a stream the same way. A state whose stream comes from the `stream` resolver has no pattern, so its subscriptions take any stream except one another state's pattern claims: `subscribe.Settings` can't open `invoice-acme-42`. Never put the address in the payload: an emit handler that spreads its payload would copy it onto every event. `stream` is optional when every state is in `streams`, and generation fails, naming the state, when a state is in neither.
 
 ## Authentication — the `actor` seam
 
@@ -428,6 +428,8 @@ const api = hono(app, {
 // Client:
 //   new EventSource("/api/sse/Ticket?stream=ticket-42")
 ```
+
+[Real-time recipes](real-time-recipes.md) shows each option below on a real screen, with the client code.
 
 ### Lists and dashboards: `$settled`
 

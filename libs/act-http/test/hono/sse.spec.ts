@@ -416,3 +416,40 @@ describe("hono sse — publish, $settled and onConnections", () => {
     });
   });
 });
+
+describe("hono sse — a resolver state's subscription", () => {
+  const Settings = state({ Settings: z.object({ theme: z.string() }) })
+    .init(() => ({ theme: "" }))
+    .emits({ Themed: z.object({ theme: z.string() }) })
+    .patch({ Themed: ({ data }) => ({ theme: data.theme }) })
+    .on({ SetTheme: z.object({ theme: z.string() }) })
+    .emit((data) => ["Themed", data])
+    .build();
+  const two_test = fixture(act().withState(Calculator).withState(Settings));
+
+  two_test(
+    "refuses a stream another state's pattern claims",
+    async ({ app }) => {
+      const api = hono(app, {
+        actor: () => ({ id: "u-1", name: "alice" }),
+        stream: () => "settings",
+        streams: { Calculator: /^calc-\d+$/ },
+        sse: { channel: new BroadcastChannel(), live: true },
+      });
+      for (const path of [
+        "/api/sse/Settings?stream=calc-1",
+        "/api/sse/$live?Settings=calc-1",
+      ]) {
+        const refused = await api.request(path);
+        expect(refused.status).toBe(422);
+        expect((await refused.json()).detail).toBe(
+          '"calc-1" is not a stream of Settings'
+        );
+      }
+      // Control: its own stream opens.
+      const opened = await api.request("/api/sse/Settings?stream=settings");
+      expect(opened.status).toBe(200);
+      await opened.body?.cancel();
+    }
+  );
+});

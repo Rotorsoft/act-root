@@ -1,7 +1,7 @@
 import type { BroadcastChannel } from "../sse/broadcast.js";
 import { resync_frame } from "../sse/frames.js";
 import type { PatchMessage } from "../sse/types.js";
-import { matches_stream } from "./dispatch.js";
+import { is_stream_of } from "./dispatch.js";
 import type { SettledSource, SseSettledFrame } from "./sse-settled.js";
 import type { SseAccounting } from "./sse-wiring.js";
 import { DEFAULT_SSE_MAX_PENDING_PER_CONNECTION } from "./sse-wiring.js";
@@ -135,12 +135,11 @@ export function live_sources(
   for (const [state, streams] of Object.entries(request.streams ?? {})) {
     if (!streams) continue;
     if (!served.has(state)) return { refused: `no live state "${state}"` };
-    const pattern = patterns[state];
     for (const stream of streams) {
       const matches =
         typeof stream === "string" &&
         stream.length > 0 &&
-        matches_stream(pattern, stream);
+        is_stream_of(state, stream, patterns);
       if (!matches)
         return { refused: `"${String(stream)}" is not a stream of ${state}` };
       const listed = sources.get(stream);

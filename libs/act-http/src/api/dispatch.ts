@@ -29,6 +29,28 @@ export const matches_stream = (
   (pattern instanceof RegExp ? pattern.test(stream) : pattern(stream));
 
 /**
+ * Whether a subscription to `state` may open `stream`: it matches the
+ * state's pattern, or, for a state without one, no other state's pattern
+ * claims it, so another state's stream never arrives typed as this one.
+ */
+export const is_stream_of = (
+  state: string,
+  stream: string,
+  patterns:
+    | Readonly<
+        Record<string, RegExp | ((stream: string) => boolean) | undefined>
+      >
+    | undefined
+): boolean => {
+  const own = patterns?.[state];
+  if (own) return matches_stream(own, stream);
+  return !Object.entries(patterns ?? {}).some(
+    ([name, pattern]) =>
+      name !== state && pattern && matches_stream(pattern, stream)
+  );
+};
+
+/**
  * The stream patterns of the states `app`'s actions belong to, by action
  * name, and refuses at generation a state that neither `patterns` nor a
  * `stream` resolver covers, or a pattern for a state the app doesn't have.

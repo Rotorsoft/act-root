@@ -62,8 +62,8 @@ import {
   type AppActions,
   type AppStateNames,
   invalid_stream,
+  is_stream_of,
   make_dispatch,
-  matches_stream,
   type ResolverArgs,
   type SelectedActions,
   type StreamPatterns,
@@ -437,8 +437,7 @@ export function hono<TApp extends ActSurface>(
           };
           return c.json(body, 400);
         }
-        // A caller-addressed state's stream must match its pattern here too.
-        if (!matches_stream(options.streams?.[state_name], stream_id))
+        if (!is_stream_of(state_name, stream_id, options.streams))
           return c.json(
             invalid_stream(`"${stream_id}" is not a stream of ${state_name}`)
               .body,

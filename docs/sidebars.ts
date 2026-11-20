@@ -12,6 +12,7 @@ const sidebars: SidebarsConfig = {
         "guides/projections-to-database",
         "guides/external-integration",
         "guides/auto-generated-api",
+        "guides/real-time-recipes",
         "guides/flow-animations",
         "guides/diagrams",
         "guides/rules-across-streams",
