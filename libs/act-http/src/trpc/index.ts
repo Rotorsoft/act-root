@@ -91,7 +91,7 @@ import { SseConnectionCounter } from "../api/sse-counter.js";
 import { live_sources, run_live_subscription } from "../api/sse-live.js";
 import { SseOptionsSchema } from "../api/sse-options.js";
 import { type SseSettledFrame, sse_sources } from "../api/sse-settled.js";
-import { sse_state_names } from "../api/sse-states.js";
+import { sse_states } from "../api/sse-states.js";
 
 // A `$live` request: streams by state name, and whether to add the settled targets.
 const LiveRequestSchema = z.object({
@@ -541,8 +541,12 @@ export function trpc<Ctx extends object, TApp extends ActSurface>(
       sse_config.maxConnections,
       options.sse.onConnections
     );
-    const state_names = sse_state_names(app, "trpc");
-    const settled_source = sse_sources(app, sse_config, "trpc");
+    const { names: state_names, events: served_events } = sse_states(
+      app,
+      options.actions,
+      "trpc"
+    );
+    const settled_source = sse_sources(app, sse_config, served_events, "trpc");
     const sse_handlers: Record<string, unknown> = {};
     const too_many = () => {
       throw new TRPCError({

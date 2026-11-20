@@ -602,3 +602,38 @@ describe("sse publish, $settled and onConnections", () => {
     });
   });
 });
+
+describe("sse for the actions an API generates", () => {
+  const Vault = state({ Vault: z.object({ secret: z.string() }) })
+    .init(() => ({ secret: "" }))
+    .emits({ Locked: z.object({ secret: sensitive(z.string()) }) })
+    .patch({ Locked: () => ({ secret: "" }) })
+    .on({ Lock: z.object({ secret: z.string() }) })
+    .emit((a) => ["Locked", { secret: a.secret }])
+    .build();
+  const test = fixture(act().withState(Calculator).withState(Vault));
+  const actor = { id: "u-1", name: "u-1" };
+
+  test("serves and publishes only the states the selected actions reach", async ({
+    app,
+  }) => {
+    const channel = new BroadcastChannel<any>();
+    const options = {
+      actor: (ctx: Ctx) => ({ id: ctx.actorId, name: ctx.actorId }),
+      stream: () => "s-1",
+      sse: { channel, publish: true },
+    };
+    // Control: with Vault's action generated, its sensitive state refuses sse.
+    expect(() => trpc(app, options)).toThrow('state "Vault" can\'t be served');
+    const router = trpc(app, { ...options, actions: { exclude: ["Lock"] } });
+    expect(
+      Object.keys(router._def.procedures)
+        .filter((k) => k.startsWith("subscribe."))
+        .sort()
+    ).toEqual(["subscribe.Calculator"]);
+    await app.do("Lock", { stream: "v-1", actor }, { secret: "s3cr3t" });
+    await app.do("PressKey", { stream: "c-1", actor }, { key: "1" });
+    expect(channel.state("v-1")).toBeUndefined();
+    expect(channel.state("c-1")).toMatchObject({ display: "1" });
+  });
+});

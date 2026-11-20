@@ -6,7 +6,7 @@ import {
   SseConnectionCounter,
 } from "../../src/api/sse-counter.js";
 import { SseOptionsSchema } from "../../src/api/sse-options.js";
-import { sse_state_names } from "../../src/api/sse-states.js";
+import { sse_states } from "../../src/api/sse-states.js";
 import {
   DEFAULT_SSE_HEARTBEAT_MS,
   DEFAULT_SSE_MAX_CONNECTIONS,
@@ -315,163 +315,39 @@ describe("runSseSubscription", () => {
     expect(counter.open).toBe(1);
   });
 
-  it("bounds the per-connection pending buffer, dropping the oldest when a slow consumer stalls", async () => {
-    // Defect #1: a stalled consumer that never pulls lets `pending`
-    // grow without bound. With a bound of N, publishing far more than N
-    // messages before the consumer reads must retain only the newest N
-    // (drop-oldest), not every message.
+  it("bounds a stalled consumer's backlog: an overflow becomes one _resync, then the newest patches", async () => {
+    // A stalled consumer that never pulls must not let the backlog grow
+    // without bound, nor lose versions silently: when a patch finds it full,
+    // the stream's pending frames give way to one `_resync` (the client
+    // refetches), and later patches queue behind it.
     const channel = new BroadcastChannel<S>();
     const counter = new SseConnectionCounter(5);
     const maxPending = 3;
     const gen = runSseSubscription(channel, "k", counter, undefined, {
       maxPending,
     });
-
-    // Prime the subscription: pull the first frame so the loop is now
-    // awaiting the next publish and the subscriber callback is armed.
     const primed = gen.next();
-    // The consumer stalls here — it never pulls again while we flood.
-    // Flood the channel with far more than `maxPending` publications.
     const flood = 50;
-    for (let i = 1; i <= flood; i++) {
+    for (let i = 1; i <= flood; i++)
       channel.publish("k", { _v: i, n: i }, [{ n: i }]);
-    }
 
-    // First frame is the earliest surviving patch (n === flood - maxPending + 1).
-    const first = await primed;
-    expect(first.value).toMatchObject({
+    // Publishes 1–3 fill the backlog; every third after that overflows and
+    // swaps the stream's frames for one `_resync` (at 4, 7, …, 49), so the
+    // consumer finds that resync, then patch 50.
+    expect((await primed).value).toMatchObject({
       kind: "patch",
-      data: { [flood - maxPending + 1]: { n: flood - maxPending + 1 } },
+      data: { _resync: true },
     });
-
-    // Only `maxPending - 1` remain queued (one was just shifted out).
-    const rest: SseSubscriptionFrame<S>[] = [];
-    for (let i = 0; i < maxPending - 1; i++) {
-      rest.push((await gen.next()).value as SseSubscriptionFrame<S>);
-    }
-    // The very last flooded message must be present (newest kept).
-    expect(rest.at(-1)).toMatchObject({
+    expect((await gen.next()).value).toMatchObject({
       kind: "patch",
       data: { [flood]: { n: flood } },
     });
-
     await gen.return(undefined);
     expect(counter.open).toBe(0);
   });
 });
 
-/**
- * The per-connection backlog dropped the oldest frame unconditionally,
- * and its doc-comment justified that with "each frame is a full version-keyed
- * patch, so the consumer converges regardless of skips." That is false for
- * `_overlay` and `_resync`: they carry no versions, so a dropped one leaves no
- * gap for `applyPatchMessage` to report as `behind` and is lost silently.
- */
-describe("runSseSubscription backlog keeps version-neutral frames", () => {
-  type S = { _v: number; n: number; typing?: string[] };
-
-  /** Yield to the generator without consuming, so the backlog fills. */
-  const settle = () => new Promise((r) => setTimeout(r, 5));
-
-  async function drain(
-    gen: AsyncGenerator<SseSubscriptionFrame<S>>,
-    count: number
-  ): Promise<SseSubscriptionFrame<S>[]> {
-    const frames: SseSubscriptionFrame<S>[] = [];
-    for await (const frame of gen) {
-      frames.push(frame);
-      if (frames.length >= count) break;
-    }
-    return frames;
-  }
-
-  it("evicts a version-keyed frame rather than the overlay beside it", async () => {
-    const channel = new BroadcastChannel<S>();
-    channel.publish("k", { _v: 1, n: 1 }, [{ n: 1 }]);
-    const gen = runSseSubscription(channel, "k", undefined, undefined, {
-      maxPending: 2,
-    });
-    // Pull the initial state frame, then stop consuming.
-    const first = await gen.next();
-    expect(first.value).toMatchObject({ kind: "state" });
-
-    channel.overlay("k", { typing: ["alice"] });
-    channel.publish("k", { _v: 2, n: 2 }, [{ n: 2 }]);
-    channel.publish("k", { _v: 3, n: 3 }, [{ n: 3 }]); // forces an eviction
-    await settle();
-
-    const frames = await drain(gen, 2);
-    const payloads = frames.map((f) => f.data as Record<string, unknown>);
-    // The overlay survived; a version-keyed patch was dropped instead, and
-    // the client sees that gap and refetches on its own.
-    expect(payloads.some((p) => p._overlay)).toBe(true);
-    await gen.return(undefined as never);
-  });
-
-  it("collapses an all-neutral backlog into a single resync", async () => {
-    const channel = new BroadcastChannel<S>();
-    channel.publish("k", { _v: 1, n: 1 }, [{ n: 1 }]);
-    const gen = runSseSubscription(channel, "k", undefined, undefined, {
-      maxPending: 1,
-    });
-    await gen.next(); // state frame
-
-    channel.overlay("k", { typing: ["alice"] });
-    channel.overlay("k", { typing: ["alice", "bob"] });
-    await settle();
-
-    const frames = await drain(gen, 1);
-    const payload = frames[0].data as Record<string, unknown>;
-    // Nothing was lost silently: the client is told to refetch.
-    expect(payload._resync).toBe(true);
-    await gen.return(undefined as never);
-  });
-
-  it("keeps the newest frame alongside the collapsed resync when there is room", async () => {
-    // Same collapse, but a cap above 1 leaves space for the frame that
-    // triggered it — the resync supersedes only what it replaced.
-    const channel = new BroadcastChannel<S>();
-    channel.publish("k", { _v: 1, n: 1 }, [{ n: 1 }]);
-    const gen = runSseSubscription(channel, "k", undefined, undefined, {
-      maxPending: 2,
-    });
-    await gen.next(); // state frame
-
-    channel.overlay("k", { typing: ["alice"] });
-    channel.overlay("k", { typing: ["alice", "bob"] });
-    channel.publish("k", { _v: 2, n: 2 }, [{ n: 2 }]);
-    await settle();
-
-    const frames = await drain(gen, 2);
-    const payloads = frames.map((f) => f.data as Record<string, unknown>);
-    expect(payloads[0]._resync).toBe(true);
-    expect(payloads[1]["2"]).toBeDefined();
-    await gen.return(undefined as never);
-  });
-
-  it("still drops the oldest frame when every frame is version-keyed", async () => {
-    // The pre-existing drop-oldest behavior is unchanged for ordinary
-    // patches — that path is what the version gap already covers.
-    const channel = new BroadcastChannel<S>();
-    channel.publish("k", { _v: 1, n: 1 }, [{ n: 1 }]);
-    const gen = runSseSubscription(channel, "k", undefined, undefined, {
-      maxPending: 1,
-    });
-    await gen.next();
-
-    channel.publish("k", { _v: 2, n: 2 }, [{ n: 2 }]);
-    channel.publish("k", { _v: 3, n: 3 }, [{ n: 3 }]);
-    await settle();
-
-    const frames = await drain(gen, 1);
-    const payload = frames[0].data as Record<string, unknown>;
-    expect(payload["3"]).toBeDefined();
-    expect(payload["2"]).toBeUndefined();
-    await gen.return(undefined as never);
-  });
-});
-
-describe("sse_state_names", () => {
+describe("sse_states", () => {
   it("lists each state once, including states of a bare surface with no event schemas", () => {
     const app = {
       do: async () => [],
@@ -484,7 +360,10 @@ describe("sse_state_names", () => {
         sensitive_fields: () => [],
       },
     };
-    expect(sse_state_names(app, "hono")).toEqual(["Ticket", "Calculator"]);
+    expect(sse_states(app, undefined, "hono").names).toEqual([
+      "Ticket",
+      "Calculator",
+    ]);
   });
 
   describe("a state only reached through .loads", () => {
@@ -513,10 +392,9 @@ describe("sse_state_names", () => {
         .emits({ SeatTaken: Taken })
         .patch({ SeatTaken: () => ({}) })
         .build();
-      expect(sse_state_names(loading(Seats, "SeatTaken"), "trpc")).toEqual([
-        "Enrollment",
-        "Seats",
-      ]);
+      expect(
+        sse_states(loading(Seats, "SeatTaken"), undefined, "trpc").names
+      ).toEqual(["Enrollment", "Seats"]);
     });
 
     it("throws when its events declare sensitive fields", () => {
@@ -525,9 +403,9 @@ describe("sse_state_names", () => {
         .emits({ Locked: z.object({ who: sensitive(z.string()) }) })
         .patch({ Locked: () => ({}) })
         .build();
-      expect(() => sse_state_names(loading(Vault, "Locked"), "trpc")).toThrow(
-        'trpc: state "Vault" can\'t be served over SSE'
-      );
+      expect(() =>
+        sse_states(loading(Vault, "Locked"), undefined, "trpc")
+      ).toThrow('trpc: state "Vault" can\'t be served over SSE');
     });
   });
 });

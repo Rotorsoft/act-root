@@ -26,7 +26,7 @@ export type SettledSource = {
 
 /**
  * Start what `sse.publish`, `sse.settled` and `sse.live` ask of the app:
- * publication of every commit to `channel`, and the source the settled frames
+ * publication of the served states' commits (`events`) to `channel`, and the source the settled frames
  * read. Refuses any of them on a surface without lifecycle events (`on` and
  * `off`).
  */
@@ -39,6 +39,7 @@ export function sse_sources(
     readonly settled: boolean;
     readonly live: boolean;
   },
+  events: ReadonlySet<string>,
   transport: string
 ): SettledSource | undefined {
   if (!config.publish && !config.settled && !config.live) return undefined;
@@ -47,7 +48,7 @@ export function sse_sources(
       `${transport}: \`sse.publish\`, \`sse.settled\` and \`sse.live\` listen to the app's lifecycle events; pass the built Act.`
     );
   if (config.publish)
-    publishCommits(app as unknown as CommitSource, config.channel);
+    publishCommits(app as unknown as CommitSource, config.channel, { events });
   return config.settled || config.live
     ? (app as unknown as SettledSource)
     : undefined;

@@ -66,3 +66,12 @@ describe("publishCommits", () => {
     expect(publish).toHaveBeenCalledTimes(2);
   });
 });
+
+describe("publishCommits with events", () => {
+  test("publishes only commits of the named events", async ({ app }) => {
+    const channel = new BroadcastChannel<{ _v: number; n: number }>();
+    publishCommits(app, channel, { events: ["Other"] });
+    await app.do("add", { stream: "c-9", actor }, { by: 1 });
+    expect(channel.state("c-9")).toBeUndefined();
+  });
+});
