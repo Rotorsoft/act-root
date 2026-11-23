@@ -60,7 +60,7 @@
     "@rotorsoft/act": "workspace:^"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.6.7",
+    "@biomejs/biome": "^2.6.8",
     "@commitlint/cli": "^21.2.4",
     "@commitlint/config-conventional": "^21.2.4",
     "@fast-check/vitest": "^0.5.0",
@@ -74,11 +74,11 @@
     "@semantic-release/release-notes-generator": "^14.1.1",
     "@types/chance": "^1.1.8",
     "@types/node": "^22.20.5",
-    "@vitest/coverage-v8": "^5.1.0",
+    "@vitest/coverage-v8": "^5.1.1",
     "chance": "^1.1.13",
     "concurrently": "^10.0.7",
-    "fast-check": "^4.10.2",
-    "lint-staged": "^17.6.0",
+    "fast-check": "^4.10.3",
+    "lint-staged": "^17.6.1",
     "semantic-release": "^25.0.9",
     "semantic-release-monorepo": "^8.0.2",
     "simple-git-hooks": "^2.14.0",
