@@ -1,3 +1,10 @@
+# [@rotorsoft/act-http-v2.5.6](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-http-v2.5.5...@rotorsoft/act-http-v2.5.6) (2026-11-24)
+
+
+### Bug Fixes
+
+* **deps:** update non-major dependencies ([#2618](https://github.com/Rotorsoft/act-root/issues/2618)) ([8472327](https://github.com/Rotorsoft/act-root/commit/84723272bce2304f562e0cfb4307ca5e6176ae0d))
+
 # [@rotorsoft/act-http-v2.5.5](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-http-v2.5.4...@rotorsoft/act-http-v2.5.5) (2026-11-24)
 
 
