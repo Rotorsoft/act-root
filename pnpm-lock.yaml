@@ -7,162 +7,162 @@ importers:
     configDependencies: {}
     packageManagerDependencies:
       pnpm:
-        specifier: 12.20.0
-        version: 12.20.0
+        specifier: 12.22.0
+        version: 12.22.0
 
 packages:
 
-  '@pnpm/exe.android-arm64@12.20.0':
-    resolution: {integrity: sha512-cRn0gBik+J8jjtio12bMRSRGsO/xBvy87rtldEY53rU+G1YY+MJb5tykWNfQJM9ZMTgpXFecYOd3dokT081N0w==}
+  '@pnpm/exe.android-arm64@12.22.0':
+    resolution: {integrity: sha512-n0kwk3uOtWGaSMJWUuxG8fLefRonw8jR27dhGzMcDz79Um37QKPLEGZAZF37iASbb2yBBQFl4hue6/SfQnmIdA==}
     cpu: [arm64]
     os: [android]
 
-  '@pnpm/exe.android-x64@12.20.0':
-    resolution: {integrity: sha512-GRLjYtnDzwThGIqEAM5IwtbB95R9GopWXZ+136h1M7EUGTLkY5rD9veL7Xpg82PjEsFerdYK1cGzRGUBaXRi4g==}
+  '@pnpm/exe.android-x64@12.22.0':
+    resolution: {integrity: sha512-1HERYEdvJEjU5p/lyI8g3YNEVdvVz6+omaqI1pKotZB9w92BlSXr0xTqur8X/8GAiE4B/pwZi8+eAi4v+KQVHg==}
     cpu: [x64]
     os: [android]
 
-  '@pnpm/exe.darwin-arm64@12.20.0':
-    resolution: {integrity: sha512-W1/HpqljOibAKfiZWGugHBrsYSVIw7VOOle/zkRIMK49S4PUdJw0Fnpv0Xummo5RE59TLFWvEHYzsfOCd8yfBg==}
+  '@pnpm/exe.darwin-arm64@12.22.0':
+    resolution: {integrity: sha512-CU0m1tFFVW2QD2PDVTsdejYGoPzhMq04l/MnwhpCuM2iBXkMXqV52kH24U5A2SYULV4Y/TTYsKL5InKZblVNvw==}
     cpu: [arm64]
     os: [darwin]
 
-  '@pnpm/exe.darwin-x64@12.20.0':
-    resolution: {integrity: sha512-OU+Mfuk+pJQwnWSveYDbBRHPfOIILk24cn/Mrzg6rvf6CSAXnQEiUqwJYfokB3wDCw0s8N+q/AszVusc9CihIQ==}
+  '@pnpm/exe.darwin-x64@12.22.0':
+    resolution: {integrity: sha512-XjVoliuAZjcyQJVymR+n3xmkw3SBME3Sg7wjKBTNbOaTGe3RLIkXt8D9YXOoSnET8gyhQrY8fwThFT+Ki6IVNw==}
     cpu: [x64]
     os: [darwin]
 
-  '@pnpm/exe.freebsd-x64@12.20.0':
-    resolution: {integrity: sha512-GMizEmKm/90zRw48YpYcydkc95IM9+BwvfG7RYYnby70JKxklCIAayG/IyykpbBrQfl2wpxZSVok8Xw+tu+SDA==}
+  '@pnpm/exe.freebsd-x64@12.22.0':
+    resolution: {integrity: sha512-BefdhvM+nrLXHCRVFmNv5yp4Zhwz29nEP+UPhsvGRRp4YRzgmyxT9r0lVts3Lg0FzcKOtPbM3o0Hyb2y0JF3yw==}
     cpu: [x64]
     os: [freebsd]
 
-  '@pnpm/exe.linux-arm64-musl@12.20.0':
-    resolution: {integrity: sha512-sNhQjnRnpoFSQFiQ8N9ktQuLF7t9e8IB4DB3YAK9CvY+mw6P63IAEeBJPKj+pox0nN8UdlTFHAkLWtuHN/q+yw==}
+  '@pnpm/exe.linux-arm64-musl@12.22.0':
+    resolution: {integrity: sha512-72fwiRonMxFAY4Fb611eTaR+8bYwH91SnWCg3aODjhigCMURFe5Pom+TtYM/GMrme2yirGkHbpzU2u0lMMCwTQ==}
     cpu: [arm64]
     os: [linux]
     libc: [musl]
 
-  '@pnpm/exe.linux-arm64@12.20.0':
-    resolution: {integrity: sha512-g8rFjUHaNKEkuQSqMCu+sA5PldhfMdQDc088H1H/SEV01vlCsJXXoGK4vLKSefEmgzVmgsG+9ozqeMmDDBE3Xw==}
+  '@pnpm/exe.linux-arm64@12.22.0':
+    resolution: {integrity: sha512-1MZ3GfFCFckquAJP6WZ985Lrd5MP5YNA7vPZH79W+1QVzwl55fVMdsAOczdGnFeU4jqMwERnk129/1g9zYxhDw==}
     cpu: [arm64]
     os: [linux]
     libc: [glibc]
 
-  '@pnpm/exe.linux-ppc64@12.20.0':
-    resolution: {integrity: sha512-oUTewHLppAqn5CvyPqKkgFWXpZj2Z0QjViilgU8DaYoStRHFojRJK26z7xklyEy9uTLnrkJHA5/hp6KUKIHllw==}
+  '@pnpm/exe.linux-ppc64@12.22.0':
+    resolution: {integrity: sha512-JOmNBnncDB+9pa8ddtIp9qrLrKwvgzV92xWEFAXSBrDcPIIAdD7imtk3kZnoiApdRzPbQHHj6JJKKVmOUXN0Bw==}
     cpu: [ppc64]
     os: [linux]
     libc: [glibc]
 
-  '@pnpm/exe.linux-riscv64@12.20.0':
-    resolution: {integrity: sha512-WrihJXJQQaFWz0IFSaWNQht1c+8c7QVyReHGdwL/In1/ql5cizUMxzXOcoy6GyPs+h1UvvNUTaflMLA0cE1oLg==}
+  '@pnpm/exe.linux-riscv64@12.22.0':
+    resolution: {integrity: sha512-4oJ2VAuzpEnySBxZ9uz9dwIZYqOcgJ7FWIFdPDf9QbkYo8NbskZ2ySgHwlDVnvQYGhTM45kFRDwjfhKYZJJ9PQ==}
     cpu: [riscv64]
     os: [linux]
     libc: [glibc]
 
-  '@pnpm/exe.linux-s390x@12.20.0':
-    resolution: {integrity: sha512-58HYnkciIaxScbGXASyJiYaKAfOb2MrQ5Ed+OKG7bxPhfe/fV7NZTNKdgxHoxKgO3jrso9mZaLnKHvbb7lGWCw==}
+  '@pnpm/exe.linux-s390x@12.22.0':
+    resolution: {integrity: sha512-wLbmg1e+9qAUbqZ29/BUvAQwiZtvgzKg3kjDIN4tkxrCATnneM2G0agFpD9yLHD3FT5J8bUB8RWSur5vqm4Vnw==}
     cpu: [s390x]
     os: [linux]
     libc: [glibc]
 
-  '@pnpm/exe.linux-x64-musl@12.20.0':
-    resolution: {integrity: sha512-DHS61C8f5Yjt4X3R4HnfTtihVPCC3vpCgE3zLIfUAyy1J5Gh4sgZSMGII6V595X7W29mH4kUjKrCiR0A6atzTg==}
+  '@pnpm/exe.linux-x64-musl@12.22.0':
+    resolution: {integrity: sha512-ODMJgTVHvs/WOqQKE9Am5u7RztsNjXZpkn73z9z4SsU7Dtrr/3IQkjvsF1MGM9hbhMdGwl2BHAW91eCCipIsHQ==}
     cpu: [x64]
     os: [linux]
     libc: [musl]
 
-  '@pnpm/exe.linux-x64@12.20.0':
-    resolution: {integrity: sha512-FQlCX0bSn8CBQQodfWYIv9Nq98/Zpxaoj5onCzHuSdfaO7bGXUDZAtscaaEuJnxkIQOle7mVOLssoEy4Gp9shA==}
+  '@pnpm/exe.linux-x64@12.22.0':
+    resolution: {integrity: sha512-iBAZAYCYoow6g0aObKmprKkIBGO72mK4KFfqIrY7jIdHRkAbN67tcN0zgaPE39UAEdMcrkLhLwEml+VMxf8h8Q==}
     cpu: [x64]
     os: [linux]
     libc: [glibc]
 
-  '@pnpm/exe.netbsd-x64@12.20.0':
-    resolution: {integrity: sha512-i9ZzFiiMovsgHIuQ8/i384O1fsWJ87GwzLeV+hFI1uDpFO88kPODtijMbi8UBUNhlpP4X/T9QDiy7/mdI4mHgA==}
+  '@pnpm/exe.netbsd-x64@12.22.0':
+    resolution: {integrity: sha512-5y9seaGcEL2OH5p9PG1cZRnSQKENvzK8hTsTjkFxUxXM84OCDvSlaSLr4ABrjrxWKlo4k8bjnmW7NEwznlowGA==}
     cpu: [x64]
     os: [netbsd]
 
-  '@pnpm/exe.win32-arm64@12.20.0':
-    resolution: {integrity: sha512-ghB0EKw7PHwTwB72c4nfPJmIPSbTJr/VpG2FBBckgMBLMVSj3xK9n12euTTSfAL6cABdBrtCwsXjjYs52BJexw==}
+  '@pnpm/exe.win32-arm64@12.22.0':
+    resolution: {integrity: sha512-eMJWsyECSWxhGDQwPokhES8dJX0dsu7E0tUfhxAaUnFxX7oBKKNS7kBY9yY75sNq4CmMNLjhOtBwrVjd3bQ1Hg==}
     cpu: [arm64]
     os: [win32]
 
-  '@pnpm/exe.win32-x64@12.20.0':
-    resolution: {integrity: sha512-VJxSNS89UWgkDLdI5K2oW009V63mtJn1LB5+G5a3jXG9IYc79U9lEvDEmFU4/LNGhfWwkvx7b40UtIqNewwp4A==}
+  '@pnpm/exe.win32-x64@12.22.0':
+    resolution: {integrity: sha512-d0D0GIiDkdiUiENlz3sMOR3arSsApaXtBZl2+rDwbwtQJ5IIBopf4KVTSZDPr09yl2NUVglCS5roveGKpYCWOg==}
     cpu: [x64]
     os: [win32]
 
-  pnpm@12.20.0:
-    resolution: {integrity: sha512-bMx0mXzO9OZ5mXiOGNv7+lg+KoSWaGaNtHB7aoMGZi9HFW5lAjKphb0+wkz5NkwaoVTTflHteqxiwc0eOvyAww==}
+  pnpm@12.22.0:
+    resolution: {integrity: sha512-iUlAo9mlffpv03OZD7TkHgnC8tdtmC7R11J105Jn+Yj7Ti1AkAy+mSHGjZfGeqGhCW0nZjPbJI97NJJ6yd23pA==}
     engines: {node: '>=18'}
     hasBin: true
 
 snapshots:
 
-  '@pnpm/exe.android-arm64@12.20.0':
+  '@pnpm/exe.android-arm64@12.22.0':
     optional: true
 
-  '@pnpm/exe.android-x64@12.20.0':
+  '@pnpm/exe.android-x64@12.22.0':
     optional: true
 
-  '@pnpm/exe.darwin-arm64@12.20.0':
+  '@pnpm/exe.darwin-arm64@12.22.0':
     optional: true
 
-  '@pnpm/exe.darwin-x64@12.20.0':
+  '@pnpm/exe.darwin-x64@12.22.0':
     optional: true
 
-  '@pnpm/exe.freebsd-x64@12.20.0':
+  '@pnpm/exe.freebsd-x64@12.22.0':
     optional: true
 
-  '@pnpm/exe.linux-arm64-musl@12.20.0':
+  '@pnpm/exe.linux-arm64-musl@12.22.0':
     optional: true
 
-  '@pnpm/exe.linux-arm64@12.20.0':
+  '@pnpm/exe.linux-arm64@12.22.0':
     optional: true
 
-  '@pnpm/exe.linux-ppc64@12.20.0':
+  '@pnpm/exe.linux-ppc64@12.22.0':
     optional: true
 
-  '@pnpm/exe.linux-riscv64@12.20.0':
+  '@pnpm/exe.linux-riscv64@12.22.0':
     optional: true
 
-  '@pnpm/exe.linux-s390x@12.20.0':
+  '@pnpm/exe.linux-s390x@12.22.0':
     optional: true
 
-  '@pnpm/exe.linux-x64-musl@12.20.0':
+  '@pnpm/exe.linux-x64-musl@12.22.0':
     optional: true
 
-  '@pnpm/exe.linux-x64@12.20.0':
+  '@pnpm/exe.linux-x64@12.22.0':
     optional: true
 
-  '@pnpm/exe.netbsd-x64@12.20.0':
+  '@pnpm/exe.netbsd-x64@12.22.0':
     optional: true
 
-  '@pnpm/exe.win32-arm64@12.20.0':
+  '@pnpm/exe.win32-arm64@12.22.0':
     optional: true
 
-  '@pnpm/exe.win32-x64@12.20.0':
+  '@pnpm/exe.win32-x64@12.22.0':
     optional: true
 
-  pnpm@12.20.0:
+  pnpm@12.22.0:
     optionalDependencies:
-      '@pnpm/exe.android-arm64': 12.20.0
-      '@pnpm/exe.android-x64': 12.20.0
-      '@pnpm/exe.darwin-arm64': 12.20.0
-      '@pnpm/exe.darwin-x64': 12.20.0
-      '@pnpm/exe.freebsd-x64': 12.20.0
-      '@pnpm/exe.linux-arm64': 12.20.0
-      '@pnpm/exe.linux-arm64-musl': 12.20.0
-      '@pnpm/exe.linux-ppc64': 12.20.0
-      '@pnpm/exe.linux-riscv64': 12.20.0
-      '@pnpm/exe.linux-s390x': 12.20.0
-      '@pnpm/exe.linux-x64': 12.20.0
-      '@pnpm/exe.linux-x64-musl': 12.20.0
-      '@pnpm/exe.netbsd-x64': 12.20.0
-      '@pnpm/exe.win32-arm64': 12.20.0
-      '@pnpm/exe.win32-x64': 12.20.0
+      '@pnpm/exe.android-arm64': 12.22.0
+      '@pnpm/exe.android-x64': 12.22.0
+      '@pnpm/exe.darwin-arm64': 12.22.0
+      '@pnpm/exe.darwin-x64': 12.22.0
+      '@pnpm/exe.freebsd-x64': 12.22.0
+      '@pnpm/exe.linux-arm64': 12.22.0
+      '@pnpm/exe.linux-arm64-musl': 12.22.0
+      '@pnpm/exe.linux-ppc64': 12.22.0
+      '@pnpm/exe.linux-riscv64': 12.22.0
+      '@pnpm/exe.linux-s390x': 12.22.0
+      '@pnpm/exe.linux-x64': 12.22.0
+      '@pnpm/exe.linux-x64-musl': 12.22.0
+      '@pnpm/exe.netbsd-x64': 12.22.0
+      '@pnpm/exe.win32-arm64': 12.22.0
+      '@pnpm/exe.win32-x64': 12.22.0
 
 ---
 lockfileVersion: '9.0'
@@ -176,7 +176,7 @@ overrides:
   flatted: '>=3.4.4'
   picomatch: '>=4.0.7'
   yaml: '>=2.9.1'
-  undici: '>=8.12.4'
+  undici: '>=8.13.1'
   rollup: '>=4.68.7'
   minimatch@<3.1.4: '>=11.0.9'
   serialize-javascript: '>=7.1.4'
@@ -388,8 +388,8 @@ importers:
   libs/act-diagram:
     dependencies:
       lucide-react:
-        specifier: ^1.72.0
-        version: 1.73.0(@types/react@19.3.0)(react@19.3.1)
+        specifier: ^1.77.0
+        version: 1.77.0(@types/react@19.3.0)(react@19.3.1)
       sucrase:
         specifier: ^3.35.1
         version: 3.35.1
@@ -587,7 +587,7 @@ importers:
   packages/calculator:
     dependencies:
       '@rotorsoft/act':
-        specifier: '>=2.1.16'
+        specifier: '>=2.2.1'
         version: link:../../libs/act
       zod:
         specifier: ^4.6.7
@@ -615,11 +615,11 @@ importers:
         specifier: ^5.107.2
         version: 5.108.3(@types/react@19.3.0)(react@19.3.1)
       '@trpc/client':
-        specifier: 11.28.6
-        version: 11.28.6(@trpc/server@11.28.6(@types/express@5.0.6)(@types/ws@8.18.1)(fastify@5.12.8)(typescript@7.0.2))(typescript@7.0.2)
+        specifier: 11.29.5
+        version: 11.29.5(@trpc/server@11.29.5(@types/express@5.0.6)(@types/ws@8.18.1)(fastify@5.12.8)(typescript@7.0.2))(typescript@7.0.2)
       '@trpc/react-query':
-        specifier: 11.28.6
-        version: 11.28.6(@tanstack/react-query@5.108.3(@types/react@19.3.0)(react@19.3.1))(@trpc/client@11.28.6(@trpc/server@11.28.6(@types/express@5.0.6)(@types/ws@8.18.1)(fastify@5.12.8)(typescript@7.0.2))(typescript@7.0.2))(@trpc/server@11.28.6(@types/express@5.0.6)(@types/ws@8.18.1)(fastify@5.12.8)(typescript@7.0.2))(react@19.3.1)(typescript@7.0.2)
+        specifier: 11.29.5
+        version: 11.29.5(@tanstack/react-query@5.108.3(@types/react@19.3.0)(react@19.3.1))(@trpc/client@11.29.5(@trpc/server@11.29.5(@types/express@5.0.6)(@types/ws@8.18.1)(fastify@5.12.8)(typescript@7.0.2))(typescript@7.0.2))(@trpc/server@11.29.5(@types/express@5.0.6)(@types/ws@8.18.1)(fastify@5.12.8)(typescript@7.0.2))(react@19.3.1)(typescript@7.0.2)
       hono:
         specifier: ^4.13.19
         version: 4.13.20
@@ -667,14 +667,14 @@ importers:
         specifier: ^5.107.2
         version: 5.108.3(@types/react@19.3.0)(react@19.3.1)
       '@trpc/client':
-        specifier: 11.28.6
-        version: 11.28.6(@trpc/server@11.28.6(@types/express@5.0.6)(@types/ws@8.18.1)(fastify@5.12.8)(typescript@7.0.2))(typescript@7.0.2)
+        specifier: 11.29.5
+        version: 11.29.5(@trpc/server@11.29.5(@types/express@5.0.6)(@types/ws@8.18.1)(fastify@5.12.8)(typescript@7.0.2))(typescript@7.0.2)
       '@trpc/react-query':
-        specifier: 11.28.6
-        version: 11.28.6(@tanstack/react-query@5.108.3(@types/react@19.3.0)(react@19.3.1))(@trpc/client@11.28.6(@trpc/server@11.28.6(@types/express@5.0.6)(@types/ws@8.18.1)(fastify@5.12.8)(typescript@7.0.2))(typescript@7.0.2))(@trpc/server@11.28.6(@types/express@5.0.6)(@types/ws@8.18.1)(fastify@5.12.8)(typescript@7.0.2))(react@19.3.1)(typescript@7.0.2)
+        specifier: 11.29.5
+        version: 11.29.5(@tanstack/react-query@5.108.3(@types/react@19.3.0)(react@19.3.1))(@trpc/client@11.29.5(@trpc/server@11.29.5(@types/express@5.0.6)(@types/ws@8.18.1)(fastify@5.12.8)(typescript@7.0.2))(typescript@7.0.2))(@trpc/server@11.29.5(@types/express@5.0.6)(@types/ws@8.18.1)(fastify@5.12.8)(typescript@7.0.2))(react@19.3.1)(typescript@7.0.2)
       '@trpc/server':
-        specifier: 11.28.6
-        version: 11.28.6(@types/express@5.0.6)(@types/ws@8.18.1)(fastify@5.12.8)(typescript@7.0.2)
+        specifier: 11.29.5
+        version: 11.29.5(@types/express@5.0.6)(@types/ws@8.18.1)(fastify@5.12.8)(typescript@7.0.2)
       cors:
         specifier: ^2.8.6
         version: 2.8.6
@@ -682,8 +682,8 @@ importers:
         specifier: ^4.0.3
         version: 4.0.3
       lucide-react:
-        specifier: ^1.72.0
-        version: 1.73.0(@types/react@19.3.0)(react@19.3.1)
+        specifier: ^1.77.0
+        version: 1.77.0(@types/react@19.3.0)(react@19.3.1)
       pg:
         specifier: ^8.23.1
         version: 8.23.1
@@ -752,8 +752,8 @@ importers:
         specifier: workspace:^
         version: link:../../libs/act-otel
       '@trpc/server':
-        specifier: 11.28.6
-        version: 11.28.6(@types/express@5.0.6)(@types/ws@8.18.1)(fastify@5.12.8)(typescript@7.0.2)
+        specifier: 11.29.5
+        version: 11.29.5(@types/express@5.0.6)(@types/ws@8.18.1)(fastify@5.12.8)(typescript@7.0.2)
       hono:
         specifier: ^4.13.19
         version: 4.13.20
@@ -779,8 +779,8 @@ importers:
         specifier: workspace:^
         version: link:../../libs/act-pg
       '@trpc/server':
-        specifier: 11.28.6
-        version: 11.28.6(@types/express@5.0.6)(@types/ws@8.18.1)(fastify@5.12.8)(typescript@7.0.2)
+        specifier: 11.29.5
+        version: 11.29.5(@types/express@5.0.6)(@types/ws@8.18.1)(fastify@5.12.8)(typescript@7.0.2)
       drizzle-orm:
         specifier: ^0.45.4
         version: 0.45.4(@libsql/client@0.18.0)(@opentelemetry/api@1.9.1)(@types/pg@8.23.1)(pg@8.23.1)
@@ -795,7 +795,7 @@ importers:
   performance/act-performance:
     dependencies:
       '@rotorsoft/act':
-        specifier: ^2.1.16
+        specifier: ^2.2.1
         version: link:../../libs/act
       '@rotorsoft/act-pg':
         specifier: ^2.1.4
@@ -4100,24 +4100,24 @@ packages:
       '@types/react':
         optional: true
 
-  '@trpc/client@11.28.6':
-    resolution: {integrity: sha512-pj3CGacQVOsktvmJN2qEgRcrYVnwRT3Ik36fbHGo89puZpzQ+2Jnl9DV16Hl/9qKFbimGkkBBawRSIN1VuRVZA==}
+  '@trpc/client@11.29.5':
+    resolution: {integrity: sha512-EGebaRjt/rDHt7gJ6nv262nLRPalzwSyI/dEMYtA+PBEy/HxhoVUW3bQqyE34cozJNj2HAgB+TqXVe76pWGk+Q==}
     peerDependencies:
-      '@trpc/server': 11.28.6
+      '@trpc/server': 11.29.5
       typescript: '>=5.7.2'
 
-  '@trpc/react-query@11.28.6':
-    resolution: {integrity: sha512-ZZY0O2Js+FiPXycS4uip/YIvQ2cvlkEQEAphhgDgsqXZHtKcNLMpphActxog8OpCK4B1sjlVxTLWXZVwLtKZMg==}
+  '@trpc/react-query@11.29.5':
+    resolution: {integrity: sha512-sDwivI7wTYxZA/+1Z1UtaP8K3OBXiV9a4Nz2eo5YSUXGHc4a3p1HT748D6E1vfH9Q/wZQb4IfnR3tBpm3PBx/g==}
     deprecated: '@trpc/react-query only gets bug fixes and will be removed in the next major version of tRPC. Use @trpc/tanstack-react-query instead: https://trpc.io/docs/client/tanstack-react-query/migrating'
     peerDependencies:
       '@tanstack/react-query': ^5.80.3
-      '@trpc/client': 11.28.6
-      '@trpc/server': 11.28.6
+      '@trpc/client': 11.29.5
+      '@trpc/server': 11.29.5
       react: '>=18.2.0'
       typescript: '>=5.7.2'
 
-  '@trpc/server@11.28.6':
-    resolution: {integrity: sha512-VoUTZUnjPzSGcW7R4pCyeyLL2Pj2INbI/xHeju1epTbNZeomLfeD3xMK4XnaNmHgFXAF5GNhViG4rEo7K8PpdQ==}
+  '@trpc/server@11.29.5':
+    resolution: {integrity: sha512-8ET3fqBo4byVkjLNU047NFwmT3JQIjZCVpdJwanb6Tpv7b5P3M9pjN7JofqGyDQZaDR5XLkWX2hWrsIpjtt5wA==}
     peerDependencies:
       '@types/aws-lambda': '*'
       '@types/express': '*'
@@ -7077,8 +7077,8 @@ packages:
   lru-cache@5.1.1:
     resolution: {integrity: sha512-KpNARQA3Iwv+jTA0utUVVbrh+Jlrr1Fv0e56GGzAFOXN7dk/FviaDW8LHmK52DlcH4WP2n6gI8vN1aesBFgo9w==}
 
-  lucide-react@1.73.0:
-    resolution: {integrity: sha512-fVOzGviL9mTfHenG1PbCfIceavyGlnpYNSYr+aGZHLRymAJ7DTP6KHuqt0uBkCKAoenr1UVkwSbDIYt2xIesEQ==}
+  lucide-react@1.77.0:
+    resolution: {integrity: sha512-VS6sOi8ZUH1qm6swBL/tpI4xAhB6pFTdHvw3pfCJD+DaTJwpyynVzfOS6mdyMZ+OCdY/GMSQbqinOMOPbNSrQA==}
     peerDependencies:
       '@types/react': '*'
       react: ^16.5.1 || ^17.0.0 || ^18.0.0 || ^19.0.0
@@ -9399,8 +9399,8 @@ packages:
   undici-types@6.21.0:
     resolution: {integrity: sha512-iwDZqg0QAGrg9Rav5H4n0M64c3mkR59cJ6wQp+7C4nI0gsmExaedaYLNO44eT4AtBBwjbTiGPMlt2Md0T9H9JQ==}
 
-  undici@8.12.4:
-    resolution: {integrity: sha512-8Mx+uNKKER2bA4AdtedkqRbwUCIJFr2nJckXRe5yrDqzePqwLP7VNcctN8/XdmDSbF7mS+jJKIszlL+vbam1VA==}
+  undici@8.13.1:
+    resolution: {integrity: sha512-Kt7EaPjh0s93lJH/PmW3d5rhkcpUa6fS3jqZ7+YGxNd9L7Xy/i827xe4C2uhhq+pJebM4tQOl5AgHmW11G5Skg==}
     engines: {node: '>=22.19.0'}
 
   unicode-canonical-property-names-ecmascript@2.0.1:
@@ -9840,7 +9840,7 @@ snapshots:
   '@actions/http-client@4.0.0':
     dependencies:
       tunnel: 0.0.6
-      undici: 8.12.4
+      undici: 8.13.1
 
   '@actions/io@3.0.2': {}
 
@@ -13403,7 +13403,7 @@ snapshots:
       p-filter: 4.1.0
       semantic-release: 25.0.9(supports-color@10.2.2)(typescript@7.0.2)
       tinyglobby: 0.2.17
-      undici: 8.12.4
+      undici: 8.13.1
       url-join: 5.0.0
     transitivePeerDependencies:
       - supports-color
@@ -13841,20 +13841,20 @@ snapshots:
     optionalDependencies:
       '@types/react': 19.3.0
 
-  '@trpc/client@11.28.6(@trpc/server@11.28.6(@types/express@5.0.6)(@types/ws@8.18.1)(fastify@5.12.8)(typescript@7.0.2))(typescript@7.0.2)':
+  '@trpc/client@11.29.5(@trpc/server@11.29.5(@types/express@5.0.6)(@types/ws@8.18.1)(fastify@5.12.8)(typescript@7.0.2))(typescript@7.0.2)':
     dependencies:
-      '@trpc/server': 11.28.6(@types/express@5.0.6)(@types/ws@8.18.1)(fastify@5.12.8)(typescript@7.0.2)
+      '@trpc/server': 11.29.5(@types/express@5.0.6)(@types/ws@8.18.1)(fastify@5.12.8)(typescript@7.0.2)
       typescript: 7.0.2
 
-  '@trpc/react-query@11.28.6(@tanstack/react-query@5.108.3(@types/react@19.3.0)(react@19.3.1))(@trpc/client@11.28.6(@trpc/server@11.28.6(@types/express@5.0.6)(@types/ws@8.18.1)(fastify@5.12.8)(typescript@7.0.2))(typescript@7.0.2))(@trpc/server@11.28.6(@types/express@5.0.6)(@types/ws@8.18.1)(fastify@5.12.8)(typescript@7.0.2))(react@19.3.1)(typescript@7.0.2)':
+  '@trpc/react-query@11.29.5(@tanstack/react-query@5.108.3(@types/react@19.3.0)(react@19.3.1))(@trpc/client@11.29.5(@trpc/server@11.29.5(@types/express@5.0.6)(@types/ws@8.18.1)(fastify@5.12.8)(typescript@7.0.2))(typescript@7.0.2))(@trpc/server@11.29.5(@types/express@5.0.6)(@types/ws@8.18.1)(fastify@5.12.8)(typescript@7.0.2))(react@19.3.1)(typescript@7.0.2)':
     dependencies:
       '@tanstack/react-query': 5.108.3(@types/react@19.3.0)(react@19.3.1)
-      '@trpc/client': 11.28.6(@trpc/server@11.28.6(@types/express@5.0.6)(@types/ws@8.18.1)(fastify@5.12.8)(typescript@7.0.2))(typescript@7.0.2)
-      '@trpc/server': 11.28.6(@types/express@5.0.6)(@types/ws@8.18.1)(fastify@5.12.8)(typescript@7.0.2)
+      '@trpc/client': 11.29.5(@trpc/server@11.29.5(@types/express@5.0.6)(@types/ws@8.18.1)(fastify@5.12.8)(typescript@7.0.2))(typescript@7.0.2)
+      '@trpc/server': 11.29.5(@types/express@5.0.6)(@types/ws@8.18.1)(fastify@5.12.8)(typescript@7.0.2)
       react: 19.3.1
       typescript: 7.0.2
 
-  '@trpc/server@11.28.6(@types/express@5.0.6)(@types/ws@8.18.1)(fastify@5.12.8)(typescript@7.0.2)':
+  '@trpc/server@11.29.5(@types/express@5.0.6)(@types/ws@8.18.1)(fastify@5.12.8)(typescript@7.0.2)':
     dependencies:
       typescript: 7.0.2
     optionalDependencies:
@@ -16895,7 +16895,7 @@ snapshots:
     dependencies:
       yallist: 3.1.1
 
-  lucide-react@1.73.0(@types/react@19.3.0)(react@19.3.1):
+  lucide-react@1.77.0(@types/react@19.3.0)(react@19.3.1):
     dependencies:
       react: 19.3.1
     optionalDependencies:
@@ -19652,7 +19652,7 @@ snapshots:
 
   undici-types@6.21.0: {}
 
-  undici@8.12.4: {}
+  undici@8.13.1: {}
 
   unicode-canonical-property-names-ecmascript@2.0.1: {}
 
