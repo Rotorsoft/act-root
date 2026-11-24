@@ -18,7 +18,7 @@
     "@rotorsoft/act": "workspace:^",
     "@rotorsoft/act-http": "workspace:^",
     "@rotorsoft/act-pg": "workspace:^",
-    "@trpc/server": "11.28.6",
+    "@trpc/server": "11.29.5",
     "drizzle-orm": "^0.45.4",
     "zod": "^4.6.7"
   },
