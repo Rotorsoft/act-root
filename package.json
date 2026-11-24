@@ -79,7 +79,7 @@
     "concurrently": "^10.0.7",
     "fast-check": "^4.10.3",
     "lint-staged": "^17.6.1",
-    "semantic-release": "^25.0.9",
+    "semantic-release": "^26.0.1",
     "semantic-release-monorepo": "^8.0.2",
     "simple-git-hooks": "^2.14.0",
     "tsup": "^9.0.0",
