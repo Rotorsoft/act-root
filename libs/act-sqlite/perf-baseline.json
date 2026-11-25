@@ -3,45 +3,72 @@
     {
       "name": "commit: single event",
       "samples": 200,
-      "p50_ms": 0.9707,
-      "p95_ms": 1.2335,
-      "mean_ms": 1.0151,
-      "ops_per_sec": 985
+      "p50_ms": 0.6463,
+      "p95_ms": 0.8405,
+      "mean_ms": 0.6534,
+      "ops_per_sec": 1530
     },
     {
       "name": "commit: 50-event batch",
       "samples": 100,
-      "p50_ms": 3.4744,
-      "p95_ms": 4.9709,
-      "mean_ms": 3.5727,
-      "ops_per_sec": 280,
-      "effective_per_sec": 14000
+      "p50_ms": 3.3375,
+      "p95_ms": 5.5232,
+      "mean_ms": 3.6323,
+      "ops_per_sec": 275,
+      "effective_per_sec": 13750
+    },
+    {
+      "name": "commit: 2 streams",
+      "samples": 200,
+      "p50_ms": 0.7139,
+      "p95_ms": 1.3671,
+      "mean_ms": 0.862,
+      "ops_per_sec": 1160,
+      "effective_per_sec": 2320
+    },
+    {
+      "name": "commit: 3 streams",
+      "samples": 200,
+      "p50_ms": 0.7461,
+      "p95_ms": 0.9427,
+      "mean_ms": 0.764,
+      "ops_per_sec": 1309,
+      "effective_per_sec": 3927
+    },
+    {
+      "name": "commit: hot shared stream (8 writers)",
+      "samples": 50,
+      "p50_ms": 4.5273,
+      "p95_ms": 8.6573,
+      "mean_ms": 5.9158,
+      "ops_per_sec": 169,
+      "effective_per_sec": 1352
     },
     {
       "name": "load: cold replay over snapshot floor",
       "samples": 100,
-      "p50_ms": 0.5346,
-      "p95_ms": 0.9656,
-      "mean_ms": 0.5796,
-      "ops_per_sec": 1725
+      "p50_ms": 0.6043,
+      "p95_ms": 0.7962,
+      "mean_ms": 0.6156,
+      "ops_per_sec": 1624
     },
     {
       "name": "drain: correlate+drain 50 events",
       "samples": 50,
-      "p50_ms": 5.645,
-      "p95_ms": 8.1276,
-      "mean_ms": 6.0303,
-      "ops_per_sec": 165,
-      "effective_per_sec": 12700
+      "p50_ms": 4.4116,
+      "p95_ms": 6.3794,
+      "mean_ms": 4.7758,
+      "ops_per_sec": 209,
+      "effective_per_sec": 10450
     },
     {
       "name": "query_stats: page of 50 (count+names)",
       "samples": 50,
-      "p50_ms": 3.3783,
-      "p95_ms": 3.6317,
-      "mean_ms": 3.3538,
-      "ops_per_sec": 298,
-      "effective_per_sec": 14900
+      "p50_ms": 3.0306,
+      "p95_ms": 3.135,
+      "mean_ms": 3.0438,
+      "ops_per_sec": 329,
+      "effective_per_sec": 16450
     }
   ]
 }

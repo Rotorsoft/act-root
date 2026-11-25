@@ -3,54 +3,81 @@
     {
       "name": "commit: single event",
       "samples": 100,
-      "p50_ms": 1.446,
-      "p95_ms": 1.5727,
-      "mean_ms": 1.4627,
-      "ops_per_sec": 684
+      "p50_ms": 1.1965,
+      "p95_ms": 1.3997,
+      "mean_ms": 1.2433,
+      "ops_per_sec": 804
     },
     {
       "name": "commit: 50-event batch",
       "samples": 50,
-      "p50_ms": 19.1228,
-      "p95_ms": 24.5077,
-      "mean_ms": 19.7244,
-      "ops_per_sec": 51,
-      "effective_per_sec": 2550
+      "p50_ms": 2.4291,
+      "p95_ms": 2.7923,
+      "mean_ms": 2.438,
+      "ops_per_sec": 410,
+      "effective_per_sec": 20500
+    },
+    {
+      "name": "commit: 2 streams",
+      "samples": 100,
+      "p50_ms": 1.3879,
+      "p95_ms": 1.7445,
+      "mean_ms": 1.4405,
+      "ops_per_sec": 694,
+      "effective_per_sec": 1388
+    },
+    {
+      "name": "commit: 3 streams",
+      "samples": 100,
+      "p50_ms": 1.3634,
+      "p95_ms": 1.4892,
+      "mean_ms": 1.3945,
+      "ops_per_sec": 717,
+      "effective_per_sec": 2151
+    },
+    {
+      "name": "commit: hot shared stream (8 writers)",
+      "samples": 30,
+      "p50_ms": 22.3745,
+      "p95_ms": 24.1895,
+      "mean_ms": 22.1963,
+      "ops_per_sec": 45,
+      "effective_per_sec": 360
     },
     {
       "name": "load: cold replay over snapshot floor",
       "samples": 50,
-      "p50_ms": 0.9782,
-      "p95_ms": 1.0711,
-      "mean_ms": 0.9883,
-      "ops_per_sec": 1012
+      "p50_ms": 0.8722,
+      "p95_ms": 1.069,
+      "mean_ms": 0.9164,
+      "ops_per_sec": 1091
     },
     {
       "name": "drain: correlate+drain 50 events",
       "samples": 30,
-      "p50_ms": 19.6401,
-      "p95_ms": 22.8977,
-      "mean_ms": 19.9502,
-      "ops_per_sec": 50,
-      "effective_per_sec": 2500
+      "p50_ms": 7.4465,
+      "p95_ms": 12.4139,
+      "mean_ms": 8.1245,
+      "ops_per_sec": 123,
+      "effective_per_sec": 6150
     },
     {
       "name": "query_stats: page of 50 (count+names)",
       "samples": 30,
-      "p50_ms": 4.0613,
-      "p95_ms": 4.2659,
-      "mean_ms": 4.1009,
-      "ops_per_sec": 244,
-      "effective_per_sec": 12200
+      "p50_ms": 2.6538,
+      "p95_ms": 4.29,
+      "mean_ms": 2.826,
+      "ops_per_sec": 354,
+      "effective_per_sec": 17700
     },
     {
       "name": "notify: commit→listener latency",
       "samples": 30,
-      "p50_ms": 1.6252,
-      "p95_ms": 1.8401,
-      "mean_ms": 1.6316,
-      "ops_per_sec": 613,
-      "effective_per_sec": 613
+      "p50_ms": 1.49,
+      "p95_ms": 1.6126,
+      "mean_ms": 1.5024,
+      "ops_per_sec": 666,
+      "effective_per_sec": 666
     }
   ]
 }

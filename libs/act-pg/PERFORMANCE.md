@@ -385,18 +385,15 @@ compares it against the checked-in `perf-baseline.json`.
 
 ### Rollout
 
-The gate is **report-only** in CI (`continue-on-error: true`) until the
-baseline proves stable across a few runs, then it flips to blocking.
-The baseline ships **empty** (`{"results":[]}`) — a real local Docker PG
-is needed to generate it, so until CI or a maintainer runs
-`pnpm -F @rotorsoft/act-pg bench:update` against `localhost:5431` every
-scenario is reported as `NEW` and the gate is a no-op. **No pg numbers
-have been fabricated.**
+The gate fails the weekly `perf` job in `conformance.yml`. The baseline
+comes from the Perf Baseline workflow (`perf-baseline.yml`), run by hand
+on the same GitHub runner type as the gate, so both compare like for like.
 
 ### Refreshing the baseline
 
-Run `pnpm -F @rotorsoft/act-pg bench:update` against a real PG in a PR
-labeled `perf-baseline-update`, with the rationale documented here.
+Dispatch `perf-baseline.yml`, commit the `perf-baseline.json` from its
+artifact in a PR labeled `perf-baseline-update`, and record the rationale
+here.
 
 ### #1024 cold-load before/after (pg)
 
@@ -1453,3 +1450,23 @@ Both columns come from the Perf Baseline workflow, dispatched on the same day on
 | `commit: hot shared stream (8 writers)` | — | 22.5 (p95 34.5) | all 8 land; each lost race is a retry from a fresh probe |
 
 The other scenarios moved within noise (`notify` 1.89 → 1.42, `drain` 8.70 → 7.17). A hot shared stream serializes, as RFC 2251 § Trade-offs says it must: eight commits that all append to one stream take about eight round trips of retries between them.
+
+## Baselines refreshed (2026-11-25)
+
+The checked-in baseline predated the 2.0 commit scenarios, so `commit: 2 streams`, `commit: 3 streams` and `commit: hot shared stream (8 writers)` were reported as `NEW` and never gated. Its batch and drain numbers were also 5–10× above what the runner now measures, so those two gates could not fail. The 2026-11-22 weekly run then failed on `commit: single event` (4.43 ms against 1.446 ms) with no change to act-pg's source or bench since the last green run; every single-commit scenario in that run was about 4× slower while the read scenarios were normal, which points at the runner's disk flushes, not the code.
+
+New baseline from the Perf Baseline workflow on master, p50 in ms:
+
+| Scenario | Old | New |
+|---|---|---|
+| `commit: single event` | 1.446 | 1.197 |
+| `commit: 50-event batch` | 19.123 | 2.429 |
+| `commit: 2 streams` | — | 1.388 |
+| `commit: 3 streams` | — | 1.363 |
+| `commit: hot shared stream (8 writers)` | — | 22.375 |
+| `load: cold replay over snapshot floor` | 0.978 | 0.872 (floor, skipped) |
+| `drain: correlate+drain 50 events` | 19.640 | 7.447 |
+| `query_stats: page of 50 (count+names)` | 4.061 | 2.654 |
+| `notify: commit→listener latency` | 1.625 | 1.490 |
+
+The numbers match the 2.0 comparison above (`commit: single event` 1.165, `commit: 2 streams` 1.337), so nothing regressed; the old file was simply stale.
