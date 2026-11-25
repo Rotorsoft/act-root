@@ -101,10 +101,12 @@ design and does not implement `Store.notify`.
 
 ### Rollout
 
-The gate is **report-only** in CI (`continue-on-error: true`) until the
-baseline proves stable across a few runs, then it flips to blocking.
+The gate fails the weekly `perf` job in `conformance.yml`. The baseline
+comes from the Perf Baseline workflow (`perf-baseline.yml`) on the same
+GitHub runner type as the gate; the local seed below is the first one,
+since replaced (see "Baselines refreshed (2026-11-25)").
 
-### Baseline (seeded from a real local run)
+### First baseline (seeded from a real local run)
 
 Captured on macOS (Apple Silicon), Node 22, on-disk WAL SQLite, no other
 load, via `pnpm -F @rotorsoft/act-sqlite bench:update`. Variance is real
@@ -125,8 +127,9 @@ their ratio never fails the build.
 
 ### Refreshing the baseline
 
-Run `pnpm -F @rotorsoft/act-sqlite bench:update` in a PR labeled
-`perf-baseline-update`, with the rationale documented here.
+Dispatch `perf-baseline.yml`, commit the `perf-baseline.json` from its
+artifact in a PR labeled `perf-baseline-update`, and record the rationale
+here.
 
 ## #1485 — the subscription work set: the N+1 probe is gone
 
@@ -246,3 +249,18 @@ Both columns come from the Perf Baseline workflow, dispatched on the same day on
 | `commit: 2 streams` (one event each) | — | 0.602 | +0.05 ms over one stream |
 | `commit: 3 streams` | — | 0.688 | one more head read and insert |
 | `commit: hot shared stream (8 writers)` | — | 3.83 (p95 5.67) | all 8 land with no retry: the store runs them one at a time |
+
+## Baselines refreshed (2026-11-25)
+
+Refreshed with act-pg's, from the same Perf Baseline workflow run on master. The old file predated the 2.0 commit scenarios, so `commit: 2 streams`, `commit: 3 streams` and `commit: hot shared stream (8 writers)` were reported as `NEW` and never gated. p50 in ms:
+
+| Scenario | Old | New |
+|---|---|---|
+| `commit: single event` | 0.971 | 0.646 (floor, skipped) |
+| `commit: 50-event batch` | 3.474 | 3.338 |
+| `commit: 2 streams` | — | 0.714 (floor, skipped) |
+| `commit: 3 streams` | — | 0.746 (floor, skipped) |
+| `commit: hot shared stream (8 writers)` | — | 4.527 |
+| `load: cold replay over snapshot floor` | 0.535 | 0.604 (floor, skipped) |
+| `drain: correlate+drain 50 events` | 5.645 | 4.412 |
+| `query_stats: page of 50 (count+names)` | 3.378 | 3.031 |
