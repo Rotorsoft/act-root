@@ -194,11 +194,12 @@ describe("hono(app, { sse }) — generated SSE endpoints", () => {
   test("releasing a connection allows a new one through", async ({
     app: _app,
   }) => {
+    const counts: number[] = [];
     const channel = new BroadcastChannel<{ _v: number; display: string }>();
     const api = hono(_app, {
       actor: () => ({ id: "u-1", name: "alice" }),
       stream: () => "calc-1",
-      sse: { channel, maxConnections: 1 },
+      sse: { channel, maxConnections: 1, onConnections: (n) => counts.push(n) },
     });
 
     const first = await api.request("/api/sse/Calculator?stream=calc-1");
@@ -206,8 +207,7 @@ describe("hono(app, { sse }) — generated SSE endpoints", () => {
 
     // Cancel the first reader → server sees abort → counter releases.
     await first.body?.cancel();
-    // Give the abort listener a tick to fire and release the slot.
-    await new Promise((r) => setTimeout(r, 20));
+    await vi.waitFor(() => expect(counts).toEqual([1, 0]));
 
     const next = await api.request("/api/sse/Calculator?stream=calc-1");
     expect(next.status).toBe(200);

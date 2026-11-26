@@ -747,7 +747,6 @@ describe("lanes", () => {
       {}
     );
     await app.correlate();
-    await new Promise<void>((r) => setTimeout(r, 50));
     const ctrl = (
       app as unknown as {
         _drain_controllers: Map<
@@ -756,7 +755,7 @@ describe("lanes", () => {
         >;
       }
     )._drain_controllers.get("fast");
-    expect(ctrl?._stopped).toBe(true);
+    await vi.waitFor(() => expect(ctrl?._stopped).toBe(true));
     expect(ctrl?._worker).toBeUndefined();
   });
 

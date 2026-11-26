@@ -267,10 +267,9 @@ describe("act", () => {
 
     const started = errApp.start_correlations({}, 10);
     expect(started).toBe(true);
-    await sleep(50);
+    await vi.waitFor(() => expect(errorSpy).toHaveBeenCalled());
     errApp.stop_correlations();
 
-    expect(errorSpy).toHaveBeenCalled();
     const arg = errorSpy.mock.calls[0]?.[0] as unknown as Error;
     expect(arg.message).toBe("query exploded");
 

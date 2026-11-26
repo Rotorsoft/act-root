@@ -1528,7 +1528,6 @@ describe("correlate: the lease", () => {
       await two.do("poke", { stream: "s4", actor }, {});
       one.settle({ debounceMs: 0 });
       two.settle({ debounceMs: 0 });
-      await new Promise((r) => setTimeout(r, 200));
 
       // Two applications are not interchangeable: one holding a global lease
       // would stop the other ever scanning, and its reactions would silently
@@ -1536,12 +1535,13 @@ describe("correlate: the lease", () => {
       // and both must be granted.
       // The correlator rides `subscribe`'s third argument, so the keys asked
       // for are the keys the store saw.
-      const keys = new Set(
-        spy.mock.calls
-          .map(([, , correlator]) => correlator?.key)
-          .filter((k): k is string => typeof k === "string")
-      );
-      expect(keys.size).toBe(2);
+      const keys = () =>
+        new Set(
+          spy.mock.calls
+            .map(([, , correlator]) => correlator?.key)
+            .filter((k): k is string => typeof k === "string")
+        );
+      await vi.waitFor(() => expect(keys().size).toBe(2));
 
       spy.mockRestore();
       await one.shutdown();
