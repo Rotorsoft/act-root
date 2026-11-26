@@ -195,15 +195,18 @@ describe("withBroker", () => {
       ]);
 
     it("shuts down when the broker's unsubscribe never settles", async () => {
+      let subscribed = false;
       class StalledUnsubscribe extends LoopbackBroker {
         override subscribe(h: Parameters<Broker["subscribe"]>[0]) {
           super.subscribe(h);
+          subscribed = true;
           return () => never<void>();
         }
       }
       store(withBroker(new InMemoryStore(), new StalledUnsubscribe()));
       const app = reacting();
-      await new Promise((r) => setTimeout(r, 10));
+      // The app has subscribed, so its shutdown meets the stalled unsubscribe.
+      await vi.waitFor(() => expect(subscribed).toBe(true));
       expect(await within(app.shutdown({ graceMs: 50 }), 1_000)).toBe(
         "resolved"
       );

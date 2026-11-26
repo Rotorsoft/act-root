@@ -6,7 +6,6 @@ import {
   InMemoryCache,
   InMemoryStore,
   log,
-  sleep,
   state,
   store,
   ZodEmpty,
@@ -347,9 +346,15 @@ describe("correlate: arming lanes", () => {
       // Commit arms the lanes, but the payments worker (20ms cadence)
       // claims before any subscription exists and disarms itself. No
       // settle wiring here — the starvation window is the point.
+      const claims = vi.spyOn(store(), "claim");
       await app.do("place", { stream: "o1", actor }, { sku: "x" });
-      await sleep(80);
-      expect(seen).toHaveLength(0); // worker ticked empty and went idle
+      // The worker ticked: a claim made after the commit came back empty.
+      await vi.waitFor(async () => {
+        expect(claims).toHaveBeenCalled();
+        expect(await claims.mock.results.at(-1)!.value).toEqual([]);
+      });
+      claims.mockRestore();
+      expect(seen).toHaveLength(0);
 
       // Correlate discovers and subscribes payments:o1 — and must re-arm
       // the lane so its worker picks the stream up on the next tick.
@@ -1485,8 +1490,10 @@ describe("correlate: the lease", () => {
       await a.do("bump", { stream: "s2", actor }, {});
 
       // `a` takes the lease through the automatic path...
-      a.settle({ debounceMs: 0 });
-      await new Promise((r) => setTimeout(r, 100));
+      await new Promise<void>((resolve) => {
+        a.on("settled", () => resolve());
+        a.settle({ debounceMs: 0 });
+      });
 
       // ...and `b` can still scan when told to explicitly. `close` relies on
       // this: it loops until the checkpoint advances, so a silently blocked

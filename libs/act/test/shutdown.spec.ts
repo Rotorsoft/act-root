@@ -498,12 +498,15 @@ describe("a notification during shutdown cannot arm a new cycle", () => {
       release = r;
     });
     let first = true;
+    let held!: () => void;
+    const holding = new Promise<void>((r) => (held = r));
     const app = act()
       .withState(Ticker)
       .on("Ticked")
       .do(async function hold() {
         if (first) {
           first = false;
+          held();
           await parked;
         }
       })
@@ -513,7 +516,7 @@ describe("a notification during shutdown cannot arm a new cycle", () => {
     await app.do("tick", { stream: "s1", actor }, {});
     await app.correlate();
     const draining = app.drain();
-    await pause(20);
+    await holding;
 
     // Shutdown is now waiting out its grace budget on the parked handler.
     const shutting = app.shutdown({ graceMs: 5_000 });
@@ -549,12 +552,15 @@ describe("the defer wake stops draining at shutdown", () => {
     const due = new Date(Date.now() + 100);
     const after_shutdown: string[] = [];
     let down = false;
+    let running!: () => void;
+    const first_pass = new Promise<void>((r) => (running = r));
     const app = act()
       .withState(Ticker)
       .withLane({ name: "one", streamLimit })
       .on("Ticked")
       .do(async function remind(event) {
         if (Date.now() < due.getTime()) throw new DeferSignal({ at: due });
+        running();
         await pause(60);
         if (down) after_shutdown.push(event.stream);
       })
@@ -564,7 +570,7 @@ describe("the defer wake stops draining at shutdown", () => {
       await app.do("tick", { stream: s, actor }, {});
     await app.correlate();
     await app.drain({ streamLimit: 10 });
-    await pause(130); // the wake fired and its first pass is running
+    await first_pass; // the wake fired and its first pass is running
     await app.shutdown();
     down = true;
     await pause(250);
@@ -588,10 +594,13 @@ describe("the settle loop stops at shutdown", () => {
     store(new InMemoryStore());
     const after_shutdown: string[] = [];
     let down = false;
+    let running!: () => void;
+    const first_pass = new Promise<void>((r) => (running = r));
     const app = act()
       .withState(Ticker)
       .on("Ticked")
       .do(async function slow(event) {
+        running();
         await pause(60);
         if (down) after_shutdown.push(event.stream);
       })
@@ -600,7 +609,7 @@ describe("the settle loop stops at shutdown", () => {
     for (const s of ["x1", "x2", "x3"])
       await app.do("tick", { stream: s, actor }, {});
     app.settle({ streamLimit, debounceMs: 0 });
-    await pause(30); // the first pass is running
+    await first_pass; // the first pass is running
     // A budget the first pass fits in but the whole loop doesn't.
     await app.shutdown({ graceMs: 100 });
     down = true;
