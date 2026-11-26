@@ -30,8 +30,10 @@ export type CommitSource = {
 };
 
 // One publication per app and channel: a second call (a tRPC and a Hono
-// generator both set to publish) reuses the first listener.
-const publishers = new WeakMap<object, WeakMap<object, () => void>>();
+// generator both set to publish) reuses the first listener and widens its
+// filter to the second call's events (`undefined` is every event).
+type Publisher = { dispose: () => void; events: Set<string> | undefined };
+const publishers = new WeakMap<object, WeakMap<object, Publisher>>();
 
 /**
  * Publish every commit of `app` to `channel` once, as the clients' patch
@@ -43,8 +45,9 @@ const publishers = new WeakMap<object, WeakMap<object, () => void>>();
  * With `events`, only commits of those event names are published: a state
  * the channel doesn't serve, a sensitive one above all, never reaches it.
  *
- * Calling it again for the same app and channel publishes nothing more and
- * returns the same disposer.
+ * Calling it again for the same app and channel returns the same disposer
+ * and publishes each commit once; the events published are those any call
+ * named (every event, once a call names none).
  *
  * @returns A function that stops publishing.
  */
@@ -54,16 +57,20 @@ export function publishCommits(
   channel: BroadcastChannel<any>,
   options?: { readonly events?: Iterable<string> }
 ): () => void {
-  const of_app = publishers.get(app) ?? new WeakMap<object, () => void>();
+  const of_app = publishers.get(app) ?? new WeakMap<object, Publisher>();
   publishers.set(app, of_app);
   const existing = of_app.get(channel);
-  if (existing) return existing;
-  const events = options?.events && new Set(options.events);
+  if (existing) {
+    if (!options?.events) existing.events = undefined;
+    else if (existing.events)
+      for (const name of options.events) existing.events.add(name);
+    return existing.dispose;
+  }
   const listener = (snapshots: CommittedSnapshot[]) => {
     // Fired only with committed snapshots: each carries its patch, and the
     // last one and its event exist. One call is one stream, of one state.
     const last = snapshots.at(-1)!;
-    if (events && !events.has(last.event!.name)) return;
+    if (publisher.events && !publisher.events.has(last.event!.name)) return;
     const patches = snapshots.map((s) => s.patch as object);
     if (last.version > last.event!.version) patches.push({});
     channel.publish(
@@ -73,10 +80,13 @@ export function publishCommits(
     );
   };
   app.on("committed", listener);
-  const dispose = () => {
-    app.off("committed", listener);
-    of_app.delete(channel);
+  const publisher: Publisher = {
+    dispose: () => {
+      app.off("committed", listener);
+      of_app.delete(channel);
+    },
+    events: options?.events && new Set(options.events),
   };
-  of_app.set(channel, dispose);
-  return dispose;
+  of_app.set(channel, publisher);
+  return publisher.dispose;
 }

@@ -20,13 +20,16 @@ export type {
   StreamPatterns,
 } from "./types.js";
 
-/** Whether `stream` matches a state's pattern; a state without one takes any. */
+/** Whether `stream` matches a state's pattern. */
 export const matches_stream = (
-  pattern: RegExp | ((stream: string) => boolean) | undefined,
+  pattern: RegExp | ((stream: string) => boolean),
   stream: string
-): boolean =>
-  !pattern ||
-  (pattern instanceof RegExp ? pattern.test(stream) : pattern(stream));
+): boolean => {
+  if (!(pattern instanceof RegExp)) return pattern(stream);
+  // A `g` or `y` pattern resumes from `lastIndex`, so start every test over.
+  pattern.lastIndex = 0;
+  return pattern.test(stream);
+};
 
 /**
  * Whether a subscription to `state` may open `stream`: it matches the
