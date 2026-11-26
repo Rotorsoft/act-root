@@ -16,7 +16,7 @@ const scene: SceneSpec = {
       notes: [{ at: "server", text: "v8: patch 8\nv9: patch 9" }],
     },
     {
-      say: "The server publishes the new state, with `_v` taken from the event version, and the two patches in commit order.",
+      say: "The server publishes the new state, with `_v` taken from the stream's head version, and the two patches in commit order.",
       messages: [
         { from: "server", to: "broadcast", label: "publish(state, patches)" },
       ],

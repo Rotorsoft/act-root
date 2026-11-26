@@ -2,9 +2,9 @@ import type { BroadcastChannel } from "../sse/broadcast.js";
 import { resync_frame } from "../sse/frames.js";
 import type { PatchMessage } from "../sse/types.js";
 import { is_stream_of } from "./dispatch.js";
+import { DEFAULT_SSE_MAX_PENDING_PER_CONNECTION } from "./sse-defaults.js";
 import type { SettledSource, SseSettledFrame } from "./sse-settled.js";
 import type { SseAccounting } from "./sse-wiring.js";
-import { DEFAULT_SSE_MAX_PENDING_PER_CONNECTION } from "./sse-wiring.js";
 
 /** One stream a `$live` subscription follows, with the state it belongs to. */
 export type LiveSource = { readonly state: string; readonly stream: string };

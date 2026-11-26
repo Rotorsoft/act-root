@@ -132,15 +132,15 @@ export function useStateStream(streamId: string | null, identityId?: string) {
     streamId ? { streamId, identityId } : undefined,
     {
       onStarted,
-      onData: (env) => {
+      onData: (frame) => {
         if (!streamId) return;
-        if (env.kind === "snap") {
+        if (frame.kind === "state") {
           // Full state on connect/reconnect — seed the cache directly
-          utils.getState.setData({ streamId }, env.state);
+          utils.getState.setData({ streamId }, frame.data);
           return;
         }
         const cached = utils.getState.getData({ streamId });
-        const result = applyPatchMessage(env.msg, cached);
+        const result = applyPatchMessage(frame.data, cached);
 
         if (result.ok) {
           utils.getState.setData({ streamId }, result.state);

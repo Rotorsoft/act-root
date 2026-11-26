@@ -232,6 +232,7 @@ describe("hono(app, { sse }) — generated SSE endpoints", () => {
   }) => {
     vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
     const channel = new BroadcastChannel<{ _v: number; display: string }>();
+    channel.publish("calc-1", { _v: 1, display: "1" }, [{ display: "1" }]);
     const api = hono(_app, {
       actor: () => ({ id: "u-1", name: "alice" }),
       stream: () => "calc-1",
@@ -239,11 +240,30 @@ describe("hono(app, { sse }) — generated SSE endpoints", () => {
     });
     const res = await api.request("/api/sse/Calculator?stream=calc-1");
     expect(res.status).toBe(200);
-    // Advance past one heartbeat interval — the timer callback runs
-    // and writes a ping frame; we just need the path covered.
-    vi.advanceTimersByTime(20_000);
-    vi.useRealTimers();
-    await res.body?.cancel();
+    const reader = res.body!.pipeThrough(new TextDecoderStream()).getReader();
+    let text = "";
+    const pump = (async () => {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) return;
+        text += value;
+      }
+    })();
+    const pings = () => text.split("event: ping").length - 1;
+    try {
+      // The cached state arrives first; nothing is published after it.
+      await vi.advanceTimersByTimeAsync(14_000);
+      expect(text).toContain("event: state");
+      expect(pings()).toBe(0);
+      await vi.advanceTimersByTimeAsync(1_500);
+      expect(pings()).toBe(1);
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect(pings()).toBe(2);
+    } finally {
+      vi.useRealTimers();
+      await reader.cancel();
+      await pump;
+    }
   });
 
   test("heartbeat-write rejection is swallowed (catch path)", async ({

@@ -1,6 +1,7 @@
 import type { BroadcastChannel } from "../sse/broadcast.js";
 import type { BroadcastState, PatchMessage } from "../sse/types.js";
 import { run_live_subscription } from "./sse-live.js";
+import { SseOptionsSchema } from "./sse-options.js";
 
 /**
  * SSE wiring options shared by the auto-generated `trpc` and `hono`
@@ -10,7 +11,8 @@ import { run_live_subscription } from "./sse-live.js";
  *
  * With {@link publish}, the generator publishes every commit to the
  * channel; without it, the host does, which it needs when the published
- * state carries app-specific overlays (presence, computed fields).
+ * state carries computed fields. Overlays (`channel.overlay`, such as
+ * presence in its own key) survive a publish and don't need it.
  *
  * Defaults are sized for typical business-app dashboards (dozens to
  * hundreds of human viewers per process). The numeric knobs are validated
@@ -93,29 +95,11 @@ export type SseOptions = {
   readonly maxStreamsPerSubscription?: number;
 };
 
-/**
- * Default cap on concurrent open subscriptions per generator
- * instance. Sized for typical business-app dashboards (dozens to a
- * few hundred viewers); high enough not to surprise small
- * deployments, low enough not to mask a missing horizontal-scale
- * strategy on big ones.
- */
-export const DEFAULT_SSE_MAX_CONNECTIONS = 500;
-
-/**
- * Default keep-alive cadence (30 s). Sits comfortably under the
- * 60 s idle timeout most reverse proxies impose.
- */
-export const DEFAULT_SSE_HEARTBEAT_MS = 30_000;
-
-/**
- * Default cap on the per-connection undelivered-frame backlog. Sized
- * so a briefly-stalled consumer on a busy stream keeps recent history
- * without letting a permanently-wedged client pin unbounded memory.
- * At overflow the stream's pending frames give way to one `_resync`, so
- * the consumer refetches instead of missing versions silently.
- */
-export const DEFAULT_SSE_MAX_PENDING_PER_CONNECTION = 256;
+export {
+  DEFAULT_SSE_HEARTBEAT_MS,
+  DEFAULT_SSE_MAX_CONNECTIONS,
+  DEFAULT_SSE_MAX_PENDING_PER_CONNECTION,
+} from "./sse-defaults.js";
 
 /**
  * Frame yielded by the per-state SSE subscription generator. The
@@ -161,7 +145,8 @@ export type RunSseOptions = {
    * Upper bound on the per-connection undelivered-frame backlog. When a
    * patch finds it full, the stream's pending frames give way to one
    * `_resync`, and the client refetches. Defaults to
-   * {@link DEFAULT_SSE_MAX_PENDING_PER_CONNECTION} when omitted.
+   * {@link DEFAULT_SSE_MAX_PENDING_PER_CONNECTION} when omitted; a value
+   * outside `[1, 100_000]` throws `ZodError` before a slot is taken.
    */
   readonly maxPending?: number;
 };
@@ -188,13 +173,16 @@ export async function* runSseSubscription<S extends { _v: number } = any>(
   // One stream is a `$live` of one: the same backlog, and the same `_resync`
   // when it overflows.
   // The frame type resolves `PatchMessage<S>` only once `S` is known.
+  const max_pending = SseOptionsSchema.shape.maxPendingPerConnection.parse(
+    options?.maxPending
+  );
   for await (const frame of run_live_subscription(
     channel,
     [{ state: "", stream: stream_id }],
     undefined,
     accounting,
     signal,
-    options
+    { ...options, maxPending: max_pending }
   ))
     yield { kind: frame.kind, data: frame.data } as SseSubscriptionFrame<S>;
 }

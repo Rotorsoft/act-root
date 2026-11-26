@@ -156,7 +156,7 @@ export type TrpcOptions<Ctx, TApp = ActSurface> = {
    * Each subscription yields `{ kind: "state", data }` once with
    * the cached state (when present) and then `{ kind: "patch",
    * data }` for every patch the shared
-   * {@link SseOptions.channel} publishes. The per-process
+   * {@link SseOptions.channel} publishes. The generator's
    * connection cap surfaces as a `TOO_MANY_REQUESTS` `TRPCError`.
    *
    * Off by default — most APIs don't expose live state to every

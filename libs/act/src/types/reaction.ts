@@ -122,7 +122,7 @@ export type Resolved<TLane extends string = string> = {
  *
  * @property name - Lane name (`"default"` is reserved for the implicit lane)
  * @property leaseMillis - Lease window for `claim()` calls in this lane
- * @property streamLimit - Max streams claimed per cycle in this lane
+ * @property streamLimit - Max streams claimed per cycle in this lane (at least 1)
  * @property cycleMs - Cycle frequency for this lane's controller
  */
 export type LaneConfig<TName extends string = string> = {
@@ -356,7 +356,7 @@ export type BlockedLease = Lease & { readonly error: string };
 
 /**
  * Options for draining events from the store.
- * @property streamLimit - Maximum number of streams to fetch.
+ * @property streamLimit - Maximum number of streams to fetch (at least 1).
  * @property eventLimit - Maximum number of events to fetch per stream.
  * @property leaseMillis - Maximum lease duration (in milliseconds).
  */

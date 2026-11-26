@@ -28,7 +28,7 @@
  * Node's `setTimeout` delay is a 32-bit signed int (~24.8 days). A larger
  * delay overflows and fires immediately, so we cap at this and re-arm.
  */
-const MAX_TIMER_DELAY_MS = 2_147_483_647;
+export const MAX_TIMER_DELAY_MS = 2_147_483_647;
 
 /** A linear scan finds the earliest entry: the map is bounded by claim limits. */
 export class DeferTimer {

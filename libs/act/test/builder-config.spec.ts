@@ -165,6 +165,23 @@ describe("check drain / settle", () => {
     expect(() => check("settle", { maxPasses: -1 })).toThrow();
   });
 
+  it("refuses a streamLimit of 0, which claims nothing and stalls the lane", async () => {
+    for (const kind of ["drain", "settle"] as const)
+      expect(() => check(kind, { streamLimit: 0 })).toThrow(ZodError);
+    expect(() => check("lane", { name: "z", streamLimit: 0 })).toThrow(
+      ZodError
+    );
+    expect(() => act().withLane({ name: "z", streamLimit: 0 })).toThrow(
+      ZodError
+    );
+    const app = act().build();
+    await expect(app.drain({ streamLimit: 0 })).rejects.toThrow(ZodError);
+    expect(() => app.settle({ streamLimit: 0 })).toThrow(ZodError);
+    // Control: one stream per claim is the least that drains.
+    expect(check("drain", { streamLimit: 1 })).toEqual({ streamLimit: 1 });
+    await app.shutdown();
+  });
+
   /**
    * `Infinity` is what both public doc-comments name as `maxPasses`'s default,
    * and what `settle.ts` destructures to — so the one value the docs advertise

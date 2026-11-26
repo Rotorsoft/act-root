@@ -37,7 +37,7 @@ If you build a transport of your own over these patches, do the same normalizati
 
 The multi-transport calculator demo wires SSE end-to-end next to tRPC, Hono REST, and OpenAPI:
 
-- `packages/server/src/api.ts` — publishes every commit to a `BroadcastChannel` from a single `committed` lifecycle listener, and generates the typed `subscribe.Calculator` tRPC subscription and the `GET /api/sse/Calculator?stream=<id>` endpoint with `trpc(app, { sse })` and `hono(app, { sse })`.
+- `packages/server/src/api.ts` — publishes every commit to a `BroadcastChannel` with `sse.publish`, and generates the typed `subscribe.Calculator` tRPC subscription and the `GET /api/sse/Calculator?stream=<id>` endpoint with `trpc(app, { sse })` and `hono(app, { sse })`.
 - `packages/client/src/Calculator.tsx` — subscribes through `trpc.subscribe.Calculator.useSubscription`, whose frames are typed from the server's router, applies each patch with `applyPatchMessage`, resubscribes on `behind` for a fresh state, and renders it live under the keypad.
 
 Run `pnpm dev:http` from the repo root and press keys at [http://localhost:3000](http://localhost:3000) — the live panel updates on every commit without refetching, from either transport or another browser tab.
@@ -104,7 +104,7 @@ app.on("closed", ({ truncated }) => {
 
 ### Broadcasting a commit
 
-After every `app.do()`, forward each emitted snapshot's domain patch. An action with [`.loads`](state-management.md#rules-across-streams-loads) also appends to other streams, and `app.do()` returns only its own; broadcast from a `committed` listener instead (as `packages/server` does), which fires once per stream appended to:
+After every `app.do()`, forward each emitted snapshot's domain patch. An action with [`.loads`](state-management.md#rules-across-streams-loads) also appends to other streams, and `app.do()` returns only its own; broadcast from a `committed` listener instead, which fires once per stream appended to (or let the generators do it with `publish: true`):
 
 ```typescript no-check
 const snaps = await app.do("CreateItem", target, input);
@@ -170,57 +170,25 @@ presence.isOnline(streamId, identityId); // boolean
 
 ### If you use the generated transports
 
-You may not need to write a subscription handler at all. Both `trpc(app, { sse })` and `hono(app, { sse })` from `@rotorsoft/act-http` accept an `sse: { channel: broadcast }` option that walks the registry and emits one subscription — or one streaming `GET /api/sse/<stateName>?stream=<id>` endpoint — per registered state, all reading from your `BroadcastChannel`. Pass `publish: true` and the generator publishes every commit to the channel too; leave it off to publish yourself, for a state with overlays (presence, computed fields). The generator owns subscription, accounting, cleanup, and the wire format. A served state whose events declare `sensitive(...)` fields is refused at build (leave its actions out with `actions`): a commit's snapshot is the committing actor's view, and the channel would send it to every subscriber. See [Auto-generated API surfaces § Real-time subscriptions](../guides/auto-generated-api.md#real-time-subscriptions), and the runnable demo in `packages/server` + `packages/client` (`pnpm dev:http` from the repo root). [Real-time recipes](../guides/real-time-recipes.md) walks through the options by screen.
+You may not need to write a subscription handler at all. Both `trpc(app, { sse })` and `hono(app, { sse })` from `@rotorsoft/act-http` accept an `sse: { channel: broadcast }` option that walks the registry and emits one subscription — or one streaming `GET /api/sse/<stateName>?stream=<id>` endpoint — per registered state, all reading from your `BroadcastChannel`. Pass `publish: true` and the generator publishes every commit to the channel too. Overlays (presence) survive a publish, so they don't need it off; leave it off to publish yourself only when the broadcast view carries computed fields. The generator owns subscription, accounting, cleanup, and the wire format. A served state whose events declare `sensitive(...)` fields is refused at build (leave its actions out with `actions`): a commit's snapshot is the committing actor's view, and the channel would send it to every subscriber. See [Auto-generated API surfaces § Real-time subscriptions](../guides/auto-generated-api.md#real-time-subscriptions), and the runnable demo in `packages/server` + `packages/client` (`pnpm dev:http` from the repo root). [Real-time recipes](../guides/real-time-recipes.md) walks through the options by screen.
 
-The section below is the custom-server path — the same loop the generator writes for you, hand-rolled for hosts the generators don't cover.
+The section below is the custom-server path, for hosts the generators don't cover. It runs the generators' own loop, `runSseSubscription` from `@rotorsoft/act-http/api`, which queues every patch up to `maxPending` and swaps an overflow for one `_resync`, so no version is skipped silently.
 
 ### tRPC subscription (custom server)
 
-`act-http/sse` doesn't dictate the wire format — your tRPC handler decides. A typical pattern yields the cached state on connect, then forwards each patch message. Wrap the two shapes in a small app-level envelope so the client can tell them apart:
+`act-http/sse` doesn't dictate the wire format; your tRPC handler decides. `runSseSubscription` yields `{ kind: "state", data }` once with the cached state, then `{ kind: "patch", data }` for every message the channel publishes, and ends when the signal aborts:
 
 ```typescript no-check
-import type { BroadcastState, PatchMessage } from "@rotorsoft/act-http/sse";
-
-type Envelope<S extends BroadcastState> =
-  | { kind: "snap"; state: S }
-  | { kind: "patch"; msg: PatchMessage<S> };
+import { runSseSubscription } from "@rotorsoft/act-http/api";
 
 export const onStateChange = publicProcedure
   .input(z.object({ streamId: z.string(), identityId: z.string().optional() }))
   .subscription(async function* ({ input, signal }) {
     const { streamId, identityId } = input;
-    let resolve: (() => void) | null = null;
-    let pending: PatchMessage<AppState> | null = null;
-
-    const cleanup = broadcast.subscribe(streamId, (msg) => {
-      pending = msg;
-      resolve?.();
-      resolve = null;
-    });
-
     if (identityId) presence.add(streamId, identityId);
-
     try {
-      // Initial snapshot for first paint
-      const cached = broadcast.state(streamId);
-      if (cached) yield { kind: "snap", state: cached } satisfies Envelope<AppState>;
-
-      while (!signal?.aborted) {
-        if (!pending) {
-          await new Promise<void>((r) => {
-            resolve = r;
-            signal?.addEventListener("abort", () => r(), { once: true });
-          });
-        }
-        if (signal?.aborted) break;
-        if (pending) {
-          const msg = pending;
-          pending = null;
-          yield { kind: "patch", msg } satisfies Envelope<AppState>;
-        }
-      }
+      yield* runSseSubscription(broadcast, streamId, undefined, signal);
     } finally {
-      cleanup();
       if (identityId) presence.remove(streamId, identityId);
     }
   });
@@ -238,13 +206,13 @@ The `sse` subpath's client half — `applyPatchMessage`, `patch`, and the wire t
 ```typescript no-check
 import { applyPatchMessage } from "@rotorsoft/act-http/sse";
 
-onData: (env) => {
-  if (env.kind === "snap") {
-    utils.getState.setData({ streamId }, env.state);
+onData: (frame) => {
+  if (frame.kind === "state") {
+    utils.getState.setData({ streamId }, frame.data);
     return;
   }
   const cached = utils.getState.getData({ streamId });
-  const result = applyPatchMessage(env.msg, cached);
+  const result = applyPatchMessage(frame.data, cached);
 
   if (result.ok) {
     utils.getState.setData({ streamId }, result.state);
