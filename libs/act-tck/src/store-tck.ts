@@ -5560,6 +5560,32 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           expect(next.version).toBe(2);
           expect(next.id).toBeGreaterThan(head);
         });
+        it("refuses a stream version it already restored, and changes nothing", async () => {
+          const a = `dup-${edge_uid()}`;
+          await store.commit([{ stream: a, msgs: [E()] }], edge_meta());
+          const restored = (version: number) =>
+            ({
+              id: version,
+              stream: "merged",
+              version,
+              name: "E",
+              data: {},
+              meta: edge_meta(),
+              created: new Date(),
+            }) as never;
+          await expect(
+            store.restore!(async (callback) => {
+              await callback(restored(0));
+              await callback(restored(1));
+              // A rename that maps two source streams onto one name.
+              await callback(restored(0));
+            })
+          ).rejects.toThrow();
+          expect(await rows({ stream: "merged", stream_exact: true })).toEqual(
+            []
+          );
+          expect(await rows(one(a))).toHaveLength(1);
+        });
       });
 
       // Restore wipes the whole store — every test starts from a

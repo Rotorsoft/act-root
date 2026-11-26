@@ -875,8 +875,17 @@ export class InMemoryStore implements Store {
     this._streams = new Map();
     this._stream_versions = new Map();
     this._pii = new Map();
+    // A stream holds each version once, as the SQL stores' unique index
+    // enforces: a rename that maps two streams onto one name is refused.
+    const seen = new Set<string>();
     try {
       await driver(async (event) => {
+        const at = `${event.version}:${event.stream}`;
+        if (seen.has(at))
+          throw new Error(
+            `restore: stream "${event.stream}" has version ${event.version} twice`
+          );
+        seen.add(at);
         const id = this._next_id++;
         // Split `pii` out like `commit`, so `forget_pii` erases restored PII.
         const { pii, ...rest } = event;
