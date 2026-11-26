@@ -24,9 +24,13 @@ export type {
 export const matches_stream = (
   pattern: RegExp | ((stream: string) => boolean) | undefined,
   stream: string
-): boolean =>
-  !pattern ||
-  (pattern instanceof RegExp ? pattern.test(stream) : pattern(stream));
+): boolean => {
+  if (!pattern) return true;
+  if (!(pattern instanceof RegExp)) return pattern(stream);
+  // A `g` or `y` pattern resumes from `lastIndex`, so start every test over.
+  pattern.lastIndex = 0;
+  return pattern.test(stream);
+};
 
 /**
  * Whether a subscription to `state` may open `stream`: it matches the

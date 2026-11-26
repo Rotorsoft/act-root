@@ -119,6 +119,28 @@ describe("hono(app, options) — generated REST surface", () => {
     );
   });
 
+  test("checks a g or y pattern the same on every request", async ({ app }) => {
+    for (const flags of ["g", "y"]) {
+      const client = testClient(
+        hono(app, {
+          ...default_options(),
+          streams: { Calculator: new RegExp("^calc-\\d+$", flags) },
+        })
+      );
+      const statuses: number[] = [];
+      for (let i = 0; i < 4; i++)
+        statuses.push(
+          (
+            await client.api.actions.PressKey[":stream"].$post(
+              { json: { key: "5" }, param: { stream: `calc-${i}` } },
+              { headers: make_headers() }
+            )
+          ).status
+        );
+      expect(statuses).toEqual([200, 200, 200, 200]);
+    }
+  });
+
   test("takes a caller-addressed state's stream from the path", async ({
     app,
   }) => {
