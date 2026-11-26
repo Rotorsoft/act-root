@@ -209,6 +209,16 @@ describe("trpc(app, options) — generated router", () => {
     ).toThrow(
       'trpc: `streams` names "Ledger", which the app doesn\'t register.'
     );
+    // A state no generated action reaches needs no stream.
+    const router = trpc(app, {
+      ...no_stream,
+      streams: { Calculator: () => true },
+      actions: { exclude: ["OpenTicket"] },
+    });
+    expect(Object.keys(router._def.procedures).sort()).toEqual([
+      "Clear",
+      "PressKey",
+    ]);
   });
 
   test("maps a malformed body to 422 UNPROCESSABLE_CONTENT (parity with Hono/OpenAPI)", async ({

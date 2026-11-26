@@ -446,7 +446,8 @@ export function trpc<Ctx extends object, TApp extends ActSurface>(
     app,
     options.streams,
     !!options.stream,
-    "trpc"
+    "trpc",
+    options.actions
   );
   const selected = selected_actions(app, options.actions, "trpc");
   // SSE subscriptions mount under the `subscribe` key of the same router as

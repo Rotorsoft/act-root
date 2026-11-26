@@ -306,7 +306,8 @@ export function hono<TApp extends ActSurface>(
     app,
     options.streams,
     !!options.stream,
-    "hono"
+    "hono",
+    options.actions
   );
 
   // Wire SSE subscriptions before the mutation routes so the

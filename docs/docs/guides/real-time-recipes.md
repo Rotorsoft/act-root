@@ -77,7 +77,7 @@ type Ctx = { user: { id: string; name: string } };
 
 export const router = trpc(app, {
   actor: (ctx: Ctx) => ctx.user,
-  stream: () => "unused", // every state below is addressed by the caller
+  // Every state is addressed by the caller, so no `stream` resolver.
   streams: { Ticket: /^ticket-\d+$/, Customer: /^customer-\d+$/ },
   // Customer's action is hand-written (recipe 6), so SSE never serves it.
   actions: { exclude: ["ChangeEmail"] },
@@ -254,7 +254,6 @@ type Ctx = { user: { id: string; name: string } };
 // a Note commit never reaches this channel.
 export const customerRouter = trpc(app, {
   actor: (ctx: Ctx) => ctx.user,
-  stream: () => "unused",
   streams: { Ticket: /^ticket-\d+$/ },
   actions: { include: ["OpenTicket"] },
   sse: { channel: new BroadcastChannel(), publish: true, live: true },
