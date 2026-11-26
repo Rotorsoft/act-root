@@ -64,6 +64,18 @@ describe("PinoLogger", () => {
     expect(parsed.key).toBe("val");
   });
 
+  it("logs a number, boolean, null or array payload under value", () => {
+    const logger = new PinoLogger({ level: "trace", pretty: false });
+    logger.error(42, "Unhandled Rejection");
+    logger.info(true);
+    logger.info(null);
+    logger.info(["a", "b"], "list");
+    const parsed = output.map((line) => JSON.parse(line));
+    expect(parsed.map((p) => p.value)).toEqual([42, true, null, ["a", "b"]]);
+    expect(parsed[0].msg).toBe("Unhandled Rejection");
+    expect(parsed[3]).not.toHaveProperty("0");
+  });
+
   it("keeps the context message when the payload is a string", () => {
     const logger = new PinoLogger({ level: "trace", pretty: false });
     logger.error("db connection lost", "Unhandled Rejection");

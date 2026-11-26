@@ -84,10 +84,15 @@ export class PinoLogger implements Logger {
       // would merge into indexed single-char fields.
       if (msg === undefined) this._pino[method](obj);
       else this._pino[method]({ payload: obj }, msg);
-    } else if (msg !== undefined) {
-      this._pino[method](Object(obj), msg);
     } else {
-      this._pino[method](Object(obj));
+      // A number, boolean, null or array has no fields pino can merge, so it
+      // goes under `value`, as `ConsoleLogger` logs it.
+      const fields =
+        obj !== null && typeof obj === "object" && !Array.isArray(obj)
+          ? obj
+          : { value: obj };
+      if (msg !== undefined) this._pino[method](fields, msg);
+      else this._pino[method](fields);
     }
   }
 
