@@ -550,7 +550,7 @@ export type SseRoutes<TApp, TBase extends string, TSse = unknown> = {
           input: { query: { stream: string } };
           output: ApiError;
           outputFormat: "json";
-          status: 400 | 401 | 503;
+          status: 400 | 401 | 422 | 503;
         };
   };
 } & (TSse extends { readonly settled: true }

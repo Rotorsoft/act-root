@@ -191,6 +191,9 @@ describe("hono(app) types", () => {
     expectTypeOf(sse.api.sse.Note.$get)
       .parameter(0)
       .toEqualTypeOf<{ query: { stream: string } }>();
+    // A stream outside the state's pattern is a 422, so a caller can handle it.
+    type Res = Awaited<ReturnType<typeof sse.api.sse.Note.$get>>;
+    expectTypeOf<Res["status"]>().toEqualTypeOf<200 | 400 | 401 | 422 | 503>();
     // @ts-expect-error no SSE routes without sse
     client.api.sse;
   });
