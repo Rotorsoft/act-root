@@ -162,7 +162,10 @@ describe("trpc(app, { sse }) — generated subscriptions", () => {
       expect(text).toContain('"kind":"state"');
       expect(text).not.toContain("event: ping");
       await vi.advanceTimersByTimeAsync(1_500);
-      expect(text).toContain("event: ping");
+      expect(text.split("event: ping").length - 1).toBe(1);
+      // And again after another quiet interval.
+      await vi.advanceTimersByTimeAsync(20_000);
+      expect(text.split("event: ping").length - 1).toBe(2);
     } finally {
       vi.useRealTimers();
       await reader.cancel();

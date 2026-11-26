@@ -407,9 +407,11 @@ import { t } from "./trpc.js";
 
 export { createContext, type Context } from "./context.js";
 
+// The generated router goes first: tRPC keeps the first router's config,
+// which carries the SSE keep-alive.
 export const router = t.mergeRouters(
-  authRouter,
   domainRouter,
+  authRouter,
   queriesRouter,
   eventsRouter
 );
