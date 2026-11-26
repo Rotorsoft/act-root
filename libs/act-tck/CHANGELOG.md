@@ -1,3 +1,10 @@
+# [@rotorsoft/act-tck-v2.1.5](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-tck-v2.1.4...@rotorsoft/act-tck-v2.1.5) (2026-11-26)
+
+
+### Bug Fixes
+
+* the six debug wave 33 bugs ([#2650](https://github.com/Rotorsoft/act-root/issues/2650)) ([27072e0](https://github.com/Rotorsoft/act-root/commit/27072e0d45c4ef203b06702d5166b038b2c946f7)), closes [#2643](https://github.com/Rotorsoft/act-root/issues/2643) [#2647](https://github.com/Rotorsoft/act-root/issues/2647) [#2648](https://github.com/Rotorsoft/act-root/issues/2648) [#2646](https://github.com/Rotorsoft/act-root/issues/2646) [#2645](https://github.com/Rotorsoft/act-root/issues/2645) [#2644](https://github.com/Rotorsoft/act-root/issues/2644)
+
 # [@rotorsoft/act-tck-v2.1.4](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-tck-v2.1.3...@rotorsoft/act-tck-v2.1.4) (2026-11-24)
 
 
