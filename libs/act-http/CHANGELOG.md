@@ -1,3 +1,10 @@
+# [@rotorsoft/act-http-v2.5.10](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-http-v2.5.9...@rotorsoft/act-http-v2.5.10) (2026-11-26)
+
+
+### Bug Fixes
+
+* **act:** restoring into the app's own store clears the state cache ([#2641](https://github.com/Rotorsoft/act-root/issues/2641)) ([966db88](https://github.com/Rotorsoft/act-root/commit/966db88e4218d8612f7df2b3ef12386e66657570)), closes [#2640](https://github.com/Rotorsoft/act-root/issues/2640)
+
 # [@rotorsoft/act-http-v2.5.9](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-http-v2.5.8...@rotorsoft/act-http-v2.5.9) (2026-11-26)
 
 # [@rotorsoft/act-http-v2.5.8](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-http-v2.5.7...@rotorsoft/act-http-v2.5.8) (2026-11-26)
