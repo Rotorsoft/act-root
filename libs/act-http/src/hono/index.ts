@@ -77,11 +77,9 @@ import {
   type SseOptions,
   toApiError,
 } from "../api/index.js";
-import { fire_and_forget, SseConnectionCounter } from "../api/sse-counter.js";
+import { fire_and_forget } from "../api/sse-counter.js";
 import { live_sources, run_live_subscription } from "../api/sse-live.js";
-import { SseOptionsSchema } from "../api/sse-options.js";
-import { sse_sources } from "../api/sse-settled.js";
-import { sse_states } from "../api/sse-states.js";
+import { sse_setup } from "../api/sse-states.js";
 
 /**
  * Hono context variables this subpath contributes. The generic on
@@ -317,20 +315,7 @@ export function hono<TApp extends ActSurface>(
   // instance so a noisy room on one state doesn't get a free pass
   // on another.
   if (options.sse) {
-    const sse_config = {
-      channel: options.sse.channel,
-      ...SseOptionsSchema.parse(options.sse),
-    };
-    const sse_counter = new SseConnectionCounter(
-      sse_config.maxConnections,
-      options.sse.onConnections
-    );
-    const { names: state_names, events: served_events } = sse_states(
-      app,
-      options.actions,
-      "hono"
-    );
-    const settled_source = sse_sources(app, sse_config, served_events, "hono");
+    const sse = sse_setup(app, options.sse, options.actions, "hono");
     // One event stream: take a slot (503 when the cap is full, before any
     // header is written), keep the connection alive with a heartbeat, write
     // each frame, and free the slot when the client goes away.
@@ -341,7 +326,7 @@ export function hono<TApp extends ActSurface>(
         readonly data: unknown;
       }>
     ) => {
-      if (!sse_counter.acquire()) {
+      if (!sse.counter.acquire()) {
         c.header("Retry-After", "1");
         const body: ApiError = {
           error: "ServiceUnavailable",
@@ -357,7 +342,7 @@ export function hono<TApp extends ActSurface>(
           fire_and_forget(() =>
             sse_stream.writeSSE({ event: "ping", data: "" })
           );
-        }, sse_config.heartbeatMs);
+        }, sse.config.heartbeatMs);
         try {
           for await (const frame of frames(controller.signal))
             await sse_stream.writeSSE({
@@ -366,26 +351,26 @@ export function hono<TApp extends ActSurface>(
             });
         } finally {
           clearInterval(heartbeat);
-          sse_counter.release();
+          sse.counter.release();
         }
       });
     };
-    if (sse_config.settled)
+    if (sse.config.settled)
       api.get("/sse/$settled", (c) =>
         serve(c, (signal) =>
           // A `$live` that follows no stream yields only the settled frames.
           run_live_subscription(
-            sse_config.channel,
+            sse.config.channel,
             [],
-            settled_source,
+            sse.settled,
             undefined,
             signal,
-            { maxPending: sse_config.maxPendingPerConnection }
+            { maxPending: sse.config.maxPendingPerConnection }
           )
         )
       );
-    if (sse_config.live) {
-      const served = new Set(state_names);
+    if (sse.config.live) {
+      const served = new Set(sse.names);
       const live_patterns = options.streams ?? {};
       // `?<State>=<stream>` once per stream, and `settled=1` for the targets.
       // Other query keys are ignored, as REST APIs do: a cache-buster or a
@@ -400,18 +385,18 @@ export function hono<TApp extends ActSurface>(
           { streams, settled: want_settled },
           served,
           live_patterns,
-          sse_config.maxStreamsPerSubscription
+          sse.config.maxStreamsPerSubscription
         );
         if ("refused" in checked)
           return c.json(invalid_stream(checked.refused).body, 422);
         return serve(c, async function* (signal) {
           for await (const frame of run_live_subscription(
-            sse_config.channel,
+            sse.config.channel,
             checked.sources,
-            want_settled ? settled_source : undefined,
+            want_settled ? sse.settled : undefined,
             undefined,
             signal,
-            { maxPending: sse_config.maxPendingPerConnection }
+            { maxPending: sse.config.maxPendingPerConnection }
           ))
             yield frame.kind === "settled"
               ? frame
@@ -426,7 +411,7 @@ export function hono<TApp extends ActSurface>(
         });
       });
     }
-    for (const state_name of state_names) {
+    for (const state_name of sse.names) {
       api.get(`/sse/${state_name}`, async (c) => {
         const stream_id = c.req.query("stream");
         if (!stream_id) {
@@ -445,8 +430,8 @@ export function hono<TApp extends ActSurface>(
           );
         // `serve` holds the slot, so the shared loop runs without accounting.
         return serve(c, (signal) =>
-          runSseSubscription(sse_config.channel, stream_id, undefined, signal, {
-            maxPending: sse_config.maxPendingPerConnection,
+          runSseSubscription(sse.config.channel, stream_id, undefined, signal, {
+            maxPending: sse.config.maxPendingPerConnection,
           })
         );
       });

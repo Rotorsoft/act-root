@@ -87,11 +87,9 @@ import {
   type SseSubscriptionFrame,
   toApiError,
 } from "../api/index.js";
-import { SseConnectionCounter } from "../api/sse-counter.js";
 import { live_sources, run_live_subscription } from "../api/sse-live.js";
-import { SseOptionsSchema } from "../api/sse-options.js";
-import { type SseSettledFrame, sse_sources } from "../api/sse-settled.js";
-import { sse_states } from "../api/sse-states.js";
+import type { SseSettledFrame } from "../api/sse-settled.js";
+import { sse_setup } from "../api/sse-states.js";
 
 // A `$live` request: streams by state name, and whether to add the settled targets.
 const LiveRequestSchema = z.object({
@@ -444,24 +442,30 @@ export function trpc<Ctx extends object, TApp extends ActSurface>(
     readonly streams?: StreamPatterns<unknown>;
   }
 ): unknown {
-  // Parsed up front: tRPC sends its SSE keep-alive from the root config, so
-  // `heartbeatMs` sets the ping on the `t` every procedure is built from.
-  const sse_config = options.sse && {
-    channel: options.sse.channel,
-    ...SseOptionsSchema.parse(options.sse),
-  };
-  const t = initTRPC.context<Ctx>().create(
-    sse_config && {
-      sse: { ping: { enabled: true, intervalMs: sse_config.heartbeatMs } },
-    }
-  );
-  const dispatch = make_dispatch<Ctx>(app, options, options.idempotency?.store);
   const patterns = stream_patterns(
     app,
     options.streams,
     !!options.stream,
     "trpc"
   );
+  const selected = selected_actions(app, options.actions, "trpc");
+  // SSE subscriptions mount under the `subscribe` key of the same router as
+  // the action mutations, so an action named `subscribe` would be silently
+  // replaced. Refuse it at generation, before `publish` wires a listener.
+  if (options.sse && selected.some(([name]) => name === "subscribe"))
+    throw new Error(
+      'trpc: an action named "subscribe" collides with the SSE subscription router (router.subscribe.<stateName>); rename the action or generate the router without `sse`.'
+    );
+  // Built up front: tRPC sends its SSE keep-alive from the root config, so
+  // `heartbeatMs` sets the ping on the `t` every procedure is built from.
+  const sse =
+    options.sse && sse_setup(app, options.sse, options.actions, "trpc");
+  const t = initTRPC.context<Ctx>().create(
+    sse && {
+      sse: { ping: { enabled: true, intervalMs: sse.config.heartbeatMs } },
+    }
+  );
+  const dispatch = make_dispatch<Ctx>(app, options, options.idempotency?.store);
 
   // Run the actor extractor for a generated procedure, mapping a "throw to
   // deny" onto `UNAUTHORIZED` rather than a framework 500. Shared by
@@ -487,11 +491,7 @@ export function trpc<Ctx extends object, TApp extends ActSurface>(
     string,
     ReturnType<ReturnType<typeof t.procedure.input>["mutation"]>
   > = {};
-  for (const [action_name, state] of selected_actions(
-    app,
-    options.actions,
-    "trpc"
-  )) {
+  for (const [action_name, state] of selected) {
     const action_schema = state.actions[action_name];
     const matches = patterns.get(action_name);
     handlers[action_name] = t.procedure
@@ -535,24 +535,7 @@ export function trpc<Ctx extends object, TApp extends ActSurface>(
       });
   }
 
-  if (options.sse && sse_config) {
-    // SSE subscriptions mount under the `subscribe` key of the same router
-    // as the action mutations, so an action named `subscribe` would be
-    // silently replaced. Refuse it at generation instead.
-    if ("subscribe" in handlers)
-      throw new Error(
-        'trpc: an action named "subscribe" collides with the SSE subscription router (router.subscribe.<stateName>); rename the action or generate the router without `sse`.'
-      );
-    const sse_counter = new SseConnectionCounter(
-      sse_config.maxConnections,
-      options.sse.onConnections
-    );
-    const { names: state_names, events: served_events } = sse_states(
-      app,
-      options.actions,
-      "trpc"
-    );
-    const settled_source = sse_sources(app, sse_config, served_events, "trpc");
+  if (sse) {
     const sse_handlers: Record<string, unknown> = {};
     const too_many = () => {
       throw new TRPCError({
@@ -560,8 +543,8 @@ export function trpc<Ctx extends object, TApp extends ActSurface>(
         message: "max concurrent SSE subscriptions reached",
       });
     };
-    if (sse_config.live) {
-      const served = new Set(state_names);
+    if (sse.config.live) {
+      const served = new Set(sse.names);
       const live_patterns = options.streams ?? {};
       sse_handlers.$live = t.procedure
         // Checked in the body, so a bad request is a 422, as Hono's is.
@@ -574,25 +557,25 @@ export function trpc<Ctx extends object, TApp extends ActSurface>(
                 request.data,
                 served,
                 live_patterns,
-                sse_config.maxStreamsPerSubscription
+                sse.config.maxStreamsPerSubscription
               )
             : { refused: "streams by state name, and settled" };
           if ("refused" in checked)
             throw refused_error(invalid_stream(checked.refused));
           yield* run_live_subscription(
-            sse_config.channel,
+            sse.config.channel,
             checked.sources,
-            request.data!.settled ? settled_source : undefined,
-            sse_counter,
+            request.data!.settled ? sse.settled : undefined,
+            sse.counter,
             signal,
             {
-              maxPending: sse_config.maxPendingPerConnection,
+              maxPending: sse.config.maxPendingPerConnection,
               on_cap_exceeded: too_many,
             }
           );
         });
     }
-    if (sse_config.settled)
+    if (sse.config.settled)
       sse_handlers.$settled = t.procedure.subscription(async function* ({
         ctx,
         signal,
@@ -600,18 +583,18 @@ export function trpc<Ctx extends object, TApp extends ActSurface>(
         await resolve_actor(ctx as unknown as Ctx);
         // A `$live` that follows no stream yields only the settled frames.
         yield* run_live_subscription(
-          sse_config.channel,
+          sse.config.channel,
           [],
-          settled_source,
-          sse_counter,
+          sse.settled,
+          sse.counter,
           signal,
           {
-            maxPending: sse_config.maxPendingPerConnection,
+            maxPending: sse.config.maxPendingPerConnection,
             on_cap_exceeded: too_many,
           }
         );
       });
-    for (const state_name of state_names) {
+    for (const state_name of sse.names) {
       sse_handlers[state_name] = t.procedure
         .input(z.object({ stream: z.string().min(1) }))
         .subscription(async function* ({ input, ctx, signal }) {
@@ -623,12 +606,12 @@ export function trpc<Ctx extends object, TApp extends ActSurface>(
               )
             );
           yield* runSseSubscription(
-            sse_config.channel,
+            sse.config.channel,
             input.stream,
-            sse_counter,
+            sse.counter,
             signal,
             {
-              maxPending: sse_config.maxPendingPerConnection,
+              maxPending: sse.config.maxPendingPerConnection,
               on_cap_exceeded: too_many,
             }
           );
