@@ -222,6 +222,26 @@ describe("runSseSubscription", () => {
     expect(counter.open).toBe(0);
   });
 
+  it("refuses a maxPending that would unbound the backlog, before taking a slot", async () => {
+    const channel = new BroadcastChannel<S>();
+    channel.publish("k", { _v: 1, n: 1 }, [{ n: 1 }]);
+    const counter = new SseConnectionCounter(5);
+    for (const maxPending of [Number.POSITIVE_INFINITY, Number.NaN, 0, 1.5])
+      await expect(
+        runSseSubscription(channel, "k", counter, undefined, {
+          maxPending,
+        }).next()
+      ).rejects.toThrow(ZodError);
+    expect(counter.open).toBe(0);
+    // Control: an in-range bound opens on the cached state.
+    const gen = runSseSubscription(channel, "k", counter, undefined, {
+      maxPending: 2,
+    });
+    expect((await gen.next()).value).toMatchObject({ kind: "state" });
+    await gen.return(undefined);
+    expect(counter.open).toBe(0);
+  });
+
   it("calls on_cap_exceeded when the counter is full", () => {
     const channel = new BroadcastChannel<S>();
     const counter = new SseConnectionCounter(0);

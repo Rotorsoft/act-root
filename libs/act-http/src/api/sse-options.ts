@@ -3,7 +3,7 @@ import {
   DEFAULT_SSE_HEARTBEAT_MS,
   DEFAULT_SSE_MAX_CONNECTIONS,
   DEFAULT_SSE_MAX_PENDING_PER_CONNECTION,
-} from "./sse-wiring.js";
+} from "./sse-defaults.js";
 
 // The numeric knobs on `SseOptions`, parsed once when `hono(...)` or
 // `trpc(...)` builds, so a bad value throws then, not at the first connection.
