@@ -104,27 +104,13 @@ app.on("closed", ({ truncated }) => {
 
 ### Broadcasting a commit
 
-After every `app.do()`, forward each emitted snapshot's domain patch. An action with [`.loads`](state-management.md#rules-across-streams-loads) also appends to other streams, and `app.do()` returns only its own; broadcast from a `committed` listener instead, which fires once per stream appended to (or let the generators do it with `publish: true`):
+Let the framework publish. With the generated transports, `sse: { channel, publish: true }` publishes every commit; without them, `publishCommits(app, channel)` from `@rotorsoft/act-http/sse` does the same and returns a function that stops it. Both listen to `committed`, which fires once per stream a commit appended to (the streams an action [`.loads`](state-management.md#rules-across-streams-loads) included), and send, for each stream:
 
-```typescript no-check
-const snaps = await app.do("CreateItem", target, input);
-const last = snaps.at(-1)!;
+- the new state, with `_v` set to the stream's head version;
+- one domain patch per emitted event, in commit order;
+- an empty patch when a `.snap` took the next version, so a live client doesn't read the next commit as a gap.
 
-// 1. Derive the broadcast view (typically snap.state plus overlays)
-const state: AppState = {
-  ...last.state,
-  _v: last.version, // MUST be the stream's head version
-};
-
-// 2. Collect each emitted snapshot's patch, in commit order
-const patches: Partial<AppState>[] = snaps.map((s) => s.patch ?? {});
-// A `.snap` took the next version: send it as an empty patch
-if (last.version > last.event!.version) patches.push({});
-
-// 3. Publish — sends a version-keyed PatchMessage to all subscribers
-broadcast.publish(streamId, state, patches);
-// The commit settles its reactions on its own.
-```
+Write your own `committed` listener only when the broadcast view carries computed fields, or to publish only some streams; [Real-time recipes § 5](../guides/real-time-recipes.md#5-only-one-stream-or-a-few) shows one that builds the same state and patches.
 
 `publish()` writes the new state to the LRU cache (so reconnects can read it) and pushes a `PatchMessage<AppState>` to subscribers. The keys of the message are absolute event versions (`baseV + 1`, `baseV + 2`, …), so subscribers can apply them directly to their cached state without computing offsets.
 

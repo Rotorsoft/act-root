@@ -52,20 +52,26 @@ export const is_stream_of = (
 
 /**
  * The stream patterns of the states `app`'s actions belong to, by action
- * name, and refuses at generation a state that neither `patterns` nor a
- * `stream` resolver covers, or a pattern for a state the app doesn't have.
+ * name, and refuses at generation a state of a generated action that neither
+ * `patterns` nor a `stream` resolver covers, or a pattern for a state the app
+ * doesn't have.
  */
 export function stream_patterns(
   app: Pick<ActSurface, "registry">,
   patterns: StreamPatterns<unknown> | undefined,
   has_resolver: boolean,
-  transport: string
+  transport: string,
+  selection?: ActionSelection<unknown>
 ): Map<string, (stream: string) => boolean> {
   const by_action = new Map<string, (stream: string) => boolean>();
   const states = new Set<string>();
   const uncovered = new Set<string>();
+  const generated = new Set(
+    selected_actions(app, selection, transport).map(([name]) => name)
+  );
   for (const [action, state] of Object.entries(app.registry.actions)) {
     states.add(state.name);
+    if (!generated.has(action)) continue;
     const pattern = patterns?.[state.name];
     if (pattern) by_action.set(action, (s) => matches_stream(pattern, s));
     else if (!has_resolver) uncovered.add(state.name);

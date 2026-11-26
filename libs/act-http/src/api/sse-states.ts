@@ -4,6 +4,10 @@ import {
   type ActSurface,
   selected_actions,
 } from "./dispatch.js";
+import { SseConnectionCounter } from "./sse-counter.js";
+import { SseOptionsSchema } from "./sse-options.js";
+import { sse_sources } from "./sse-settled.js";
+import type { SseOptions } from "./sse-wiring.js";
 
 /**
  * What a transport serves over SSE: one subscription per state a generated
@@ -41,4 +45,22 @@ export function sse_states(
     for (const event of Object.keys(of_state)) events.add(event);
   }
   return { names: [...states.keys()], events };
+}
+
+// A generator's SSE wiring, built once: the parsed knobs, the counter, the
+// served states, and the settled source (which also publishes, with `publish`).
+export function sse_setup(
+  app: ActSurface,
+  sse: SseOptions,
+  selection: ActionSelection<unknown> | undefined,
+  transport: string
+) {
+  const config = { channel: sse.channel, ...SseOptionsSchema.parse(sse) };
+  const { names, events } = sse_states(app, selection, transport);
+  return {
+    config,
+    counter: new SseConnectionCounter(config.maxConnections, sse.onConnections),
+    names,
+    settled: sse_sources(app, config, events, transport),
+  };
 }

@@ -6,7 +6,7 @@ tRPC router in `packages/app/src/api/`, decomposed into focused route modules.
 
 **Why decompose into many small files instead of one router?** Each file has a single responsibility and a clear dependency graph. `trpc.ts` knows nothing about auth; `context.ts` knows nothing about routes; route files know nothing about each other. This prevents circular dependencies and makes it easy to find where a specific endpoint lives. When the spec adds a new domain aggregate, you add handlers to `domain.routes.ts` without touching auth or SSE logic.
 
-**Broadcast once, on `committed`.** Unless presence rewrites domain fields, pass `sse: { channel, publish: true }` to the generated API and it publishes every commit itself, with `_v` and the `.snap` empty patch; skip `broadcast.ts`. Presence kept in its own top-level key with `channel.overlay` survives each publish and needs nothing more. This skill's `applyPresence` writes presence into the domain fields (`connected` on each user), which each commit's state would overwrite, so it keeps one listener: `app.on("committed", Item, ...)` in `broadcast.ts`, scoped to the state so its snapshots are typed, publishes every commit, whichever path made it: a generated mutation, a reaction, a timer. No mutation calls `broadcastState()` itself, so none can forget to. Reactions and projections run on their own after the commit. A generated mutation returns the snapshots of its own commit; never answer a request from a projection, which may lag.
+**Broadcast once, from the generator.** `sse: { channel, publish: true }` on the generated API publishes every commit itself, with `_v` and the `.snap` empty patch. Presence kept in its own top-level key with `channel.overlay` survives each publish, so it needs nothing more. Only a view with computed fields needs its own `app.on("committed", Item, ...)` listener. Either way no mutation publishes itself, so none can forget to. Reactions and projections run on their own after the commit. A generated mutation returns the snapshots of its own commit; never answer a request from a projection, which may lag.
 
 **Choosing the right procedure type:** Use `publicProcedure` for unauthenticated reads (list views, SSE subscriptions). Use `authedProcedure` for any mutation that modifies state — the middleware guarantees `ctx.actor` is non-null and typed. Use `adminProcedure` for administrative operations (role assignment, user management). Never use `publicProcedure` for mutations unless the spec explicitly allows anonymous writes.
 
@@ -151,59 +151,29 @@ export function serializeEvents(events: Array<{ id: number; name: unknown; data:
 
 ## packages/app/src/api/broadcast.ts (broadcast setup)
 
-App-specific broadcast setup using `@rotorsoft/act-http/sse`. Customize `deriveState()` and `applyPresence()` for your domain.
+The channel and presence. The generated router publishes every commit to the channel (`sse: { channel: broadcast, publish: true }` in `domain.routes.ts`), whichever path made it: a generated mutation, a reaction, a timer. Presence lives in its own top-level key, set with `overlay`, so each publish keeps it.
 
 ```typescript
-import { app, Item } from "@my-app/domain";
+import type { Item } from "@my-app/domain";
 import { BroadcastChannel, PresenceTracker } from "@rotorsoft/act-http/sse";
 import type { z } from "zod";
 
-// The broadcast view: the domain state, its stream version, and any
-// app-specific computed fields (deadlines, etc.)
-export type AppState = z.infer<typeof Item.state> & { _v: number };
+// The broadcast view: the domain state, its stream version, and who's viewing.
+export type AppState = z.infer<typeof Item.state> & {
+  _v: number;
+  viewers?: string[];
+};
 
 export const broadcast = new BroadcastChannel<AppState>();
 export const presence = new PresenceTracker();
 
-/**
- * Broadcast every commit by the state's actions: generated mutations,
- * reactions and timers alike. Scoped to the state, so `snaps` is typed
- * from it. One listener per broadcast state.
- */
-app.on("committed", Item, (snaps) => {
-  // Fired only with committed snapshots: the last one and its event exist.
-  const last = snaps.at(-1)!;
-  const event = last.event!;
-  const streamId = event.stream;
-  const fullState: AppState = {
-    ...last.state,
-    _v: last.version, // MUST be the stream's head version
-  };
-  // One domain patch per emitted event, in commit order
-  const patches = snaps.map((s) => s.patch ?? {});
-  // A `.snap` took the next version: send it as an empty patch
-  if (last.version > event.version) patches.push({});
-  // Overlay presence on human players/users
-  broadcast.publish(streamId, applyPresence(fullState, streamId), patches);
-});
-
-/** Re-broadcast with updated presence (called on connect/disconnect). */
+/** Re-broadcast who's viewing a stream (called on connect/disconnect). */
 export function broadcastPresenceChange(streamId: string) {
-  const cached = broadcast.state(streamId);
-  if (!cached) return;
-  const withPresence = applyPresence(cached, streamId);
-  broadcast.overlay(streamId, withPresence);
-}
-
-function applyPresence(state: AppState, streamId: string): AppState {
-  // App-specific presence overlay — e.g., set `connected` on each player/user
-  const online = presence.online(streamId);
-  // ... overlay online status onto state
-  return state;
+  broadcast.overlay(streamId, { viewers: [...presence.online(streamId)] });
 }
 ```
 
-Use the short names (`overlay`, `state`, `online`, `isOnline`). The snake_case names are gone in 2.0.
+Use the short names (`overlay`, `state`, `online`, `isOnline`). The snake_case names are gone in 2.0. A broadcast view that adds computed fields (a deadline derived from the state) can't use `publish: true`: write one `app.on("committed", Item, ...)` listener instead, as [Real-time recipes § 5](https://rotorsoft.github.io/act-root/docs/guides/real-time-recipes#5-only-one-stream-or-a-few) shows.
 
 ## packages/app/src/api/domain.routes.ts (domain commands + queries)
 
@@ -236,6 +206,8 @@ export const domainRouter = trpc(app, {
       throw new Error(`${action} has its own route`);
     return input.itemId;
   },
+  // Publishes every commit of the served states to the channel.
+  sse: { channel: broadcast, publish: true },
 });
 
 export const queriesRouter = t.router({

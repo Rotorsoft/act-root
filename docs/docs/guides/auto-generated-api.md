@@ -298,7 +298,7 @@ const router = trpc(app, {
 trpc.VoidInvoice.mutate({ stream: "invoice-acme-42", payload: { reason } });
 ```
 
-A stream that doesn't match its state's pattern is refused before `app.do`: `422` with code `INVALID_STREAM` on Hono, `UNPROCESSABLE_CONTENT` on tRPC, so a client can't point `VoidInvoice` at a client's stream. The state's subscriptions (`subscribe.<State>`, `$live`) refuse such a stream the same way. A state whose stream comes from the `stream` resolver has no pattern, so its subscriptions take any stream except one another state's pattern claims: `subscribe.Settings` can't open `invoice-acme-42`. Never put the address in the payload: an emit handler that spreads its payload would copy it onto every event. `stream` is optional when every state is in `streams`, and generation fails, naming the state, when a state is in neither.
+A stream that doesn't match its state's pattern is refused before `app.do`: `422` with code `INVALID_STREAM` on Hono, `UNPROCESSABLE_CONTENT` on tRPC, so a client can't point `VoidInvoice` at a client's stream. The state's subscriptions (`subscribe.<State>`, `$live`) refuse such a stream the same way. A state whose stream comes from the `stream` resolver has no pattern, so its subscriptions take any stream except one another state's pattern claims: `subscribe.Settings` can't open `invoice-acme-42`. Never put the address in the payload: an emit handler that spreads its payload would copy it onto every event. `stream` is optional when every state the generated actions write is in `streams`, and generation fails, naming the state, when one of those is in neither. A state only left-out actions write needs neither.
 
 ## Authentication — the `actor` seam
 
@@ -470,15 +470,16 @@ trpc.subscribe.$live.useSubscription(
 For every subscription, on every open:
 
 1. Run the `actor` extractor (`401` / `UNAUTHORIZED` on throw).
-2. Acquire one slot on the generator's counter (each `trpc(...)` or `hono(...)` call counts its own; a process that builds both allows `maxConnections` on each). Full counter →
+2. Check each stream against its state's `streams` pattern, and a `$live` request against what the API serves (`422 INVALID_STREAM` on Hono, `UNPROCESSABLE_CONTENT` on tRPC). A refused open takes no slot.
+3. Acquire one slot on the generator's counter (each `trpc(...)` or `hono(...)` call counts its own; a process that builds both allows `maxConnections` on each). Full counter →
    - Hono: `503 / SSE_BUSY` with `Retry-After: 1` (header set **before** the response body starts so it's a clean reject, not a hung stream).
    - tRPC: `TRPCError({ code: "TOO_MANY_REQUESTS" })`.
-3. Yield `{ kind: "state", data }` once if `channel.state(streamId)` has a cached value (re-connect / cold-start affordance — the client doesn't need a separate `getById` query).
-4. Subscribe to the channel for `streamId` and forward every publication as `{ kind: "patch", data }`. The per-connection backlog of undelivered frames is bounded by `maxPendingPerConnection` (default 256): when a slow consumer can't drain as fast as a busy stream publishes, the stream's pending frames give way to one `_resync`, and the client refetches and converges on current state; no frame is lost silently. `$settled` and `$live` follow the same policy. This caps per-connection memory independently of the connection-count cap.
-5. Run a keep-alive ping every `heartbeatMs` (default 30 s). Below the 60 s idle timeout most reverse proxies impose.
+4. Yield `{ kind: "state", data }` once if `channel.state(streamId)` has a cached value (re-connect / cold-start affordance — the client doesn't need a separate `getById` query).
+5. Subscribe to the channel for `streamId` and forward every publication as `{ kind: "patch", data }`. The per-connection backlog of undelivered frames is bounded by `maxPendingPerConnection` (default 256): when a slow consumer can't drain as fast as a busy stream publishes, the stream's pending frames give way to one `_resync`, and the client refetches and converges on current state; no frame is lost silently. `$settled` and `$live` follow the same policy. This caps per-connection memory independently of the connection-count cap.
+6. Run a keep-alive ping every `heartbeatMs` (default 30 s). Below the 60 s idle timeout most reverse proxies impose.
    - Hono writes an `event: ping` frame on that interval.
    - tRPC turns on its own SSE ping (`sse.ping` on the `initTRPC` instance the router is built with), which sends `event: ping` once a subscription has been quiet for `heartbeatMs`. `httpSubscriptionLink` reads it as a keep-alive and passes no frame to your code. tRPC reads this setting from the root router given to the HTTP handler, and `t.mergeRouters` keeps the first router's. So hand the generated router to the handler, or list it first in `mergeRouters`; if your own router comes first or nests it, turn the ping on in your own `initTRPC.create({ sse: { ping: { enabled: true, intervalMs } } })`.
-6. Tear down on `iter.return()` / disconnect / abort: unsubscribe, release the slot, clear the heartbeat. The teardown runs from a `finally` block so a crashed handler doesn't leak count. A subscription that could not acquire a slot (cap full, no `on_cap_exceeded` reject) releases nothing on teardown — only an acquired slot is released, so the counter never underflows.
+7. Tear down on `iter.return()` / disconnect / abort: unsubscribe, release the slot, clear the heartbeat. The teardown runs from a `finally` block so a crashed handler doesn't leak count. A subscription that could not acquire a slot (cap full, no `on_cap_exceeded` reject) releases nothing on teardown — only an acquired slot is released, so the counter never underflows.
 
 The shared loop is exported as `runSseSubscription` from `@rotorsoft/act-http/api` for adopters who want to build a different transport (WebSocket, a custom long-poll bridge) on the same accounting + cancellation discipline.
 
@@ -489,9 +490,9 @@ The shared loop is exported as `runSseSubscription` from `@rotorsoft/act-http/ap
 | Knob | Default | Range | Why |
 |---|---|---|---|
 | `maxConnections` | `500` | `[1, 10_000]` | Comfortable for hundreds of human viewers; above 10k the FD ceiling and memory force horizontal scaling regardless of tuning. |
-| `heartbeatMs` | `30_000` | `[15_000, 300_000]` | Sub-15s wastes bandwidth on business workloads; above 5 min risks proxy idle drops. |
-| `maxStreamsPerSubscription` | `50` | `[1, 1_000]` | The most streams one `$live` follows; it takes one slot however many it follows. |
-| `maxPendingPerConnection` | `256` | `[1, 100_000]` | Bounds the per-connection undelivered-frame backlog. A stalled consumer on a busy stream can't drain as fast as it publishes; at the bound the stream's pending frames give way to one `_resync`, so one wedged client can't pin unbounded memory and none loses a version silently. |
+| `heartbeatMs` | `30_000` | `[15_000, 300_000]` | Sub-15s wastes bandwidth on business workloads; above 5 min risks proxy idle drops. Lower it when a proxy closes idle connections sooner than 30 s. |
+| `maxStreamsPerSubscription` | `50` | `[1, 1_000]` | The most streams one `$live` follows; it takes one slot however many it follows. Raise it when a page follows more. |
+| `maxPendingPerConnection` | `256` | `[1, 100_000]` | Bounds the per-connection undelivered-frame backlog. A stalled consumer on a busy stream can't drain as fast as it publishes; at the bound the stream's pending frames give way to one `_resync`, so one wedged client can't pin unbounded memory and none loses a version silently. Raise it when a busy stream sends bursts larger than that to clients that pause. |
 
 Out-of-range knobs throw `ZodError` at transport construction — misconfiguration surfaces at startup, not at first connection. (Every config bag in the framework validates with Zod and throws `ZodError` at its entry point.)
 

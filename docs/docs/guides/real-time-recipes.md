@@ -77,7 +77,7 @@ type Ctx = { user: { id: string; name: string } };
 
 export const router = trpc(app, {
   actor: (ctx: Ctx) => ctx.user,
-  stream: () => "unused", // every state below is addressed by the caller
+  // Every state is addressed by the caller, so no `stream` resolver.
   streams: { Ticket: /^ticket-\d+$/, Customer: /^customer-\d+$/ },
   // Customer's action is hand-written (recipe 6), so SSE never serves it.
   actions: { exclude: ["ChangeEmail"] },
@@ -136,7 +136,7 @@ source.addEventListener("patch", (e) => patch(JSON.parse(e.data)));
 // "ping" events are the heartbeat; ignore them.
 ```
 
-A stream outside the state's pattern (`streams.Ticket`) is refused when the subscription opens (`422` on Hono, `UNPROCESSABLE_CONTENT` on tRPC), so a client can't subscribe to another state's records through `subscribe.Ticket`.
+A stream outside the state's pattern (`streams.Ticket`) is refused when the subscription opens ([the codes](auto-generated-api.md#what-the-generator-owns)), so a client can't subscribe to another state's records through `subscribe.Ticket`.
 
 ## 2. A list that follows a projection
 
@@ -254,7 +254,6 @@ type Ctx = { user: { id: string; name: string } };
 // a Note commit never reaches this channel.
 export const customerRouter = trpc(app, {
   actor: (ctx: Ctx) => ctx.user,
-  stream: () => "unused",
   streams: { Ticket: /^ticket-\d+$/ },
   actions: { include: ["OpenTicket"] },
   sse: { channel: new BroadcastChannel(), publish: true, live: true },
@@ -366,15 +365,7 @@ The overlay survives the next commit, so a client that reconnects sees the same 
 
 ## 8. Capacity
 
-Each generator counts its open subscriptions. The defaults fit a business app with up to a few hundred viewers per process:
-
-| Option | Default | Change it when |
-| --- | --- | --- |
-| `maxConnections` | `500` | more viewers per process than that; above 10,000 run more processes instead |
-| `heartbeatMs` | `30_000` | a proxy closes idle connections sooner than 30 s |
-| `maxPendingPerConnection` | `256` | a busy stream sends bursts larger than that to clients that pause |
-| `maxStreamsPerSubscription` | `50` | a `$live` page follows more streams |
-| `onConnections` | — | you want the open count on a metric |
+Each generator counts its open subscriptions. The defaults fit a business app with up to a few hundred viewers per process; [Defaults and validation](auto-generated-api.md#defaults-and-validation) lists each knob, its range and when to change it. `onConnections` reports the open count, for a gauge:
 
 ```ts no-check
 sse: {
@@ -387,7 +378,7 @@ sse: {
 },
 ```
 
-The subscription past the cap is refused (`503` on Hono, `TOO_MANY_REQUESTS` on tRPC), never left hanging. Over HTTP/2 the browser's six-connection limit goes away, but `$live` still saves a slot and a heartbeat per stream.
+The subscription past the cap is refused, never left hanging ([the codes](auto-generated-api.md#what-the-generator-owns)). Over HTTP/2 the browser's six-connection limit goes away, but `$live` still saves a slot and a heartbeat per stream.
 
 ## 9. More than one server process
 

@@ -8088,7 +8088,7 @@ import type { IdempotencyStore } from "@rotorsoft/act-ops/idempotency";
 import { type TRPCBuiltRouter, type TRPCDefaultErrorShape, type TRPCMiddlewareFunction, type TRPCMutationProcedure, type TRPCSubscriptionProcedure } from "@trpc/server";
 import { type ActionInput, type ActionResult, type ActionSelection, type ActSurface, type AppActions, type AppState, type AppStateNames, type ResolverArgs, type SelectedActions, type StreamPatterns } from "../api/dispatch.js";
 import { type ActorExtractor, type SseOptions, type SseSubscriptionFrame } from "../api/index.js";
-import { type SseSettledFrame } from "../api/sse-settled.js";
+import type { SseSettledFrame } from "../api/sse-settled.js";
 /**
  * Per-call options for {@link trpc}. The host supplies the three
  * seams the package can't make decisions on:

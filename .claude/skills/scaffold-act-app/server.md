@@ -334,7 +334,11 @@ app.on("blocked", (leases) => { /* alert on blocked streams */ });
 // they're single-process / single-node by design. The orchestrator
 // auto-wires `settle()` on the same signal — this listener is for
 // fan-out (SSE, dashboards, audit).
-app.on("notified", (n) => sse.broadcast(n));
+// The notification names the stream and its events, but carries no
+// snapshot or patch, so the SSE channel can't forward it as one. Route each
+// viewer to the process that serves its writes instead; see
+// https://rotorsoft.github.io/act-root/docs/guides/auto-generated-api#horizontal-scaling
+app.on("notified", ({ stream, events }) => log.info({ stream, events: events.length }, "remote commit"));
 
 // Query events directly
 const events = await app.query_array({ stream: "my-stream" });
@@ -398,7 +402,7 @@ Instead of sending the full aggregate state to every client after each action, `
   app.do() → snapshots (each carries its domain patch)
       │
       ▼
-  deriveState(snap)              ← app-specific (overlay presence, deadlines, etc.)
+  state = snap.state             ← presence rides along as an overlay key
   state._v = snap.version        ← event store version is the single source of truth
       │
       ▼
@@ -417,95 +421,7 @@ Instead of sending the full aggregate state to every client after each action, `
 
 ### Server-Side Setup
 
-```typescript
-import { BroadcastChannel, PresenceTracker } from "@rotorsoft/act-http/sse";
-import type { BroadcastState } from "@rotorsoft/act-http/sse";
-
-// Extend BroadcastState with your app-specific fields
-type MyAppState = BroadcastState & {
-  // ... your domain state shape
-  turnDeadline: string | null;
-};
-
-// Create broadcast channel + presence tracker
-const broadcast = new BroadcastChannel<MyAppState>({
-  cacheSize: 50,    // LRU cache entries; default 50
-});
-const presence = new PresenceTracker();
-
-// The single broadcast entry point, run on every commit by the state's
-// actions; scoped to the state, so `snaps` is typed from it
-app.on("committed", MyState, (snaps) => {
-  const last = snaps.at(-1)!;                     // fired only with committed snapshots,
-  const event = last.event!;                     // so the last one and its event exist
-  const streamId = event.stream;
-  const state = deriveFullState(last);           // app-specific state derivation
-  state._v = last.version;                       // MUST be the stream's head version
-  const patches = snaps.map((s) => s.patch ?? {}); // one per emitted event
-  if (last.version > event.version) patches.push({}); // a .snap took the next version
-  const withPresence = applyPresence(state, streamId); // app-specific overlay
-  broadcast.publish(streamId, withPresence, patches);
-});
-
-// For non-event state changes (e.g. presence toggle)
-function broadcastPresenceChange(streamId: string) {
-  const cached = broadcast.state(streamId);
-  if (!cached) return;
-  const withPresence = applyPresence(cached, streamId);
-  broadcast.overlay(streamId, withPresence);
-}
-```
-
-Use the short names (`overlay`, `state`, `subscriberCount`, `cacheSize`, `online`, `isOnline`). The snake_case names are gone in 2.0.
-
-### Client-Side Patch Application
-
-```typescript
-import { applyPatchMessage } from "@rotorsoft/act-http/sse";
-
-// In SSE onData handler (React Query):
-onData: (frame) => {
-  if (frame.kind === "state") {
-    utils.getState.setData({ streamId }, frame.data); // full state on connect
-    return;
-  }
-  const cached = utils.getState.getData({ streamId });
-  const result = applyPatchMessage(frame.data, cached);
-
-  if (result.ok) {
-    utils.getState.setData({ streamId }, result.state);
-  } else if (result.reason === "behind") {
-    utils.getState.invalidate({ streamId }); // missed versions — trigger full refetch
-  }
-  // "stale" → no-op (client already has newer state from mutation response)
-}
-```
-
-### SSE Subscription Pattern (tRPC)
-
-```typescript
-import { runSseSubscription } from "@rotorsoft/act-http/api";
-
-onStateChange: publicProcedure
-  .input(z.object({ streamId: z.string(), identityId: z.string().optional() }))
-  .subscription(async function* ({ input, signal }) {
-    const { streamId, identityId } = input;
-    if (identityId) {
-      presence.add(streamId, identityId);
-      broadcastPresenceChange(streamId);
-    }
-    try {
-      // The cached state first, then every patch, queued: never a single
-      // pending slot, which drops a patch when two commits land together.
-      yield* runSseSubscription(broadcast, streamId, undefined, signal);
-    } finally {
-      if (identityId) {
-        presence.remove(streamId, identityId);
-        broadcastPresenceChange(streamId);
-      }
-    }
-  }),
-```
+The scaffold's `broadcast.ts`, `domain.routes.ts` and `events.routes.ts` in [api.md](api.md) are the setup: the generated router publishes every commit (`sse: { channel: broadcast, publish: true }`), presence is an `overlay` in its own key, and `onStateChange` runs `runSseSubscription`. The client's `useStateStream` in [client.md](client.md) applies the frames with `applyPatchMessage`.
 
 ### Projection Optimization Strategies
 
@@ -704,7 +620,7 @@ async function upsertProjection(streamId, mutator) {
 
 ### Single Broadcast Function
 
-Every code path that commits — generated mutations, background workers, timers, reactions — reaches subscribers through the one `app.on("committed")` listener that calls `broadcast.publish()`. No path calls it itself, so none can skip it, and cache seeding, subscriber push and side effects (e.g., scheduling timers) stay consistent.
+Every code path that commits — generated mutations, background workers, timers, reactions — reaches subscribers through the generator's one `committed` listener (`publish: true`). No path publishes itself, so none can skip it, and cache seeding, subscriber push and side effects (e.g., scheduling timers) stay consistent.
 
 ### Drizzle Migrations
 
