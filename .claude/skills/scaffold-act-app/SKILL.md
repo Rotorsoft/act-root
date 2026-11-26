@@ -215,8 +215,7 @@ For production deployment (PostgresStore, background processing, automated jobs)
 - [ ] Domain package has no infrastructure dependencies
 - [ ] All packages use `"type": "module"` and TypeScript strict mode
 - [ ] Domain mutations generated with `trpc(app, ...)`, never hand-written, with every action a hand-written route owns (auth) left out by `actions.exclude`; the rest decomposed into route files with typed middleware
-- [ ] `broadcast.ts` sets up `BroadcastChannel` + `PresenceTracker` from `@rotorsoft/act-http/sse`
-- [ ] Broadcasting is `sse: { publish: true }` on the generated API, or, when presence rewrites domain fields (this skill's `applyPresence`), one `app.on("committed", State, ...)` listener per broadcast state — sets `_v` from `snap.version` and sends a snapshot's version as an empty patch
+- [ ] `broadcast.ts` sets up `BroadcastChannel` + `PresenceTracker`; the generated API publishes with `sse: { channel: broadcast, publish: true }`, and presence is an `overlay` in its own key
 - [ ] SSE `onStateChange` subscription runs `runSseSubscription` over `broadcast` for incremental state push
 - [ ] SSE `onEvent` subscription wired with `app.on("settled")` for event replay
 - [ ] No `app.settle()` in mutations (each commit settles on its own and emits "settled" after reactions)
