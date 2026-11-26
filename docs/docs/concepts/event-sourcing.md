@@ -315,17 +315,13 @@ There is a third variant for streams whose lifecycle never ends: a target carryi
 `app.restore(source, opts?, sink?)` is the offline wipe-and-rebuild primitive — atomically replace the contents of a store from an event source. Use it for CSV-driven backups, cross-adapter migrations (PG → SQLite or vice versa), or compaction passes that drop `__snapshot__` events to shrink the log.
 
 ```typescript
-import { act, cache, CsvFile } from "@rotorsoft/act";
+import { act, CsvFile } from "@rotorsoft/act";
 
 const app = act().build();
 
 // Restore from a CSV file on disk into the connected store
 const result = await app.restore(new CsvFile({ path: "./backup.csv" }));
 console.log(`Restored ${result.kept} events in ${result.duration_ms}ms`);
-
-// Cache invalidation is the caller's responsibility — restore wipes events,
-// not cache entries. Always clear after a destructive restore.
-await cache().clear();
 
 // Projection rebuilds are also up to the caller — restore does not call reset.
 // Restored ids are renumbered, so empty a table that keeps the highest
@@ -341,7 +337,7 @@ await app.reset({ stream: "^proj-" });
 - **It renumbers `id`** densely (PG `RESTART IDENTITY`, SQLite `sqlite_sequence` reset, InMemory `0..N-1`). The framework rewrites `meta.causation.event.id` through a per-call `old → new` map so causation chains survive the renumber. A cause that isn't in the source (a close or prune deleted it) gets id `-1`, keeping its name and stream, so it never names another event in the new log. Original ids never persist.
 - **It is not** a disaster-recovery primitive. `pg_dump` / `pg_restore` and SQLite file copies are still the right tool for backups you'll need to recover from in a hurry — they preserve every byte and run at the storage layer. `app.restore` is for content-level operations: cross-adapter migration, compaction, validated re-imports.
 - **It is** safe in the process that runs it: the restore waits for that app's correlate passes in flight, replaces the log, then restarts correlation from the restored log and settles its reactions. A correlate pass that starts while the restore runs (an explicit `app.correlate()` included) reads nothing and returns `{ subscribed: 0 }`. **Other processes** on the same store keep their correlation state and must be restarted, as the `Store.restore` port contract says.
-- **It is not** transparent to the cache. The cache is a separate port; restore does not call `cache().clear()`. After a destructive restore the cache holds entries that no longer match the rebuilt store. Clearing it is the caller's job. Restoring into the app's own store does drop its state projections' in-memory fold caches, as `app.reset` does.
+- **It clears** the cache when it restores into the app's own store, and drops its state projections' in-memory fold caches, as `app.reset` does: both hold states and versions of the log it replaced. A restore into another sink leaves the app's cache alone. Other processes' caches are theirs to clear (a shared cache, such as Redis, is cleared once for all of them).
 
 ### Source and sink
 

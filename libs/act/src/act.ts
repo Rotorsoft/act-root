@@ -1260,8 +1260,9 @@ export class Act<
    * lifecycle and per-event insert.
    *
    * Safe in a live process: restoring into this Act's own store waits
-   * for its correlate passes in flight, replaces the log, then restarts
-   * correlation and settles. A correlate pass that starts meanwhile
+   * for its correlate passes in flight, replaces the log, clears the cache
+   * and the state projections' fold caches, then restarts correlation and
+   * settles. A correlate pass that starts meanwhile
    * reads nothing. Other processes on the same store keep their
    * correlation state and must be restarted.
    *
@@ -1287,7 +1288,6 @@ export class Act<
    * ```typescript
    * const result = await app.restore(new CsvFile({ path: "./backup.csv" }));
    * console.log(`Restored ${result.kept} events in ${result.duration_ms}ms`);
-   * await cache().clear();   // operator's responsibility
    * ```
    *
    * @see {@link Store.restore} for the underlying driver-pattern primitive.
@@ -1328,7 +1328,8 @@ export class Act<
         // Restoring into this app's own store replaces its log (new ids, no
         // subscription rows): restart correlation from cold and arm the drain.
         await this._correlate.restart(run);
-        // The fold caches hold the old log's states and frontiers.
+        // The state and fold caches hold the old log's states and frontiers.
+        await cache().clear();
         this._reset_folds();
         this._wake();
       }
