@@ -29,6 +29,7 @@ tRPC router in `packages/app/src/api/`, decomposed into focused route modules.
 **Key rules:**
 - Don't call `app.settle()` in mutations — each commit settles its reactions on its own
 - Generate the domain mutations with `trpc(app, ...)`; never hand-write a procedure that only calls `app.do()`
+- Leave out of `trpc(app, ...)` (with `actions: { exclude: [...] }`) every action a hand-written route owns, such as `RegisterUser` and `AssignRole`: a generated twin skips the route's checks
 - Broadcasting runs from one `app.on("committed", State, ...)` listener per broadcast state (snapshots typed, no casts) — pushes incremental patches via `@rotorsoft/act-http/sse`
 - Use `authedProcedure` / `adminProcedure` for authorization (middleware narrows `ctx.actor`)
 - `onStateChange` SSE uses `broadcast.subscribe()` from `@rotorsoft/act-http/sse` for real-time state push
@@ -218,15 +219,23 @@ import type { Context } from "./context.js";
 import { t, publicProcedure } from "./trpc.js";
 
 /** One typed mutation per action: payload in, snapshots out. */
-export const domainRouter = trpc<Context, typeof app>(app, {
+export const domainRouter = trpc(app, {
   // Throwing denies the call with UNAUTHORIZED.
-  actor: (ctx) => {
+  actor: (ctx: Context) => {
     if (!ctx.actor) throw new TRPCError({ code: "UNAUTHORIZED" });
     return ctx.actor;
   },
+  // The user actions have hand-written routes (auth.routes.ts), so they get
+  // no generated twin: a generated RegisterUser would let any caller pick
+  // the password hash. Leave out every action a hand-written route owns.
+  actions: { exclude: ["RegisterUser", "AssignRole"] },
   // Checking `action` narrows `input` (declare all three parameters).
-  stream: (action, input, _ctx) =>
-    action === "CreateItem" ? crypto.randomUUID() : input.itemId,
+  stream: (action, input, _ctx) => {
+    if (action === "CreateItem") return crypto.randomUUID();
+    if (action === "RegisterUser" || action === "AssignRole")
+      throw new Error(`${action} has its own route`);
+    return input.itemId;
+  },
 });
 
 export const queriesRouter = t.router({

@@ -214,7 +214,7 @@ For production deployment (PostgresStore, background processing, automated jobs)
 - [ ] Tests use `fixture(builder)` / `sandbox(builder)` from `@rotorsoft/act/test` for isolation, clearing in-memory projections with `clear*()` at the start of each test
 - [ ] Domain package has no infrastructure dependencies
 - [ ] All packages use `"type": "module"` and TypeScript strict mode
-- [ ] Domain mutations generated with `trpc(app, ...)`, never hand-written; the rest decomposed into route files with typed middleware
+- [ ] Domain mutations generated with `trpc(app, ...)`, never hand-written, with every action a hand-written route owns (auth) left out by `actions.exclude`; the rest decomposed into route files with typed middleware
 - [ ] `broadcast.ts` sets up `BroadcastChannel` + `PresenceTracker` from `@rotorsoft/act-http/sse`
 - [ ] Broadcasting is `sse: { publish: true }` on the generated API, or, with presence overlays, one `app.on("committed", State, ...)` listener per broadcast state — sets `_v` from `snap.version` and sends a snapshot's version as an empty patch
 - [ ] SSE `onStateChange` subscription uses `broadcast.subscribe()` for incremental state push
