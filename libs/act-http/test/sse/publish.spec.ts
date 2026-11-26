@@ -74,4 +74,24 @@ describe("publishCommits with events", () => {
     await app.do("add", { stream: "c-9", actor }, { by: 1 });
     expect(channel.state("c-9")).toBeUndefined();
   });
+
+  test("publishes what any call on the channel named, once", async ({
+    app,
+  }) => {
+    const channel = new BroadcastChannel<{ _v: number; n: number }>();
+    const publish = vi.spyOn(channel, "publish");
+    const dispose = publishCommits(app, channel, { events: ["Other"] });
+    // A second generator serving another state shares the listener.
+    expect(publishCommits(app, channel, { events: ["Added"] })).toBe(dispose);
+    await app.do("add", { stream: "c-10", actor }, { by: 1 });
+    expect(channel.state("c-10")).toEqual({ n: 1, _v: 0 });
+    expect(publish).toHaveBeenCalledOnce();
+    // A call that names no events widens it to every event.
+    dispose();
+    publishCommits(app, channel, { events: ["Other"] });
+    publishCommits(app, channel);
+    publishCommits(app, channel, { events: ["Other"] });
+    await app.do("add", { stream: "c-11", actor }, { by: 1 });
+    expect(channel.state("c-11")).toEqual({ n: 1, _v: 0 });
+  });
 });
