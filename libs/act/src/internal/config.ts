@@ -10,6 +10,7 @@
 import { z } from "zod";
 import type { AutocloseConfig, CircuitBreakerOptions } from "../types/act.js";
 import type { AutoclosePolicy, BackoffOptions } from "../types/index.js";
+import { MAX_TIMER_DELAY_MS } from "./defer-timer.js";
 
 // Backoff — retry pacing, nested in the reaction and action bags. No
 // `maxMs >= baseMs` constraint: a cap below `baseMs` on `exponential` is
@@ -81,15 +82,7 @@ const AuditOptionsSchema = z.object({
 
 // A timer's delay. Node runs a timer below 1 ms, above 2^31 − 1 ms or NaN
 // every millisecond, so every delay a bag sets a timer from is held to this.
-const TimerMsSchema = z.number().min(0).max(2_147_483_647);
-
-// Lane — `.withLane({...})`, per-lane overrides of the drain budget.
-const LaneConfigSchema = z.object({
-  name: z.string().min(1),
-  leaseMillis: z.number().min(0).optional(),
-  streamLimit: z.number().int().min(0).optional(),
-  cycleMs: TimerMsSchema.optional(),
-});
+const TimerMsSchema = z.number().min(0).max(MAX_TIMER_DELAY_MS);
 
 // Page — the `limit` and bounds of every query: `app.query`, `app.load`'s
 // `asOf`, `app.correlate`, `app.start_correlations`, `app.blocked_streams`
@@ -119,10 +112,21 @@ export const DEFAULT_EVENT_LIMIT = 10;
 /** How long a drain holds a stream's lease (ms). */
 export const DEFAULT_LEASE_MILLIS = 10_000;
 
+// A drain claims at least one stream: 0 would claim nothing and read as
+// caught up, so the lane would never run.
 const DrainOptionsSchema = z.object({
-  streamLimit: z.number().int().min(0).optional(),
+  streamLimit: z.number().int().min(1).optional(),
   eventLimit: z.number().int().min(0).optional(),
   leaseMillis: z.number().min(0).optional(),
+});
+
+// Lane — `.withLane({...})`, per-lane overrides of the drain budget.
+const LaneConfigSchema = DrainOptionsSchema.pick({
+  streamLimit: true,
+  leaseMillis: true,
+}).extend({
+  name: z.string().min(1),
+  cycleMs: TimerMsSchema.optional(),
 });
 
 const SettleOptionsSchema = DrainOptionsSchema.extend({
