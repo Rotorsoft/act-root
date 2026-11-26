@@ -1,6 +1,6 @@
 import type { IdempotencyStore } from "@rotorsoft/act-ops/idempotency";
 import { InMemoryIdempotencyStore } from "@rotorsoft/act-ops/idempotency";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { receiver } from "../../src/receiver/start.js";
 import { sign_request } from "../../src/webhook/sign.js";
@@ -449,9 +449,11 @@ describe("receiver — fetch mode (Lambda / edge / serverless)", () => {
     // A durable store records the original's claim at once, but its reply
     // reaches the receiver after the duplicate's reply does.
     const inner = new InMemoryIdempotencyStore();
+    let claimed = false;
     const store: IdempotencyStore = {
       claim: async (k) => {
         const won = inner.claim(k);
+        claimed ||= won;
         if (won) await new Promise((r) => setTimeout(r, 30));
         return won;
       },
@@ -480,7 +482,7 @@ describe("receiver — fetch mode (Lambda / edge / serverless)", () => {
       );
 
     const first = fire();
-    await new Promise((r) => setTimeout(r, 5)); // original's claim recorded
+    await vi.waitFor(() => expect(claimed).toBe(true));
     expect((await fire()).status).toBe(503);
     release_handler?.();
     expect((await first).status).toBe(204);

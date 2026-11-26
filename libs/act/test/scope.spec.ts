@@ -317,12 +317,14 @@ describe("scoped ports", () => {
     const { app, store: scoped, dispose } = await sandbox(pollBuilder);
 
     app.start_correlations({}, 5);
-    // Let the polling timer fire a few times.
-    await new Promise<void>((r) => setTimeout(r, 40));
+    const scoped_streams: string[] = [];
+    await vi.waitFor(async () => {
+      scoped_streams.length = 0;
+      await scoped.query_streams((p) => scoped_streams.push(p.stream));
+      expect(scoped_streams).toContain("poll-target");
+    });
     app.stop_correlations();
 
-    const scoped_streams: string[] = [];
-    await scoped.query_streams((p) => scoped_streams.push(p.stream));
     const singleton_streams: string[] = [];
     await store().query_streams((p) => singleton_streams.push(p.stream));
 

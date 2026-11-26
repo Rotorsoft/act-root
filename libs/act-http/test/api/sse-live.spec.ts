@@ -28,8 +28,6 @@ const settled_source = () => {
   return source as typeof source & SettledSource;
 };
 
-const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
-
 describe("run_live_subscription", () => {
   it("yields each source's cached state, then patches and settles tagged with their source", async () => {
     const channel = new BroadcastChannel<S>();
@@ -53,7 +51,6 @@ describe("run_live_subscription", () => {
       data: { _v: 0, n: 1 },
     });
     const next = frames.next();
-    await tick();
     channel.publish("b-1", { _v: 0, n: 2 }, [{ n: 2 }]);
     expect((await next).value).toMatchObject({
       kind: "patch",
@@ -86,7 +83,6 @@ describe("run_live_subscription", () => {
       { maxPending: 2 }
     );
     const first = frames.next();
-    await tick();
     channel.publish("a-1", { _v: 0, n: 1 }, [{ n: 1 }]);
     await first;
     channel.publish("b-1", { _v: 0, n: 1 }, [{ n: 1 }]);
@@ -116,7 +112,6 @@ describe("run_live_subscription", () => {
       { maxPending: 2 }
     );
     const first = frames.next();
-    await tick();
     source.settle("a");
     await first;
     source.settle("b");
@@ -150,7 +145,6 @@ describe("run_live_subscription", () => {
       abort.signal
     );
     const next = frames.next();
-    await tick();
     expect(accounting.acquire).toHaveBeenCalledOnce();
     abort.abort();
     expect((await next).done).toBe(true);

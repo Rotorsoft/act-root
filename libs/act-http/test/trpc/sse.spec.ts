@@ -512,6 +512,7 @@ describe("sse publish, $settled and onConnections", () => {
   });
 
   test("refuses $settled past the connection cap", async ({ app }) => {
+    const counts: number[] = [];
     const router = trpc(app, {
       actor: (ctx: Ctx) => ({ id: ctx.actorId, name: ctx.actorId }),
       stream: () => "t-1",
@@ -519,14 +520,14 @@ describe("sse publish, $settled and onConnections", () => {
         channel: new BroadcastChannel(),
         settled: true,
         maxConnections: 1,
+        onConnections: (n) => counts.push(n),
       },
     });
     const t = initTRPC.context<Ctx>().create();
     const caller = t.createCallerFactory(router)({ actorId: "u-1" });
     const first = (await caller.subscribe.$settled())[Symbol.asyncIterator]();
     const pending = first.next();
-    // The first subscription takes its slot once the actor resolves.
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await vi.waitFor(() => expect(counts).toEqual([1]));
     const second = (await caller.subscribe.$settled())[Symbol.asyncIterator]();
     await expect(second.next()).rejects.toMatchObject({
       code: "TOO_MANY_REQUESTS",
@@ -572,8 +573,7 @@ describe("sse publish, $settled and onConnections", () => {
       await caller.subscribe.$live({ streams: { Tally: ["t-1"] } })
     )[Symbol.asyncIterator]();
     const next = streams_only.next();
-    // It subscribes once the actor resolves.
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await vi.waitFor(() => expect(counts).toEqual([1, 0, 1]));
     await app.do("add", { stream: "t-1", actor }, { by: 1 });
     expect((await next).value).toMatchObject({ kind: "patch", stream: "t-1" });
     await streams_only.return?.(undefined);
@@ -586,7 +586,7 @@ describe("sse publish, $settled and onConnections", () => {
       })
     )[Symbol.asyncIterator]();
     const settle = settled_only.next();
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await vi.waitFor(() => expect(counts).toEqual([1, 0, 1, 0, 1]));
     await app.do("add", { stream: "t-3", actor }, { by: 1 });
     expect((await settle).value).toEqual({
       kind: "settled",
