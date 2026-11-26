@@ -1,3 +1,10 @@
+# [@rotorsoft/act-http-v2.5.7](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-http-v2.5.6...@rotorsoft/act-http-v2.5.7) (2026-11-26)
+
+
+### Bug Fixes
+
+* **act-http:** send the sse heartbeat on generated trpc subscriptions ([#2622](https://github.com/Rotorsoft/act-root/issues/2622)) ([5256b7a](https://github.com/Rotorsoft/act-root/commit/5256b7ab0e89db870bc9c349b4a76434ee1ce767)), closes [#2621](https://github.com/Rotorsoft/act-root/issues/2621)
+
 # [@rotorsoft/act-http-v2.5.6](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-http-v2.5.5...@rotorsoft/act-http-v2.5.6) (2026-11-24)
 
 
