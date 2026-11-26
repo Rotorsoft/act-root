@@ -82,6 +82,9 @@ These are load-bearing facts about the framework. A red test that only "works" b
 - **A reaction that consumes its trigger before an action that can be refused loses the trigger.** #2474: autoclose acks to the head, the close is skipped for a lagging sibling, and nothing re-triggers it. Same family as #1669/#1670: a refusal or skip must leave something that brings the work back.
 - **`{ ...DEFAULTS, ...options }` over a `Partial<>` lets `undefined` replace a default.** #2477: `schema: process.env.X` with X unset wrote to a schema named `"undefined"`. Treat any spread-merged config as unvalidated until undefined keys are dropped and the values are parsed.
 
+- **A dedup that returns the first registration drops what later callers ask for.** #2643: `publishCommits` keeps one listener per app and channel and ignored a second generator's event filter, so which states published depended on build order. When a call dedups, check that every option it takes is merged, not only the first caller's.
+- **Per-request is not per-operation.** #2645: an idempotency key read from tRPC's context is shared by every mutation `httpBatchLink` sends in one request. When a key, a limit or an actor comes from a request-scoped value, ask what batching does to it.
+
 ## Mechanics that bit us
 
 - Postgres test DB is on **5431** (not 5432): `postgres://postgres:postgres@localhost:5431`. `docker ps` shows container `act-pg`.
