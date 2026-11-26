@@ -444,7 +444,17 @@ export function trpc<Ctx extends object, TApp extends ActSurface>(
     readonly streams?: StreamPatterns<unknown>;
   }
 ): unknown {
-  const t = initTRPC.context<Ctx>().create();
+  // Parsed up front: tRPC sends its SSE keep-alive from the root config, so
+  // `heartbeatMs` sets the ping on the `t` every procedure is built from.
+  const sse_config = options.sse && {
+    channel: options.sse.channel,
+    ...SseOptionsSchema.parse(options.sse),
+  };
+  const t = initTRPC.context<Ctx>().create(
+    sse_config && {
+      sse: { ping: { enabled: true, intervalMs: sse_config.heartbeatMs } },
+    }
+  );
   const dispatch = make_dispatch<Ctx>(app, options, options.idempotency?.store);
   const patterns = stream_patterns(
     app,
@@ -525,7 +535,7 @@ export function trpc<Ctx extends object, TApp extends ActSurface>(
       });
   }
 
-  if (options.sse) {
+  if (options.sse && sse_config) {
     // SSE subscriptions mount under the `subscribe` key of the same router
     // as the action mutations, so an action named `subscribe` would be
     // silently replaced. Refuse it at generation instead.
@@ -533,10 +543,6 @@ export function trpc<Ctx extends object, TApp extends ActSurface>(
       throw new Error(
         'trpc: an action named "subscribe" collides with the SSE subscription router (router.subscribe.<stateName>); rename the action or generate the router without `sse`.'
       );
-    const sse_config = {
-      channel: options.sse.channel,
-      ...SseOptionsSchema.parse(options.sse),
-    };
     const sse_counter = new SseConnectionCounter(
       sse_config.maxConnections,
       options.sse.onConnections

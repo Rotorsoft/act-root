@@ -8,7 +8,8 @@
 import { act, projection, sensitive, state, ZodEmpty } from "@rotorsoft/act";
 import { fixture } from "@rotorsoft/act/test";
 import { initTRPC, TRPCError } from "@trpc/server";
-import { describe, expect } from "vitest";
+import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
+import { describe, expect, vi } from "vitest";
 import { z } from "zod";
 import type { SseOptions } from "../../src/api/index.js";
 import { BroadcastChannel } from "../../src/sse/index.js";
@@ -125,6 +126,48 @@ describe("trpc(app, { sse }) — generated subscriptions", () => {
     const frames = await take_frames(iter, 2, abort);
     expect(frames[0]).toMatchObject({ kind: "state" });
     expect(frames[1]).toMatchObject({ kind: "patch" });
+  });
+
+  test("sends a keep-alive ping every heartbeatMs on an idle subscription", async ({
+    app,
+  }) => {
+    const channel = new BroadcastChannel<{ _v: number; display: string }>();
+    channel.publish("calc-1", { _v: 1, display: "1" }, [{ display: "1" }]);
+    const router = trpc<Ctx, typeof app>(
+      app,
+      default_options(channel, { heartbeatMs: 20_000 })
+    );
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const input = encodeURIComponent(JSON.stringify({ stream: "calc-1" }));
+    const res = await fetchRequestHandler({
+      endpoint: "/trpc",
+      req: new Request(
+        `http://localhost/trpc/subscribe.Calculator?input=${input}`
+      ),
+      router,
+      createContext: () => ({ actorId: "u-1" }),
+    });
+    const reader = res.body!.pipeThrough(new TextDecoderStream()).getReader();
+    let text = "";
+    const pump = (async () => {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) return;
+        text += value;
+      }
+    })();
+    try {
+      // The cached state arrives first; nothing is published after it.
+      await vi.advanceTimersByTimeAsync(19_000);
+      expect(text).toContain('"kind":"state"');
+      expect(text).not.toContain("event: ping");
+      await vi.advanceTimersByTimeAsync(1_500);
+      expect(text).toContain("event: ping");
+    } finally {
+      vi.useRealTimers();
+      await reader.cancel();
+      await pump;
+    }
   });
 
   test("connection cap throws TOO_MANY_REQUESTS when full", async ({ app }) => {
