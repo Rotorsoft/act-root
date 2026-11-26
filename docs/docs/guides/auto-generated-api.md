@@ -393,6 +393,22 @@ openapi(app, { info, servers, idempotency: true });
 
 Behavior: fresh claim → handler runs, response normal. Duplicate of a committed key → `409 CONFLICT` with `code: "CONFLICT"` and `detail: "Idempotency-Key already used; original result not cached"`. Duplicate while the original is still running → `503` with `Retry-After: 1` and `code: "IN_FLIGHT"`. tRPC throws `CONFLICT` and `SERVICE_UNAVAILABLE` respectively (a procedure can't set `Retry-After`). The in-flight check is local to the process serving the generated API, matching `InMemoryIdempotencyStore`'s single-process scope. See the [External integration guide](./external-integration.md) for the surrounding pattern — this is the same `IdempotencyStore` contract that powers receivers.
 
+:::caution[tRPC batching]
+`keyFrom` reads the key from the request context, and tRPC's `httpBatchLink` sends every mutation of one tick in one request, so they share one key: the first commits and the rest are refused as in flight, then as already used. With idempotency on, send mutations over an unbatched link:
+
+```ts no-check
+import { httpBatchLink, httpLink, splitLink } from "@trpc/client";
+
+const links = [
+  splitLink({
+    condition: (op) => op.type === "mutation",
+    true: httpLink({ url, headers: () => ({ "idempotency-key": crypto.randomUUID() }) }),
+    false: httpBatchLink({ url }),
+  }),
+];
+```
+:::
+
 ## Real-time subscriptions
 
 Both `trpc(app, { sse })` and `hono(app, { sse })` accept an optional SSE wiring that walks the registry and emits **one subscription per unique state name**, including states reached only through [`.loads`](../concepts/state-management.md#rules-across-streams-loads), all reading from a host-supplied `BroadcastChannel`. With `publish: true` the generator also publishes every commit to it; the generator owns subscription, accounting, cleanup, and the wire format — so the loop you used to hand-write (open SSE response, subscribe to channel, forward patches, manage heartbeat, decrement counter on close) collapses to one option. On tRPC the subscriptions mount at `router.subscribe.<stateName>`, beside the action mutations, so `subscribe` is a reserved action name there: generating a router with `sse` for an app that has an action called `subscribe` throws instead of silently dropping the action.

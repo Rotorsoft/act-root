@@ -102,6 +102,16 @@ app.on("closed", ({ truncated }) => {
 ```
 :::
 
+:::caution[A restore into the app's own store]
+`app.restore(source)` replaces the log and clears the app's cache, but the channel is a cache of its own: it keeps the replaced log's states and versions, so a reconnect gets the old state and a live client ahead of the restored versions reads every patch as `stale`. A restore emits no event, so resync the channel's streams where you call it:
+
+```typescript no-check
+await app.restore(backup);
+// Copy first: resync forgets each stream it tells to refetch.
+for (const [stream] of [...broadcast.cache.entries()]) broadcast.resync(stream);
+```
+:::
+
 ### Broadcasting a commit
 
 Let the framework publish. With the generated transports, `sse: { channel, publish: true }` publishes every commit; without them, `publishCommits(app, channel)` from `@rotorsoft/act-http/sse` does the same and returns a function that stops it. Both listen to `committed`, which fires once per stream a commit appended to (the streams an action [`.loads`](state-management.md#rules-across-streams-loads) included), and send, for each stream:

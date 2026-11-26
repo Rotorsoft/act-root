@@ -129,6 +129,9 @@ const LiveRequestSchema = z.object({
  *   original is still running throws a retryable
  *   `SERVICE_UNAVAILABLE` (503) instead: the original may yet fail and
  *   release the key, and a client told "already used" would never retry.
+ *   The key comes from the request context, so mutations a client batches
+ *   into one request (tRPC's `httpBatchLink`) share it: send mutations over
+ *   an unbatched link (`httpLink`) when idempotency is on.
  *
  * @template Ctx The host's tRPC context shape. Flows end-to-end —
  *   procedures see this exact context type (plus `actor`) at
