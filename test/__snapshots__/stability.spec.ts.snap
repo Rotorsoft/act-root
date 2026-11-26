@@ -7943,8 +7943,9 @@ export type CommitSource = {
  * With \`events\`, only commits of those event names are published: a state
  * the channel doesn't serve, a sensitive one above all, never reaches it.
  *
- * Calling it again for the same app and channel publishes nothing more and
- * returns the same disposer.
+ * Calling it again for the same app and channel returns the same disposer
+ * and publishes each commit once; the events published are those any call
+ * named (every event, once a call names none).
  *
  * @returns A function that stops publishing.
  */
@@ -8121,6 +8122,9 @@ import type { SseSettledFrame } from "../api/sse-settled.js";
  *   original is still running throws a retryable
  *   \`SERVICE_UNAVAILABLE\` (503) instead: the original may yet fail and
  *   release the key, and a client told "already used" would never retry.
+ *   The key comes from the request context, so mutations a client batches
+ *   into one request (tRPC's \`httpBatchLink\`) share it: send mutations over
+ *   an unbatched link (\`httpLink\`) when idempotency is on.
  *
  * @template Ctx The host's tRPC context shape. Flows end-to-end —
  *   procedures see this exact context type (plus \`actor\`) at

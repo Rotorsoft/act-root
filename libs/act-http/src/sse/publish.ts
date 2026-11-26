@@ -66,10 +66,6 @@ export function publishCommits(
       for (const name of options.events) existing.events.add(name);
     return existing.dispose;
   }
-  const publisher: Publisher = {
-    dispose: () => {},
-    events: options?.events && new Set(options.events),
-  };
   const listener = (snapshots: CommittedSnapshot[]) => {
     // Fired only with committed snapshots: each carries its patch, and the
     // last one and its event exist. One call is one stream, of one state.
@@ -84,9 +80,12 @@ export function publishCommits(
     );
   };
   app.on("committed", listener);
-  publisher.dispose = () => {
-    app.off("committed", listener);
-    of_app.delete(channel);
+  const publisher: Publisher = {
+    dispose: () => {
+      app.off("committed", listener);
+      of_app.delete(channel);
+    },
+    events: options?.events && new Set(options.events),
   };
   of_app.set(channel, publisher);
   return publisher.dispose;
