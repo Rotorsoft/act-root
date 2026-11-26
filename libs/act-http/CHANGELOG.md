@@ -1,3 +1,10 @@
+# [@rotorsoft/act-http-v2.5.8](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-http-v2.5.7...@rotorsoft/act-http-v2.5.8) (2026-11-26)
+
+
+### Bug Fixes
+
+* stall on streamLimit 0, SSE checks and types, scaffold auth twins ([#2637](https://github.com/Rotorsoft/act-root/issues/2637)) ([6050c28](https://github.com/Rotorsoft/act-root/commit/6050c28e1fbfc17ba2a9387ccfe88a1acbe5c708)), closes [#2624](https://github.com/Rotorsoft/act-root/issues/2624) [#2627](https://github.com/Rotorsoft/act-root/issues/2627) [#2626](https://github.com/Rotorsoft/act-root/issues/2626) [#2625](https://github.com/Rotorsoft/act-root/issues/2625) [#2623](https://github.com/Rotorsoft/act-root/issues/2623) [#2628](https://github.com/Rotorsoft/act-root/issues/2628)
+
 # [@rotorsoft/act-http-v2.5.7](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-http-v2.5.6...@rotorsoft/act-http-v2.5.7) (2026-11-26)
 
 
