@@ -439,8 +439,9 @@ export declare class Act<TSchemaReg extends SchemaRegister<TActions>, TEvents ex
      * lifecycle and per-event insert.
      *
      * Safe in a live process: restoring into this Act's own store waits
-     * for its correlate passes in flight, replaces the log, then restarts
-     * correlation and settles. A correlate pass that starts meanwhile
+     * for its correlate passes in flight, replaces the log, clears the cache
+     * and the state projections' fold caches, then restarts correlation and
+     * settles. A correlate pass that starts meanwhile
      * reads nothing. Other processes on the same store keep their
      * correlation state and must be restarted.
      *
@@ -466,7 +467,6 @@ export declare class Act<TSchemaReg extends SchemaRegister<TActions>, TEvents ex
      * \`\`\`typescript
      * const result = await app.restore(new CsvFile({ path: "./backup.csv" }));
      * console.log(\`Restored \${result.kept} events in \${result.duration_ms}ms\`);
-     * await cache().clear();   // operator's responsibility
      * \`\`\`
      *
      * @see {@link Store.restore} for the underlying driver-pattern primitive.
@@ -4498,9 +4498,9 @@ export interface Store extends Disposable, EventSource {
      * process running against the same store must be restarted, as for any
      * offline restore.
      *
-     * **Cache.** Restore does not touch the {@link Cache} port —
-     * callers must \`cache().clear()\` after restore to avoid serving
-     * stale snapshots. Documented; not enforced.
+     * **Cache.** The store's restore does not touch the {@link Cache} port.
+     * \`app.restore\` into its own store clears the cache; a direct caller
+     * clears it, or loads serve the replaced log's states.
      *
      * @param driver - Orchestrator-supplied iteration callback. The
      *   adapter calls \`driver(callback)\` exactly once, from inside its

@@ -1151,9 +1151,9 @@ export interface Store extends Disposable, EventSource {
    * process running against the same store must be restarted, as for any
    * offline restore.
    *
-   * **Cache.** Restore does not touch the {@link Cache} port —
-   * callers must `cache().clear()` after restore to avoid serving
-   * stale snapshots. Documented; not enforced.
+   * **Cache.** The store's restore does not touch the {@link Cache} port.
+   * `app.restore` into its own store clears the cache; a direct caller
+   * clears it, or loads serve the replaced log's states.
    *
    * @param driver - Orchestrator-supplied iteration callback. The
    *   adapter calls `driver(callback)` exactly once, from inside its

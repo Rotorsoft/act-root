@@ -693,6 +693,40 @@ describe("Act.restore (orchestrator)", () => {
     await ctx.dispose();
   });
 
+  it("clears the state cache when it restores into its own store, so a load reads the restored log", async () => {
+    const Count = state({ Count: z.object({ n: z.number() }) })
+      .init(() => ({ n: 0 }))
+      .emits({ Counted: ZodEmpty })
+      .patch({ Counted: (_e, s) => ({ n: s.n + 1 }) })
+      .on({ count: ZodEmpty })
+      .emit(() => ["Counted", {}])
+      .build();
+    const { app, store, cache, dispose } = await sandbox(
+      act().withState(Count)
+    );
+    const target = { stream: "kept", actor: { id: "a", name: "a" } };
+    try {
+      for (let i = 0; i < 2; i++) await app.do("count", target, {});
+      const backup = new InMemoryStore();
+      // Into another sink: the app's log and its cache stay as they are.
+      await app.restore(store, {}, backup);
+      expect(await cache.get("kept")).toMatchObject({ version: 1 });
+      for (let i = 0; i < 3; i++) await app.do("count", target, {});
+      expect((await app.load(Count, "kept")).state.n).toBe(5);
+
+      // Into its own store: the older log replaces the newer one.
+      await app.restore(backup, {});
+      expect(await cache.get("kept")).toBeUndefined();
+      const loaded = await app.load(Count, "kept");
+      expect([loaded.state.n, loaded.version]).toEqual([2, 1]);
+      // The next write lands on the restored head, with no conflict.
+      const [snap] = await app.do("count", target, {});
+      expect([snap.state.n, snap.version]).toEqual([3, 2]);
+    } finally {
+      await dispose();
+    }
+  });
+
   it("refuses a batch_size that isn't a positive integer, before touching the store", async () => {
     const ctx = await sandbox(act().withState(Calculator));
     try {

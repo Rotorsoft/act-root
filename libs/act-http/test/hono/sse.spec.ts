@@ -207,7 +207,9 @@ describe("hono(app, { sse }) — generated SSE endpoints", () => {
 
     // Cancel the first reader → server sees abort → counter releases.
     await first.body?.cancel();
-    await vi.waitFor(() => expect(counts).toEqual([1, 0]));
+    // The release follows the body's cancel through Hono's abort, which a
+    // loaded runner can take past waitFor's one-second default.
+    await vi.waitFor(() => expect(counts).toEqual([1, 0]), { timeout: 5_000 });
 
     const next = await api.request("/api/sse/Calculator?stream=calc-1");
     expect(next.status).toBe(200);
@@ -381,7 +383,9 @@ describe("hono sse — publish, $settled and onConnections", () => {
       { event: "settled", data: JSON.stringify({ targets: ["tally-view"] }) },
     ]);
     expect(channel.state("t-1")).toEqual({ n: 2, _v: 0 });
-    await vi.waitFor(() => expect(counts).toEqual([1, 0]));
+    // The release follows the body's cancel through Hono's abort, which a
+    // loaded runner can take past waitFor's one-second default.
+    await vi.waitFor(() => expect(counts).toEqual([1, 0]), { timeout: 5_000 });
   });
 
   test("follows many streams and the settled targets at /sse/$live", async ({
