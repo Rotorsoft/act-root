@@ -470,7 +470,7 @@ trpc.subscribe.$live.useSubscription(
 For every subscription, on every open:
 
 1. Run the `actor` extractor (`401` / `UNAUTHORIZED` on throw).
-2. Acquire one slot on the per-process counter. Full counter →
+2. Acquire one slot on the generator's counter (each `trpc(...)` or `hono(...)` call counts its own; a process that builds both allows `maxConnections` on each). Full counter →
    - Hono: `503 / SSE_BUSY` with `Retry-After: 1` (header set **before** the response body starts so it's a clean reject, not a hung stream).
    - tRPC: `TRPCError({ code: "TOO_MANY_REQUESTS" })`.
 3. Yield `{ kind: "state", data }` once if `channel.state(streamId)` has a cached value (re-connect / cold-start affordance — the client doesn't need a separate `getById` query).
@@ -484,12 +484,13 @@ The shared loop is exported as `runSseSubscription` from `@rotorsoft/act-http/ap
 
 ### Defaults and validation
 
-`SseOptions = { channel, maxConnections?, heartbeatMs?, maxPendingPerConnection? }`. Defaults sized for typical business-app dashboards:
+`SseOptions` takes the `channel`, three switches (`publish`, `settled`, `live`, all off by default), an `onConnections` callback, and four numeric knobs. Defaults sized for typical business-app dashboards:
 
 | Knob | Default | Range | Why |
 |---|---|---|---|
 | `maxConnections` | `500` | `[1, 10_000]` | Comfortable for hundreds of human viewers; above 10k the FD ceiling and memory force horizontal scaling regardless of tuning. |
 | `heartbeatMs` | `30_000` | `[15_000, 300_000]` | Sub-15s wastes bandwidth on business workloads; above 5 min risks proxy idle drops. |
+| `maxStreamsPerSubscription` | `50` | `[1, 1_000]` | The most streams one `$live` follows; it takes one slot however many it follows. |
 | `maxPendingPerConnection` | `256` | `[1, 100_000]` | Bounds the per-connection undelivered-frame backlog. A stalled consumer on a busy stream can't drain as fast as it publishes; at the bound the stream's pending frames give way to one `_resync`, so one wedged client can't pin unbounded memory and none loses a version silently. |
 
 Out-of-range knobs throw `ZodError` at transport construction — misconfiguration surfaces at startup, not at first connection. (Every config bag in the framework validates with Zod and throws `ZodError` at its entry point.)

@@ -11,7 +11,8 @@ import { SseOptionsSchema } from "./sse-options.js";
  *
  * With {@link publish}, the generator publishes every commit to the
  * channel; without it, the host does, which it needs when the published
- * state carries app-specific overlays (presence, computed fields).
+ * state carries computed fields. Overlays (`channel.overlay`, such as
+ * presence in its own key) survive a publish and don't need it.
  *
  * Defaults are sized for typical business-app dashboards (dozens to
  * hundreds of human viewers per process). The numeric knobs are validated

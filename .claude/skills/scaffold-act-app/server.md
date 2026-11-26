@@ -464,13 +464,13 @@ Use the short names (`overlay`, `state`, `subscriberCount`, `cacheSize`, `online
 import { applyPatchMessage } from "@rotorsoft/act-http/sse";
 
 // In SSE onData handler (React Query):
-onData: (env) => {
-  if (env.kind === "snap") {
-    utils.getState.setData({ streamId }, env.state); // full state on connect
+onData: (frame) => {
+  if (frame.kind === "state") {
+    utils.getState.setData({ streamId }, frame.data); // full state on connect
     return;
   }
   const cached = utils.getState.getData({ streamId });
-  const result = applyPatchMessage(env.msg, cached);
+  const result = applyPatchMessage(frame.data, cached);
 
   if (result.ok) {
     utils.getState.setData({ streamId }, result.state);
@@ -484,47 +484,21 @@ onData: (env) => {
 ### SSE Subscription Pattern (tRPC)
 
 ```typescript
-import type { PatchMessage } from "@rotorsoft/act-http/sse";
+import { runSseSubscription } from "@rotorsoft/act-http/api";
 
 onStateChange: publicProcedure
   .input(z.object({ streamId: z.string(), identityId: z.string().optional() }))
   .subscription(async function* ({ input, signal }) {
     const { streamId, identityId } = input;
-
-    let resolve: (() => void) | null = null;
-    let pending: PatchMessage<MyAppState> | null = null;
-
-    const cleanup = broadcast.subscribe(streamId, (msg) => {
-      pending = msg;
-      if (resolve) { resolve(); resolve = null; }
-    });
-
     if (identityId) {
       presence.add(streamId, identityId);
       broadcastPresenceChange(streamId);
     }
-
     try {
-      // Yield cached state on connect (full state for first paint / reconnects)
-      const cached = broadcast.state(streamId);
-      if (cached) yield { kind: "snap" as const, state: cached };
-
-      while (!signal?.aborted) {
-        if (!pending) {
-          await new Promise<void>((r) => {
-            resolve = r;
-            signal?.addEventListener("abort", () => r(), { once: true });
-          });
-        }
-        if (signal?.aborted) break;
-        if (pending) {
-          const msg = pending;
-          pending = null;
-          yield { kind: "patch" as const, msg };
-        }
-      }
+      // The cached state first, then every patch, queued: never a single
+      // pending slot, which drops a patch when two commits land together.
+      yield* runSseSubscription(broadcast, streamId, undefined, signal);
     } finally {
-      cleanup();
       if (identityId) {
         presence.remove(streamId, identityId);
         broadcastPresenceChange(streamId);

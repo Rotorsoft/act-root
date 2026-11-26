@@ -102,7 +102,7 @@ A ticket page follows the ticket's stream. Keep the last state in a ref, apply p
 import { applyPatchMessage } from "@rotorsoft/act-http/sse";
 
 function TicketPage({ id }: { id: string }) {
-  const cached = useRef<TicketView>();
+  const cached = useRef<TicketView | undefined>(undefined);
   const [ticket, setTicket] = useState<TicketView>();
   const sub = trpc.subscribe.Ticket.useSubscription(
     { stream: `ticket-${id}` },
@@ -263,7 +263,7 @@ export const customerRouter = trpc(app, {
 // AddNote, no subscribe.Note.
 ```
 
-- **`include`** generates only the listed actions; **`exclude`** generates every action but those. Either way, a state no generated action reaches gets no `subscribe.<State>`, `$live` refuses it (`no live state "Note"`), and `publish` sends none of its commits.
+- **`include`** generates only the listed actions; **`exclude`** generates every action but those. Either way, a state no generated action reaches gets no `subscribe.<State>`, `$live` doesn't serve it (tRPC refuses the request with `no live state "Note"`; Hono ignores the query key, and refuses only a request that names nothing else), and `publish` sends none of its commits.
 - **`streams`** says which streams belong to a state. `subscribe.Ticket` and `$live` refuse any other stream when they open, with `INVALID_STREAM: "note-1" is not a stream of Ticket`, so a client can't read a note through the ticket subscription by guessing its stream name.
 - **A staff API on the same app** is a second generator with its own channel and the full action set. Each channel only carries what its own API serves.
 
@@ -271,7 +271,7 @@ export const customerRouter = trpc(app, {
 
 Three separate questions, each with its own answer.
 
-**The page follows a few streams.** One `$live` names them all, from any states, on one connection:
+**The page follows a few streams.** One `$live` names them all, from any states, on one connection. Here the app also has a `Settings` state (not in the setup above), whose one stream, `settings`, comes from the `stream` resolver:
 
 ```ts no-check
 trpc.subscribe.$live.useSubscription(

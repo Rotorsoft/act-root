@@ -143,7 +143,7 @@ export type HonoOptions<TApp = ActSurface> = {
    * `?stream=...`, opens a `text/event-stream`, yields the cached
    * state (if any), and forwards every patch published to the
    * shared {@link SseOptions.channel}. A heartbeat keeps proxies
-   * from idling the connection out; the per-process connection cap
+   * from idling the connection out; the generator's connection cap
    * returns `503 Service Unavailable` (with `Retry-After: 1`) when
    * full so operators never see silent stalls.
    *
