@@ -1,3 +1,10 @@
+# [@rotorsoft/act-pg-v2.1.5](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-pg-v2.1.4...@rotorsoft/act-pg-v2.1.5) (2026-11-27)
+
+
+### Bug Fixes
+
+* a cold load seeks to the snapshot, and the 2026-11-27 run's tickets ([#2660](https://github.com/Rotorsoft/act-root/issues/2660)) ([a12bd37](https://github.com/Rotorsoft/act-root/commit/a12bd37091b7269fe5bb423954cd3548a6a28fa1)), closes [#2659](https://github.com/Rotorsoft/act-root/issues/2659) [#2654](https://github.com/Rotorsoft/act-root/issues/2654) [#1935](https://github.com/Rotorsoft/act-root/issues/1935) [#2655](https://github.com/Rotorsoft/act-root/issues/2655) [#2653](https://github.com/Rotorsoft/act-root/issues/2653) [#1513](https://github.com/Rotorsoft/act-root/issues/1513) [#2656](https://github.com/Rotorsoft/act-root/issues/2656) [#2657](https://github.com/Rotorsoft/act-root/issues/2657)
+
 # [@rotorsoft/act-pg-v2.1.4](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-pg-v2.1.3...@rotorsoft/act-pg-v2.1.4) (2026-11-15)
 
 
