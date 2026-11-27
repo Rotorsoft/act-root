@@ -8,24 +8,24 @@ Least recently run goes next. A lens with no accepted proposal in its last three
 
 | lens | last run | runs | accepted | status |
 |---|---|---|---|---|
-| Public surface | 2026-11-19 | 13 | 3 | active (58 root exports; act-http 33 runtime values / 11 entries; 1 non-importable default (#2595); the RFC-2578 types the generators name aren't walked by the snapshot, the maintainer's call) |
-| Dead code (tool) | 2026-11-19 | 14 | 12 | active (knip 46 files / 19 exports / 27 types, all known; act-http src clean) |
+| Public surface | 2026-11-27 | 14 | 3 | active (58 root exports, act-http 33 values / 11 entries, unchanged; one sibling-only export and one re-export hop (#2657)) |
+| Dead code (tool) | 2026-11-27 | 15 | 12 | active (knip 46 files / 20 exports / 27 types; `matches_stream` the one new export (#2657)) |
 | Hotspots (tool) | 2026-10-20 | 5 | 1 | retired 2026-10-20: two runs with no proposal; every branch in the hot functions (correlate, action, drain) is a separate rule |
-| File budget | 2026-11-19 | 14 | 2 | active (9 over 300 code lines: `types/builders.ts` 272 → 308 from #2583's type parameter, earned) |
-| Comment noise | 2026-11-19 | 14 | 12 | active (trpc 40% comments, cut (#2595); `TActionStates` doc pasted 5×; 2 stale passages on publication (#2592)) |
+| File budget | 2026-11-27 | 15 | 2 | active (the same 9 over 300 code lines; `in-memory-store.ts` 723 → 730 code lines (#2650)) |
+| Comment noise | 2026-11-27 | 15 | 12 | active (236 new source lines since 11-26, no ticket refs or history wording, no stacked docs) |
 | Concepts and options | 2026-11-26 | 15 | 5 | active (18 core bags, 7 satellite schemas, 3 plain checks; 2 accepted-but-unread fields (`heartbeatMs` on tRPC #2621, `Encryption.algorithm`, public); `streamLimit: 0` stalls a lane (#2624); `runSseSubscription`'s `maxPending` unchecked (#2627)) |
 | Core or decorator? | 2026-10-15 | 3 | 0 | retired 2026-10-15: three runs, findings only (PII, audit, breaker, lanes stay; priority is a major-version question) |
-| DRY across adapters and builders | 2026-11-19 | 14 | 20 | active (act-http: 3 subscription loops → 2, refusals 2 copies → 1 (#2593); no new copies across stores or builders) |
+| DRY across adapters and builders | 2026-11-27 | 15 | 20 | active (restore duplicate versions: one InMemory check plus the SQL unique indexes, right per the TCK; 11 of 12 `architecture.spec.ts` rules pass a restated copy (7 caught by nothing else), not proposed: stricter regexes add lines) |
 | Reading path | 2026-11-26 | 14 | 3 | active (do/settle 13 files, ~33 names; restore 8 files, ~18 names, unchanged) |
 | Newcomer test (quarterly) | 2026-11-15 | 3 | 0 | retired 2026-11-15: three runs, no proposal (21 concepts, 3 imports, unchanged; the package.json crash is fixed; `SLEEP_MS` waits 100 ms per call (#2521)) |
 | Tests by concept | 2026-11-26 | 14 | 24 | active (4451 tests, 15.2 s with Postgres; 0 near a framework default; 5 act-http sleeps, 2 lose under a stall (#2634); a cited heartbeat test asserts nothing (#2625)) |
 | Mutation evidence (monthly, CI) | never | 0 | 0 | retired: setup removed (#1805), see baselines below |
 | Packages earn their place | 2026-10-15 | 4 | 0 | retired 2026-10-15: four runs, no proposal (removal is ruled out; act-tck churn is the snapshot, now P2026-10-15p-1) |
-| Infra | 2026-11-19 | 14 | 4 | active (142 runs, 4 red; one generated paths file (#2594); perf and stress jobs stop building (#2595)) |
+| Infra | 2026-11-27 | 15 | 4 | active (perf-check scripts copied for two adapters (#2655); the README check's unused deprecated opt-out lets a README skip its sections (#2656)) |
 | One source of truth | 2026-11-26 | 15 | 11 | active (SSE docs: 2 lossy hand-written loops, 4 publish listeners beside `publish: true`, 3 option lists (2 drifted), 7 stale per-transport claims (#2628)) |
 | Examples | 2026-11-26 | 14 | 6 | active (recipes 6/6, recipes + packages 260 tests; no-check snippets 228 (+15); scaffold generates the hand-written auth actions (#2623); tRPC ping lost unless the generated router merges first (#2625)) |
-| Process | 2026-11-19 | 13 | 10 | active (19 PRs, 4 red runs: an MDX brace, a fixture-named test, two perf reds from #2555's cause; `check:contracts` added to /release-check (#2601)) |
-| Feature interactions | 2026-11-19 | 14 | 20 | active (6 probed: `$settled` misses non-settle drains (#2589), per-state subscriptions skip `streams` (#2590); per-state as a one-stream `$live` (#2596) and SSE refused for any sensitive state (#2599) are the maintainer's call) |
+| Process | 2026-11-27 | 14 | 10 | active (200 runs 11-19..11-27, 4 red (3 Renovate, 1 slow-runner perf); two doc copies drifted from config (#2653, #2654)) |
+| Feature interactions | 2026-11-27 | 15 | 20 | active (7 pairs probed, 0 defects; InMemory restore doesn't isolate concurrent writes (documented offline, not filed)) |
 
 ## Interaction register
 
@@ -104,6 +104,9 @@ Where two features meet, and why. The Feature interactions lens reads this first
 | restore, state projection fold caches | `app.reset` drops every fold cache before replaying; `app.restore` into its own store doesn't, so a `.of()` row keeps the old log's state, and a monotonic upsert refuses the renumbered row for good | accidental, a bug | #2517 (probed in the main loop: 3 vs 100; control `app.reset` after restore gives 100) |
 | restore `batch_size`, sources that ignore paging (CsvFile) | the `at` skip in `scan` keeps each event once at any page size | harmless | probed with sizes 1, 2, 3 and 500 (2026-11-15) |
 | `State.pii_aware`, cache / close / action / loads | set once by the builder, read by four features for one reason (a sensitive state's view depends on the reader) | shared primitive | an `@internal` field on a public type; hiding it is a reshape (2026-11-15) |
+| restore, concurrent writes (InMemory) | InMemory empties its log before reading the source, so an action during an own-store restore can commit onto the half-built log; Postgres and SQLite make it wait | justified, documented | `event-sourcing.md` calls `app.restore` offline; probed 2026-11-27 (two actions in the window → `[0, 0, 1]`; SQL `[0, 1, 2, 3]`) |
+| `publishCommits` union, served states | one listener per app and channel filters by every caller's events | shared primitive | #2643; event names are unique across the registry, so an event filter is a state filter |
+| fairness reserve, `streamLimit: 1` | one lagging slot reserves nothing (`fairSlots(1)` is 0) | justified, documented | `priority-lanes.md`: a slot only when there are two or more to split |
 | restore, state cache | own-store restore left the cache to the caller, so a load served the replaced log and the first write conflicted | resolved | #2640 → #2641: cleared beside the fold caches; a sink restore leaves it |
 | close, lane-sharded correlation | close caps a caught-up row at this process's correlation checkpoint | shared primitive | probed 2026-11-26: every shard marks every target whatever its lane, so any shard's checkpoint is a safe cap |
 | `start_correlations` limit, settle passes | while the poll runs, its `limit` (`_poll_limit`) applies to every settle pass, not only the poll's ticks | justified, needs a doc sentence | the field keeps the poll's wakes from overwriting a caller's settle options; probed 2026-11-26: `limit: 1` reads 1 event per commit-driven pass (control 100), same result in more passes |
@@ -148,6 +151,8 @@ Sound proposals that missed a run's cut. The next run ranks these before looking
 - The next major fixes once on its integration branch and merges into it without squashing: the 2.0 window fixed every audit round twice (#2337/#2336, #2357/#2359, #2379/#2380), merged master into `v2` four times (the duplicated test of #2386), and needed separate version PRs only because a squash flattens footers. Fewer words in CONTRIBUTING; 1.x waits for a backport. (P2026-11-10p-5)
 
 ## Self-changes
+- 2026-11-27: every specialist brief carries the full-contract rule: a red test or a code reading is a defect only against the whole doc paragraph and the function's doc comment, quoted in the report. The 11-26 design audit was nearly all opinion, and its one test-backed finding (#2652, a lane's `cycleMs`) expected a job the same paragraph gives to the poll and notify; this run's briefs carried the rule and its interactions specialist held back a divergence the docs call offline.
+
 - 2026-11-26: the Concepts and options lens checks that every field of a bag several entry points take is read on each, and feeds each count its degenerate value (`heartbeatMs` read by Hono only, #2621; `streamLimit: 0` stalls while `eventLimit: 0` means all, #2624). The Tests by concept lens breaks the behavior a contract row cites and runs the test: #2622's Hono citation drove a timer and asserted nothing (#2625). learnings.md merges the two loop-class entries to make room for the shared-bag entry.
 
 - 2026-11-15: the Public surface lens names how the stability snapshot walks files: a re-exported file is published whole, so a helper exported for a sibling ships though no app can import it, and a `types/` split that only imports the moved types drops them from the snapshot while they still ship (s-2, b-1). One smell added: a proposal that rewrites a rule to describe the code's current variety; the 11-14 run's o-1 and o-2 wrote the validators' four shapes into the rule, and #2514 replaced them with one pattern the next day. Retired the Newcomer test (three runs, no proposal).
@@ -245,42 +250,7 @@ Runs before the last three are one line each (with their tickets where the entry
 
 - 2026-11-15 — full run (four specialists: public surface + dead code + comment noise, file budget + DRY, feature interactions + field, process + infra + newcomer). Tickets: #2517–#2528, and #2529 (my own fixes).
 
-### 2026-11-18 — full run (four specialists: tests by concept, concepts and options + field, reading path + one source of truth, examples)
-
-| metric | 2026-11-15 | now | why |
-|---|---|---|---|
-| core lines (libs/act/src) | 18541 | 18619 | #2531 (restore drops the fold caches), #2532 (crash exit code), #2537 (sensitive fields from the registry, the name rule) |
-| files over 300 code lines | 9 | 8 | #2539 (`types/builders.ts` split) |
-| CI workflows / lines | 5 / 580 | 5 / 581 | `check:tour` (#2552) |
-| docs lines | 9973 | 9998 | the tour's intro link and the #2537 docs |
-| everything else | | unchanged | 58 runtime exports, 41% (28% / 14%) comments, 237 spec files, CLAUDE.md 15 KB |
-
-Audit: #2531–#2539 (the 11-15 tickets), #2537, #2544/#2545, #2552, #2554/#2555 and Renovate since the last run. #2544 → #2545 is a fix on my own fix in the same file (a helper between a doc and its export, and no `/release-check`). #2554 guarded a failure #2532 had already fixed; #2555 found the real cause. #2537 added a concept (one namespace for action and event names) in a patch.
-
-Decisions on P2026-11-15*: all shipped. D1 → #2531, D2 → #2532, D3 → #2541, D4 → #2533, D5 → #2535, D6 → #2534, 1 → #2536, 2 and 4 → #2539, 3 → #2538, 5 → #2540, 6 → #2545.
-
-Verified in the main loop before ranking: the `query` limit (5 events: `limit: 2` → 2, control; NaN → 5; −1 → 1); SSE's check before and after #2537 (`sse-states.ts`, schema walk → optional lookup); the tour's `agent` and `CloseTicket` tips against its schemas; one of the six repeated tests line for line. Coverage of act and act-diagram is identical with #2565.
-
-My own defects, fixed in PRs the user approved: the tour's two code tips (#2564) and #2554's guard (reverted in #2565). The run started those fixes on a branch before asking, against step 6; the permission check stopped the commit.
-
-Proposals, ticketed when the reports were in. Defects first:
-- D1 (concepts). `app.query` / `query_array` don't check `limit`, which #2541 ("every query limit") missed: a fix on a fix → #2556 → #2568.
-- D2 (reading). act-http SSE fails open for an app object without `registry.sensitive_fields`, a regression from #2537 → #2557 → #2569 (the maintainer chose fail closed, then a required lookup).
-- D3 (concepts). #2537's action/event name rule refuses apps that ran on 2.1.13, in a patch → #2558 → #2569 (the maintainer kept the rule; a migration note added).
-- D4 (examples). Two tour code tips don't compile against the tour's schemas → #2564.
-Simplifications:
-- 1 (r-1, e-1). Cut the tour script's chapter tables (−395) → #2559 → #2564.
-- 2 (t-1). Six repeated tests (−117) → #2560 → #2565.
-- 3 (e-2). act-patch README benchmarks (−14) → #2561 → #2566.
-- 4 (r-2). The sensitive marker's reach written once (−11) → #2562 → #2566.
-- 5 (t-2). 65 line-number test names, 11 audit tests into their categories → #2563 → #2565.
-Backlog: the act-http error tables, the audit.spec helpers and the sqlite `query_stats` duplicate are done and dropped.
-
-Findings, not proposed: nothing type-checks the tour's code strings (a gate would add machinery); act-http `/api`'s `runSseSubscription` doesn't parse `maxPending` (only direct callers); an Invalid Date `close` cutoff skips the stream; the tour's 45 doc and test links all resolve, but no CI check covers hrefs built in a component; the time-travel test claim from the script has no link in the tour (a scene holds one test link).
-
-Lens metrics: Postgres was down (Docker off), so 4 full runs at 11.7–11.8 s without act-pg and no local coverage gate; recipes + packages 260 tests; tour tips 47/49; no-check snippets 160/213, `@example` 82/99, scaffold 77/92 parse with 0 API errors; NaN-accepting numeric inputs 2; reading path do/settle 13 files, restore 8.
-
-Tickets: #2556–#2563. PRs: #2564–#2566, #2568, #2569. The maintainer left the time-travel test link out of the tour.
+- 2026-11-18 — full run (four specialists: tests by concept, concepts and options + field, reading path + one source of truth, examples). Tickets: #2556–#2563. PRs: #2564–#2566, #2568, #2569.
 
 ### 2026-11-19 — full run (four specialists: public surface + dead code + comment noise, file budget + DRY, feature interactions + field, process + infra)
 
@@ -349,3 +319,31 @@ Lens metrics: 4451 tests in 15.2 s with Postgres up, 100% coverage; 71 fixed sle
 Tickets: #2623–#2635. PR: #2622 (#2621, during the run).
 
 After the run, the same day: the defects shipped in #2637, the sleeps sweep in #2638 (65 core sleeps read: none can fail falsely, since a busy-loop stall shifts every timer alike and in-memory work finishes in microtasks; about ten use a sleep as a race's premise and pass without exercising it on a slow runner), the simplifications in #2639, and an out-of-rotation core review of feature interactions. It probed five pairs: close × fold cache (ids keep it right after a restart), reset × defer (pinned by the TCK), autoclose × `onlyLanes` (the advisory names `default`), close × sharded checkpoints (every shard marks every target), and restore × the state cache, a real gap → #2640 → #2641.
+
+### 2026-11-27 — full run (four specialists: public surface + dead code + comment noise, file budget + DRY, feature interactions + field, process + infra)
+
+| metric | 2026-11-26 | now | why |
+|---|---|---|---|
+| core lines (libs/act/src) | 18712 | 18726 | #2637 (`streamLimit` ≥ 1), #2641 (restore clears the cache), #2650 (restore refuses duplicate versions) |
+| docs lines | 10487 | 10459 | #2639 |
+| everything else | | unchanged | 58 runtime exports, 41% (28% / 14%) comments, 9 files over 300 code lines, 240 spec files, 5 workflows / 579 lines, CLAUDE.md 15 KB |
+
+Audit: #2636–#2651 since the last run, all from 11-26's run, core review and wave 33. The 11-26 design audit (outside the run) was rejected item by item; its only test-backed finding, #2652, was closed as not a bug the same day.
+
+Decisions on P2026-11-26*: all shipped (#2637 defects, #2638 tests, #2639 simplifications).
+
+Verified in the main loop: the pnpm floor (`CLAUDE.md:61`, `intro.md:111` ≥ 12.18.0 vs `package.json` ≥ 12.22.0); the pg perf-check header ("ships empty", "no-op") against a baseline of 9 results.
+
+Proposals and defects, ticketed when the reports were in. Defects first:
+- D1 (process). The perf gates' docs describe an empty baseline and a core gate that no longer exist → #2653.
+- D2 (process). The pnpm floor copied into CLAUDE.md and intro.md is behind `package.json` (with p-1, point at `packageManager`) → #2654.
+Simplifications:
+- 1 (p-2). One perf-check script for both adapters (~−115) → #2655.
+- 2 (p-3). Drop the README check's unused deprecated opt-out, a proven miss (~−15) → #2656.
+- 3 (s-1). Two internal-only export paths in act-http `api/` (−2) → #2657.
+
+Findings, not proposed: 11 of 12 `architecture.spec.ts` rules pass a restated copy, 7 caught by nothing else (stricter regexes add lines); `check:contracts` passes a cited test that is `it.skip` or survives only in a comment (nothing does that today); InMemory restore doesn't isolate concurrent writes (documented offline; in the register); the 11-26 snapshot evaluation measured today's cold-load resume floor reading the whole stream on a shared Postgres table (0.84 ms vs 0.036 ms with a `version` floor, 1M rows, a 5,000-event stream), with the maintainer's decision pending.
+
+Lens metrics: root exports 58; knip 46 / 20 / 27; 9 files over 300 code lines; 12 architecture rules planted, 11 restated copies pass; 7 interaction pairs probed, 0 defects; 200 CI runs, 4 red.
+
+Tickets: #2653–#2657.
