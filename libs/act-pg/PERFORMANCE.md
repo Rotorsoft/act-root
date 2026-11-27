@@ -415,6 +415,19 @@ The gated `load: cold replay over snapshot floor` scenario uses a small
 50/50 floor as a standing regression guard — if the floor silently breaks
 and the read scans the whole stream again, its p50 climbs past tolerance.
 
+**A single stream hid a gap.** Alone in a table, the planner reads it by
+primary key and the `id` floor bounds that scan. In a table other streams
+share, it reads the stream by `(stream, version)` and filters on `id`, so
+the floor saved the folding but not the reading. The floor is now the
+snapshot's `version`, which that unique index seeks to. `EXPLAIN ANALYZE`
+on 1,000,000 rows from 20,000 streams, one stream of 5,000 events with a
+snapshot every 100:
+
+| Floor | Cold load | Plan |
+|---|---|---|
+| `id >= MAX(snapshot id)` | 0.865 ms | `stream_ix`, 4,999 rows removed by filter |
+| `version >= latest snapshot's version` | 0.038 ms | `stream_ix` range from the snapshot |
+
 ### #1125 state projections — rebuild cost by projection shape (pg)
 
 `projection(name).of(state).flush(handler)` folds events through the
