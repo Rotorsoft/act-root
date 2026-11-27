@@ -2,7 +2,7 @@
  * Perf regression bench for `@rotorsoft/act-pg`. Measures a small, stable
  * set of hot-path scenarios against a **real PostgreSQL** instance (the
  * docker service on port 5431 that the act-pg test suite already uses)
- * and writes a JSON report. The companion script `perf-check.ts` compares
+ * and writes a JSON report. The repo's `scripts/perf-check.mjs` compares
  * the report to `perf-baseline.json` and exits non-zero on a budgeted
  * regression.
  *

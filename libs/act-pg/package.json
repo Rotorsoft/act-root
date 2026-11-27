@@ -47,7 +47,7 @@
     "build": "pnpm clean && tsup && pnpm types",
     "stress": "tsx test/stress/runner.ts",
     "bench:run": "NODE_ENV=test LOG_LEVEL=fatal tsx scripts/perf-bench.ts > perf-result.json",
-    "bench:check": "tsx scripts/perf-check.ts",
+    "bench:check": "node ../../scripts/perf-check.mjs act-pg 2.0",
     "bench:update": "NODE_ENV=test LOG_LEVEL=fatal tsx scripts/perf-bench.ts > perf-baseline.json"
   },
   "dependencies": {

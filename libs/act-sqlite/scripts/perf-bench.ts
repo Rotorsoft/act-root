@@ -2,7 +2,7 @@
  * Perf regression bench for `@rotorsoft/act-sqlite`. Measures a small,
  * stable set of hot-path scenarios against a **real on-disk SQLite**
  * database (a scratch file under `scripts/`, not `:memory:`) and writes a
- * JSON report. The companion script `perf-check.ts` compares the report
+ * JSON report. The repo's `scripts/perf-check.mjs` compares the report
  * to `perf-baseline.json` and exits non-zero on a budgeted regression.
  *
  * Shares its shape with the act-pg harness (same `Scenario` /

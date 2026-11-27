@@ -154,7 +154,7 @@ jobs:
 
   # Per-adapter perf gate on real adapters (Postgres on 5431, on-disk SQLite).
   # Budgets: p50 ≤ 2.0× baseline for act-pg, ≤ 1.5× for act-sqlite, skipped
-  # below a 1.0 ms baseline (see each perf-check.ts). Baselines come from
+  # below a 1.0 ms baseline (see scripts/perf-check.mjs). Baselines come from
   # perf-baseline.yml. A noisy scenario gets a fresh baseline or a wider
   # budget, never a silenced gate.
   perf:

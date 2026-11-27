@@ -357,8 +357,9 @@ already uses).
 ### Harness
 
 `scripts/perf-bench.ts` measures p50/p95/mean over a fixed iteration
-count per scenario and writes `perf-result.json`. `scripts/perf-check.ts`
-compares it against the checked-in `perf-baseline.json`.
+count per scenario and writes `perf-result.json`. The repo's shared
+`scripts/perf-check.mjs` compares it against the checked-in
+`perf-baseline.json`.
 
 | Scenario | What it guards |
 |---|---|

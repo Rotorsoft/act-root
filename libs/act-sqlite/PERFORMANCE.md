@@ -65,14 +65,14 @@ full-stream scan — the #1024 class of bug) are invisible there. This
 gate runs the same harness shape against a **real on-disk SQLite**
 database (a scratch file, WAL mode — not `:memory:`).
 
-SQLite needs no Docker, so unlike the act-pg gate this baseline is
-generated locally and **checked in with real numbers** (see below).
+Like act-pg's, its baseline comes from the CI runner (`perf-baseline.yml`).
 
 ### Harness
 
 `scripts/perf-bench.ts` measures p50/p95/mean over a fixed iteration
-count per scenario and writes `perf-result.json`. `scripts/perf-check.ts`
-compares it against the checked-in `perf-baseline.json`. The `notify`
+count per scenario and writes `perf-result.json`. The repo's shared
+`scripts/perf-check.mjs` compares it against the checked-in
+`perf-baseline.json`. The `notify`
 scenario from the act-pg harness is omitted — SQLite is single-node by
 design and does not implement `Store.notify`.
 
@@ -90,7 +90,7 @@ design and does not implement `Store.notify`.
 
 - **Metric:** p50 latency per scenario.
 - **Tolerance:** p50 may rise to **1.5×** the baseline before the gate
-  fails — the same budget as the core InMemory gate. Embedded SQLite has
+  fails. Embedded SQLite has
   no network and no connection pool, so its noise band is far tighter
   than act-pg's (which gets a 2.0× budget).
 - **Absolute floor:** scenarios whose **baseline** p50 is below **1.0 ms**
