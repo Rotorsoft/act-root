@@ -7,10 +7,6 @@
  * Documentation, License. Optional sections (API, Configuration, Common
  * patterns, "When to use this vs ...", Compatibility, Stability) are
  * encouraged but not enforced — their fit varies per lib.
- *
- * Deprecated packages can opt out by including either an HTML-comment
- * marker (with the body `canonical-check: deprecated`) or a GFM warning
- * banner mentioning "deprecat" in the first 30 lines.
  */
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
@@ -27,17 +23,6 @@ const REQUIRED_SECTIONS = [
   "License",
 ];
 
-// Searched as a substring — no need to match the surrounding HTML
-// comment delimiters, which would trip JS's HTML-comment compatibility
-// rule if we embedded them literally in source.
-const SKIP_MARKER = "canonical-check: deprecated";
-
-function isDeprecated(body) {
-  if (body.includes(SKIP_MARKER)) return true;
-  const head = body.split("\n").slice(0, 30).join("\n").toLowerCase();
-  return head.includes("> [!warning]") && head.includes("deprecat");
-}
-
 function checkReadme(_libName, path) {
   const body = readFileSync(path, "utf8");
   const errors = [];
@@ -51,12 +36,6 @@ function checkReadme(_libName, path) {
   const head10 = body.split("\n").slice(0, 10).join("\n");
   if (!/^(?:_[^_].*_|\*[^*].*\*)\s*$/m.test(head10)) {
     errors.push("missing italicized one-line tagline under the H1");
-  }
-
-  if (isDeprecated(body)) {
-    // Deprecated packages are exempt from the canonical-section check.
-    // Title + tagline are still required so the npm landing page renders.
-    return errors;
   }
 
   for (const heading of REQUIRED_SECTIONS) {
