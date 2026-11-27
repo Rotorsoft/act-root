@@ -864,14 +864,18 @@ export class PostgresStore implements Store {
         conditions.push(`id>$${values.length}`);
       } else if (with_snaps && query.stream_exact && stream) {
         // Resume at the latest snapshot for this stream so pre-snapshot
-        // events aren't scanned. No snapshot → MAX is NULL → -1 → full
-        // stream. An explicit `after` (above) wins. The orchestrator only
-        // sets `with_snaps` for an unbounded current-state load — it
-        // suppresses the flag under any `asOf` bound — so the
-        // floor never needs to re-check `before`/`created_*`/`limit` here.
+        // events aren't scanned. No snapshot → -1 → full stream. An
+        // explicit `after` (above) wins. The orchestrator only sets
+        // `with_snaps` for an unbounded current-state load — it suppresses
+        // the flag under any `asOf` bound — so the floor never needs to
+        // re-check `before`/`created_*`/`limit` here. The floor is the
+        // snapshot's version, not its id: the unique (stream, version)
+        // index then seeks to it, where an id floor reads the whole stream
+        // on a table other streams share. Versions and ids rise together
+        // within a stream, so the rows are the same.
         values.push(stream);
         conditions.push(
-          `id >= (SELECT COALESCE(MAX(id), -1) FROM ${this._fqt} WHERE stream=$${values.length} AND name='${SNAP_EVENT}')`
+          `version >= COALESCE((SELECT version FROM ${this._fqt} WHERE stream=$${values.length} AND name='${SNAP_EVENT}' ORDER BY id DESC LIMIT 1), -1)`
         );
       } else {
         conditions.push("id>-1");

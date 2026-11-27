@@ -112,7 +112,7 @@ jobs:
       # Walks dist/, so it runs after build.
       - run: pnpm check:browser-safe
 
-      # Every lib README has the canonical sections (opt out: `canonical-check: deprecated`).
+      # Every lib README has the canonical sections.
       - run: pnpm check:readmes
 
       # `act` CLI smoke test on both examples. NO_COLOR keeps the output greppable.

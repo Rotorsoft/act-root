@@ -5,12 +5,14 @@ import {
   fire_and_forget,
   SseConnectionCounter,
 } from "../../src/api/sse-counter.js";
-import { SseOptionsSchema } from "../../src/api/sse-options.js";
-import { sse_states } from "../../src/api/sse-states.js";
 import {
   DEFAULT_SSE_HEARTBEAT_MS,
   DEFAULT_SSE_MAX_CONNECTIONS,
   DEFAULT_SSE_MAX_PENDING_PER_CONNECTION,
+} from "../../src/api/sse-defaults.js";
+import { SseOptionsSchema } from "../../src/api/sse-options.js";
+import { sse_states } from "../../src/api/sse-states.js";
+import {
   runSseSubscription,
   type SseSubscriptionFrame,
 } from "../../src/api/sse-wiring.js";

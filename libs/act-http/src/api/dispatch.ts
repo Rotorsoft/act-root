@@ -20,8 +20,8 @@ export type {
   StreamPatterns,
 } from "./types.js";
 
-/** Whether `stream` matches a state's pattern. */
-export const matches_stream = (
+// Whether `stream` matches a state's pattern.
+const matches_stream = (
   pattern: RegExp | ((stream: string) => boolean),
   stream: string
 ): boolean => {

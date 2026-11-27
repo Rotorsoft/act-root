@@ -46,6 +46,8 @@ export {
   DEFAULT_SSE_HEARTBEAT_MS,
   DEFAULT_SSE_MAX_CONNECTIONS,
   DEFAULT_SSE_MAX_PENDING_PER_CONNECTION,
+} from "./sse-defaults.js";
+export {
   type RunSseOptions,
   runSseSubscription,
   type SseAccounting,

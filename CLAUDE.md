@@ -58,7 +58,7 @@ pnpm act [dir] [-q Name]   # contracts explorer
 
 ## Important Constraints
 
-- **Node ≥ 22.23.4** (CI, docs and the perf image run Node 26; a weekly `node-compat` job tests 22 and 24), **pnpm ≥ 12.18.0** (not npm/yarn)
+- **Node ≥ 22.23.4** (CI, docs and the perf image run Node 26; a weekly `node-compat` job tests 22 and 24), **pnpm** at the version the root `package.json` pins in `packageManager` (not npm/yarn)
 - **TypeScript 7** (`tsc` is the native binary) everywhere except the **`docs` package, which stays on TS 6** until typedoc supports TS 7
 - Strict mode everywhere; ESM only (`"type": "module"`, `.js` import extensions)
 - All actions, events and state require Zod schemas; all actions need actor context (`{ id, name }`)

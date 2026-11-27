@@ -95,12 +95,6 @@ export type SseOptions = {
   readonly maxStreamsPerSubscription?: number;
 };
 
-export {
-  DEFAULT_SSE_HEARTBEAT_MS,
-  DEFAULT_SSE_MAX_CONNECTIONS,
-  DEFAULT_SSE_MAX_PENDING_PER_CONNECTION,
-} from "./sse-defaults.js";
-
 /**
  * Frame yielded by the per-state SSE subscription generator. The
  * initial cached state (when present) arrives as `kind: "state"`;

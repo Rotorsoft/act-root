@@ -627,13 +627,15 @@ export class SqliteStore implements Store {
       args.push(query.after);
     } else if (query?.with_snaps && query.stream_exact && query.stream) {
       // Resume at the latest snapshot for this stream so pre-snapshot
-      // events aren't scanned. No snapshot → MAX is NULL → -1 → full
-      // stream. An explicit `after` (above) wins. The orchestrator only sets
-      // `with_snaps` for an unbounded current-state load — it suppresses the
-      // flag under any `asOf` bound — so the floor never needs to
-      // re-check `before`/`created_*`/`limit` here.
+      // events aren't scanned. No snapshot → -1 → full stream. An explicit
+      // `after` (above) wins. The orchestrator only sets `with_snaps` for an
+      // unbounded current-state load — it suppresses the flag under any
+      // `asOf` bound — so the floor never needs to re-check
+      // `before`/`created_*`/`limit` here. The floor is the snapshot's
+      // version, so the unique (stream, version) index seeks to it; versions
+      // and ids rise together within a stream.
       sql +=
-        " AND id >= (SELECT COALESCE(MAX(id), -1) FROM events WHERE stream = ? AND name = '__snapshot__')";
+        " AND version >= COALESCE((SELECT version FROM events WHERE stream = ? AND name = '__snapshot__' ORDER BY id DESC LIMIT 1), -1)";
       args.push(query.stream);
     }
     if (query?.before !== undefined) {
